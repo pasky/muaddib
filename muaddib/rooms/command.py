@@ -8,9 +8,8 @@ import logging
 import re
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Protocol, TypeAlias
+from typing import Any, Protocol
 
 from ..agentic_actor.actor import AgentResult
 from ..providers import parse_model_spec
@@ -18,42 +17,13 @@ from ..rate_limiter import RateLimiter
 from .autochronicler import AutoChronicler
 from .message import RoomMessage
 from .proactive import ProactiveDebouncer
+from .resolver import CommandResolver, ResolvedCommand
+from .steering_queue import SteeringKey, SteeringQueue
 
 logger = logging.getLogger(__name__)
 
 HELP_TOKEN = "!h"
 FLAG_TOKENS = {"!c"}
-
-SteeringKey: TypeAlias = tuple[str, str, str | None]
-
-
-@dataclass
-class QueuedInboundMessage:
-    """Queued inbound message waiting for an active steering session runner."""
-
-    kind: str  # "command" | "passive"
-    msg: RoomMessage
-    trigger_message_id: int | None
-    reply_sender: Callable[[str], Awaitable[None]]
-    completion: asyncio.Future[None]
-
-
-@dataclass
-class SteeringSession:
-    """In-flight steering session for a specific steering key."""
-
-    queue: list[QueuedInboundMessage]
-
-
-@dataclass
-class ParsedPrefix:
-    """Result of parsing command prefix from message."""
-
-    no_context: bool
-    mode_token: str | None
-    model_override: str | None
-    query_text: str
-    error: str | None = None
 
 
 class ResponseCleaner(Protocol):
@@ -132,39 +102,13 @@ class RoomCommandHandler:
         command_config = self.room_config["command"]
         proactive_config = self.room_config["proactive"]
 
-        self._trigger_to_mode: dict[str, str] = {}
-        self._trigger_overrides: dict[str, dict[str, Any]] = {}
-        self._default_trigger_by_mode: dict[str, str] = {}
-
-        for mode_key, mode_cfg in command_config.get("modes", {}).items():
-            triggers = mode_cfg.get("triggers", {})
-            if not triggers:
-                raise ValueError(f"Mode '{mode_key}' must define at least one trigger")
-            self._default_trigger_by_mode[mode_key] = next(iter(triggers))
-            for trigger, overrides in triggers.items():
-                if trigger in self._trigger_to_mode:
-                    raise ValueError(f"Duplicate trigger '{trigger}' in command mode config")
-                if not isinstance(trigger, str) or not trigger.startswith("!"):
-                    raise ValueError(f"Invalid trigger '{trigger}' for mode '{mode_key}'")
-                self._trigger_to_mode[trigger] = mode_key
-                self._trigger_overrides[trigger] = overrides or {}
-
-        labels = command_config.get("mode_classifier", {}).get("labels", {})
-        if not labels:
-            raise ValueError("command.mode_classifier.labels must not be empty")
-        for label, trigger in labels.items():
-            if trigger not in self._trigger_to_mode:
-                raise ValueError(
-                    f"Classifier label '{label}' points to unknown trigger '{trigger}'"
-                )
-        self._classifier_label_to_trigger = labels
-        self._fallback_classifier_label = command_config.get("mode_classifier", {}).get(
-            "fallback_label"
-        ) or next(iter(labels))
-        if self._fallback_classifier_label not in labels:
-            raise ValueError(
-                f"Classifier fallback label '{self._fallback_classifier_label}' is not defined"
-            )
+        self.command_resolver = CommandResolver(
+            command_config,
+            classify_mode=self.classify_mode,
+            help_token=HELP_TOKEN,
+            flag_tokens=FLAG_TOKENS,
+            model_name_formatter=model_str_core,
+        )
 
         self.rate_limiter = RateLimiter(command_config["rate_limit"], command_config["rate_period"])
         self.proactive_rate_limiter = RateLimiter(
@@ -173,11 +117,7 @@ class RoomCommandHandler:
         self.proactive_debouncer = ProactiveDebouncer(proactive_config["debounce_seconds"])
         self.autochronicler = AutoChronicler(self.agent.history, self)
 
-        # Active steering sessions keyed by:
-        # - non-threaded: (arc, nick_lower, None)
-        # - threaded: (arc, "*", thread_id)
-        self._steering_sessions: dict[SteeringKey, SteeringSession] = {}
-        self._steering_lock = asyncio.Lock()
+        self.steering_queue = SteeringQueue()
 
     @property
     def command_config(self) -> dict[str, Any]:
@@ -186,35 +126,6 @@ class RoomCommandHandler:
     @property
     def proactive_config(self) -> dict[str, Any]:
         return self.room_config["proactive"]
-
-    def _runtime_for_trigger(self, trigger: str) -> tuple[str, dict[str, Any]]:
-        mode_key = self._trigger_to_mode.get(trigger)
-        if mode_key is None:
-            raise ValueError(f"Unknown trigger '{trigger}'")
-
-        mode_cfg = self.command_config["modes"][mode_key]
-        overrides = self._trigger_overrides[trigger]
-        runtime = {
-            "reasoning_effort": overrides.get(
-                "reasoning_effort", mode_cfg.get("reasoning_effort", "minimal")
-            ),
-            "allowed_tools": overrides.get("allowed_tools", mode_cfg.get("allowed_tools")),
-            "steering": overrides.get("steering", mode_cfg.get("steering", True)),
-            "model": overrides.get("model"),
-            "history_size": int(mode_cfg.get("history_size", self.command_config["history_size"])),
-        }
-        return mode_key, runtime
-
-    def _trigger_for_label(self, label: str) -> str:
-        trigger = self._classifier_label_to_trigger.get(label)
-        if trigger is None:
-            logger.warning(
-                "Unknown classifier label '%s', using fallback '%s'",
-                label,
-                self._fallback_classifier_label,
-            )
-            return self._classifier_label_to_trigger[self._fallback_classifier_label]
-        return trigger
 
     def _response_max_bytes(self) -> int:
         return int(self.command_config.get("response_max_bytes", 600))
@@ -228,131 +139,6 @@ class RoomCommandHandler:
     def should_ignore_user(self, nick: str) -> bool:
         ignore_list = self.command_config.get("ignore_users", [])
         return any(nick.lower() == ignored.lower() for ignored in ignore_list)
-
-    @staticmethod
-    def _steering_key(msg: RoomMessage) -> SteeringKey:
-        # Non-threaded steering stays scoped to same sender.
-        # In thread, steering is shared by thread participants.
-        if msg.thread_id is not None:
-            return (msg.arc, "*", msg.thread_id)
-        return (msg.arc, msg.nick.lower(), None)
-
-    @staticmethod
-    def _steering_context_message(msg: RoomMessage) -> dict[str, str]:
-        return {"role": "user", "content": f"<{msg.nick}> {msg.content}"}
-
-    @staticmethod
-    def _finish_queued_item(item: QueuedInboundMessage) -> None:
-        if not item.completion.done():
-            item.completion.set_result(None)
-
-    @staticmethod
-    def _fail_queued_item(item: QueuedInboundMessage, exc: BaseException) -> None:
-        if not item.completion.done():
-            item.completion.set_exception(exc)
-
-    async def _enqueue_command_or_start_runner(
-        self,
-        msg: RoomMessage,
-        trigger_message_id: int,
-        reply_sender: Callable[[str], Awaitable[None]],
-    ) -> tuple[bool, SteeringKey, QueuedInboundMessage]:
-        item = QueuedInboundMessage(
-            kind="command",
-            msg=msg,
-            trigger_message_id=trigger_message_id,
-            reply_sender=reply_sender,
-            completion=asyncio.get_running_loop().create_future(),
-        )
-        key = self._steering_key(msg)
-        async with self._steering_lock:
-            session = self._steering_sessions.get(key)
-            if session is None:
-                self._steering_sessions[key] = SteeringSession(queue=[])
-                return True, key, item
-            session.queue.append(item)
-            return False, key, item
-
-    async def _drain_steering_context_messages(self, key: SteeringKey) -> list[dict[str, str]]:
-        """Drain currently queued inbound items into steering context."""
-        async with self._steering_lock:
-            session = self._steering_sessions.get(key)
-            if session is None or not session.queue:
-                return []
-            drained = list(session.queue)
-            session.queue.clear()
-
-        for item in drained:
-            self._finish_queued_item(item)
-
-        return [self._steering_context_message(item.msg) for item in drained]
-
-    async def _take_next_work_compacted(
-        self, key: SteeringKey
-    ) -> tuple[list[QueuedInboundMessage], QueuedInboundMessage | None]:
-        """Take next work item while compacting passive queue noise.
-
-        Policy:
-          - If a command exists in queue: drop all passives before first command.
-          - If no command exists: keep only the last passive.
-
-        When nothing remains, the session is removed (closed).
-
-        Returns: (dropped_items, next_item_or_None)
-        """
-        async with self._steering_lock:
-            session = self._steering_sessions.get(key)
-            if session is None:
-                return [], None
-
-            if not session.queue:
-                self._steering_sessions.pop(key, None)
-                return [], None
-
-            queue = session.queue
-            first_command_index = next(
-                (i for i, item in enumerate(queue) if item.kind == "command"),
-                None,
-            )
-
-            if first_command_index is not None:
-                dropped = queue[:first_command_index]
-                next_item = queue[first_command_index]
-                session.queue = queue[first_command_index + 1 :]
-                return dropped, next_item
-
-            dropped = queue[:-1]
-            next_item = queue[-1]
-            session.queue = []
-            return dropped, next_item
-
-    async def _abort_steering_session(
-        self, key: SteeringKey, exc: BaseException
-    ) -> list[QueuedInboundMessage]:
-        async with self._steering_lock:
-            session = self._steering_sessions.pop(key, None)
-            if session is None:
-                return []
-            remaining = list(session.queue)
-
-        for item in remaining:
-            self._fail_queued_item(item, exc)
-        return remaining
-
-    @staticmethod
-    def _normalize_server_tag(server_tag: str) -> str:
-        if server_tag.startswith("discord:"):
-            return server_tag.split("discord:", 1)[1]
-        if server_tag.startswith("slack:"):
-            return server_tag.split("slack:", 1)[1]
-        return server_tag
-
-    def _get_channel_key(self, server_tag: str, channel_name: str) -> str:
-        normalized_server = self._normalize_server_tag(server_tag)
-        return f"{normalized_server}#{channel_name}"
-
-    def _get_proactive_channel_key(self, server_tag: str, channel_name: str) -> str:
-        return self._get_channel_key(server_tag, channel_name)
 
     def build_system_prompt(self, mode: str, mynick: str, model_override: str | None = None) -> str:
         """Build a command system prompt with standard substitutions."""
@@ -371,9 +157,9 @@ class RoomCommandHandler:
             return model_str_core(value)
 
         trigger_model_vars: dict[str, str] = {}
-        for trigger, mode_key in self._trigger_to_mode.items():
+        for trigger, mode_key in self.command_resolver.trigger_to_mode.items():
             mode_cfg = modes_config[mode_key]
-            trigger_model = self._trigger_overrides[trigger].get("model")
+            trigger_model = self.command_resolver.trigger_overrides[trigger].get("model")
             if trigger_model is None:
                 trigger_model = (
                     model_override if mode_key == mode and model_override else mode_cfg["model"]
@@ -399,13 +185,6 @@ class RoomCommandHandler:
             current_time=datetime.now().strftime("%Y-%m-%d %H:%M"),
             **prompt_vars,
         )
-
-    def get_channel_mode(self, server_tag: str, chan_name: str) -> str:
-        channel_modes = self.command_config.get("channel_modes", {})
-        channel_key = self._get_channel_key(server_tag, chan_name)
-        if channel_key in channel_modes:
-            return channel_modes[channel_key]
-        return self.command_config.get("default_mode", "classifier")
 
     async def classify_mode(self, context: list[dict[str, str]]) -> str:
         """Use preprocessing model to classify message mode."""
@@ -435,16 +214,16 @@ class RoomCommandHandler:
 
             counts = {
                 label: response_upper.count(label.upper())
-                for label in self._classifier_label_to_trigger
+                for label in self.command_resolver.classifier_label_to_trigger
             }
             best_label, best_count = max(counts.items(), key=lambda item: item[1])
             if best_count == 0:
                 logger.warning("Invalid mode classification response: %s", response)
-                return self._fallback_classifier_label
+                return self.command_resolver.fallback_classifier_label
             return best_label
         except Exception as e:
             logger.error("Error classifying mode: %s", e)
-            return self._fallback_classifier_label
+            return self.command_resolver.fallback_classifier_label
 
     async def should_interject_proactively(
         self, context: list[dict[str, str]]
@@ -573,10 +352,12 @@ class RoomCommandHandler:
             if not should_interject:
                 return
 
-            channel_key = self._get_proactive_channel_key(msg.server_tag, msg.channel_name)
+            channel_key = self.command_resolver.channel_key(msg.server_tag, msg.channel_name)
             classified_label = await self.classify_mode(context)
-            classified_trigger = self._trigger_for_label(classified_label)
-            classified_mode_key, classified_runtime = self._runtime_for_trigger(classified_trigger)
+            classified_trigger = self.command_resolver.trigger_for_label(classified_label)
+            classified_mode_key, classified_runtime = self.command_resolver.runtime_for_trigger(
+                classified_trigger
+            )
             if classified_mode_key != "serious":
                 test_channels = self.agent.config.get("behavior", {}).get(
                     "proactive_interjecting_test", []
@@ -756,39 +537,19 @@ class RoomCommandHandler:
     ) -> None:
         # Cancel pending proactive checks immediately when explicit command arrives.
         await self.proactive_debouncer.cancel_channel(
-            self._get_proactive_channel_key(msg.server_tag, msg.channel_name)
+            self.command_resolver.channel_key(msg.server_tag, msg.channel_name)
         )
 
-        if self._should_bypass_steering_queue(msg):
+        if self.command_resolver.should_bypass_steering_queue(msg):
             await self._handle_command_core(
                 msg,
                 trigger_message_id,
                 reply_sender,
-                self._steering_key(msg),
+                self.steering_queue.key_for_message(msg),
             )
             return
 
         await self._run_or_queue_command(msg, trigger_message_id, reply_sender)
-
-    def _should_bypass_steering_queue(self, msg: RoomMessage) -> bool:
-        """Return True for commands that should never participate in steering queue."""
-        parsed = self._parse_prefix(msg.content)
-        if parsed.error or parsed.no_context:
-            return True
-        if parsed.mode_token == HELP_TOKEN:
-            return True
-        if parsed.mode_token is not None:
-            _, runtime = self._runtime_for_trigger(parsed.mode_token)
-            return not bool(runtime["steering"])
-
-        channel_mode = self.get_channel_mode(msg.server_tag, msg.channel_name)
-        trigger = channel_mode
-        if trigger not in self._trigger_to_mode and trigger in self.command_config["modes"]:
-            trigger = self._default_trigger_by_mode[trigger]
-        if trigger in self._trigger_to_mode:
-            _, runtime = self._runtime_for_trigger(trigger)
-            return not bool(runtime["steering"])
-        return False
 
     async def _handle_command_core(
         self,
@@ -838,16 +599,21 @@ class RoomCommandHandler:
                 logger.debug("Debounced %s followup messages from %s", len(followups), msg.nick)
                 context[-1]["content"] += "\n" + "\n".join([m["message"] for m in followups])
 
+        resolved = await self.command_resolver.resolve(
+            msg=msg,
+            context=context,
+            default_size=default_size,
+        )
         await self._route_command(
             msg,
             context,
-            default_size,
             trigger_message_id,
             reply_sender,
             steering_key=steering_key,
+            resolved=resolved,
         )
         await self.proactive_debouncer.cancel_channel(
-            self._get_proactive_channel_key(msg.server_tag, msg.channel_name)
+            self.command_resolver.channel_key(msg.server_tag, msg.channel_name)
         )
         await self.autochronicler.check_and_chronicle(
             msg.mynick, msg.server_tag, msg.channel_name, default_size
@@ -867,7 +633,11 @@ class RoomCommandHandler:
         so new items may arrive while processing. The loop naturally
         re-checks after each item — no inner loop needed.
         """
-        is_runner, steering_key, active_item = await self._enqueue_command_or_start_runner(
+        (
+            is_runner,
+            steering_key,
+            active_item,
+        ) = await self.steering_queue.enqueue_command_or_start_runner(
             msg,
             trigger_message_id,
             reply_sender,
@@ -892,99 +662,30 @@ class RoomCommandHandler:
                         active_item.msg,
                         active_item.reply_sender,
                     )
-                self._finish_queued_item(active_item)
+                self.steering_queue.finish_item(active_item)
 
-                dropped, active_item = await self._take_next_work_compacted(steering_key)
+                dropped, active_item = await self.steering_queue.take_next_work_compacted(
+                    steering_key
+                )
                 for item in dropped:
-                    self._finish_queued_item(item)
+                    self.steering_queue.finish_item(item)
         except Exception as e:
-            await self._abort_steering_session(steering_key, e)
+            await self.steering_queue.abort_session(steering_key, e)
             if active_item is not None:
-                self._fail_queued_item(active_item, e)
+                self.steering_queue.fail_item(active_item, e)
             raise
-
-    def _parse_prefix(self, message: str) -> ParsedPrefix:
-        """Parse leading modifier tokens from message.
-
-        Recognized tokens (any order at start):
-          - !c: no-context flag
-          - configured mode triggers and !h
-          - @modelid: model override
-
-        Parsing stops at first non-modifier token. Only one trigger allowed.
-        """
-        text = message.strip()
-        if not text:
-            return ParsedPrefix(False, None, None, "", None)
-
-        tokens = text.split()
-        no_context = False
-        mode_token: str | None = None
-        model_override: str | None = None
-        error: str | None = None
-        consumed = 0
-
-        for i, tok in enumerate(tokens):
-            if tok in FLAG_TOKENS:
-                no_context = True
-                consumed = i + 1
-                continue
-
-            if tok in self._trigger_to_mode or tok == HELP_TOKEN:
-                if mode_token is not None:
-                    error = "Only one mode command allowed."
-                    break
-                mode_token = tok
-                consumed = i + 1
-                continue
-
-            if tok.startswith("@") and len(tok) > 1:
-                if model_override is None:
-                    model_override = tok[1:]
-                consumed = i + 1
-                continue
-
-            if tok.startswith("!"):
-                error = f"Unknown command '{tok}'. Use !h for help."
-                break
-
-            break
-
-        query_text = " ".join(tokens[consumed:]) if consumed > 0 else text
-        return ParsedPrefix(
-            no_context=no_context,
-            mode_token=mode_token,
-            model_override=model_override,
-            query_text=query_text,
-            error=error,
-        )
 
     async def handle_passive_message(
         self,
         msg: RoomMessage,
         reply_sender: Callable[[str], Awaitable[None]],
     ) -> None:
-        key = self._steering_key(msg)
+        queued_item = await self.steering_queue.enqueue_passive_if_session_exists(msg, reply_sender)
 
-        async with self._steering_lock:
-            session = self._steering_sessions.get(key)
-            if session is None:
-                queued_item = None
-            else:
-                queued_item = QueuedInboundMessage(
-                    kind="passive",
-                    msg=msg,
-                    trigger_message_id=None,
-                    reply_sender=reply_sender,
-                    completion=asyncio.get_running_loop().create_future(),
-                )
-                session.queue.append(queued_item)
-
-        if session is None:
+        if queued_item is None:
             await self._handle_passive_message_core(msg, reply_sender)
             return
 
-        assert queued_item is not None
         await queued_item.completion
 
     async def _handle_passive_message_core(
@@ -992,7 +693,7 @@ class RoomCommandHandler:
         msg: RoomMessage,
         reply_sender: Callable[[str], Awaitable[None]],
     ) -> None:
-        channel_key = self._get_proactive_channel_key(msg.server_tag, msg.channel_name)
+        channel_key = self.command_resolver.channel_key(msg.server_tag, msg.channel_name)
         if (
             channel_key
             in self.proactive_config["interjecting"] + self.proactive_config["interjecting_test"]
@@ -1013,119 +714,68 @@ class RoomCommandHandler:
         self,
         msg: RoomMessage,
         context: list[dict[str, str]],
-        default_size: int,
         trigger_message_id: int,
         reply_sender: Callable[[str], Awaitable[None]],
         steering_key: SteeringKey,
+        resolved: ResolvedCommand,
     ) -> None:
-        modes_config = self.command_config["modes"]
-        parsed = self._parse_prefix(msg.content)
-
-        if parsed.error:
+        if resolved.error:
             logger.warning(
-                "Command parse error from %s: %s (%s)", msg.nick, parsed.error, msg.content
+                "Command parse error from %s: %s (%s)", msg.nick, resolved.error, msg.content
             )
-            await reply_sender(f"{msg.nick}: {parsed.error}")
+            await reply_sender(f"{msg.nick}: {resolved.error}")
             return
 
-        no_context = parsed.no_context
-        model_override = parsed.model_override
-        query_text = parsed.query_text
-
-        if model_override:
-            logger.debug("Overriding model to %s", model_override)
-
-        if parsed.mode_token == HELP_TOKEN:
+        if resolved.help_requested:
             logger.debug("Sending help message to %s", msg.nick)
-            classifier_model = self.command_config["mode_classifier"]["model"]
-            channel_mode = self.get_channel_mode(msg.server_tag, msg.channel_name)
-            if channel_mode == "classifier":
-                default_desc = f"automatic mode ({classifier_model} decides)"
-            elif channel_mode.startswith("classifier:"):
-                default_desc = f"automatic mode constrained to {channel_mode.split(':', 1)[1]}"
-            elif channel_mode in self._trigger_to_mode:
-                default_desc = (
-                    f"forced trigger {channel_mode} ({self._trigger_to_mode[channel_mode]})"
-                )
-            else:
-                default_desc = f"{channel_mode} mode"
-
-            mode_parts: list[str] = []
-            for mode_key, mode_cfg in modes_config.items():
-                trigger_list = list(mode_cfg.get("triggers", {}).keys())
-                if not trigger_list:
-                    continue
-                model_value = mode_cfg.get("model")
-                if isinstance(model_value, list):
-                    model_value = model_value[0] if model_value else ""
-                model_desc = model_str_core(model_value) if model_value else ""
-                mode_parts.append(f"{'/'.join(trigger_list)} = {mode_key} ({model_desc})")
-
-            help_msg = (
-                f"default is {default_desc}; modes: {', '.join(mode_parts)}; "
-                "use @modelid to override model; !c disables context"
-            )
+            help_msg = self.command_resolver.build_help_message(msg.server_tag, msg.channel_name)
             await reply_sender(help_msg)
             response_msg = dataclasses.replace(msg, nick=msg.mynick, content=help_msg)
             await self.agent.history.add_message(response_msg)
             return
 
-        selected_trigger: str
-        selected_label: str
+        if resolved.model_override:
+            logger.debug("Overriding model to %s", resolved.model_override)
 
-        if parsed.mode_token:
-            selected_trigger = parsed.mode_token
-            mode_key, _ = self._runtime_for_trigger(selected_trigger)
-            selected_label = selected_trigger
+        assert resolved.selected_trigger is not None
+        assert resolved.selected_label is not None
+        assert resolved.mode_key is not None
+        assert resolved.runtime is not None
+
+        selected_trigger = resolved.selected_trigger
+        selected_label = resolved.selected_label
+        mode_key = resolved.mode_key
+        runtime = resolved.runtime
+        no_context = resolved.no_context
+
+        if resolved.selected_automatically:
+            logger.debug(
+                "Processing automatic mode request from %s: %s",
+                msg.nick,
+                resolved.query_text,
+            )
+            if resolved.channel_mode is not None:
+                logger.debug(
+                    "Channel policy %s resolved as %s -> %s",
+                    resolved.channel_mode,
+                    selected_label,
+                    selected_trigger,
+                )
+        else:
             logger.debug(
                 "Processing explicit trigger %s (%s) from %s: %s",
                 selected_trigger,
                 mode_key,
                 msg.nick,
-                query_text,
+                resolved.query_text,
             )
-        else:
-            logger.debug("Processing automatic mode request from %s: %s", msg.nick, query_text)
-            channel_mode = self.get_channel_mode(msg.server_tag, msg.channel_name)
-            if channel_mode == "classifier":
-                selected_label = await self.classify_mode(context)
-                selected_trigger = self._trigger_for_label(selected_label)
-            elif channel_mode.startswith("classifier:"):
-                constrained_mode = channel_mode.split(":", 1)[1]
-                if constrained_mode not in modes_config:
-                    raise ValueError(
-                        f"Unknown channel mode policy '{channel_mode}': mode '{constrained_mode}' missing"
-                    )
-                selected_label = await self.classify_mode(context[-default_size:])
-                selected_trigger = self._trigger_for_label(selected_label)
-                selected_mode_key, _ = self._runtime_for_trigger(selected_trigger)
-                if selected_mode_key != constrained_mode:
-                    selected_trigger = self._default_trigger_by_mode[constrained_mode]
-                    selected_label = selected_trigger
-            elif channel_mode in self._trigger_to_mode:
-                selected_trigger = channel_mode
-                selected_label = selected_trigger
-            elif channel_mode in modes_config:
-                selected_trigger = self._default_trigger_by_mode[channel_mode]
-                selected_label = selected_trigger
-            else:
-                raise ValueError(f"Unknown channel mode policy '{channel_mode}'")
-
-            logger.debug(
-                "Channel policy %s resolved as %s -> %s",
-                channel_mode,
-                selected_label,
-                selected_trigger,
-            )
-
-        mode_key, runtime = self._runtime_for_trigger(selected_trigger)
 
         steering_enabled = bool(runtime["steering"]) and not no_context
 
         async def steering_message_provider() -> list[dict[str, str]]:
             if not steering_enabled:
                 return []
-            return await self._drain_steering_context_messages(steering_key)
+            return await self.steering_queue.drain_steering_context_messages(steering_key)
 
         async def progress_cb(text: str) -> None:
             await reply_sender(text)
@@ -1145,7 +795,7 @@ class RoomCommandHandler:
             "persistence_callback": persistence_cb,
             "arc": msg.arc,
             "no_context": no_context,
-            "model": model_override or runtime["model"],
+            "model": resolved.model_override or runtime["model"],
             "secrets": msg.secrets,
             "steering_message_provider": steering_message_provider,
         }

@@ -7,8 +7,9 @@ import pytest
 
 from muaddib.agentic_actor.actor import AgentResult
 from muaddib.main import MuaddibAgent
-from muaddib.rooms.command import ParsedPrefix, ResponseCleaner, RoomCommandHandler, get_room_config
+from muaddib.rooms.command import ResponseCleaner, RoomCommandHandler, get_room_config
 from muaddib.rooms.message import RoomMessage
+from muaddib.rooms.resolver import ParsedPrefix
 
 
 def build_handler(
@@ -69,54 +70,109 @@ def test_parse_prefix(temp_config_file):
     agent = MuaddibAgent(temp_config_file)
     handler, _, _ = build_handler(agent)
 
-    assert handler._parse_prefix("just a plain query") == ParsedPrefix(
+    assert handler.command_resolver.parse_prefix("just a plain query") == ParsedPrefix(
         False, None, None, "just a plain query", None
     )
 
-    result = handler._parse_prefix("!s tell me something")
+    result = handler.command_resolver.parse_prefix("!s tell me something")
     assert result.mode_token == "!s"
     assert result.query_text == "tell me something"
     assert result.model_override is None
 
-    result = handler._parse_prefix("@claude-sonnet query text")
+    result = handler.command_resolver.parse_prefix("@claude-sonnet query text")
     assert result.model_override == "claude-sonnet"
     assert result.mode_token is None
     assert result.query_text == "query text"
 
-    r1 = handler._parse_prefix("!s @model query")
-    r2 = handler._parse_prefix("@model !s query")
+    r1 = handler.command_resolver.parse_prefix("!s @model query")
+    r2 = handler.command_resolver.parse_prefix("@model !s query")
     assert r1.mode_token == "!s" and r1.model_override == "model" and r1.query_text == "query"
     assert r2.mode_token == "!s" and r2.model_override == "model" and r2.query_text == "query"
 
-    r1 = handler._parse_prefix("!c !s query")
-    r2 = handler._parse_prefix("!s !c query")
-    r3 = handler._parse_prefix("!c query")
+    r1 = handler.command_resolver.parse_prefix("!c !s query")
+    r2 = handler.command_resolver.parse_prefix("!s !c query")
+    r3 = handler.command_resolver.parse_prefix("!c query")
     assert r1.no_context is True and r1.mode_token == "!s" and r1.query_text == "query"
     assert r2.no_context is True and r2.mode_token == "!s" and r2.query_text == "query"
     assert r3.no_context is True and r3.mode_token is None and r3.query_text == "query"
 
-    result = handler._parse_prefix("!c @model !a my query here")
+    result = handler.command_resolver.parse_prefix("!c @model !a my query here")
     assert result.model_override == "model"
     assert result.mode_token == "!a"
 
-    result = handler._parse_prefix("!x query")
+    result = handler.command_resolver.parse_prefix("!x query")
     assert result.error is not None
 
-    result = handler._parse_prefix("!s !a query")
+    result = handler.command_resolver.parse_prefix("!s !a query")
     assert result.error is not None
 
-    result = handler._parse_prefix("!s what does !c mean in bash?")
+    result = handler.command_resolver.parse_prefix("!s what does !c mean in bash?")
     assert result.mode_token == "!s"
 
-    result = handler._parse_prefix("!s email me@example.com")
+    result = handler.command_resolver.parse_prefix("!s email me@example.com")
     assert result.mode_token == "!s"
 
-    result = handler._parse_prefix("")
+    result = handler.command_resolver.parse_prefix("")
     assert result == ParsedPrefix(False, None, None, "", None)
 
     for token in ["!s", "!S", "!a", "!d", "!D", "!u", "!h"]:
-        result = handler._parse_prefix(f"{token} query")
+        result = handler.command_resolver.parse_prefix(f"{token} query")
         assert result.mode_token == token
+
+
+@pytest.mark.asyncio
+async def test_resolve_command_explicit_trigger(temp_config_file):
+    agent = MuaddibAgent(temp_config_file)
+    handler, _, _ = build_handler(agent)
+
+    msg = RoomMessage(
+        server_tag="test",
+        channel_name="#test",
+        nick="user",
+        mynick="mybot",
+        content="!s tell me something",
+    )
+    resolved = await handler.command_resolver.resolve(
+        msg=msg,
+        context=[{"role": "user", "content": "<user> !s tell me something"}],
+        default_size=handler.command_config["history_size"],
+    )
+
+    assert resolved.error is None
+    assert resolved.help_requested is False
+    assert resolved.selected_automatically is False
+    assert resolved.selected_trigger == "!s"
+    assert resolved.mode_key == "serious"
+    assert resolved.runtime is not None
+
+
+@pytest.mark.asyncio
+async def test_resolve_command_constrained_classifier_falls_back_to_mode_default(temp_config_file):
+    agent = MuaddibAgent(temp_config_file)
+    handler, _, _ = build_handler(agent)
+    handler.command_resolver._classify_mode = AsyncMock(return_value="UNSAFE")
+    handler.room_config["command"].setdefault("channel_modes", {})["test##test"] = (
+        "classifier:serious"
+    )
+
+    msg = RoomMessage(
+        server_tag="test",
+        channel_name="#test",
+        nick="user",
+        mynick="mybot",
+        content="plain query",
+    )
+    resolved = await handler.command_resolver.resolve(
+        msg=msg,
+        context=[{"role": "user", "content": "<user> plain query"}],
+        default_size=handler.command_config["history_size"],
+    )
+
+    assert resolved.error is None
+    assert resolved.selected_automatically is True
+    assert resolved.channel_mode == "classifier:serious"
+    assert resolved.selected_trigger == handler.command_resolver.default_trigger_by_mode["serious"]
+    assert resolved.mode_key == "serious"
 
 
 @pytest.mark.asyncio
@@ -228,7 +284,7 @@ async def test_automatic_unsafe_classification(temp_config_file):
     await agent.chronicle.initialize()
 
     handler, sent, reply_sender = build_handler(agent)
-    handler.classify_mode = AsyncMock(return_value="UNSAFE")
+    handler.command_resolver._classify_mode = AsyncMock(return_value="UNSAFE")
     handler.autochronicler.check_and_chronicle = AsyncMock(return_value=False)
     handler._run_actor = AsyncMock(
         return_value=AgentResult(
