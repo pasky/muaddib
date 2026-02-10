@@ -14,7 +14,9 @@
   },
   "dependencies": {
     "@mariozechner/pi-ai": "^0.50.7",
-    "@mariozechner/pi-agent-core": "^0.50.7"
+    "@mariozechner/pi-agent-core": "^0.50.7",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

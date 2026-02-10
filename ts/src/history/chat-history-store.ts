@@ -1,0 +1,410 @@
+import { open, type Database } from "sqlite";
+import sqlite3 from "sqlite3";
+
+import type { RoomMessage } from "../rooms/message.js";
+
+export interface LlmCallInput {
+  provider: string;
+  model: string;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cost: number | null;
+  callType?: string | null;
+  arcName?: string | null;
+  triggerMessageId?: number | null;
+}
+
+export interface HistoryMessageRow {
+  id: number;
+  nick: string;
+  message: string;
+  role: string;
+  timestamp: string;
+}
+
+interface ContextRow {
+  message: string;
+  role: string;
+  time_only: string;
+  mode: string | null;
+}
+
+interface FullHistoryRow {
+  id: number;
+  nick: string;
+  message: string;
+  role: string;
+  timestamp: string;
+}
+
+export class ChatHistoryStore {
+  private readonly dbPath: string;
+  private readonly inferenceLimit: number;
+  private db: Database | null = null;
+
+  constructor(dbPath: string, inferenceLimit = 5) {
+    this.dbPath = dbPath;
+    this.inferenceLimit = inferenceLimit;
+  }
+
+  async initialize(): Promise<void> {
+    if (!this.db) {
+      this.db = await open({
+        filename: this.dbPath,
+        driver: sqlite3.Database,
+      });
+    }
+
+    const db = this.requireDb();
+
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS chat_messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          server_tag TEXT NOT NULL,
+          channel_name TEXT NOT NULL,
+          nick TEXT NOT NULL,
+          message TEXT NOT NULL,
+          role TEXT NOT NULL,
+          timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+          chapter_id INTEGER NULL,
+          mode TEXT NULL,
+          llm_call_id INTEGER NULL,
+          platform_id TEXT NULL,
+          thread_id TEXT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS llm_calls (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+          provider TEXT NOT NULL,
+          model TEXT NOT NULL,
+          input_tokens INTEGER,
+          output_tokens INTEGER,
+          cost REAL,
+          call_type TEXT,
+          arc_name TEXT,
+          trigger_message_id INTEGER NULL,
+          response_message_id INTEGER NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_server_channel
+      ON chat_messages (server_tag, channel_name, timestamp);
+
+      CREATE INDEX IF NOT EXISTS idx_chapter_id
+      ON chat_messages (chapter_id);
+
+      CREATE INDEX IF NOT EXISTS idx_llm_calls_arc
+      ON llm_calls (arc_name, timestamp);
+
+      CREATE INDEX IF NOT EXISTS idx_platform_id
+      ON chat_messages (server_tag, channel_name, platform_id);
+    `);
+
+    await this.migrateChatMessagesTable();
+    await this.migrateLlmCallsTable();
+  }
+
+  async close(): Promise<void> {
+    if (!this.db) {
+      return;
+    }
+
+    await this.db.close();
+    this.db = null;
+  }
+
+  async logLlmCall(input: LlmCallInput): Promise<number> {
+    const db = this.requireDb();
+
+    const result = await db.run(
+      `
+      INSERT INTO llm_calls
+      (provider, model, input_tokens, output_tokens, cost, call_type, arc_name, trigger_message_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      input.provider,
+      input.model,
+      input.inputTokens,
+      input.outputTokens,
+      input.cost,
+      input.callType ?? null,
+      input.arcName ?? null,
+      input.triggerMessageId ?? null,
+    );
+
+    return Number(result.lastID ?? 0);
+  }
+
+  async updateLlmCallResponse(callId: number, responseMessageId: number): Promise<void> {
+    const db = this.requireDb();
+    await db.run(
+      "UPDATE llm_calls SET response_message_id = ? WHERE id = ?",
+      responseMessageId,
+      callId,
+    );
+  }
+
+  async addMessage(
+    message: RoomMessage,
+    options: {
+      mode?: string | null;
+      llmCallId?: number | null;
+      contentTemplate?: string;
+      role?: string;
+    } = {},
+  ): Promise<number> {
+    const db = this.requireDb();
+
+    const role = options.role ?? this.defaultRoleForMessage(message);
+    const contentTemplate = options.contentTemplate ?? "<{nick}> {message}";
+    const content = contentTemplate
+      .replace("{nick}", message.nick)
+      .replace("{message}", message.content);
+
+    const result = await db.run(
+      `
+      INSERT INTO chat_messages
+      (server_tag, channel_name, nick, message, role, mode, llm_call_id, platform_id, thread_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      message.serverTag,
+      message.channelName,
+      message.nick,
+      content,
+      role,
+      options.mode ?? null,
+      options.llmCallId ?? null,
+      message.platformId ?? null,
+      message.responseThreadId ?? message.threadId ?? null,
+    );
+
+    return Number(result.lastID ?? 0);
+  }
+
+  async getContextForMessage(
+    message: RoomMessage,
+    limit?: number,
+  ): Promise<Array<{ role: string; content: string }>> {
+    return this.getContext(
+      message.serverTag,
+      message.channelName,
+      limit,
+      message.threadId,
+      message.threadStarterId,
+    );
+  }
+
+  async getContext(
+    serverTag: string,
+    channelName: string,
+    limit?: number,
+    threadId?: string,
+    threadStarterId?: number,
+  ): Promise<Array<{ role: string; content: string }>> {
+    const db = this.requireDb();
+    const inferenceLimit = limit ?? this.inferenceLimit;
+
+    let rows: ContextRow[] = [];
+
+    if (threadId) {
+      if (threadStarterId !== undefined) {
+        rows = await db.all<ContextRow[]>(
+          `
+          SELECT message, role, strftime('%H:%M', timestamp) as time_only, mode
+          FROM chat_messages
+          WHERE server_tag = ? AND channel_name = ?
+          AND ((thread_id IS NULL AND id <= ?) OR thread_id = ?)
+          ORDER BY id DESC
+          LIMIT ?
+          `,
+          serverTag,
+          channelName,
+          threadStarterId,
+          threadId,
+          inferenceLimit,
+        );
+      } else {
+        rows = await db.all<ContextRow[]>(
+          `
+          SELECT message, role, strftime('%H:%M', timestamp) as time_only, mode
+          FROM chat_messages
+          WHERE server_tag = ? AND channel_name = ?
+          AND (thread_id IS NULL OR thread_id = ?)
+          ORDER BY id DESC
+          LIMIT ?
+          `,
+          serverTag,
+          channelName,
+          threadId,
+          inferenceLimit,
+        );
+      }
+    } else {
+      rows = await db.all<ContextRow[]>(
+        `
+        SELECT message, role, strftime('%H:%M', timestamp) as time_only, mode
+        FROM chat_messages
+        WHERE server_tag = ? AND channel_name = ? AND thread_id IS NULL
+        ORDER BY timestamp DESC
+        LIMIT ?
+        `,
+        serverTag,
+        channelName,
+        inferenceLimit,
+      );
+    }
+
+    return rows
+      .slice()
+      .reverse()
+      .map((row) => {
+        const modePrefix = row.role === "assistant" && row.mode ? this.modeToPrefix(row.mode) : "";
+        return {
+          role: row.role,
+          content: `${modePrefix}[${row.time_only}] ${row.message}`,
+        };
+      });
+  }
+
+  async getFullHistory(
+    serverTag: string,
+    channelName: string,
+    limit?: number,
+  ): Promise<HistoryMessageRow[]> {
+    const db = this.requireDb();
+
+    const rows =
+      limit !== undefined
+        ? await db.all<FullHistoryRow[]>(
+            `
+            SELECT id, nick, message, role, timestamp FROM chat_messages
+            WHERE server_tag = ? AND channel_name = ?
+            ORDER BY timestamp DESC
+            LIMIT ?
+            `,
+            serverTag,
+            channelName,
+            limit,
+          )
+        : await db.all<FullHistoryRow[]>(
+            `
+            SELECT id, nick, message, role, timestamp FROM chat_messages
+            WHERE server_tag = ? AND channel_name = ?
+            ORDER BY timestamp DESC
+            `,
+            serverTag,
+            channelName,
+          );
+
+    return rows.slice().reverse().map((row) => ({
+      id: Number(row.id),
+      nick: String(row.nick),
+      message: String(row.message),
+      role: String(row.role),
+      timestamp: String(row.timestamp),
+    }));
+  }
+
+  async countRecentUnchronicled(serverTag: string, channelName: string, days = 7): Promise<number> {
+    const db = this.requireDb();
+
+    const row = await db.get<{ count: number }>(
+      `
+      SELECT COUNT(*) as count FROM chat_messages
+      WHERE server_tag = ? AND channel_name = ?
+      AND chapter_id IS NULL
+      AND timestamp >= datetime('now', '-' || ? || ' days')
+      `,
+      serverTag,
+      channelName,
+      days,
+    );
+
+    return Number(row?.count ?? 0);
+  }
+
+  async markChronicled(messageIds: number[], chapterId: number): Promise<void> {
+    if (messageIds.length === 0) {
+      return;
+    }
+
+    const db = this.requireDb();
+    const placeholders = messageIds.map(() => "?").join(",");
+    await db.run(
+      `UPDATE chat_messages SET chapter_id = ? WHERE id IN (${placeholders})`,
+      chapterId,
+      ...messageIds,
+    );
+  }
+
+  async getArcCostToday(arcName: string): Promise<number> {
+    const db = this.requireDb();
+    const row = await db.get<{ total: number }>(
+      `
+      SELECT COALESCE(SUM(cost), 0) as total FROM llm_calls
+      WHERE arc_name = ?
+      AND timestamp >= date('now', 'localtime')
+      `,
+      arcName,
+    );
+    return Number(row?.total ?? 0);
+  }
+
+  private defaultRoleForMessage(message: RoomMessage): string {
+    return message.nick.toLowerCase() === message.mynick.toLowerCase() ? "assistant" : "user";
+  }
+
+  private modeToPrefix(mode: string): string {
+    if (!mode) {
+      return "";
+    }
+    if (mode.startsWith("!")) {
+      return `${mode} `;
+    }
+    return "";
+  }
+
+  private requireDb(): Database {
+    if (!this.db) {
+      throw new Error("ChatHistoryStore not initialized. Call initialize() first.");
+    }
+    return this.db;
+  }
+
+  private async migrateChatMessagesTable(): Promise<void> {
+    const db = this.requireDb();
+    const columns = await db.all<Array<{ name: string }>>("PRAGMA table_info(chat_messages)");
+    const names = new Set(columns.map((column) => column.name));
+
+    if (!names.has("mode")) {
+      await db.exec("ALTER TABLE chat_messages ADD COLUMN mode TEXT NULL");
+    }
+    if (!names.has("llm_call_id")) {
+      await db.exec("ALTER TABLE chat_messages ADD COLUMN llm_call_id INTEGER NULL");
+    }
+    if (!names.has("platform_id")) {
+      await db.exec("ALTER TABLE chat_messages ADD COLUMN platform_id TEXT NULL");
+    }
+    if (!names.has("thread_id")) {
+      await db.exec("ALTER TABLE chat_messages ADD COLUMN thread_id TEXT NULL");
+    }
+  }
+
+  private async migrateLlmCallsTable(): Promise<void> {
+    const db = this.requireDb();
+    const columns = await db.all<Array<{ name: string }>>("PRAGMA table_info(llm_calls)");
+    const names = new Set(columns.map((column) => column.name));
+
+    if (!names.has("trigger_message_id")) {
+      await db.exec("ALTER TABLE llm_calls ADD COLUMN trigger_message_id INTEGER NULL");
+    }
+    if (!names.has("response_message_id")) {
+      await db.exec("ALTER TABLE llm_calls ADD COLUMN response_message_id INTEGER NULL");
+      await db.exec(`
+        UPDATE llm_calls SET response_message_id = (
+          SELECT id FROM chat_messages WHERE llm_call_id = llm_calls.id LIMIT 1
+        ) WHERE response_message_id IS NULL
+      `);
+    }
+  }
+}

@@ -141,7 +141,7 @@ muaddib_ts/
 - Tests for command parsing/routing + DB behavior
 
 ### Milestone 4
-- Port agent tools and wire `@mariozechner/pi-agent`
+- Port agent tools and wire `@mariozechner/pi-agent-core`
 - Port actor invocation paths in command handling
 - CLI message mode parity
 
@@ -181,3 +181,15 @@ At end of each milestone:
   - Added initial `Agent` wrapper (`ts/src/agent/muaddib-agent-runner.ts`) for single-turn runs and tool registration hooks.
   - Added unit tests for resolver/adapter/runner bootstrap (`ts/tests/*.test.ts`).
   - Validation passed: TS typecheck + TS tests + Python tests (`uv run pytest`).
+- 2026-02-10: Milestone 3 complete.
+  - Ported TS history storage (`ts/src/history/chat-history-store.ts`) with SQLite schema and core operations (messages/context, llm_calls logging, chronicling markers).
+  - Ported TS chronicle storage (`ts/src/chronicle/chronicle-store.ts`) without quests, preserving arcs/chapters/paragraphs semantics.
+  - Ported shared command config merge + resolver flow (no proactive) in:
+    - `ts/src/rooms/command/config.ts`
+    - `ts/src/rooms/command/resolver.ts`
+    - `ts/src/rooms/message.ts`
+  - Added TS tests for command parsing/routing and DB/storage behavior:
+    - `ts/tests/command-config.test.ts`
+    - `ts/tests/command-resolver.test.ts`
+    - `ts/tests/storage.test.ts`
+  - Validation passed: `cd ts && npm run typecheck`, `cd ts && npm test`, `uv run pytest`.
