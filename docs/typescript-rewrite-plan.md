@@ -193,3 +193,20 @@ At end of each milestone:
     - `ts/tests/command-resolver.test.ts`
     - `ts/tests/storage.test.ts`
   - Validation passed: `cd ts && npm run typecheck`, `cd ts && npm test`, `uv run pytest`.
+- 2026-02-10: Milestone 4 complete.
+  - Added baseline TS agent tools as `AgentTool` implementations and wiring entrypoint:
+    - `ts/src/agent/tools/baseline-tools.ts`
+    - tools: `progress_report`, `make_plan`, `final_answer`
+  - Extended `MuaddibAgentRunner` single-turn invocation with context replay support (`contextMessages`) for command-path integration.
+  - Implemented TS actor invocation path for commands (without proactive):
+    - `ts/src/rooms/command/command-handler.ts`
+    - integrates resolver -> history context -> system prompt build -> runner call -> response cleaning
+  - Added basic CLI message-mode parity path:
+    - `ts/src/cli/message-mode.ts`
+    - `ts/src/cli/main.ts`
+    - package script `npm run cli:message` (runs built CLI)
+  - Added TS tests for tool wiring and command/CLI integration:
+    - `ts/tests/baseline-tools.test.ts`
+    - `ts/tests/command-handler.test.ts`
+    - `ts/tests/cli-message-mode.test.ts`
+  - Validation passed: `cd ts && npm run typecheck`, `cd ts && npm test`, `uv run pytest`.

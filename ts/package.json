@@ -10,11 +10,13 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "cli:message": "node ./dist/cli/main.js"
   },
   "dependencies": {
     "@mariozechner/pi-ai": "^0.50.7",
     "@mariozechner/pi-agent-core": "^0.50.7",
+    "@sinclair/typebox": "^0.34.41",
     "sqlite": "^5.1.1",
     "sqlite3": "^5.1.7"
   },

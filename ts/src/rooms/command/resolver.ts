@@ -30,22 +30,23 @@ export interface RuntimeSettings {
   historySize: number;
 }
 
-interface ModeConfig {
-  model?: string;
+export interface ModeConfig {
+  model?: string | string[];
   history_size?: number;
   reasoning_effort?: string;
   allowed_tools?: string[];
   steering?: boolean;
+  prompt?: string;
   triggers: Record<string, Record<string, unknown>>;
 }
 
-interface ModeClassifierConfig {
+export interface ModeClassifierConfig {
   labels: Record<string, string>;
   fallback_label?: string;
   model: string;
 }
 
-interface CommandConfig {
+export interface CommandConfig {
   history_size: number;
   default_mode?: string;
   channel_modes?: Record<string, string>;

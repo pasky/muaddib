@@ -1,5 +1,16 @@
-import { Agent, type AgentEvent, type AgentTool } from "@mariozechner/pi-agent-core";
-import type { AssistantMessage, ImageContent, Usage } from "@mariozechner/pi-ai";
+import {
+  Agent,
+  type AgentEvent,
+  type AgentMessage,
+  type AgentTool,
+} from "@mariozechner/pi-agent-core";
+import type {
+  AssistantMessage,
+  ImageContent,
+  Message,
+  Usage,
+  UserMessage,
+} from "@mariozechner/pi-ai";
 
 import { PiAiModelAdapter, type ResolvedPiAiModel } from "../models/pi-ai-model-adapter.js";
 
@@ -11,11 +22,21 @@ export interface MuaddibAgentRunnerOptions {
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
 }
 
+export interface RunnerContextMessage {
+  role: Extract<Message["role"], "user" | "assistant">;
+  content: string;
+}
+
 export interface SingleTurnResult {
   assistantMessage: AssistantMessage;
   text: string;
   stopReason: AssistantMessage["stopReason"];
   usage: Usage;
+}
+
+export interface SingleTurnOptions {
+  contextMessages?: RunnerContextMessage[];
+  images?: ImageContent[];
 }
 
 /**
@@ -65,8 +86,12 @@ export class MuaddibAgentRunner {
     this.agent.abort();
   }
 
-  async runSingleTurn(prompt: string, images: ImageContent[] = []): Promise<SingleTurnResult> {
-    await this.agent.prompt(prompt, images);
+  async runSingleTurn(prompt: string, options: SingleTurnOptions = {}): Promise<SingleTurnResult> {
+    if (options.contextMessages) {
+      this.agent.replaceMessages(convertContextToAgentMessages(options.contextMessages));
+    }
+
+    await this.agent.prompt(prompt, options.images ?? []);
 
     const assistantMessage = this.findLastAssistantMessage();
     if (!assistantMessage) {
@@ -98,4 +123,20 @@ function extractText(message: AssistantMessage): string {
     .map((content) => content.text)
     .join("\n")
     .trim();
+}
+
+function convertContextToAgentMessages(contextMessages: RunnerContextMessage[]): AgentMessage[] {
+  const now = Date.now();
+  return contextMessages.map((message, index): UserMessage => ({
+    // For milestone 4 context replay, keep context as user-visible text blocks.
+    // Full assistant/tool replay fidelity will be expanded in later milestones.
+    role: "user",
+    content: [
+      {
+        type: "text",
+        text: message.role === "assistant" ? `[assistant] ${message.content}` : message.content,
+      },
+    ],
+    timestamp: now + index,
+  }));
 }
