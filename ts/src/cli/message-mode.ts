@@ -53,8 +53,6 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
     content: options.message,
   };
 
-  await history.addMessage(message);
-
   const fallbackLabel =
     commandConfig.mode_classifier?.fallback_label ??
     Object.keys(commandConfig.mode_classifier?.labels ?? {})[0];
@@ -73,13 +71,15 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
     runnerFactory: options.runnerFactory ?? defaultRunnerFactory,
   });
 
-  const result = await commandHandler.execute(message);
+  const result = await commandHandler.handleIncomingMessage(message, {
+    isDirect: true,
+  });
   await history.close();
 
   return {
-    response: result.response,
-    mode: result.resolved.modeKey,
-    trigger: result.resolved.selectedTrigger,
-    selectedAutomatically: result.resolved.selectedAutomatically,
+    response: result?.response ?? null,
+    mode: result?.resolved.modeKey ?? null,
+    trigger: result?.resolved.selectedTrigger ?? null,
+    selectedAutomatically: result?.resolved.selectedAutomatically ?? false,
   };
 }

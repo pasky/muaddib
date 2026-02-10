@@ -44,8 +44,17 @@ describe("IrcRoomMonitor", () => {
       history,
       commandHandler: {
         shouldIgnoreUser: () => false,
-        execute: async (message) => {
+        handleIncomingMessage: async (message, options) => {
           executeCalls.push(message.content);
+          if (options.isDirect && options.sendResponse) {
+            await options.sendResponse("line1\nline2");
+          }
+          await history.addMessage(message);
+          await history.addMessage({
+            ...message,
+            nick: message.mynick,
+            content: "line1\nline2",
+          });
           return { response: "line1\nline2" };
         },
       },
@@ -81,7 +90,7 @@ describe("IrcRoomMonitor", () => {
     await history.initialize();
 
     const sender = new FakeSender();
-    let executed = false;
+    let directFlag = false;
 
     const monitor = new IrcRoomMonitor({
       roomConfig: {
@@ -92,9 +101,10 @@ describe("IrcRoomMonitor", () => {
       history,
       commandHandler: {
         shouldIgnoreUser: () => false,
-        execute: async () => {
-          executed = true;
-          return { response: "unused" };
+        handleIncomingMessage: async (message, options) => {
+          directFlag = options.isDirect;
+          await history.addMessage(message);
+          return null;
         },
       },
       varlinkEvents: new FakeEventsClient(),
@@ -110,7 +120,7 @@ describe("IrcRoomMonitor", () => {
       message: "just chatting",
     });
 
-    expect(executed).toBe(false);
+    expect(directFlag).toBe(false);
     expect(sender.sent).toHaveLength(0);
 
     const historyRows = await history.getFullHistory("libera", "#test");

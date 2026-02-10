@@ -143,4 +143,60 @@ describe("RoomCommandHandlerTs", () => {
 
     await history.close();
   });
+
+  it("handleIncomingMessage persists user + assistant with selected trigger mode", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const incoming = makeMessage("!s persistence check");
+
+    const handler = new RoomCommandHandlerTs({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: () => ({
+        runSingleTurn: async () => ({
+          assistantMessage: {
+            role: "assistant",
+            content: [{ type: "text", text: "persisted response" }],
+            api: "openai-completions",
+            provider: "openai",
+            model: "gpt-4o-mini",
+            usage: {
+              input: 1,
+              output: 1,
+              cacheRead: 0,
+              cacheWrite: 0,
+              totalTokens: 2,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+            },
+            stopReason: "stop",
+            timestamp: Date.now(),
+          },
+          text: "persisted response",
+          stopReason: "stop",
+          usage: {
+            input: 1,
+            output: 1,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 2,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+        }),
+      }),
+    });
+
+    await handler.handleIncomingMessage(incoming, { isDirect: true });
+
+    const rows = await history.getFullHistory("libera", "#test");
+    expect(rows).toHaveLength(2);
+    expect(rows[0].role).toBe("user");
+    expect(rows[1].role).toBe("assistant");
+
+    const context = await history.getContext("libera", "#test", 10);
+    expect(context[1].content).toContain("!s");
+
+    await history.close();
+  });
 });

@@ -34,7 +34,10 @@ export interface IrcEventsClient {
 
 interface CommandLike {
   shouldIgnoreUser(nick: string): boolean;
-  execute(message: RoomMessage): Promise<{ response: string | null }>;
+  handleIncomingMessage(
+    message: RoomMessage,
+    options: { isDirect: boolean; sendResponse?: (text: string) => Promise<void> },
+  ): Promise<{ response: string | null } | null>;
 }
 
 export interface IrcRoomMonitorOptions {
@@ -138,24 +141,12 @@ export class IrcRoomMonitor {
       content: isDirect ? cleanedMessage : normalizedMessage,
     };
 
-    await this.options.history.addMessage(roomMessage);
-
-    if (!isDirect) {
-      return;
-    }
-
-    const result = await this.options.commandHandler.execute(roomMessage);
-    if (!result.response) {
-      return;
-    }
-
-    const responseText = this.responseCleaner(result.response, roomMessage.nick);
-    await this.varlinkSender.sendMessage(channelName, responseText, server);
-
-    await this.options.history.addMessage({
-      ...roomMessage,
-      nick: mynick,
-      content: responseText,
+    await this.options.commandHandler.handleIncomingMessage(roomMessage, {
+      isDirect,
+      sendResponse: async (text) => {
+        const responseText = this.responseCleaner(text, roomMessage.nick);
+        await this.varlinkSender.sendMessage(channelName, responseText, server);
+      },
     });
   }
 

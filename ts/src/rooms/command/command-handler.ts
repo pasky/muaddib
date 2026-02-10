@@ -51,6 +51,11 @@ export interface CommandExecutionResult {
   usage: Usage | null;
 }
 
+export interface HandleIncomingMessageOptions {
+  isDirect: boolean;
+  sendResponse?: (text: string) => Promise<void>;
+}
+
 /**
  * Shared TS command execution path (without proactive handling).
  */
@@ -83,6 +88,39 @@ export class RoomCommandHandlerTs {
   shouldIgnoreUser(nick: string): boolean {
     const ignoreUsers = this.commandConfig.ignore_users ?? [];
     return ignoreUsers.some((ignored) => String(ignored).toLowerCase() === nick.toLowerCase());
+  }
+
+  async handleIncomingMessage(
+    message: RoomMessage,
+    options: HandleIncomingMessageOptions,
+  ): Promise<CommandExecutionResult | null> {
+    await this.options.history.addMessage(message);
+
+    if (!options.isDirect) {
+      return null;
+    }
+
+    const result = await this.execute(message);
+    if (!result.response) {
+      return result;
+    }
+
+    if (options.sendResponse) {
+      await options.sendResponse(result.response);
+    }
+
+    await this.options.history.addMessage(
+      {
+        ...message,
+        nick: message.mynick,
+        content: result.response,
+      },
+      {
+        mode: result.resolved.selectedTrigger ?? undefined,
+      },
+    );
+
+    return result;
   }
 
   async execute(message: RoomMessage): Promise<CommandExecutionResult> {

@@ -12,6 +12,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "cli:message": "node ./dist/cli/main.js",
+    "start": "node ./dist/app/main.js",
     "start:irc": "node ./dist/app/main.js"
   },
   "dependencies": {

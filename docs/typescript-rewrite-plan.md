@@ -223,3 +223,21 @@ At end of each milestone:
     - `ts/tests/varlink.test.ts`
     - `ts/tests/irc-monitor.test.ts`
   - Validation passed: `cd ts && npm run typecheck`, `cd ts && npm test`, `uv run pytest`.
+- 2026-02-10: Milestone 6 complete.
+  - Added Discord and Slack monitor scaffolding with shared command-handler integration:
+    - `ts/src/rooms/discord/monitor.ts`
+    - `ts/src/rooms/slack/monitor.ts`
+  - Aligned app bootstrap/orchestration for multi-monitor config-driven execution:
+    - `ts/src/app/bootstrap.ts`
+    - `ts/src/app/main.ts` (enable/disable by room config, run monitors concurrently)
+    - `ts/src/app/irc-main.ts` wrapper retained for milestone continuity
+  - Closed command/response persistence parity gap across adapters by adding shared ingestion path in command handler:
+    - `RoomCommandHandlerTs.handleIncomingMessage(...)` now consistently persists user + assistant responses (with trigger mode) and optional sending hook.
+    - CLI and IRC paths updated to use this shared flow.
+  - Added monitor entry and shared-handler parity tests:
+    - `ts/tests/discord-monitor.test.ts`
+    - `ts/tests/slack-monitor.test.ts`
+    - `ts/tests/app-main.test.ts`
+    - `ts/tests/room-adapters-shared-handler.test.ts`
+    - updated `ts/tests/command-handler.test.ts` and `ts/tests/irc-monitor.test.ts`
+  - Validation passed: `cd ts && npm run typecheck`, `cd ts && npm test`, `uv run pytest`.
