@@ -8,6 +8,7 @@ import type {
   AssistantMessage,
   ImageContent,
   Message,
+  ToolResultMessage,
   Usage,
   UserMessage,
 } from "@mariozechner/pi-ai";
@@ -22,10 +23,18 @@ export interface MuaddibAgentRunnerOptions {
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
 }
 
-export interface RunnerContextMessage {
-  role: Extract<Message["role"], "user" | "assistant">;
-  content: string;
-}
+export type RunnerContextMessage =
+  | {
+      role: Extract<Message["role"], "user" | "assistant">;
+      content: string;
+    }
+  | {
+      role: "toolResult";
+      toolCallId: string;
+      toolName: string;
+      content: string;
+      isError?: boolean;
+    };
 
 export interface SingleTurnResult {
   assistantMessage: AssistantMessage;
@@ -88,7 +97,9 @@ export class MuaddibAgentRunner {
 
   async runSingleTurn(prompt: string, options: SingleTurnOptions = {}): Promise<SingleTurnResult> {
     if (options.contextMessages) {
-      this.agent.replaceMessages(convertContextToAgentMessages(options.contextMessages));
+      this.agent.replaceMessages(
+        convertContextToAgentMessages(options.contextMessages, this.modelInfo.spec.provider, this.modelInfo.model.api, this.modelInfo.spec.modelId),
+      );
     }
 
     await this.agent.prompt(prompt, options.images ?? []);
@@ -125,18 +136,62 @@ function extractText(message: AssistantMessage): string {
     .trim();
 }
 
-function convertContextToAgentMessages(contextMessages: RunnerContextMessage[]): AgentMessage[] {
+function convertContextToAgentMessages(
+  contextMessages: RunnerContextMessage[],
+  provider: string,
+  api: string,
+  modelId: string,
+): AgentMessage[] {
   const now = Date.now();
-  return contextMessages.map((message, index): UserMessage => ({
-    // For milestone 4 context replay, keep context as user-visible text blocks.
-    // Full assistant/tool replay fidelity will be expanded in later milestones.
-    role: "user",
-    content: [
-      {
-        type: "text",
-        text: message.role === "assistant" ? `[assistant] ${message.content}` : message.content,
-      },
-    ],
-    timestamp: now + index,
-  }));
+
+  return contextMessages.map((message, index): AgentMessage => {
+    const timestamp = now + index;
+
+    if (message.role === "toolResult") {
+      const toolResult: ToolResultMessage = {
+        role: "toolResult",
+        toolCallId: message.toolCallId,
+        toolName: message.toolName,
+        content: [{ type: "text", text: message.content }],
+        details: {},
+        isError: Boolean(message.isError),
+        timestamp,
+      };
+      return toolResult;
+    }
+
+    if (message.role === "assistant") {
+      const assistant: AssistantMessage = {
+        role: "assistant",
+        content: [{ type: "text", text: message.content }],
+        api,
+        provider,
+        model: modelId,
+        usage: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 0,
+          cost: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            total: 0,
+          },
+        },
+        stopReason: "stop",
+        timestamp,
+      };
+      return assistant;
+    }
+
+    const user: UserMessage = {
+      role: "user",
+      content: [{ type: "text", text: message.content }],
+      timestamp,
+    };
+    return user;
+  });
 }

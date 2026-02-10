@@ -197,6 +197,13 @@ describe("RoomCommandHandlerTs", () => {
     const context = await history.getContext("libera", "#test", 10);
     expect(context[1].content).toContain("!s");
 
+    const llmCalls = await history.getLlmCalls();
+    expect(llmCalls).toHaveLength(1);
+    expect(llmCalls[0].provider).toBe("openai");
+    expect(llmCalls[0].model).toBe("gpt-4o-mini");
+    expect(llmCalls[0].triggerMessageId).toBeGreaterThan(0);
+    expect(llmCalls[0].responseMessageId).toBeGreaterThan(0);
+
     await history.close();
   });
 });

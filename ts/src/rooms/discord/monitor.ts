@@ -26,10 +26,14 @@ export interface DiscordMessageEvent {
 }
 
 export interface DiscordEventSource {
+  connect?(): Promise<void>;
+  disconnect?(): Promise<void>;
   receiveEvent(): Promise<DiscordMessageEvent | null>;
 }
 
 export interface DiscordSender {
+  connect?(): Promise<void>;
+  disconnect?(): Promise<void>;
   sendMessage(channelId: string, message: string): Promise<void>;
 }
 
@@ -49,12 +53,32 @@ export class DiscordRoomMonitor {
       return;
     }
 
-    while (true) {
-      const event = await this.options.eventSource.receiveEvent();
-      if (!event) {
-        break;
+    if (this.options.eventSource.connect) {
+      await this.options.eventSource.connect();
+    }
+
+    const senderIsEventSource = Object.is(this.options.sender, this.options.eventSource);
+
+    if (this.options.sender && !senderIsEventSource && this.options.sender.connect) {
+      await this.options.sender.connect();
+    }
+
+    try {
+      while (true) {
+        const event = await this.options.eventSource.receiveEvent();
+        if (!event) {
+          break;
+        }
+        await this.processMessageEvent(event);
       }
-      await this.processMessageEvent(event);
+    } finally {
+      if (this.options.sender && !senderIsEventSource && this.options.sender.disconnect) {
+        await this.options.sender.disconnect();
+      }
+
+      if (this.options.eventSource.disconnect) {
+        await this.options.eventSource.disconnect();
+      }
     }
   }
 
@@ -91,8 +115,11 @@ export class DiscordRoomMonitor {
 }
 
 function normalizeDirectContent(content: string, mynick: string): string {
-  const mentionPattern = new RegExp(`^\\s*(<@!?\\w+>\\s*)?${escapeRegExp(mynick)}[,:]?\\s*`, "i");
-  return content.replace(mentionPattern, "").trim() || content.trim();
+  const mentionOrNickPrefix = new RegExp(
+    `^\\s*(?:<@!?\\w+>\\s*)?(?:${escapeRegExp(mynick)}[,:]?\\s*)?`,
+    "i",
+  );
+  return content.replace(mentionOrNickPrefix, "").trim() || content.trim();
 }
 
 function escapeRegExp(input: string): string {

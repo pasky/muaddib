@@ -44,6 +44,7 @@ export interface ModeClassifierConfig {
   labels: Record<string, string>;
   fallback_label?: string;
   model: string;
+  prompt?: string;
 }
 
 export interface CommandConfig {

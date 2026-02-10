@@ -22,6 +22,19 @@ export interface HistoryMessageRow {
   timestamp: string;
 }
 
+export interface LlmCallRow {
+  id: number;
+  provider: string;
+  model: string;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cost: number | null;
+  callType: string | null;
+  arcName: string | null;
+  triggerMessageId: number | null;
+  responseMessageId: number | null;
+}
+
 interface ContextRow {
   message: string;
   role: string;
@@ -35,6 +48,19 @@ interface FullHistoryRow {
   message: string;
   role: string;
   timestamp: string;
+}
+
+interface LlmCallDbRow {
+  id: number;
+  provider: string;
+  model: string;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cost: number | null;
+  call_type: string | null;
+  arc_name: string | null;
+  trigger_message_id: number | null;
+  response_message_id: number | null;
 }
 
 export class ChatHistoryStore {
@@ -348,6 +374,43 @@ export class ChatHistoryStore {
       arcName,
     );
     return Number(row?.total ?? 0);
+  }
+
+  async getLlmCalls(limit?: number): Promise<LlmCallRow[]> {
+    const db = this.requireDb();
+    const rows =
+      limit !== undefined
+        ? await db.all<LlmCallDbRow[]>(
+            `
+            SELECT id, provider, model, input_tokens, output_tokens, cost, call_type,
+                   arc_name, trigger_message_id, response_message_id
+            FROM llm_calls
+            ORDER BY id ASC
+            LIMIT ?
+            `,
+            limit,
+          )
+        : await db.all<LlmCallDbRow[]>(
+            `
+            SELECT id, provider, model, input_tokens, output_tokens, cost, call_type,
+                   arc_name, trigger_message_id, response_message_id
+            FROM llm_calls
+            ORDER BY id ASC
+            `,
+          );
+
+    return rows.map((row) => ({
+      id: Number(row.id),
+      provider: row.provider,
+      model: row.model,
+      inputTokens: row.input_tokens,
+      outputTokens: row.output_tokens,
+      cost: row.cost,
+      callType: row.call_type,
+      arcName: row.arc_name,
+      triggerMessageId: row.trigger_message_id,
+      responseMessageId: row.response_message_id,
+    }));
   }
 
   private defaultRoleForMessage(message: RoomMessage): string {

@@ -4,9 +4,12 @@ import { join } from "node:path";
 import { ChatHistoryStore } from "../history/chat-history-store.js";
 import { getRoomConfig } from "../rooms/command/config.js";
 import { RoomCommandHandlerTs } from "../rooms/command/command-handler.js";
+import { createModeClassifier } from "../rooms/command/classifier.js";
 import { DiscordRoomMonitor } from "../rooms/discord/monitor.js";
+import { DiscordGatewayTransport } from "../rooms/discord/transport.js";
 import { IrcRoomMonitor } from "../rooms/irc/monitor.js";
 import { SlackRoomMonitor } from "../rooms/slack/monitor.js";
+import { SlackSocketTransport } from "../rooms/slack/transport.js";
 import {
   getMuaddibHome,
   loadConfig,
@@ -66,11 +69,22 @@ function createMonitors(config: Record<string, unknown>, history: ChatHistorySto
   const discordRoomConfig = getRoomConfig(config, "discord") as any;
   if (isRoomEnabled(discordRoomConfig, false)) {
     const commandHandler = createRoomCommandHandler(discordRoomConfig, history);
+    const discordToken = discordRoomConfig?.token;
+    const transport =
+      typeof discordToken === "string" && discordToken
+        ? new DiscordGatewayTransport({
+            token: discordToken,
+            botNameFallback: discordRoomConfig?.bot_name,
+          })
+        : undefined;
+
     monitors.push(
       new DiscordRoomMonitor({
         roomConfig: discordRoomConfig,
         history,
         commandHandler,
+        eventSource: transport,
+        sender: transport,
       }),
     );
   }
@@ -78,13 +92,42 @@ function createMonitors(config: Record<string, unknown>, history: ChatHistorySto
   const slackRoomConfig = getRoomConfig(config, "slack") as any;
   if (isRoomEnabled(slackRoomConfig, false)) {
     const commandHandler = createRoomCommandHandler(slackRoomConfig, history);
-    monitors.push(
-      new SlackRoomMonitor({
-        roomConfig: slackRoomConfig,
-        history,
-        commandHandler,
-      }),
-    );
+    const slackAppToken = slackRoomConfig?.app_token;
+
+    if (typeof slackAppToken === "string" && slackAppToken) {
+      const workspaces = (slackRoomConfig?.workspaces as Record<string, any> | undefined) ?? {};
+      for (const [workspaceId, workspaceConfig] of Object.entries(workspaces)) {
+        const botToken = workspaceConfig?.bot_token;
+        if (typeof botToken !== "string" || !botToken) {
+          continue;
+        }
+
+        const transport = new SlackSocketTransport({
+          appToken: slackAppToken,
+          botToken,
+          workspaceId,
+          botNameFallback: workspaceConfig?.name,
+        });
+
+        monitors.push(
+          new SlackRoomMonitor({
+            roomConfig: slackRoomConfig,
+            history,
+            commandHandler,
+            eventSource: transport,
+            sender: transport,
+          }),
+        );
+      }
+    } else {
+      monitors.push(
+        new SlackRoomMonitor({
+          roomConfig: slackRoomConfig,
+          history,
+          commandHandler,
+        }),
+      );
+    }
   }
 
   return monitors;
@@ -96,14 +139,11 @@ function createRoomCommandHandler(
   responseCleaner?: (text: string, nick: string) => string,
 ): RoomCommandHandlerTs {
   const commandConfig = roomConfig?.command ?? {};
-  const fallbackLabel =
-    commandConfig.mode_classifier?.fallback_label ??
-    Object.keys(commandConfig.mode_classifier?.labels ?? {})[0];
 
   return new RoomCommandHandlerTs({
     roomConfig,
     history,
-    classifyMode: async () => fallbackLabel,
+    classifyMode: createModeClassifier(commandConfig),
     responseCleaner,
   });
 }

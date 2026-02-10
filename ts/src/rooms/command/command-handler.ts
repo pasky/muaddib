@@ -9,6 +9,7 @@ import {
 } from "../../agent/muaddib-agent-runner.js";
 import { createBaselineAgentTools } from "../../agent/tools/baseline-tools.js";
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
+import { parseModelSpec } from "../../models/model-spec.js";
 import type { RoomMessage } from "../message.js";
 import {
   CommandResolver,
@@ -94,7 +95,7 @@ export class RoomCommandHandlerTs {
     message: RoomMessage,
     options: HandleIncomingMessageOptions,
   ): Promise<CommandExecutionResult | null> {
-    await this.options.history.addMessage(message);
+    const triggerMessageId = await this.options.history.addMessage(message);
 
     if (!options.isDirect) {
       return null;
@@ -105,11 +106,26 @@ export class RoomCommandHandlerTs {
       return result;
     }
 
+    let llmCallId: number | null = null;
+    if (result.model && result.usage) {
+      const spec = parseModelSpec(result.model);
+      llmCallId = await this.options.history.logLlmCall({
+        provider: spec.provider,
+        model: spec.modelId,
+        inputTokens: result.usage.input,
+        outputTokens: result.usage.output,
+        cost: result.usage.cost.total,
+        callType: "agent_run",
+        arcName: `${message.serverTag}#${message.channelName}`,
+        triggerMessageId,
+      });
+    }
+
     if (options.sendResponse) {
       await options.sendResponse(result.response);
     }
 
-    await this.options.history.addMessage(
+    const responseMessageId = await this.options.history.addMessage(
       {
         ...message,
         nick: message.mynick,
@@ -117,8 +133,13 @@ export class RoomCommandHandlerTs {
       },
       {
         mode: result.resolved.selectedTrigger ?? undefined,
+        llmCallId,
       },
     );
+
+    if (llmCallId) {
+      await this.options.history.updateLlmCallResponse(llmCallId, responseMessageId);
+    }
 
     return result;
   }

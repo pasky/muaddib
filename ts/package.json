@@ -19,6 +19,8 @@
     "@mariozechner/pi-ai": "^0.50.7",
     "@mariozechner/pi-agent-core": "^0.50.7",
     "@sinclair/typebox": "^0.34.41",
+    "@slack/bolt": "^4.5.0",
+    "discord.js": "^14.22.1",
     "sqlite": "^5.1.1",
     "sqlite3": "^5.1.7"
   },

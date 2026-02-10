@@ -241,3 +241,27 @@ At end of each milestone:
     - `ts/tests/room-adapters-shared-handler.test.ts`
     - updated `ts/tests/command-handler.test.ts` and `ts/tests/irc-monitor.test.ts`
   - Validation passed: `cd ts && npm run typecheck`, `cd ts && npm test`, `uv run pytest`.
+- 2026-02-10: Post-Milestone-6 finalization complete.
+  - Implemented real Discord/Slack transport clients behind monitor abstractions:
+    - `ts/src/rooms/discord/transport.ts` (`discord.js` gateway ingestion + sending)
+    - `ts/src/rooms/slack/transport.ts` (`@slack/bolt` socket-mode ingestion + sending)
+    - wired in `ts/src/app/main.ts` from config tokens/workspaces.
+  - Replaced bootstrap fallback-label classifier stubs with model-backed classifier integration:
+    - `ts/src/rooms/command/classifier.ts`
+    - wired through `createRoomCommandHandler(...)` in `ts/src/app/main.ts`.
+  - Improved runner context replay fidelity for assistant/tool preservation:
+    - `ts/src/agent/muaddib-agent-runner.ts` now replays `assistant` and `toolResult` context as proper message roles.
+  - Added llm_calls usage/cost persistence hooks in shared command ingestion path:
+    - `RoomCommandHandlerTs.handleIncomingMessage(...)` logs LLM calls and links trigger/response message IDs.
+  - Polished runtime surface + Python entrypoint replacement direction:
+    - `ts/package.json` adds unified `start` command (`node ./dist/app/main.js`) and keeps `cli:message` / `start:irc`.
+    - cutover plan: replace Python service entrypoint with TS `start` after transport credential rollout and operational soak.
+  - Additional tests:
+    - `ts/tests/classifier.test.ts`
+    - transport/adapter integration tests expanded and updated.
+  - Validation passed: `cd ts && npm run typecheck`, `cd ts && npm test`, `uv run pytest`.
+
+### Remaining gaps (post-finalization)
+1. OAuth/session-backed API key refresh plumbing for non-static provider credentials in app bootstrap (currently relies on provider env vars/static tokens).
+2. Full production Slack/Discord operational hardening (retry policies, rate limits, richer identity resolution, message edit/thread nuances).
+3. Packaging/distribution cutover work to make TS service the default shipped runtime (Python entrypoint deprecation choreography).
