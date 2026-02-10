@@ -62,6 +62,7 @@
 - TS runtime now fail-fast rejects deferred config knobs (`chronicler`, `chronicler.quests`, `quests`, `rooms.*.proactive`) to avoid misleading operators.
 - TS runtime fail-fast enforces provider credential contract: only static `providers.*.key` strings (or provider SDK env vars) are supported; non-static `providers.*.key` values and `providers.*.{oauth,session}` are rejected.
 - OAuth/session refresh plumbing is explicitly deferred until a stable `@mariozechner/pi-ai` provider refresh contract is available; errors must include concrete operator guidance (remove unsupported keys and use static key/env-var contract).
+- TS service runtime cutover uses TS-first entrypoint with explicit rollback window controls (`MUADDIB_RUNTIME=python`, `MUADDIB_TS_ROLLBACK_UNTIL`) during soak; do not remove rollback path before soak criteria are met.
 - No backwards-compatibility shims for legacy behavior/config keys during rewrite.
 
 ### Mandatory per-milestone flow

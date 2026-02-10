@@ -413,6 +413,53 @@ export class ChatHistoryStore {
     }));
   }
 
+  async getMessageIdByPlatformId(
+    serverTag: string,
+    channelName: string,
+    platformId: string,
+  ): Promise<number | null> {
+    const db = this.requireDb();
+
+    const row = await db.get<{ id: number }>(
+      `
+      SELECT id FROM chat_messages
+      WHERE server_tag = ? AND channel_name = ? AND platform_id = ?
+      LIMIT 1
+      `,
+      serverTag,
+      channelName,
+      platformId,
+    );
+
+    return row ? Number(row.id) : null;
+  }
+
+  async updateMessageByPlatformId(
+    serverTag: string,
+    channelName: string,
+    platformId: string,
+    newContent: string,
+    nick: string,
+    contentTemplate = "<{nick}> {message}",
+  ): Promise<boolean> {
+    const db = this.requireDb();
+    const formatted = contentTemplate.replace("{nick}", nick).replace("{message}", newContent);
+
+    const result = await db.run(
+      `
+      UPDATE chat_messages
+      SET message = ?
+      WHERE server_tag = ? AND channel_name = ? AND platform_id = ?
+      `,
+      formatted,
+      serverTag,
+      channelName,
+      platformId,
+    );
+
+    return Number(result.changes ?? 0) > 0;
+  }
+
   private defaultRoleForMessage(message: RoomMessage): string {
     return message.nick.toLowerCase() === message.mynick.toLowerCase() ? "assistant" : "user";
   }

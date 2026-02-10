@@ -2,7 +2,10 @@ import { App } from "@slack/bolt";
 
 import type {
   SlackEventSource,
+  SlackIncomingEvent,
+  SlackMessageEditEvent,
   SlackMessageEvent,
+  SlackSendOptions,
   SlackSender,
 } from "./monitor.js";
 
@@ -42,7 +45,7 @@ export interface SlackSocketTransportOptions {
  * Real Slack socket-mode transport behind monitor abstractions.
  */
 export class SlackSocketTransport implements SlackEventSource, SlackSender {
-  private readonly queue = new AsyncQueue<SlackMessageEvent | null>();
+  private readonly queue = new AsyncQueue<SlackIncomingEvent | null>();
   private readonly app: App;
   private connected = false;
   private botUserId: string | null = null;
@@ -58,7 +61,7 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
     });
 
     this.app.event("message", async ({ event }) => {
-      const mapped = await this.mapMessage(event as unknown as Record<string, unknown>);
+      const mapped = await this.mapEvent(event as unknown as Record<string, unknown>);
       if (mapped) {
         this.queue.push(mapped);
       }
@@ -98,34 +101,47 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
     this.queue.push(null);
   }
 
-  async receiveEvent(): Promise<SlackMessageEvent | null> {
+  async receiveEvent(): Promise<SlackIncomingEvent | null> {
     return await this.queue.shift();
   }
 
-  async sendMessage(channelId: string, message: string): Promise<void> {
+  async sendMessage(channelId: string, message: string, options?: SlackSendOptions): Promise<void> {
     await this.app.client.chat.postMessage({
       channel: channelId,
       text: message,
+      thread_ts: options?.threadTs,
       token: this.options.botToken,
     });
   }
 
-  private async mapMessage(event: Record<string, unknown>): Promise<SlackMessageEvent | null> {
-    if (typeof event.subtype === "string") {
+  private async mapEvent(event: Record<string, unknown>): Promise<SlackIncomingEvent | null> {
+    const subtype = typeof event.subtype === "string" ? event.subtype : undefined;
+
+    if (subtype === "message_changed") {
+      return await this.mapMessageEdit(event);
+    }
+
+    if (subtype && subtype !== "file_share" && subtype !== "me_message") {
       return null;
     }
 
-    const text = typeof event.text === "string" ? event.text : "";
+    return await this.mapMessage(event);
+  }
+
+  private async mapMessage(event: Record<string, unknown>): Promise<SlackMessageEvent | null> {
+    const rawText = typeof event.text === "string" ? event.text : "";
     const channelId = typeof event.channel === "string" ? event.channel : "";
     const userId = typeof event.user === "string" ? event.user : "";
 
-    if (!text || !channelId || !userId) {
+    if (!rawText || !channelId || !userId) {
       return null;
     }
 
-    const isDirectMessage = channelId.startsWith("D");
-    const mentionsBot = this.botUserId ? text.includes(`<@${this.botUserId}>`) : false;
+    const channelType = typeof event.channel_type === "string" ? event.channel_type : undefined;
+    const isDirectMessage = channelType === "im" || channelId.startsWith("D");
+    const mentionsBot = this.botUserId ? rawText.includes(`<@${this.botUserId}>`) : false;
     const username = await this.getUserDisplayName(userId);
+    const normalizedText = await this.normalizeIncomingText(rawText);
 
     let channelName: string;
     if (isDirectMessage) {
@@ -136,18 +152,83 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
     }
 
     return {
+      kind: "message",
       workspaceId: this.options.workspaceId,
       workspaceName: this.options.workspaceName ?? this.options.workspaceId,
       channelId,
       channelName,
+      channelType,
       userId,
       username,
-      text,
+      text: normalizedText,
       mynick: this.botDisplayName ?? this.options.botNameFallback ?? "muaddib",
+      botUserId: this.botUserId ?? undefined,
       messageTs: typeof event.ts === "string" ? event.ts : undefined,
+      threadTs: typeof event.thread_ts === "string" ? event.thread_ts : undefined,
       isDirectMessage,
       mentionsBot,
+      isFromSelf: this.botUserId ? userId === this.botUserId : false,
     };
+  }
+
+  private async mapMessageEdit(event: Record<string, unknown>): Promise<SlackMessageEditEvent | null> {
+    const channelId = typeof event.channel === "string" ? event.channel : "";
+    const channelType = typeof event.channel_type === "string" ? event.channel_type : undefined;
+    const message = asRecord(event.message);
+    if (!channelId || !message) {
+      return null;
+    }
+
+    const userId = typeof message.user === "string" ? message.user : "";
+    const editedMessageTs = typeof message.ts === "string" ? message.ts : "";
+    const rawText = typeof message.text === "string" ? message.text : "";
+
+    if (!userId || !editedMessageTs || !rawText) {
+      return null;
+    }
+
+    const username = await this.getUserDisplayName(userId);
+    const normalizedText = await this.normalizeIncomingText(rawText);
+
+    let channelName: string;
+    if (channelType === "im" || channelId.startsWith("D")) {
+      channelName = `${normalizeName(username)}_${userId}`;
+    } else {
+      const name = await this.getChannelName(channelId);
+      channelName = `#${name}`;
+    }
+
+    return {
+      kind: "message_edit",
+      workspaceId: this.options.workspaceId,
+      workspaceName: this.options.workspaceName ?? this.options.workspaceId,
+      channelId,
+      channelName,
+      channelType,
+      userId,
+      username,
+      editedMessageTs,
+      newText: normalizedText,
+      isFromSelf:
+        (this.botUserId ? userId === this.botUserId : false) ||
+        typeof message.bot_id === "string",
+    };
+  }
+
+  private async normalizeIncomingText(text: string): Promise<string> {
+    let content = decodeSlackEntities(text);
+
+    const userMatches = Array.from(content.matchAll(/<@([A-Z0-9]+)>/g), (match) => match[1]);
+    for (const userId of new Set(userMatches)) {
+      const displayName = await this.getUserDisplayName(userId);
+      content = content.replaceAll(`<@${userId}>`, `@${displayName}`);
+    }
+
+    content = content.replace(/<#([A-Z0-9]+)\|([^>]+)>/g, "#$2");
+    content = content.replace(/<(https?:\/\/[^>|]+)\|[^>]+>/g, "$1");
+    content = content.replace(/<(https?:\/\/[^>]+)>/g, "$1");
+
+    return content;
   }
 
   private async getUserDisplayName(userId: string): Promise<string> {
@@ -202,4 +283,19 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
 
 function normalizeName(name: string): string {
   return name.trim().split(/\s+/u).join("_");
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function decodeSlackEntities(text: string): string {
+  return text
+    .replaceAll("&amp;", "&")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">");
 }

@@ -61,13 +61,17 @@ For Docker, mount a local directory as the muaddib home:
 
 Note: Relative paths in `config.json` (like `"path": "chronicle.db"` or `"path": "artifacts"`) are resolved against `$MUADDIB_HOME`.
 
-The default `docker-compose.yml` already sets this up:
+The default `docker-compose.yml` already sets this up (TS runtime default with explicit rollback window):
 ```yaml
 environment:
   - MUADDIB_HOME=/data
+  - MUADDIB_RUNTIME=${MUADDIB_RUNTIME:-ts}
+  - MUADDIB_TS_ROLLBACK_UNTIL=2026-03-31T23:59:59Z
 volumes:
   - ./muaddib-data:/data
 ```
+
+To force rollback runtime during the cutover window, export `MUADDIB_RUNTIME=python` before `docker compose up`.
 
 ## Troubleshooting
 

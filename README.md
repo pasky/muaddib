@@ -84,21 +84,26 @@ Copy `config.json.example` to `~/.muaddib/config.json` (or `$MUADDIB_HOME/config
 
 Recommended for Discord:
 1. Follow [Discord setup instructions](docs/discord.md) to create a bot account and obtain a token. Set it in `~/.muaddib/config.json` Discord section.
-2. Install dependencies: `uv sync --dev`
-3. Run the service: `uv run muaddib`
+2. Install dependencies: `uv sync --dev` and `cd ts && npm ci`
+3. Build TS runtime: `cd ts && npm run build`
+4. Run the service (TS default): `cd ts && npm run start`
 
 Recommended for Slack:
 1. Follow [Slack setup instructions](docs/slack.md) to create a Slack app, enable Socket Mode, and obtain tokens.
 2. Set the Slack config block in `~/.muaddib/config.json`.
-3. Install dependencies: `uv sync --dev`
-4. Run the service: `uv run muaddib`
+3. Install dependencies: `uv sync --dev` and `cd ts && npm ci`
+4. Build TS runtime: `cd ts && npm run build`
+5. Run the service (TS default): `cd ts && npm run start`
 
 Recommended for an IRC bot: See [Docker instructions](docs/docker.md) for running a Muaddib service + irssi in tandem in a Docker compose setup.
 
 Manual for IRC ("bring your own irssi"):
 1. Ensure `irssi-varlink` is loaded in your irssi, and your varlink path is set up properly in `~/.muaddib/config.json` IRC section.
-2. Install dependencies: `uv sync --dev`
-3. Run the service: `uv run muaddib`
+2. Install dependencies: `uv sync --dev` and `cd ts && npm ci`
+3. Build TS runtime: `cd ts && npm run build`
+4. Run the service (TS default): `cd ts && npm run start`
+
+During the TS cutover rollback window (until `2026-03-31T23:59:59Z`), operators can force Python runtime in deployment environments with `MUADDIB_RUNTIME=python` (see `docs/typescript-runtime-rollout.md` and `docs/typescript-runtime-runbook.md`).
 
 ### Commands
 

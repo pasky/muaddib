@@ -1,6 +1,9 @@
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import type { RoomMessage } from "../message.js";
-import { sendWithRateLimitRetry } from "../send-retry.js";
+import {
+  sendWithRateLimitRetry,
+  type SendRetryEvent,
+} from "../send-retry.js";
 
 interface CommandLike {
   shouldIgnoreUser(nick: string): boolean;
@@ -12,32 +15,61 @@ interface CommandLike {
 
 export interface SlackMonitorRoomConfig {
   enabled?: boolean;
+  reply_start_thread?: {
+    channel?: boolean;
+    dm?: boolean;
+  };
 }
 
 export interface SlackMessageEvent {
+  kind?: "message";
   workspaceId: string;
   workspaceName?: string;
   channelId: string;
   channelName?: string;
+  channelType?: string;
   userId?: string;
   username: string;
   text: string;
   mynick: string;
+  botUserId?: string;
   messageTs?: string;
+  threadTs?: string;
   isDirectMessage?: boolean;
   mentionsBot?: boolean;
+  isFromSelf?: boolean;
 }
+
+export interface SlackMessageEditEvent {
+  kind: "message_edit";
+  workspaceId: string;
+  workspaceName?: string;
+  channelId: string;
+  channelName?: string;
+  channelType?: string;
+  userId?: string;
+  username: string;
+  editedMessageTs: string;
+  newText: string;
+  isFromSelf?: boolean;
+}
+
+export type SlackIncomingEvent = SlackMessageEvent | SlackMessageEditEvent;
 
 export interface SlackEventSource {
   connect?(): Promise<void>;
   disconnect?(): Promise<void>;
-  receiveEvent(): Promise<SlackMessageEvent | null>;
+  receiveEvent(): Promise<SlackIncomingEvent | null>;
+}
+
+export interface SlackSendOptions {
+  threadTs?: string;
 }
 
 export interface SlackSender {
   connect?(): Promise<void>;
   disconnect?(): Promise<void>;
-  sendMessage(channelId: string, message: string): Promise<void>;
+  sendMessage(channelId: string, message: string, options?: SlackSendOptions): Promise<void>;
 }
 
 export interface SlackRoomMonitorOptions {
@@ -46,6 +78,7 @@ export interface SlackRoomMonitorOptions {
   commandHandler: CommandLike;
   eventSource?: SlackEventSource;
   sender?: SlackSender;
+  onSendRetryEvent?: (event: SendRetryEvent) => void;
 }
 
 export class SlackRoomMonitor {
@@ -74,7 +107,11 @@ export class SlackRoomMonitor {
         }
 
         try {
-          await this.processMessageEvent(event);
+          if (isSlackMessageEditEvent(event)) {
+            await this.processMessageEditEvent(event);
+          } else {
+            await this.processMessageEvent(event);
+          }
         } catch (error) {
           console.error("Slack monitor failed to process event; continuing", error);
         }
@@ -91,7 +128,11 @@ export class SlackRoomMonitor {
   }
 
   async processMessageEvent(event: SlackMessageEvent): Promise<void> {
-    if (!event.workspaceId || !event.channelId || !event.username || !event.text) {
+    if (!event.workspaceId || !event.channelId || !event.username || !event.text || !event.mynick) {
+      return;
+    }
+
+    if (event.isFromSelf) {
       return;
     }
 
@@ -100,15 +141,38 @@ export class SlackRoomMonitor {
     }
 
     const isDirect = Boolean(event.isDirectMessage || event.mentionsBot);
-    const cleanedContent = isDirect ? normalizeDirectContent(event.text, event.mynick) : event.text;
+    const cleanedContent = isDirect
+      ? normalizeDirectContent(event.text, event.mynick, event.botUserId)
+      : event.text.trim();
+
+    if (!cleanedContent) {
+      return;
+    }
+
+    const serverTag = `slack:${event.workspaceName ?? event.workspaceId}`;
+    const channelName = resolveSlackChannelName(event);
+
+    const responseThreadId = resolveReplyThreadTs(this.options.roomConfig, event);
+    const threadId = event.threadTs ?? responseThreadId;
+
+    let threadStarterId: number | undefined;
+    if (threadId) {
+      const starterId = await this.options.history.getMessageIdByPlatformId(serverTag, channelName, threadId);
+      if (starterId !== null) {
+        threadStarterId = starterId;
+      }
+    }
 
     const message: RoomMessage = {
-      serverTag: `slack:${event.workspaceName ?? event.workspaceId}`,
-      channelName: event.channelName ?? event.channelId,
+      serverTag,
+      channelName,
       nick: event.username,
       mynick: event.mynick,
       content: cleanedContent,
       platformId: event.messageTs,
+      threadId,
+      threadStarterId,
+      responseThreadId,
     };
 
     const sender = this.options.sender;
@@ -119,25 +183,116 @@ export class SlackRoomMonitor {
         ? async (text) => {
             await sendWithRateLimitRetry(
               async () => {
-                await sender.sendMessage(event.channelId, text);
+                await sender.sendMessage(event.channelId, text, {
+                  threadTs: responseThreadId,
+                });
               },
               {
                 platform: "slack",
                 destination: event.channelId,
+                onEvent: this.options.onSendRetryEvent,
               },
             );
           }
         : undefined,
     });
   }
+
+  async processMessageEditEvent(event: SlackMessageEditEvent): Promise<void> {
+    if (!event.workspaceId || !event.channelId || !event.username || !event.editedMessageTs) {
+      return;
+    }
+
+    if (event.isFromSelf) {
+      return;
+    }
+
+    const newText = event.newText.trim();
+    if (!newText) {
+      return;
+    }
+
+    const serverTag = `slack:${event.workspaceName ?? event.workspaceId}`;
+    const channelName = resolveSlackChannelName(event);
+
+    await this.options.history.updateMessageByPlatformId(
+      serverTag,
+      channelName,
+      event.editedMessageTs,
+      newText,
+      event.username,
+    );
+  }
 }
 
-function normalizeDirectContent(content: string, mynick: string): string {
-  const mentionOrNickPrefix = new RegExp(
-    `^\\s*(?:<@\\w+>\\s*)?(?:${escapeRegExp(mynick)}[,:]?\\s*)?`,
-    "i",
-  );
-  return content.replace(mentionOrNickPrefix, "").trim() || content.trim();
+function isSlackMessageEditEvent(event: SlackIncomingEvent): event is SlackMessageEditEvent {
+  return event.kind === "message_edit";
+}
+
+function resolveReplyThreadTs(
+  roomConfig: SlackMonitorRoomConfig,
+  event: Pick<SlackMessageEvent, "threadTs" | "messageTs" | "channelType" | "isDirectMessage">,
+): string | undefined {
+  if (event.threadTs) {
+    return event.threadTs;
+  }
+
+  if (!event.messageTs) {
+    return undefined;
+  }
+
+  const replyStartThread = roomConfig.reply_start_thread;
+  const channelEnabled = replyStartThread?.channel ?? true;
+  const dmEnabled = replyStartThread?.dm ?? false;
+
+  if (isDirectMessageChannel(event.channelType, event.isDirectMessage)) {
+    return dmEnabled ? event.messageTs : undefined;
+  }
+
+  return channelEnabled ? event.messageTs : undefined;
+}
+
+function isDirectMessageChannel(channelType: string | undefined, isDirectMessage: boolean | undefined): boolean {
+  return channelType === "im" || Boolean(isDirectMessage);
+}
+
+function resolveSlackChannelName(
+  event: Pick<SlackMessageEvent, "channelId" | "channelName" | "channelType" | "username" | "userId"> |
+    Pick<SlackMessageEditEvent, "channelId" | "channelName" | "channelType" | "username" | "userId">,
+): string {
+  if (event.channelName) {
+    return event.channelName;
+  }
+
+  if (event.channelType === "im" && event.userId) {
+    return `${normalizeName(event.username)}_${event.userId}`;
+  }
+
+  return event.channelId;
+}
+
+function normalizeDirectContent(content: string, mynick: string, botUserId?: string): string {
+  let cleaned = content.trimStart();
+
+  if (botUserId) {
+    const mentionPattern = new RegExp(`^\\s*(?:<@${escapeRegExp(botUserId)}>\\s*)+[:,]?\\s*(.*)$`, "i");
+    const mentionMatch = cleaned.match(mentionPattern);
+    if (mentionMatch) {
+      cleaned = mentionMatch[1]?.trim() ?? "";
+    }
+  }
+
+  const namePattern = new RegExp(`^\\s*@?${escapeRegExp(mynick)}[:,]?\\s*(.*)$`, "i");
+  const nameMatch = cleaned.match(namePattern);
+  if (nameMatch) {
+    cleaned = nameMatch[1]?.trim() ?? "";
+  }
+
+  return cleaned || content.trim();
+}
+
+function normalizeName(name: string): string {
+  return name.trim().split(/\s+/u).join("_");
 }
 
 function escapeRegExp(input: string): string {

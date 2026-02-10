@@ -42,6 +42,39 @@ describe("SlackRoomMonitor", () => {
     await history.close();
   });
 
+  it("normalizes repeated leading mention prefixes using Slack bot id + bot nick", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    let seenText = "";
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async (message) => {
+          seenText = message.content;
+          return null;
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      workspaceId: "T123",
+      channelId: "C123",
+      username: "alice",
+      text: "<@B123> <@B123>: ping",
+      mynick: "muaddib",
+      botUserId: "B123",
+      mentionsBot: true,
+    });
+
+    expect(seenText).toBe("ping");
+
+    await history.close();
+  });
+
   it("maps workspace/message identity fields with Python parity semantics", async () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();
@@ -86,6 +119,193 @@ describe("SlackRoomMonitor", () => {
     await history.close();
   });
 
+  it("starts reply thread in channels by default and aligns RoomMessage thread context", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    let seenThreadId: string | undefined;
+    let seenResponseThreadId: string | undefined;
+    let sentThreadTs: string | undefined;
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      sender: {
+        sendMessage: async (_channelId, _text, options) => {
+          sentThreadTs = options?.threadTs;
+        },
+      },
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async (message, options) => {
+          seenThreadId = message.threadId;
+          seenResponseThreadId = message.responseThreadId;
+          await options.sendResponse?.("ok");
+          return { response: "ok" };
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      workspaceId: "T123",
+      workspaceName: "Rossum",
+      channelId: "C123",
+      channelName: "#general",
+      username: "alice",
+      text: "muaddib: hello",
+      mynick: "muaddib",
+      messageTs: "1700000000.2000",
+      channelType: "channel",
+      mentionsBot: true,
+    });
+
+    expect(seenThreadId).toBe("1700000000.2000");
+    expect(seenResponseThreadId).toBe("1700000000.2000");
+    expect(sentThreadTs).toBe("1700000000.2000");
+
+    await history.close();
+  });
+
+  it("keeps DM replies non-threaded by default", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    let seenResponseThreadId: string | undefined;
+    let sentThreadTs: string | undefined;
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      sender: {
+        sendMessage: async (_channelId, _text, options) => {
+          sentThreadTs = options?.threadTs;
+        },
+      },
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async (message, options) => {
+          seenResponseThreadId = message.responseThreadId;
+          await options.sendResponse?.("ok");
+          return { response: "ok" };
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      workspaceId: "T123",
+      channelId: "D123",
+      username: "alice",
+      text: "hello",
+      mynick: "muaddib",
+      messageTs: "1700000000.2001",
+      channelType: "im",
+      isDirectMessage: true,
+    });
+
+    expect(seenResponseThreadId).toBeUndefined();
+    expect(sentThreadTs).toBeUndefined();
+
+    await history.close();
+  });
+
+  it("maps threaded incoming events and resolves thread starter history id", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    await history.addMessage({
+      serverTag: "slack:Rossum",
+      channelName: "#general",
+      nick: "alice",
+      mynick: "muaddib",
+      content: "thread starter",
+      platformId: "1700000000.1111",
+    });
+
+    let seenThreadId: string | undefined;
+    let seenThreadStarterId: number | undefined;
+    let sentThreadTs: string | undefined;
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      sender: {
+        sendMessage: async (_channelId, _text, options) => {
+          sentThreadTs = options?.threadTs;
+        },
+      },
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async (message, options) => {
+          seenThreadId = message.threadId;
+          seenThreadStarterId = message.threadStarterId;
+          await options.sendResponse?.("ok");
+          return { response: "ok" };
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      workspaceId: "T123",
+      workspaceName: "Rossum",
+      channelId: "C123",
+      channelName: "#general",
+      username: "alice",
+      text: "muaddib: follow-up",
+      mynick: "muaddib",
+      messageTs: "1700000000.2222",
+      threadTs: "1700000000.1111",
+      channelType: "channel",
+      mentionsBot: true,
+    });
+
+    expect(seenThreadId).toBe("1700000000.1111");
+    expect(seenThreadStarterId).toBeGreaterThan(0);
+    expect(sentThreadTs).toBe("1700000000.1111");
+
+    await history.close();
+  });
+
+  it("updates edited messages by platform id with history parity", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    await history.addMessage({
+      serverTag: "slack:Rossum",
+      channelName: "#general",
+      nick: "Alice",
+      mynick: "Muaddib",
+      content: "hello",
+      platformId: "1700000000.1111",
+    });
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async () => null,
+      },
+    });
+
+    await monitor.processMessageEditEvent({
+      kind: "message_edit",
+      workspaceId: "T123",
+      workspaceName: "Rossum",
+      channelId: "C123",
+      channelName: "#general",
+      channelType: "channel",
+      userId: "U123",
+      username: "Alice",
+      editedMessageTs: "1700000000.1111",
+      newText: "edited message",
+    });
+
+    const rows = await history.getFullHistory("slack:Rossum", "#general");
+    expect(rows[0].message).toBe("<Alice> edited message");
+
+    await history.close();
+  });
+
   it("ignores users from ignore list through shared command handler", async () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();
@@ -122,10 +342,14 @@ describe("SlackRoomMonitor", () => {
     await history.initialize();
 
     let sendAttempts = 0;
+    const retryEvents: Array<{ type: string; retryable: boolean }> = [];
 
     const monitor = new SlackRoomMonitor({
       roomConfig: { enabled: true },
       history,
+      onSendRetryEvent: (event) => {
+        retryEvents.push({ type: event.type, retryable: event.retryable });
+      },
       sender: {
         sendMessage: async () => {
           sendAttempts += 1;
@@ -161,6 +385,7 @@ describe("SlackRoomMonitor", () => {
     ).resolves.toBeUndefined();
 
     expect(sendAttempts).toBe(2);
+    expect(retryEvents).toEqual([{ type: "retry", retryable: true }]);
 
     await history.close();
   });
@@ -170,10 +395,14 @@ describe("SlackRoomMonitor", () => {
     await history.initialize();
 
     let sendAttempts = 0;
+    const retryEvents: Array<{ type: string; retryable: boolean }> = [];
 
     const monitor = new SlackRoomMonitor({
       roomConfig: { enabled: true },
       history,
+      onSendRetryEvent: (event) => {
+        retryEvents.push({ type: event.type, retryable: event.retryable });
+      },
       sender: {
         sendMessage: async () => {
           sendAttempts += 1;
@@ -201,6 +430,7 @@ describe("SlackRoomMonitor", () => {
     ).rejects.toThrow("forbidden");
 
     expect(sendAttempts).toBe(1);
+    expect(retryEvents).toEqual([{ type: "failed", retryable: false }]);
 
     await history.close();
   });

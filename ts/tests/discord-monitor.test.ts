@@ -48,6 +48,39 @@ describe("DiscordRoomMonitor", () => {
     await history.close();
   });
 
+  it("normalizes Discord mention prefixes with bot id and preserves cleaned payload", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    let seenMessage = "";
+
+    const monitor = new DiscordRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async (message) => {
+          seenMessage = message.content;
+          return null;
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      guildId: "guild-1",
+      channelId: "chan-1",
+      username: "alice",
+      content: "<@!999>, hi there",
+      mynick: "muaddib",
+      botUserId: "999",
+      mentionsBot: true,
+    });
+
+    expect(seenMessage).toBe("hi there");
+
+    await history.close();
+  });
+
   it("maps serverTag/platformId using Python parity semantics", async () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();
@@ -81,6 +114,106 @@ describe("DiscordRoomMonitor", () => {
 
     expect(mappedServerTag).toBe("discord:Rossum");
     expect(mappedPlatformId).toBe("msg-42");
+
+    await history.close();
+  });
+
+  it("maps thread fields for context lookup and reply semantics", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    await history.addMessage({
+      serverTag: "discord:Rossum",
+      channelName: "general",
+      nick: "alice",
+      mynick: "muaddib",
+      content: "thread-start",
+      platformId: "thread-1",
+    });
+
+    let seenThreadId: string | undefined;
+    let seenThreadStarterId: number | undefined;
+    const sendOptions: Array<{ replyToMessageId?: string; mentionAuthor?: boolean }> = [];
+
+    const monitor = new DiscordRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      sender: {
+        sendMessage: async (_channelId, _message, options) => {
+          sendOptions.push(options ?? {});
+        },
+      },
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async (message, options) => {
+          seenThreadId = message.threadId;
+          seenThreadStarterId = message.threadStarterId;
+          await options.sendResponse?.("ok");
+          return { response: "ok" };
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      guildId: "123456789",
+      guildName: "Rossum",
+      channelId: "chan-1",
+      channelName: "general",
+      messageId: "msg-42",
+      threadId: "thread-1",
+      username: "alice",
+      content: "muaddib: hello",
+      mynick: "muaddib",
+      mentionsBot: true,
+    });
+
+    expect(seenThreadId).toBe("thread-1");
+    expect(seenThreadStarterId).toBeGreaterThan(0);
+    expect(sendOptions).toEqual([
+      {
+        replyToMessageId: "msg-42",
+        mentionAuthor: true,
+      },
+    ]);
+
+    await history.close();
+  });
+
+  it("updates edited Discord message content by platform id", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    await history.addMessage({
+      serverTag: "discord:Rossum",
+      channelName: "general",
+      nick: "alice",
+      mynick: "muaddib",
+      content: "hello",
+      platformId: "msg-42",
+    });
+
+    const monitor = new DiscordRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async () => null,
+      },
+    });
+
+    await monitor.processMessageEditEvent({
+      kind: "message_edit",
+      guildId: "123456789",
+      guildName: "Rossum",
+      channelId: "chan-1",
+      channelName: "general",
+      messageId: "msg-42",
+      username: "alice",
+      content: "edited message",
+    });
+
+    const rows = await history.getFullHistory("discord:Rossum", "general");
+    expect(rows[0].message).toBe("<alice> edited message");
 
     await history.close();
   });
@@ -120,10 +253,14 @@ describe("DiscordRoomMonitor", () => {
     await history.initialize();
 
     let sendAttempts = 0;
+    const retryEvents: Array<{ type: string; retryable: boolean }> = [];
 
     const monitor = new DiscordRoomMonitor({
       roomConfig: { enabled: true },
       history,
+      onSendRetryEvent: (event) => {
+        retryEvents.push({ type: event.type, retryable: event.retryable });
+      },
       sender: {
         sendMessage: async () => {
           sendAttempts += 1;
@@ -158,6 +295,7 @@ describe("DiscordRoomMonitor", () => {
     ).resolves.toBeUndefined();
 
     expect(sendAttempts).toBe(2);
+    expect(retryEvents).toEqual([{ type: "retry", retryable: true }]);
 
     await history.close();
   });
@@ -167,10 +305,14 @@ describe("DiscordRoomMonitor", () => {
     await history.initialize();
 
     let sendAttempts = 0;
+    const retryEvents: Array<{ type: string; retryable: boolean }> = [];
 
     const monitor = new DiscordRoomMonitor({
       roomConfig: { enabled: true },
       history,
+      onSendRetryEvent: (event) => {
+        retryEvents.push({ type: event.type, retryable: event.retryable });
+      },
       sender: {
         sendMessage: async () => {
           sendAttempts += 1;
@@ -197,6 +339,7 @@ describe("DiscordRoomMonitor", () => {
     ).rejects.toThrow("forbidden");
 
     expect(sendAttempts).toBe(1);
+    expect(retryEvents).toEqual([{ type: "failed", retryable: false }]);
 
     await history.close();
   });

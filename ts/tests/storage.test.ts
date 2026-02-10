@@ -41,6 +41,37 @@ describe("ChatHistoryStore", () => {
     await store.close();
   });
 
+  it("updates and resolves messages by platform id", async () => {
+    const store = new ChatHistoryStore(":memory:", 10);
+    await store.initialize();
+
+    const messageId = await store.addMessage({
+      serverTag: "libera",
+      channelName: "#test",
+      nick: "alice",
+      mynick: "muaddib",
+      content: "archive me",
+      platformId: "1700000000.1111",
+    });
+
+    expect(await store.getMessageIdByPlatformId("libera", "#test", "1700000000.1111")).toBe(
+      messageId,
+    );
+
+    await store.updateMessageByPlatformId(
+      "libera",
+      "#test",
+      "1700000000.1111",
+      "edited",
+      "alice",
+    );
+
+    const rows = await store.getFullHistory("libera", "#test", 10);
+    expect(rows[0].message).toBe("<alice> edited");
+
+    await store.close();
+  });
+
   it("counts and marks chronicled messages", async () => {
     const store = new ChatHistoryStore(":memory:", 10);
     await store.initialize();

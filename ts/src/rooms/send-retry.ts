@@ -2,16 +2,30 @@ const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_RETRY_AFTER_MS = 1_000;
 const MAX_RETRY_AFTER_MS = 60_000;
 
+export interface SendRetryEvent {
+  type: "retry" | "failed";
+  retryable: boolean;
+  platform: "discord" | "slack";
+  destination: string;
+  attempt: number;
+  maxAttempts: number;
+  retryAfterMs: number | null;
+  error: unknown;
+}
+
 interface SendRetryContext {
   platform: "discord" | "slack";
   destination: string;
+  maxAttempts?: number;
+  onEvent?: (event: SendRetryEvent) => void;
 }
 
 export async function sendWithRateLimitRetry(
   send: () => Promise<void>,
-  _context: SendRetryContext,
+  context: SendRetryContext,
 ): Promise<void> {
   let attempt = 1;
+  const maxAttempts = normalizeMaxAttempts(context.maxAttempts);
 
   while (true) {
     try {
@@ -19,15 +33,45 @@ export async function sendWithRateLimitRetry(
       return;
     } catch (error) {
       const retryAfterMs = extractRetryAfterMs(error);
-      const shouldRetry = retryAfterMs !== null && attempt < DEFAULT_MAX_ATTEMPTS;
-      if (!shouldRetry) {
-        throw error;
+      const retryable = retryAfterMs !== null;
+
+      if (retryable && attempt < maxAttempts) {
+        context.onEvent?.({
+          type: "retry",
+          retryable,
+          platform: context.platform,
+          destination: context.destination,
+          attempt,
+          maxAttempts,
+          retryAfterMs,
+          error,
+        });
+
+        await sleep(retryAfterMs);
+        attempt += 1;
+        continue;
       }
 
-      await sleep(retryAfterMs);
-      attempt += 1;
+      context.onEvent?.({
+        type: "failed",
+        retryable,
+        platform: context.platform,
+        destination: context.destination,
+        attempt,
+        maxAttempts,
+        retryAfterMs,
+        error,
+      });
+      throw error;
     }
   }
+}
+
+function normalizeMaxAttempts(value: number | undefined): number {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 1) {
+    return Math.floor(value);
+  }
+  return DEFAULT_MAX_ATTEMPTS;
 }
 
 function extractRetryAfterMs(error: unknown): number | null {

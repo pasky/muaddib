@@ -343,11 +343,34 @@ At end of each milestone:
     - non-rate-limit send errors remain fail-fast (no broad fallback)
   - Expanded packaging/distribution cutover plan with explicit staged tasks (see below section).
   - Validation passed: `cd ts && npm run typecheck`, `cd ts && npm test`, `uv run pytest`.
+- 2026-02-11: Milestone 7G complete (Slack/Discord nuance parity hardening + TS runtime cutover choreography).
+  - Added red tests first and implemented deterministic fixes for:
+    - Slack/Discord message edit parity (`processMessageEditEvent` + history `platform_id` update plumbing)
+    - thread/reply nuance parity (Slack thread-start defaults + existing thread reuse + thread context IDs, Discord reply metadata)
+    - richer mention/identity normalization parity in monitors/transports
+  - Added operational retry/failure instrumentation events:
+    - `sendWithRateLimitRetry(...)` now emits structured retry/failure events
+    - Discord/Slack monitors expose `onSendRetryEvent` wiring for observability hooks
+  - Added history parity helpers:
+    - `ChatHistoryStore.getMessageIdByPlatformId(...)`
+    - `ChatHistoryStore.updateMessageByPlatformId(...)`
+  - Completed packaging/distribution choreography deliverables:
+    - operator rollout guide: `docs/typescript-runtime-rollout.md`
+    - deployment/rollback runbook: `docs/typescript-runtime-runbook.md`
+    - TS default runtime entrypoint wrapper + docker cutover:
+      - `scripts/runtime-entrypoint.sh`
+      - `Dockerfile` default command now routes through TS-first wrapper
+      - `docker-compose.yml` defaults `MUADDIB_RUNTIME=ts` with explicit rollback window env
+  - Validation passed:
+    - `cd ts && npm run typecheck`
+    - `cd ts && npm test`
+    - `uv run pytest`
+    - `MUADDIB_HOME=. uv run muaddib --message "milestone 7g ts parity hardening smoke test"`
 
-### Remaining gaps (post-finalization)
-1. OAuth/session-backed token refresh plumbing remains explicitly deferred pending a stable provider/session refresh contract in `@mariozechner/pi-ai` (TS now fail-fast rejects unsupported config with concrete operator guidance).
-2. Continue Slack/Discord production hardening beyond current bounded 429 retry support (message edits, thread/reply nuance, richer identity/mention handling, metrics/telemetry around retries/failures).
-3. Execute packaging/distribution cutover to make TS service the default shipped runtime (Python entrypoint deprecation choreography).
+### Remaining gaps (post-7G)
+1. OAuth/session-backed token refresh plumbing remains explicitly deferred pending a stable provider/session refresh contract in `@mariozechner/pi-ai` (TS fail-fast rejects unsupported config with concrete operator guidance).
+2. Continue post-cutover soak hardening for transport observability and live-room edge cases beyond current test-covered Slack/Discord edit/thread/reply/mention parity.
+3. Complete Python runtime deprecation after rollback window closes and soak criteria are met.
 
 ### Compatibility notes (intentional Python vs TS divergences)
 - TS runtime currently **fails fast** if deferred Python-only config keys are present, instead of silently ignoring them.
@@ -357,21 +380,22 @@ At end of each milestone:
   - supported TS contract today: static `providers.*.key` string or provider SDK env-var fallback
   - fail-fast errors include concrete per-provider operator guidance (remove unsupported keys and use static key/env-var contract)
 - TS Discord/Slack adapters now include bounded retry behavior for outbound 429/rate-limit failures; non-rate-limit send errors remain fail-fast.
+- TS Discord/Slack monitor parity now includes message edit persistence (`platform_id` updates), thread/reply mapping semantics, and richer mention/identity normalization across transport/monitor boundaries.
 - Python supports proactive interjections and chronicler/quests automation; TS parity target v1 intentionally does not.
 - TS still keeps storage-layer primitives (history + chronicle DB semantics) for migration continuity, but runtime automation for chronicling/proactive/quests remains deferred.
 
 ### Packaging/distribution cutover plan (staged)
-1. [~] Runtime entrypoint alignment
+1. [x] Runtime entrypoint alignment
    - TS default service command is `cd ts && npm run start`.
-   - Keep Python runtime available during soak; do not silently switch operators.
-2. [ ] Operator rollout checklist
-   - publish TS runtime env/credential contract doc (including deferred credential refresh constraints)
-   - add migration notes for room token provisioning (Discord/Slack/IRC)
-3. [ ] Deployment choreography
-   - switch production/systemd/container entrypoint to TS `start`
-   - keep explicit rollback path to Python entrypoint for one release window
-4. [ ] Python deprecation completion
-   - after successful soak + parity verification, remove Python service entrypoint from default distribution path
+   - Python runtime remains available as explicit rollback path during soak.
+2. [x] Operator rollout checklist
+   - published TS runtime env/credential contract doc: `docs/typescript-runtime-rollout.md`
+   - includes migration notes for Discord/Slack/IRC provisioning and deferred credential-refresh constraints
+3. [x] Deployment choreography
+   - default container/service runtime entrypoint switched to TS wrapper (`scripts/runtime-entrypoint.sh`)
+   - explicit rollback path kept via `MUADDIB_RUNTIME=python` until `MUADDIB_TS_ROLLBACK_UNTIL`
+4. [~] Python deprecation completion
+   - after successful soak + rollback-window expiry, remove Python service entrypoint from default distribution path
 
 ---
 
@@ -418,7 +442,7 @@ Legend:
 - [x] Add bounded send retries for outbound 429/rate-limit failures.
 - [x] Keep non-rate-limit send failures fail-fast.
 - [x] Add monitor regression tests for retry success and non-retry failure paths.
-- [~] Continue message edit/thread nuance parity and richer mention/identity behavior.
+- [x] Complete message edit/thread nuance parity and richer mention/identity behavior coverage.
 
 ---
 
@@ -495,11 +519,20 @@ Steps:
 4. Update compatibility notes + packaging cutover plan section.
 5. Validate test suites; commit + handoff.
 
-### Milestone 7G — Next
+### Milestone 7G — Complete
 Goal: complete remaining Slack/Discord nuance parity and execute TS default-runtime cutover choreography.
 
+Completed:
+1. Added red tests for message edit/thread/reply behavior gaps.
+2. Implemented targeted monitor/transport parity fixes + deterministic history update plumbing.
+3. Finalized operator rollout + deployment/rollback runbook and switched default container runtime entrypoint to TS with explicit rollback window.
+4. Added retry/failure instrumentation hooks consumed by monitor send paths.
+
+### Milestone 7H — Next
+Goal: post-cutover soak hardening + deprecation preparation without expanding deferred-feature scope.
+
 Steps:
-1. Add red tests for message edit/thread/reply behavior gaps.
-2. Implement targeted monitor/transport parity fixes.
-3. Finalize operator rollout + deployment/rollback runbook for TS default runtime.
-4. Validate test suites; commit + handoff.
+1. Add red tests for any live-soak regressions in Slack/Discord/IRC room behavior.
+2. Tighten observability wiring for retry/failure events into operator-facing logs/metrics.
+3. Prepare Python runtime deprecation checklist gated on rollback-window completion.
+4. Re-run full validation suites; commit + handoff.

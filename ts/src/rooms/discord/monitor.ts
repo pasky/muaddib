@@ -1,6 +1,9 @@
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import type { RoomMessage } from "../message.js";
-import { sendWithRateLimitRetry } from "../send-retry.js";
+import {
+  sendWithRateLimitRetry,
+  type SendRetryEvent,
+} from "../send-retry.js";
 
 interface CommandLike {
   shouldIgnoreUser(nick: string): boolean;
@@ -16,28 +19,51 @@ export interface DiscordMonitorRoomConfig {
 }
 
 export interface DiscordMessageEvent {
+  kind?: "message";
   guildId?: string;
   guildName?: string;
   channelId: string;
   channelName?: string;
   messageId?: string;
+  threadId?: string;
   username: string;
   content: string;
   mynick: string;
+  botUserId?: string;
   isDirectMessage?: boolean;
   mentionsBot?: boolean;
+  isFromSelf?: boolean;
 }
+
+export interface DiscordMessageEditEvent {
+  kind: "message_edit";
+  guildId?: string;
+  guildName?: string;
+  channelId: string;
+  channelName?: string;
+  messageId: string;
+  username: string;
+  content: string;
+  isFromSelf?: boolean;
+}
+
+export type DiscordIncomingEvent = DiscordMessageEvent | DiscordMessageEditEvent;
 
 export interface DiscordEventSource {
   connect?(): Promise<void>;
   disconnect?(): Promise<void>;
-  receiveEvent(): Promise<DiscordMessageEvent | null>;
+  receiveEvent(): Promise<DiscordIncomingEvent | null>;
+}
+
+export interface DiscordSendOptions {
+  replyToMessageId?: string;
+  mentionAuthor?: boolean;
 }
 
 export interface DiscordSender {
   connect?(): Promise<void>;
   disconnect?(): Promise<void>;
-  sendMessage(channelId: string, message: string): Promise<void>;
+  sendMessage(channelId: string, message: string, options?: DiscordSendOptions): Promise<void>;
 }
 
 export interface DiscordRoomMonitorOptions {
@@ -46,6 +72,7 @@ export interface DiscordRoomMonitorOptions {
   commandHandler: CommandLike;
   eventSource?: DiscordEventSource;
   sender?: DiscordSender;
+  onSendRetryEvent?: (event: SendRetryEvent) => void;
 }
 
 export class DiscordRoomMonitor {
@@ -74,7 +101,11 @@ export class DiscordRoomMonitor {
         }
 
         try {
-          await this.processMessageEvent(event);
+          if (isDiscordMessageEditEvent(event)) {
+            await this.processMessageEditEvent(event);
+          } else {
+            await this.processMessageEvent(event);
+          }
         } catch (error) {
           console.error("Discord monitor failed to process event; continuing", error);
         }
@@ -91,7 +122,11 @@ export class DiscordRoomMonitor {
   }
 
   async processMessageEvent(event: DiscordMessageEvent): Promise<void> {
-    if (!event.channelId || !event.username || !event.content) {
+    if (!event.channelId || !event.username || !event.content || !event.mynick) {
+      return;
+    }
+
+    if (event.isFromSelf) {
       return;
     }
 
@@ -100,19 +135,41 @@ export class DiscordRoomMonitor {
     }
 
     const isDirect = Boolean(event.isDirectMessage || event.mentionsBot);
-    const cleanedContent = isDirect ? normalizeDirectContent(event.content, event.mynick) : event.content;
+    const cleanedContent = isDirect
+      ? normalizeDirectContent(event.content, event.mynick, event.botUserId)
+      : normalizeContent(event.content).trim();
+
+    if (!cleanedContent) {
+      return;
+    }
+
+    const serverTag = event.guildName
+      ? `discord:${event.guildName}`
+      : event.guildId
+        ? `discord:${event.guildId}`
+        : "discord:_DM";
+
+    let threadStarterId: number | undefined;
+    if (event.threadId) {
+      const starterId = await this.options.history.getMessageIdByPlatformId(
+        serverTag,
+        event.channelName ?? event.channelId,
+        event.threadId,
+      );
+      if (starterId !== null) {
+        threadStarterId = starterId;
+      }
+    }
 
     const message: RoomMessage = {
-      serverTag: event.guildName
-        ? `discord:${event.guildName}`
-        : event.guildId
-          ? `discord:${event.guildId}`
-          : "discord:_DM",
+      serverTag,
       channelName: event.channelName ?? event.channelId,
       nick: event.username,
       mynick: event.mynick,
       content: cleanedContent,
       platformId: event.messageId,
+      threadId: event.threadId,
+      threadStarterId,
     };
 
     const sender = this.options.sender;
@@ -123,25 +180,90 @@ export class DiscordRoomMonitor {
         ? async (text) => {
             await sendWithRateLimitRetry(
               async () => {
-                await sender.sendMessage(event.channelId, text);
+                await sender.sendMessage(event.channelId, text, {
+                  replyToMessageId: event.messageId,
+                  mentionAuthor: true,
+                });
               },
               {
                 platform: "discord",
                 destination: event.channelId,
+                onEvent: this.options.onSendRetryEvent,
               },
             );
           }
         : undefined,
     });
   }
+
+  async processMessageEditEvent(event: DiscordMessageEditEvent): Promise<void> {
+    if (!event.channelId || !event.username || !event.messageId) {
+      return;
+    }
+
+    if (event.isFromSelf) {
+      return;
+    }
+
+    const newContent = normalizeContent(event.content).trim();
+    if (!newContent) {
+      return;
+    }
+
+    const serverTag = event.guildName
+      ? `discord:${event.guildName}`
+      : event.guildId
+        ? `discord:${event.guildId}`
+        : "discord:_DM";
+
+    await this.options.history.updateMessageByPlatformId(
+      serverTag,
+      event.channelName ?? event.channelId,
+      event.messageId,
+      newContent,
+      event.username,
+    );
+  }
 }
 
-function normalizeDirectContent(content: string, mynick: string): string {
-  const mentionOrNickPrefix = new RegExp(
-    `^\\s*(?:<@!?\\w+>\\s*)?(?:${escapeRegExp(mynick)}[,:]?\\s*)?`,
-    "i",
-  );
-  return content.replace(mentionOrNickPrefix, "").trim() || content.trim();
+function isDiscordMessageEditEvent(event: DiscordIncomingEvent): event is DiscordMessageEditEvent {
+  return event.kind === "message_edit";
+}
+
+function normalizeContent(content: string): string {
+  if (!content) {
+    return content;
+  }
+
+  return content.replace(/<a?:([0-9A-Za-z_]+):\d+>/g, ":$1:");
+}
+
+function normalizeDirectContent(content: string, mynick: string, botUserId?: string): string {
+  let cleaned = content.trimStart();
+
+  if (botUserId) {
+    const mentionPattern = new RegExp(`^\\s*(?:<@!?${escapeRegExp(botUserId)}>\\s*)+[:,]?\\s*(.*)$`, "i");
+    const match = cleaned.match(mentionPattern);
+    if (match) {
+      cleaned = match[1]?.trim() ?? "";
+    }
+  }
+
+  if (cleaned === content.trimStart()) {
+    const anyMentionPattern = /^\s*(?:<@!?\w+>\s*)+[:,]?\s*(.*)$/i;
+    const match = cleaned.match(anyMentionPattern);
+    if (match) {
+      cleaned = match[1]?.trim() ?? "";
+    }
+  }
+
+  const namePattern = new RegExp(`^\\s*@?${escapeRegExp(mynick)}[:,]?\\s*(.*)$`, "i");
+  const nameMatch = cleaned.match(namePattern);
+  if (nameMatch) {
+    cleaned = nameMatch[1]?.trim() ?? "";
+  }
+
+  return normalizeContent(cleaned || content.trim());
 }
 
 function escapeRegExp(input: string): string {
