@@ -1,7 +1,7 @@
-# TypeScript Rewrite Plan (pi-ai + pi-agent)
+# TypeScript Rewrite Plan (pi-ai + pi-agent-core)
 
 ## Goal
-Rewrite muaddib from Python to TypeScript, using `@mariozechner/pi-ai` + `@mariozechner/pi-agent` as the LLM/provider/agent foundation.
+Rewrite muaddib from Python to TypeScript, using `@mariozechner/pi-ai` + `@mariozechner/pi-agent-core` (from pi-mono `packages/agent`) as the LLM/provider/agent foundation.
 
 Scope:
 - ✅ Transfer core bot behavior (rooms, command routing, history/chronicler, tools, varlink integration, CLI test mode)
@@ -59,12 +59,12 @@ Create a parallel implementation (no compatibility shims), then switch entrypoin
 ### B. Use pi-ai models directly; remove custom provider clients
 Replace `muaddib/providers/*` with:
 - model parsing: `provider:model` -> `getModel(provider, modelId)`
-- inference: `streamSimple`/`completeSimple` via `@mariozechner/pi-agent`
+- inference: `streamSimple`/`completeSimple` via `@mariozechner/pi-agent-core`
 
 No custom Anthropic/OpenAI wrappers in TS rewrite.
 
 ### C. Replace custom actor loop with `Agent` + tool registry
-Replace `AgenticLLMActor` with `Agent` from `@mariozechner/pi-agent`:
+Replace `AgenticLLMActor` with `Agent` from `@mariozechner/pi-agent-core`:
 - tool loop execution handled by library
 - keep existing tools as `AgentTool` adapters
 - keep room-level policy logic (mode selection, help, history windows) in muaddib app layer
@@ -174,3 +174,10 @@ At end of each milestone:
 ## Progress log
 
 - 2026-02-10: Milestone 1 complete (review + architecture decisions documented).
+- 2026-02-10: Milestone 2 complete.
+  - Bootstrapped TS subproject under `ts/` with `package.json`, `tsconfig.json`, `tsconfig.build.json`, `src/`, `tests/`.
+  - Implemented strict `provider:model` parser (`ts/src/models/model-spec.ts`).
+  - Implemented pi-ai adapter (`ts/src/models/pi-ai-model-adapter.ts`) with explicit unknown provider/model errors.
+  - Added initial `Agent` wrapper (`ts/src/agent/muaddib-agent-runner.ts`) for single-turn runs and tool registration hooks.
+  - Added unit tests for resolver/adapter/runner bootstrap (`ts/tests/*.test.ts`).
+  - Validation passed: TS typecheck + TS tests + Python tests (`uv run pytest`).

@@ -1,0 +1,24 @@
+{
+  "name": "muaddib-ts-rewrite",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TypeScript rewrite foundation for muaddib on pi-ai + pi-agent-core",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@mariozechner/pi-ai": "^0.50.7",
+    "@mariozechner/pi-agent-core": "^0.50.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "typescript": "^5.7.3",
+    "vitest": "^3.2.4"
+  }
+}

@@ -8,3 +8,6 @@ debug.log
 logs/
 irssi-data
 artifacts
+
+ts/node_modules/
+ts/dist/
