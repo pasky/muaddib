@@ -116,4 +116,66 @@ describe("SlackRoomMonitor", () => {
 
     await history.close();
   });
+
+  it("keeps event loop alive after a single handler failure", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    const processed: string[] = [];
+    let offset = 0;
+    let connectCalls = 0;
+    let disconnectCalls = 0;
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      eventSource: {
+        connect: async () => {
+          connectCalls += 1;
+        },
+        disconnect: async () => {
+          disconnectCalls += 1;
+        },
+        receiveEvent: async () => {
+          const events = [
+            {
+              workspaceId: "T123",
+              channelId: "C123",
+              username: "alice",
+              text: "first",
+              mynick: "muaddib",
+            },
+            {
+              workspaceId: "T123",
+              channelId: "C123",
+              username: "alice",
+              text: "second",
+              mynick: "muaddib",
+            },
+          ];
+
+          const event = events[offset];
+          offset += 1;
+          return event ?? null;
+        },
+      },
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async (message) => {
+          processed.push(message.content);
+          if (processed.length === 1) {
+            throw new Error("boom");
+          }
+          return null;
+        },
+      },
+    });
+
+    await expect(monitor.run()).resolves.toBeUndefined();
+    expect(processed).toEqual(["first", "second"]);
+    expect(connectCalls).toBe(1);
+    expect(disconnectCalls).toBe(1);
+
+    await history.close();
+  });
 });

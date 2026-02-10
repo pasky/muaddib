@@ -71,7 +71,12 @@ export class DiscordRoomMonitor {
         if (!event) {
           break;
         }
-        await this.processMessageEvent(event);
+
+        try {
+          await this.processMessageEvent(event);
+        } catch (error) {
+          console.error("Discord monitor failed to process event; continuing", error);
+        }
       }
     } finally {
       if (this.options.sender && !senderIsEventSource && this.options.sender.disconnect) {

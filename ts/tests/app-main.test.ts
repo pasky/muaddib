@@ -40,6 +40,21 @@ function baseCommandConfig() {
   };
 }
 
+async function runWithConfig(config: Record<string, unknown>): Promise<void> {
+  const dir = await mkdtemp(join(tmpdir(), "muaddib-app-main-"));
+  tempDirs.push(dir);
+
+  const mutableConfig = config as any;
+  mutableConfig.history ??= {};
+  mutableConfig.history.database ??= {};
+  mutableConfig.history.database.path ??= join(dir, "chat_history.db");
+
+  const configPath = join(dir, "config.json");
+  await writeFile(configPath, JSON.stringify(mutableConfig), "utf-8");
+
+  await runMuaddibMain(["--config", configPath]);
+}
+
 describe("resolveMuaddibPath", () => {
   it("expands '~' paths, preserves absolute paths, and resolves relative paths under MUADDIB_HOME", () => {
     process.env.MUADDIB_HOME = "/tmp/mu-home";
@@ -57,69 +72,112 @@ describe("resolveMuaddibPath", () => {
 });
 
 describe("runMuaddibMain", () => {
-  it("supports enabled/disabled monitor orchestration via config", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "muaddib-app-main-"));
-    tempDirs.push(dir);
+  it("throws when Discord is enabled without token", async () => {
+    await expect(
+      runWithConfig({
+        history: {
+          database: {
+            path: "/tmp/muaddib-test-history.db",
+          },
+        },
+        rooms: {
+          common: {
+            command: baseCommandConfig(),
+          },
+          irc: {
+            enabled: false,
+          },
+          discord: {
+            enabled: true,
+          },
+          slack: {
+            enabled: false,
+          },
+        },
+      }),
+    ).rejects.toThrow("Discord room is enabled but rooms.discord.token is missing.");
+  });
 
-    const configPath = join(dir, "config.json");
-    const config = {
-      history: {
-        database: {
-          path: join(dir, "chat_history.db"),
+  it("throws when Slack is enabled without app token", async () => {
+    await expect(
+      runWithConfig({
+        history: {
+          database: {
+            path: "/tmp/muaddib-test-history.db",
+          },
         },
-      },
-      rooms: {
-        common: {
-          command: baseCommandConfig(),
+        rooms: {
+          common: {
+            command: baseCommandConfig(),
+          },
+          irc: {
+            enabled: false,
+          },
+          discord: {
+            enabled: false,
+          },
+          slack: {
+            enabled: true,
+            workspaces: {
+              T123: {
+                bot_token: "xoxb-demo",
+              },
+            },
+          },
         },
-        irc: {
-          enabled: false,
-        },
-        discord: {
-          enabled: true,
-        },
-        slack: {
-          enabled: true,
-        },
-      },
-    };
+      }),
+    ).rejects.toThrow("Slack room is enabled but rooms.slack.app_token is missing.");
+  });
 
-    await writeFile(configPath, JSON.stringify(config), "utf-8");
-
-    await expect(runMuaddibMain(["--config", configPath])).resolves.toBeUndefined();
+  it("throws when IRC is enabled without varlink socket path", async () => {
+    await expect(
+      runWithConfig({
+        history: {
+          database: {
+            path: "/tmp/muaddib-test-history.db",
+          },
+        },
+        rooms: {
+          common: {
+            command: baseCommandConfig(),
+          },
+          irc: {
+            enabled: true,
+          },
+          discord: {
+            enabled: false,
+          },
+          slack: {
+            enabled: false,
+          },
+        },
+      }),
+    ).rejects.toThrow("IRC room is enabled but rooms.irc.varlink.socket_path is missing.");
   });
 
   it("throws when no monitors are enabled", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "muaddib-app-main-"));
-    tempDirs.push(dir);
-
-    const configPath = join(dir, "config.json");
-    const config = {
-      history: {
-        database: {
-          path: join(dir, "chat_history.db"),
+    await expect(
+      runWithConfig({
+        history: {
+          database: {
+            path: "/tmp/muaddib-test-history.db",
+          },
         },
-      },
-      rooms: {
-        common: {
-          command: baseCommandConfig(),
+        rooms: {
+          common: {
+            command: baseCommandConfig(),
+          },
+          irc: {
+            enabled: false,
+          },
+          discord: {
+            enabled: false,
+          },
+          slack: {
+            enabled: false,
+          },
         },
-        irc: {
-          enabled: false,
-        },
-        discord: {
-          enabled: false,
-        },
-        slack: {
-          enabled: false,
-        },
-      },
-    };
-
-    await writeFile(configPath, JSON.stringify(config), "utf-8");
-
-    await expect(runMuaddibMain(["--config", configPath])).rejects.toThrow(
-      "No room monitors enabled.",
-    );
+      }),
+    ).rejects.toThrow("No room monitors enabled.");
   });
 });

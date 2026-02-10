@@ -84,7 +84,11 @@ export class IrcRoomMonitor {
       const parameters = (response.parameters as Record<string, unknown> | undefined) ?? {};
       const event = parameters.event as IrcEvent | undefined;
       if (event) {
-        await this.processMessageEvent(event);
+        try {
+          await this.processMessageEvent(event);
+        } catch (error) {
+          console.error("IRC monitor failed to process event; continuing", error);
+        }
       }
 
       if (response.error) {

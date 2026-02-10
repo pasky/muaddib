@@ -59,7 +59,12 @@ function createMonitors(
   const monitors: RunnableMonitor[] = [];
 
   const ircRoomConfig = getRoomConfig(config, "irc") as any;
-  if (isRoomEnabled(ircRoomConfig, true) && ircRoomConfig?.varlink) {
+  if (isRoomEnabled(ircRoomConfig, true)) {
+    const socketPath = requireNonEmptyString(
+      ircRoomConfig?.varlink?.socket_path,
+      "IRC room is enabled but rooms.irc.varlink.socket_path is missing.",
+    );
+
     const commandHandler = createRoomCommandHandler(
       ircRoomConfig,
       history,
@@ -69,7 +74,13 @@ function createMonitors(
 
     monitors.push(
       new IrcRoomMonitor({
-        roomConfig: ircRoomConfig,
+        roomConfig: {
+          ...ircRoomConfig,
+          varlink: {
+            ...(ircRoomConfig?.varlink ?? {}),
+            socket_path: socketPath,
+          },
+        },
         history,
         commandHandler,
       }),
@@ -79,14 +90,15 @@ function createMonitors(
   const discordRoomConfig = getRoomConfig(config, "discord") as any;
   if (isRoomEnabled(discordRoomConfig, false)) {
     const commandHandler = createRoomCommandHandler(discordRoomConfig, history, getApiKey);
-    const discordToken = discordRoomConfig?.token;
-    const transport =
-      typeof discordToken === "string" && discordToken
-        ? new DiscordGatewayTransport({
-            token: discordToken,
-            botNameFallback: discordRoomConfig?.bot_name,
-          })
-        : undefined;
+    const discordToken = requireNonEmptyString(
+      discordRoomConfig?.token,
+      "Discord room is enabled but rooms.discord.token is missing.",
+    );
+
+    const transport = new DiscordGatewayTransport({
+      token: discordToken,
+      botNameFallback: discordRoomConfig?.bot_name,
+    });
 
     monitors.push(
       new DiscordRoomMonitor({
@@ -102,46 +114,51 @@ function createMonitors(
   const slackRoomConfig = getRoomConfig(config, "slack") as any;
   if (isRoomEnabled(slackRoomConfig, false)) {
     const commandHandler = createRoomCommandHandler(slackRoomConfig, history, getApiKey);
-    const slackAppToken = slackRoomConfig?.app_token;
+    const slackAppToken = requireNonEmptyString(
+      slackRoomConfig?.app_token,
+      "Slack room is enabled but rooms.slack.app_token is missing.",
+    );
 
-    if (typeof slackAppToken === "string" && slackAppToken) {
-      const workspaces = (slackRoomConfig?.workspaces as Record<string, any> | undefined) ?? {};
-      for (const [workspaceId, workspaceConfig] of Object.entries(workspaces)) {
-        const botToken = workspaceConfig?.bot_token;
-        if (typeof botToken !== "string" || !botToken) {
-          continue;
-        }
+    const workspaces = (slackRoomConfig?.workspaces as Record<string, any> | undefined) ?? {};
+    const workspaceEntries = Object.entries(workspaces);
+    if (workspaceEntries.length === 0) {
+      throw new Error("Slack room is enabled but rooms.slack.workspaces is missing.");
+    }
 
-        const transport = new SlackSocketTransport({
-          appToken: slackAppToken,
-          botToken,
-          workspaceId,
-          workspaceName: workspaceConfig?.name,
-          botNameFallback: workspaceConfig?.name,
-        });
+    for (const [workspaceId, workspaceConfig] of workspaceEntries) {
+      const botToken = requireNonEmptyString(
+        workspaceConfig?.bot_token,
+        `Slack room is enabled but rooms.slack.workspaces.${workspaceId}.bot_token is missing.`,
+      );
 
-        monitors.push(
-          new SlackRoomMonitor({
-            roomConfig: slackRoomConfig,
-            history,
-            commandHandler,
-            eventSource: transport,
-            sender: transport,
-          }),
-        );
-      }
-    } else {
+      const transport = new SlackSocketTransport({
+        appToken: slackAppToken,
+        botToken,
+        workspaceId,
+        workspaceName: workspaceConfig?.name,
+        botNameFallback: workspaceConfig?.name,
+      });
+
       monitors.push(
         new SlackRoomMonitor({
           roomConfig: slackRoomConfig,
           history,
           commandHandler,
+          eventSource: transport,
+          sender: transport,
         }),
       );
     }
   }
 
   return monitors;
+}
+
+function requireNonEmptyString(value: unknown, message: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(message);
+  }
+  return value;
 }
 
 function createRoomCommandHandler(

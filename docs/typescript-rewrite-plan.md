@@ -292,6 +292,21 @@ At end of each milestone:
     - `ts/tests/discord-monitor.test.ts`
     - `ts/tests/slack-monitor.test.ts`
   - Validation passed: `cd ts && npm run typecheck`, `cd ts && npm test`, `uv run pytest`.
+- 2026-02-10: Milestone 7C complete (startup guardrails + monitor-loop resilience).
+  - Added failing tests first for:
+    - fail-fast startup errors when enabled room credentials are missing (`irc` varlink socket, `discord` token, `slack` app token)
+    - per-event loop isolation in `IRC`, `Discord`, and `Slack` monitors
+  - Implemented minimal fixes in:
+    - `ts/src/app/main.ts` (explicit enabled-room credential validation; no silent monitor no-op startup)
+    - `ts/src/rooms/irc/monitor.ts` (per-event try/catch recovery)
+    - `ts/src/rooms/discord/monitor.ts` (per-event try/catch recovery)
+    - `ts/src/rooms/slack/monitor.ts` (per-event try/catch recovery)
+  - Added/updated regression tests:
+    - `ts/tests/app-main.test.ts`
+    - `ts/tests/irc-monitor.test.ts`
+    - `ts/tests/discord-monitor.test.ts`
+    - `ts/tests/slack-monitor.test.ts`
+  - Validation passed: `cd ts && npm run typecheck`, `cd ts && npm test`, `uv run pytest`.
 
 ### Remaining gaps (post-finalization)
 1. OAuth/session-backed API key refresh plumbing for non-static provider credentials in app bootstrap (currently relies on provider env vars/static tokens).
@@ -320,9 +335,9 @@ Legend:
 - [x] Add monitor mapping tests that assert name/id semantics and fail on current regressions.
 
 ### C. Operational guardrails parity
-- [ ] Remove silent no-op monitor startups when room is enabled but transport credentials are missing.
-- [ ] Add per-event isolation in monitor loops where a single bad event can kill processing.
-- [ ] Add negative tests for startup/config errors and event-loop resilience.
+- [x] Remove silent no-op monitor startups when room is enabled but transport credentials are missing.
+- [x] Add per-event isolation in monitor loops where a single bad event can kill processing.
+- [x] Add negative tests for startup/config errors and event-loop resilience.
 
 ### D. Scope discipline and migration clarity
 - [ ] Explicitly mark deferred features in TS runtime docs/config surface (proactive/chronicler/quests).

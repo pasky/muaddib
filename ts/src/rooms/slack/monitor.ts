@@ -71,7 +71,12 @@ export class SlackRoomMonitor {
         if (!event) {
           break;
         }
-        await this.processMessageEvent(event);
+
+        try {
+          await this.processMessageEvent(event);
+        } catch (error) {
+          console.error("Slack monitor failed to process event; continuing", error);
+        }
       }
     } finally {
       if (this.options.sender && !senderIsEventSource && this.options.sender.disconnect) {

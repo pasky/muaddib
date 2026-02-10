@@ -128,4 +128,78 @@ describe("IrcRoomMonitor", () => {
 
     await history.close();
   });
+
+  it("keeps event loop alive after a single handler failure", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    const responses: Array<Record<string, unknown>> = [
+      {
+        parameters: {
+          event: {
+            type: "message",
+            subtype: "public",
+            server: "libera",
+            target: "#test",
+            nick: "alice",
+            message: "first",
+          },
+        },
+      },
+      {
+        parameters: {
+          event: {
+            type: "message",
+            subtype: "public",
+            server: "libera",
+            target: "#test",
+            nick: "alice",
+            message: "second",
+          },
+        },
+      },
+      {
+        error: "done",
+      },
+    ];
+
+    let offset = 0;
+    const processed: string[] = [];
+
+    const sender = new FakeSender();
+    const monitor = new IrcRoomMonitor({
+      roomConfig: {
+        varlink: {
+          socket_path: "/tmp/varlink.sock",
+        },
+      },
+      history,
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async (message) => {
+          processed.push(message.content);
+          if (processed.length === 1) {
+            throw new Error("boom");
+          }
+          return null;
+        },
+      },
+      varlinkEvents: {
+        connect: async () => {},
+        disconnect: async () => {},
+        waitForEvents: async () => {},
+        receiveResponse: async () => {
+          const response = responses[offset];
+          offset += 1;
+          return response ?? null;
+        },
+      },
+      varlinkSender: sender,
+    });
+
+    await expect(monitor.run()).resolves.toBeUndefined();
+    expect(processed).toEqual(["first", "second"]);
+
+    await history.close();
+  });
 });
