@@ -195,6 +195,44 @@ describe("runMuaddibMain", () => {
     );
   });
 
+  it("throws when provider credential refresh/session config is present", async () => {
+    await expect(
+      runWithConfig({
+        history: {
+          database: {
+            path: "/tmp/muaddib-test-history.db",
+          },
+        },
+        providers: {
+          openai: {
+            key: {
+              session_id: "sess_123",
+            },
+            oauth: {
+              refresh_token: "refresh_123",
+            },
+          },
+        },
+        rooms: {
+          common: {
+            command: baseCommandConfig(),
+          },
+          irc: {
+            enabled: false,
+          },
+          discord: {
+            enabled: false,
+          },
+          slack: {
+            enabled: false,
+          },
+        },
+      }),
+    ).rejects.toThrow(
+      "Unsupported provider API credential config in the TypeScript runtime",
+    );
+  });
+
   it("throws when no monitors are enabled", async () => {
     await expect(
       runWithConfig({

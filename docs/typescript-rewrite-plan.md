@@ -317,15 +317,27 @@ At end of each milestone:
     - rejected keys include `chronicler`, `chronicler.quests`, `quests`, and `rooms.*.proactive`
   - Added compatibility notes section clarifying intentional Python-vs-TS divergences for deferred features.
   - Validation passed: `cd ts && npm run typecheck`, `cd ts && npm test`, `uv run pytest`.
+- 2026-02-10: Milestone 7E complete (API credential contract hardening for refresh/session scenarios).
+  - Added failing tests first for unsupported provider credential refresh/session config in startup and CLI paths:
+    - `ts/tests/app-main.test.ts`
+    - `ts/tests/cli-message-mode.test.ts`
+  - Hardened TS API-key bootstrap contract in `ts/src/app/api-keys.ts`:
+    - supported contract is explicit: `providers.<provider>.key` as static non-empty string, or provider SDK env-var fallback
+    - fail-fast unsupported credential config keys: `providers.*.key` non-string, `providers.*.oauth`, `providers.*.session`
+  - Updated compatibility notes to document the credential-contract divergence and operator-facing behavior.
+  - Validation passed: `cd ts && npm run typecheck`, `cd ts && npm test`, `uv run pytest`.
 
 ### Remaining gaps (post-finalization)
-1. OAuth/session-backed API key refresh plumbing for non-static provider credentials in app bootstrap (currently relies on provider env vars/static tokens).
+1. Implement actual OAuth/session-backed token refresh plumbing for non-static provider credentials (TS currently enforces static `providers.*.key` or env-var fallback only).
 2. Full production Slack/Discord operational hardening (retry policies, rate limits, richer identity resolution, message edit/thread nuances).
 3. Packaging/distribution cutover work to make TS service the default shipped runtime (Python entrypoint deprecation choreography).
 
 ### Compatibility notes (intentional Python vs TS divergences)
 - TS runtime currently **fails fast** if deferred Python-only config keys are present, instead of silently ignoring them.
   - rejected keys: `chronicler`, `chronicler.quests`, `quests`, and `rooms.*.proactive`
+- TS runtime also **fails fast** on unsupported non-static provider credential config, instead of silently falling through:
+  - rejected credential keys: `providers.*.key` (non-string values), `providers.*.oauth`, `providers.*.session`
+  - supported TS contract today: static `providers.*.key` string or provider SDK env-var fallback
 - Python supports proactive interjections and chronicler/quests automation; TS parity target v1 intentionally does not.
 - TS still keeps storage-layer primitives (history + chronicle DB semantics) for migration continuity, but runtime automation for chronicling/proactive/quests remains deferred.
 
@@ -359,6 +371,11 @@ Legend:
 - [x] Explicitly mark deferred features in TS runtime docs/config surface (proactive/chronicler/quests).
 - [x] Either implement or strip unsupported config knobs from TS path to avoid misleading operators.
 - [x] Add compatibility notes for intentional divergences.
+
+### E. API credential contract hardening
+- [x] Add failing tests for unsupported provider refresh/session credential config in startup + CLI paths.
+- [x] Enforce explicit TS API-key contract (static `providers.*.key` or provider env-var fallback).
+- [x] Fail fast with clear errors on unsupported non-static credential config (`providers.*.key` non-string, `providers.*.oauth`, `providers.*.session`).
 
 ---
 
@@ -412,3 +429,12 @@ Steps:
 1. Add tests/docs assertions for supported knobs.
 2. Implement config cleanup or runtime support where straightforward.
 3. Validate test suites; commit + handoff.
+
+### Milestone 7E — API credential contract hardening
+Goal: make provider API-key behavior deterministic while non-static refresh flows are deferred.
+
+Steps:
+1. Add failing tests for unsupported refresh/session credential config in startup and CLI paths.
+2. Enforce explicit API-key contract in `ts/src/app/api-keys.ts` with fail-fast errors for unsupported non-static config.
+3. Update compatibility notes and remaining-gap wording.
+4. Validate test suites; commit + handoff.

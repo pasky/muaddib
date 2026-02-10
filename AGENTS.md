@@ -60,6 +60,7 @@
 - The target is full TS rewrite with `@mariozechner/pi-ai` + `@mariozechner/pi-agent`, replacing custom provider clients and custom actor loop.
 - Quests and proactive interjections are intentionally out of scope for TS parity v1.
 - TS runtime now fail-fast rejects deferred config knobs (`chronicler`, `chronicler.quests`, `quests`, `rooms.*.proactive`) to avoid misleading operators.
+- TS runtime fail-fast enforces provider credential contract: only static `providers.*.key` strings (or provider SDK env vars) are supported; non-static `providers.*.key` values and `providers.*.{oauth,session}` are rejected.
 - No backwards-compatibility shims for legacy behavior/config keys during rewrite.
 
 ### Mandatory per-milestone flow
