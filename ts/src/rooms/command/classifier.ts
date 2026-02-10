@@ -59,8 +59,7 @@ export function createModeClassifier(
         classifierModel,
         {
           messages: llmMessages,
-          systemPrompt:
-            "Return exactly one classifier label token. No explanation. If uncertain, pick the best label.",
+          systemPrompt: `${prompt}\n\nReturn exactly one classifier label token. No explanation. If uncertain, pick the best label.`,
         },
         {
           apiKey: options.getApiKey ? await options.getApiKey(classifierModel.provider) : undefined,

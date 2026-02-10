@@ -3,6 +3,7 @@ import {
   type AgentEvent,
   type AgentMessage,
   type AgentTool,
+  type ThinkingLevel,
 } from "@mariozechner/pi-agent-core";
 import type {
   AssistantMessage,
@@ -46,6 +47,7 @@ export interface SingleTurnResult {
 export interface SingleTurnOptions {
   contextMessages?: RunnerContextMessage[];
   images?: ImageContent[];
+  thinkingLevel?: ThinkingLevel;
 }
 
 /**
@@ -96,6 +98,8 @@ export class MuaddibAgentRunner {
   }
 
   async runSingleTurn(prompt: string, options: SingleTurnOptions = {}): Promise<SingleTurnResult> {
+    this.agent.setThinkingLevel(options.thinkingLevel ?? "off");
+
     if (options.contextMessages) {
       this.agent.replaceMessages(
         convertContextToAgentMessages(options.contextMessages, this.modelInfo.spec.provider, this.modelInfo.model.api, this.modelInfo.spec.modelId),

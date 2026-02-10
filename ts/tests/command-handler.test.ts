@@ -53,16 +53,22 @@ function makeMessage(content: string): RoomMessage {
 }
 
 describe("RoomCommandHandlerTs", () => {
-  it("routes command to runner with resolved mode/model and context", async () => {
+  it("routes command to runner without duplicating trigger message and propagates reasoning level", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();
 
-    const incoming = makeMessage("!s hello there");
+    await history.addMessage({
+      ...makeMessage("previous context"),
+      nick: "bob",
+    });
+
+    const incoming = makeMessage("!a hello there");
     await history.addMessage(incoming);
 
     let runnerModel: string | null = null;
     let runnerPrompt = "";
-    let runnerContextLength = -1;
+    let runnerThinkingLevel: string | undefined;
+    let runnerContextContents: string[] = [];
 
     const handler = new RoomCommandHandlerTs({
       roomConfig: roomConfig as any,
@@ -73,7 +79,8 @@ describe("RoomCommandHandlerTs", () => {
         return {
           runSingleTurn: async (prompt, options) => {
             runnerPrompt = prompt;
-            runnerContextLength = options?.contextMessages?.length ?? 0;
+            runnerThinkingLevel = options?.thinkingLevel;
+            runnerContextContents = (options?.contextMessages ?? []).map((entry) => entry.content);
             return {
               assistantMessage: {
                 role: "assistant",
@@ -115,7 +122,9 @@ describe("RoomCommandHandlerTs", () => {
     expect(result.model).toBe("openai:gpt-4o-mini");
     expect(runnerModel).toBe("openai:gpt-4o-mini");
     expect(runnerPrompt).toBe("hello there");
-    expect(runnerContextLength).toBeGreaterThan(0);
+    expect(runnerThinkingLevel).toBe("medium");
+    expect(runnerContextContents.some((entry) => entry.includes("!a hello there"))).toBe(false);
+    expect(runnerContextContents.some((entry) => entry.includes("previous context"))).toBe(true);
 
     await history.close();
   });

@@ -1,4 +1,4 @@
-import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { AgentTool, ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { Usage } from "@mariozechner/pi-ai";
 
 import {
@@ -23,7 +23,10 @@ export interface CommandHandlerRoomConfig {
 }
 
 export interface CommandRunner {
-  runSingleTurn(prompt: string, options?: { contextMessages?: RunnerContextMessage[] }): Promise<SingleTurnResult>;
+  runSingleTurn(
+    prompt: string,
+    options?: { contextMessages?: RunnerContextMessage[]; thinkingLevel?: ThinkingLevel },
+  ): Promise<SingleTurnResult>;
 }
 
 export interface CommandRunnerFactoryInput {
@@ -201,9 +204,13 @@ export class RoomCommandHandlerTs {
       };
     }
 
-    const runnerContext = (resolved.noContext ? context.slice(-1) : context)
-      .slice(-resolved.runtime.historySize)
-      .map(toRunnerContextMessage);
+    const selectedContext = (resolved.noContext ? context.slice(-1) : context).slice(
+      -resolved.runtime.historySize,
+    );
+
+    // The trigger message will be sent as the new prompt for this turn.
+    // Keep only prior context here to avoid sending the trigger twice.
+    const runnerContext = selectedContext.slice(0, -1).map(toRunnerContextMessage);
 
     const systemPrompt = this.buildSystemPrompt(
       resolved.modeKey,
@@ -220,6 +227,7 @@ export class RoomCommandHandlerTs {
 
     const agentResult = await runner.runSingleTurn(resolved.queryText, {
       contextMessages: runnerContext,
+      thinkingLevel: normalizeThinkingLevel(resolved.runtime.reasoningEffort),
     });
 
     const cleaned = this.cleanResponseText(agentResult.text, message.nick);
@@ -305,6 +313,20 @@ function toRunnerContextMessage(message: { role: string; content: string }): Run
     role: message.role === "assistant" ? "assistant" : "user",
     content: message.content,
   };
+}
+
+function normalizeThinkingLevel(reasoningEffort: string): ThinkingLevel {
+  switch (reasoningEffort) {
+    case "off":
+    case "minimal":
+    case "low":
+    case "medium":
+    case "high":
+    case "xhigh":
+      return reasoningEffort;
+    default:
+      return "minimal";
+  }
 }
 
 function formatCurrentTime(date = new Date()): string {

@@ -260,8 +260,104 @@ At end of each milestone:
     - `ts/tests/classifier.test.ts`
     - transport/adapter integration tests expanded and updated.
   - Validation passed: `cd ts && npm run typecheck`, `cd ts && npm test`, `uv run pytest`.
+- 2026-02-10: Milestone 7A complete (red-green command-path parity fixes).
+  - Added failing regression tests first, then implemented fixes for:
+    - classifier prompt wiring (`mode_classifier.prompt` + `{message}` substitution)
+    - trigger-message duplication in runner input (context excludes current trigger; prompt carries query)
+    - runtime reasoning propagation (`reasoning_effort` -> runner `thinkingLevel`)
+  - Updated files:
+    - `ts/tests/classifier.test.ts`
+    - `ts/tests/command-handler.test.ts`
+    - `ts/src/rooms/command/classifier.ts`
+    - `ts/src/rooms/command/command-handler.ts`
+    - `ts/src/agent/muaddib-agent-runner.ts`
+  - Validation passed: `cd ts && npm run typecheck`, `cd ts && npm test`, `uv run pytest`.
 
 ### Remaining gaps (post-finalization)
 1. OAuth/session-backed API key refresh plumbing for non-static provider credentials in app bootstrap (currently relies on provider env vars/static tokens).
 2. Full production Slack/Discord operational hardening (retry policies, rate limits, richer identity resolution, message edit/thread nuances).
 3. Packaging/distribution cutover work to make TS service the default shipped runtime (Python entrypoint deprecation choreography).
+
+---
+
+## Post-M6 parity hardening checklist (red-green required)
+
+Legend:
+- [ ] not started
+- [~] in progress
+- [x] done
+
+### A. Command-path correctness and test coverage
+- [x] Ensure classifier uses configured `mode_classifier.prompt` and current-message substitution.
+- [x] Ensure trigger message is not duplicated in LLM input (`context` + prompt double-send).
+- [x] Propagate mode runtime reasoning settings to runner (`reasoning_effort` -> `thinkingLevel`).
+- [x] Add regression tests that fail on each of the above before implementation (red-green).
+
+### B. Identity/path compatibility correctness
+- [ ] Fix path resolution for `~` and absolute/relative behavior in TS bootstrap.
+- [ ] Expand `~` in IRC varlink socket path.
+- [ ] Align Discord/Slack `serverTag` and `platformId` semantics with Python behavior.
+- [ ] Add monitor mapping tests that assert name/id semantics and fail on current regressions.
+
+### C. Operational guardrails parity
+- [ ] Remove silent no-op monitor startups when room is enabled but transport credentials are missing.
+- [ ] Add per-event isolation in monitor loops where a single bad event can kill processing.
+- [ ] Add negative tests for startup/config errors and event-loop resilience.
+
+### D. Scope discipline and migration clarity
+- [ ] Explicitly mark deferred features in TS runtime docs/config surface (proactive/chronicler/quests).
+- [ ] Either implement or strip unsupported config knobs from TS path to avoid misleading operators.
+- [ ] Add compatibility notes for intentional divergences.
+
+---
+
+## Staged patch plan (TDD-first)
+
+### Milestone 7A — Command path parity defects + regression tests
+Goal: fix correctness gaps that unit tests should have caught.
+
+Steps:
+1. Write failing tests for:
+   - classifier prompt wiring
+   - no duplicated triggering input in runner call
+   - reasoning level propagation from resolver/runtime to runner
+2. Implement minimal fixes in:
+   - `ts/src/rooms/command/classifier.ts`
+   - `ts/src/rooms/command/command-handler.ts`
+   - `ts/src/agent/muaddib-agent-runner.ts`
+3. Validate:
+   - `cd ts && npm run typecheck`
+   - `cd ts && npm test`
+   - `uv run pytest`
+4. Commit + handoff.
+
+### Milestone 7B — Identity and path semantics parity + regression tests
+Goal: eliminate Discord/Slack/IRC path+identity mismatches vs Python.
+
+Steps:
+1. Write failing tests for:
+   - `~` path expansion behavior
+   - IRC varlink socket expansion
+   - Discord/Slack mapping (`serverTag`, `platformId`, primary identity fields)
+2. Implement fixes in:
+   - `ts/src/app/bootstrap.ts`
+   - `ts/src/rooms/irc/varlink.ts`
+   - `ts/src/rooms/discord/*`
+   - `ts/src/rooms/slack/*`
+3. Validate test suites; commit + handoff.
+
+### Milestone 7C — Monitor resilience and startup correctness
+Goal: fail fast on invalid enabled-monitor config and isolate event failures.
+
+Steps:
+1. Add failing tests for startup misconfiguration and loop resilience.
+2. Implement monitor/main orchestration hardening.
+3. Validate test suites; commit + handoff.
+
+### Milestone 7D — Config-surface cleanup/documented divergence
+Goal: make TS runtime behavior explicit and non-misleading.
+
+Steps:
+1. Add tests/docs assertions for supported knobs.
+2. Implement config cleanup or runtime support where straightforward.
+3. Validate test suites; commit + handoff.
