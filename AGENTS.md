@@ -54,3 +54,16 @@
 - Do NOT introduce compatibility shims for legacy config fields; update tests and fixtures instead.
 - When changing tests, prefer modifying/extending existing test files and cases rather than adding new test files, unless there is a compelling reason.
 - For AI agents: When user is frustrated, stop and think why and consider whether not to append an additional behavioral instruction to this AGENTS.md file.
+
+## TypeScript rewrite program (pi-ai + pi-agent)
+- Primary migration plan and design decisions are documented in `docs/typescript-rewrite-plan.md`.
+- The target is full TS rewrite with `@mariozechner/pi-ai` + `@mariozechner/pi-agent`, replacing custom provider clients and custom actor loop.
+- Quests and proactive interjections are intentionally out of scope for TS parity v1.
+- No backwards-compatibility shims for legacy behavior/config keys during rewrite.
+
+### Mandatory per-milestone flow
+1. Update `docs/typescript-rewrite-plan.md` progress log.
+2. Update this `AGENTS.md` when process/guardrails evolve.
+3. Run tests (`uv run pytest`; and TS tests when present).
+4. Commit milestone changes.
+5. Handoff with a concrete next-session goal that repeats the original rewrite objective + current status + exact next tasks.
