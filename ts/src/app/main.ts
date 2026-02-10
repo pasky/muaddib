@@ -1,6 +1,7 @@
 import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 
+import { createConfigApiKeyResolver } from "./api-keys.js";
 import { ChatHistoryStore } from "../history/chat-history-store.js";
 import { getRoomConfig } from "../rooms/command/config.js";
 import { RoomCommandHandlerTs } from "../rooms/command/command-handler.js";
@@ -36,8 +37,10 @@ export async function runMuaddibMain(argv: string[] = process.argv.slice(2)): Pr
   const history = new ChatHistoryStore(historyDbPath, defaultHistorySize);
   await history.initialize();
 
+  const apiKeyResolver = createConfigApiKeyResolver(config);
+
   try {
-    const monitors = createMonitors(config, history);
+    const monitors = createMonitors(config, history, apiKeyResolver);
     if (monitors.length === 0) {
       throw new Error("No room monitors enabled.");
     }
@@ -48,13 +51,20 @@ export async function runMuaddibMain(argv: string[] = process.argv.slice(2)): Pr
   }
 }
 
-function createMonitors(config: Record<string, unknown>, history: ChatHistoryStore): RunnableMonitor[] {
+function createMonitors(
+  config: Record<string, unknown>,
+  history: ChatHistoryStore,
+  getApiKey: (provider: string) => Promise<string | undefined> | string | undefined,
+): RunnableMonitor[] {
   const monitors: RunnableMonitor[] = [];
 
   const ircRoomConfig = getRoomConfig(config, "irc") as any;
   if (isRoomEnabled(ircRoomConfig, true) && ircRoomConfig?.varlink) {
-    const commandHandler = createRoomCommandHandler(ircRoomConfig, history, (text) =>
-      text.replace(/\n/g, "; ").trim(),
+    const commandHandler = createRoomCommandHandler(
+      ircRoomConfig,
+      history,
+      getApiKey,
+      (text) => text.replace(/\n/g, "; ").trim(),
     );
 
     monitors.push(
@@ -68,7 +78,7 @@ function createMonitors(config: Record<string, unknown>, history: ChatHistorySto
 
   const discordRoomConfig = getRoomConfig(config, "discord") as any;
   if (isRoomEnabled(discordRoomConfig, false)) {
-    const commandHandler = createRoomCommandHandler(discordRoomConfig, history);
+    const commandHandler = createRoomCommandHandler(discordRoomConfig, history, getApiKey);
     const discordToken = discordRoomConfig?.token;
     const transport =
       typeof discordToken === "string" && discordToken
@@ -91,7 +101,7 @@ function createMonitors(config: Record<string, unknown>, history: ChatHistorySto
 
   const slackRoomConfig = getRoomConfig(config, "slack") as any;
   if (isRoomEnabled(slackRoomConfig, false)) {
-    const commandHandler = createRoomCommandHandler(slackRoomConfig, history);
+    const commandHandler = createRoomCommandHandler(slackRoomConfig, history, getApiKey);
     const slackAppToken = slackRoomConfig?.app_token;
 
     if (typeof slackAppToken === "string" && slackAppToken) {
@@ -136,6 +146,7 @@ function createMonitors(config: Record<string, unknown>, history: ChatHistorySto
 function createRoomCommandHandler(
   roomConfig: any,
   history: ChatHistoryStore,
+  getApiKey: (provider: string) => Promise<string | undefined> | string | undefined,
   responseCleaner?: (text: string, nick: string) => string,
 ): RoomCommandHandlerTs {
   const commandConfig = roomConfig?.command ?? {};
@@ -143,7 +154,8 @@ function createRoomCommandHandler(
   return new RoomCommandHandlerTs({
     roomConfig,
     history,
-    classifyMode: createModeClassifier(commandConfig),
+    classifyMode: createModeClassifier(commandConfig, { getApiKey }),
+    getApiKey,
     responseCleaner,
   });
 }

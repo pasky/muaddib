@@ -3,12 +3,16 @@ import { runCliMessageMode } from "./message-mode.js";
 interface ParsedArgs {
   message: string;
   configPath: string;
+  roomName?: string;
+  dbPath?: string;
   help: boolean;
 }
 
 function parseArgs(argv: string[]): ParsedArgs {
   let message = "";
   let configPath = "./config.json";
+  let roomName: string | undefined;
+  let dbPath: string | undefined;
   let help = false;
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -29,9 +33,21 @@ function parseArgs(argv: string[]): ParsedArgs {
       i += 1;
       continue;
     }
+
+    if (arg === "--room" && argv[i + 1]) {
+      roomName = argv[i + 1];
+      i += 1;
+      continue;
+    }
+
+    if (arg === "--db-path" && argv[i + 1]) {
+      dbPath = argv[i + 1];
+      i += 1;
+      continue;
+    }
   }
 
-  return { message, configPath, help };
+  return { message, configPath, roomName, dbPath, help };
 }
 
 async function main(): Promise<void> {
@@ -39,7 +55,9 @@ async function main(): Promise<void> {
 
   if (args.help || !args.message) {
     // eslint-disable-next-line no-console
-    console.log("Usage: node dist/cli/main.js --message \"...\" [--config /path/to/config.json]");
+    console.log(
+      "Usage: node dist/cli/main.js --message \"...\" [--config /path/to/config.json] [--room irc|discord|slack] [--db-path /path/to/chat_history.db]",
+    );
     if (!args.help && !args.message) {
       process.exitCode = 2;
     }
@@ -49,6 +67,8 @@ async function main(): Promise<void> {
   const result = await runCliMessageMode({
     message: args.message,
     configPath: args.configPath,
+    roomName: args.roomName,
+    dbPath: args.dbPath,
   });
 
   if (result.response) {

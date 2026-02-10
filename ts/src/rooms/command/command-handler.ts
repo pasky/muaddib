@@ -39,6 +39,7 @@ export interface CommandHandlerOptions {
   history: ChatHistoryStore;
   classifyMode: (context: Array<{ role: string; content: string }>) => Promise<string>;
   runnerFactory?: CommandRunnerFactory;
+  getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   responseCleaner?: (text: string, nick: string) => string;
   helpToken?: string;
   flagTokens?: string[];
@@ -83,6 +84,7 @@ export class RoomCommandHandlerTs {
           model: input.model,
           systemPrompt: input.systemPrompt,
           tools: input.tools,
+          getApiKey: options.getApiKey,
         } as MuaddibAgentRunnerOptions));
   }
 

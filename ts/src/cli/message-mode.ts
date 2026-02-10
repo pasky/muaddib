@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
 
+import { createConfigApiKeyResolver } from "../app/api-keys.js";
 import { MuaddibAgentRunner } from "../agent/muaddib-agent-runner.js";
 import { ChatHistoryStore } from "../history/chat-history-store.js";
+import { createModeClassifier } from "../rooms/command/classifier.js";
 import { getRoomConfig } from "../rooms/command/config.js";
 import {
   RoomCommandHandlerTs,
@@ -37,6 +39,7 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
   const roomName = options.roomName ?? "irc";
   const roomConfig = getRoomConfig(config, roomName) as any;
   const commandConfig = roomConfig.command;
+  const getApiKey = createConfigApiKeyResolver(config);
 
   if (!commandConfig) {
     throw new Error(`Room '${roomName}' does not define command config.`);
@@ -53,21 +56,19 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
     content: options.message,
   };
 
-  const fallbackLabel =
-    commandConfig.mode_classifier?.fallback_label ??
-    Object.keys(commandConfig.mode_classifier?.labels ?? {})[0];
-
   const defaultRunnerFactory: CommandRunnerFactory = (input) =>
     new MuaddibAgentRunner({
       model: input.model,
       systemPrompt: input.systemPrompt,
       tools: input.tools,
+      getApiKey,
     });
 
   const commandHandler = new RoomCommandHandlerTs({
     roomConfig,
     history,
-    classifyMode: async () => fallbackLabel,
+    classifyMode: createModeClassifier(commandConfig, { getApiKey }),
+    getApiKey,
     runnerFactory: options.runnerFactory ?? defaultRunnerFactory,
   });
 
