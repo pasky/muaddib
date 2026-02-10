@@ -210,3 +210,16 @@ At end of each milestone:
     - `ts/tests/command-handler.test.ts`
     - `ts/tests/cli-message-mode.test.ts`
   - Validation passed: `cd ts && npm run typecheck`, `cd ts && npm test`, `uv run pytest`.
+- 2026-02-10: Milestone 5 complete.
+  - Ported IRC varlink transport and monitor integration:
+    - `ts/src/rooms/irc/varlink.ts` (null-terminated framing, sender/event clients, IRC message splitting)
+    - `ts/src/rooms/irc/monitor.ts` (event processing, direct-message detection, command handler integration, reconnect loop)
+  - Added TS app bootstrap/main loop for IRC mode:
+    - `ts/src/app/irc-main.ts`
+    - `ts/src/app/main.ts`
+    - package script `npm run start:irc`
+  - Wired IRC + CLI paths through shared command actor logic (`RoomCommandHandlerTs`) with response cleaning.
+  - Added TS tests for varlink splitting/handling and IRC command flow entry:
+    - `ts/tests/varlink.test.ts`
+    - `ts/tests/irc-monitor.test.ts`
+  - Validation passed: `cd ts && npm run typecheck`, `cd ts && npm test`, `uv run pytest`.

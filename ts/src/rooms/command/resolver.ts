@@ -50,6 +50,7 @@ export interface CommandConfig {
   history_size: number;
   default_mode?: string;
   channel_modes?: Record<string, string>;
+  ignore_users?: string[];
   modes: Record<string, ModeConfig>;
   mode_classifier: ModeClassifierConfig;
 }

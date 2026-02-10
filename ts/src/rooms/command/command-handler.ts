@@ -80,6 +80,11 @@ export class RoomCommandHandlerTs {
         } as MuaddibAgentRunnerOptions));
   }
 
+  shouldIgnoreUser(nick: string): boolean {
+    const ignoreUsers = this.commandConfig.ignore_users ?? [];
+    return ignoreUsers.some((ignored) => String(ignored).toLowerCase() === nick.toLowerCase());
+  }
+
   async execute(message: RoomMessage): Promise<CommandExecutionResult> {
     const defaultSize = this.commandConfig.history_size;
     const maxSize = Math.max(

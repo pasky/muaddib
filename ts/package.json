@@ -11,7 +11,8 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "cli:message": "node ./dist/cli/main.js"
+    "cli:message": "node ./dist/cli/main.js",
+    "start:irc": "node ./dist/app/main.js"
   },
   "dependencies": {
     "@mariozechner/pi-ai": "^0.50.7",
