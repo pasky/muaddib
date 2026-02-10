@@ -117,6 +117,94 @@ describe("SlackRoomMonitor", () => {
     await history.close();
   });
 
+  it("retries Slack send once when sender returns a rate-limit error", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    let sendAttempts = 0;
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      sender: {
+        sendMessage: async () => {
+          sendAttempts += 1;
+          if (sendAttempts === 1) {
+            const error = new Error("rate limited") as Error & {
+              code?: string;
+              retry_after?: number;
+            };
+            error.code = "rate_limited";
+            error.retry_after = 0;
+            throw error;
+          }
+        },
+      },
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async (_message, options) => {
+          await options.sendResponse?.("ok");
+          return { response: "ok" };
+        },
+      },
+    });
+
+    await expect(
+      monitor.processMessageEvent({
+        workspaceId: "T123",
+        channelId: "C123",
+        username: "alice",
+        text: "muaddib: hi",
+        mynick: "muaddib",
+        mentionsBot: true,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(sendAttempts).toBe(2);
+
+    await history.close();
+  });
+
+  it("fails fast on non-rate-limit Slack send errors", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    let sendAttempts = 0;
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      sender: {
+        sendMessage: async () => {
+          sendAttempts += 1;
+          throw new Error("forbidden");
+        },
+      },
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async (_message, options) => {
+          await options.sendResponse?.("ok");
+          return { response: "ok" };
+        },
+      },
+    });
+
+    await expect(
+      monitor.processMessageEvent({
+        workspaceId: "T123",
+        channelId: "C123",
+        username: "alice",
+        text: "muaddib: hi",
+        mynick: "muaddib",
+        mentionsBot: true,
+      }),
+    ).rejects.toThrow("forbidden");
+
+    expect(sendAttempts).toBe(1);
+
+    await history.close();
+  });
+
   it("keeps event loop alive after a single handler failure", async () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();

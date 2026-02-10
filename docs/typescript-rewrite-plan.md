@@ -326,11 +326,28 @@ At end of each milestone:
     - fail-fast unsupported credential config keys: `providers.*.key` non-string, `providers.*.oauth`, `providers.*.session`
   - Updated compatibility notes to document the credential-contract divergence and operator-facing behavior.
   - Validation passed: `cd ts && npm run typecheck`, `cd ts && npm test`, `uv run pytest`.
+- 2026-02-11: Milestone 7F complete (credential-defer guidance + transport retry hardening + cutover planning).
+  - Added failing tests first for:
+    - provider credential defer errors including concrete operator guidance in startup + CLI paths
+      - `ts/tests/app-main.test.ts`
+      - `ts/tests/cli-message-mode.test.ts`
+    - Discord/Slack outbound reply retry behavior on rate-limit failures
+      - `ts/tests/discord-monitor.test.ts`
+      - `ts/tests/slack-monitor.test.ts`
+  - Explicit defer decision for OAuth/session refresh implementation in this milestone:
+    - kept strict fail-fast semantics for `providers.*.{oauth,session}` and non-string `providers.*.key`
+    - error messages now include provider-specific operator guidance (`providers.<provider>.key` static string or env var such as `OPENAI_API_KEY`)
+  - Added transport retry hardening:
+    - new `ts/src/rooms/send-retry.ts` helper for bounded 429/rate-limit retries
+    - wired in `ts/src/rooms/discord/monitor.ts` and `ts/src/rooms/slack/monitor.ts` send paths
+    - non-rate-limit send errors remain fail-fast (no broad fallback)
+  - Expanded packaging/distribution cutover plan with explicit staged tasks (see below section).
+  - Validation passed: `cd ts && npm run typecheck`, `cd ts && npm test`, `uv run pytest`.
 
 ### Remaining gaps (post-finalization)
-1. Implement actual OAuth/session-backed token refresh plumbing for non-static provider credentials (TS currently enforces static `providers.*.key` or env-var fallback only).
-2. Full production Slack/Discord operational hardening (retry policies, rate limits, richer identity resolution, message edit/thread nuances).
-3. Packaging/distribution cutover work to make TS service the default shipped runtime (Python entrypoint deprecation choreography).
+1. OAuth/session-backed token refresh plumbing remains explicitly deferred pending a stable provider/session refresh contract in `@mariozechner/pi-ai` (TS now fail-fast rejects unsupported config with concrete operator guidance).
+2. Continue Slack/Discord production hardening beyond current bounded 429 retry support (message edits, thread/reply nuance, richer identity/mention handling, metrics/telemetry around retries/failures).
+3. Execute packaging/distribution cutover to make TS service the default shipped runtime (Python entrypoint deprecation choreography).
 
 ### Compatibility notes (intentional Python vs TS divergences)
 - TS runtime currently **fails fast** if deferred Python-only config keys are present, instead of silently ignoring them.
@@ -338,8 +355,23 @@ At end of each milestone:
 - TS runtime also **fails fast** on unsupported non-static provider credential config, instead of silently falling through:
   - rejected credential keys: `providers.*.key` (non-string values), `providers.*.oauth`, `providers.*.session`
   - supported TS contract today: static `providers.*.key` string or provider SDK env-var fallback
+  - fail-fast errors include concrete per-provider operator guidance (remove unsupported keys and use static key/env-var contract)
+- TS Discord/Slack adapters now include bounded retry behavior for outbound 429/rate-limit failures; non-rate-limit send errors remain fail-fast.
 - Python supports proactive interjections and chronicler/quests automation; TS parity target v1 intentionally does not.
 - TS still keeps storage-layer primitives (history + chronicle DB semantics) for migration continuity, but runtime automation for chronicling/proactive/quests remains deferred.
+
+### Packaging/distribution cutover plan (staged)
+1. [~] Runtime entrypoint alignment
+   - TS default service command is `cd ts && npm run start`.
+   - Keep Python runtime available during soak; do not silently switch operators.
+2. [ ] Operator rollout checklist
+   - publish TS runtime env/credential contract doc (including deferred credential refresh constraints)
+   - add migration notes for room token provisioning (Discord/Slack/IRC)
+3. [ ] Deployment choreography
+   - switch production/systemd/container entrypoint to TS `start`
+   - keep explicit rollback path to Python entrypoint for one release window
+4. [ ] Python deprecation completion
+   - after successful soak + parity verification, remove Python service entrypoint from default distribution path
 
 ---
 
@@ -376,6 +408,17 @@ Legend:
 - [x] Add failing tests for unsupported provider refresh/session credential config in startup + CLI paths.
 - [x] Enforce explicit TS API-key contract (static `providers.*.key` or provider env-var fallback).
 - [x] Fail fast with clear errors on unsupported non-static credential config (`providers.*.key` non-string, `providers.*.oauth`, `providers.*.session`).
+
+### F. Credential defer clarity + operator guidance
+- [x] Make explicit defer decision for OAuth/session refresh plumbing when implementation contract is not yet viable.
+- [x] Include concrete operator guidance in fail-fast credential errors (per-provider static key/env-var guidance).
+- [x] Add regression tests for startup + CLI error guidance text.
+
+### G. Slack/Discord production hardening
+- [x] Add bounded send retries for outbound 429/rate-limit failures.
+- [x] Keep non-rate-limit send failures fail-fast.
+- [x] Add monitor regression tests for retry success and non-retry failure paths.
+- [~] Continue message edit/thread nuance parity and richer mention/identity behavior.
 
 ---
 
@@ -437,4 +480,26 @@ Steps:
 1. Add failing tests for unsupported refresh/session credential config in startup and CLI paths.
 2. Enforce explicit API-key contract in `ts/src/app/api-keys.ts` with fail-fast errors for unsupported non-static config.
 3. Update compatibility notes and remaining-gap wording.
+4. Validate test suites; commit + handoff.
+
+### Milestone 7F — Credential defer guidance + monitor rate-limit retries
+Goal: keep OAuth/session refresh out of scope without ambiguity, and harden Slack/Discord send reliability.
+
+Steps:
+1. Add failing tests for provider credential error guidance text (startup + CLI).
+2. Add failing tests for Slack/Discord rate-limit send retry behavior and non-rate-limit fail-fast behavior.
+3. Implement:
+   - guidance-rich fail-fast errors in `ts/src/app/api-keys.ts`
+   - bounded send retry helper in `ts/src/rooms/send-retry.ts`
+   - monitor send-path wiring in `ts/src/rooms/discord/monitor.ts` and `ts/src/rooms/slack/monitor.ts`
+4. Update compatibility notes + packaging cutover plan section.
+5. Validate test suites; commit + handoff.
+
+### Milestone 7G — Next
+Goal: complete remaining Slack/Discord nuance parity and execute TS default-runtime cutover choreography.
+
+Steps:
+1. Add red tests for message edit/thread/reply behavior gaps.
+2. Implement targeted monitor/transport parity fixes.
+3. Finalize operator rollout + deployment/rollback runbook for TS default runtime.
 4. Validate test suites; commit + handoff.

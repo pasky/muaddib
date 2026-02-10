@@ -195,7 +195,7 @@ describe("runMuaddibMain", () => {
     );
   });
 
-  it("throws when provider credential refresh/session config is present", async () => {
+  it("throws with operator guidance when provider credential refresh/session config is present", async () => {
     await expect(
       runWithConfig({
         history: {
@@ -229,7 +229,7 @@ describe("runMuaddibMain", () => {
         },
       }),
     ).rejects.toThrow(
-      "Unsupported provider API credential config in the TypeScript runtime",
+      "Operator guidance: remove providers.openai.key, providers.openai.oauth and use providers.openai.key as a static string or OPENAI_API_KEY.",
     );
   });
 

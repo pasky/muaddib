@@ -1,5 +1,6 @@
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import type { RoomMessage } from "../message.js";
+import { sendWithRateLimitRetry } from "../send-retry.js";
 
 interface CommandLike {
   shouldIgnoreUser(nick: string): boolean;
@@ -114,11 +115,21 @@ export class DiscordRoomMonitor {
       platformId: event.messageId,
     };
 
+    const sender = this.options.sender;
+
     await this.options.commandHandler.handleIncomingMessage(message, {
       isDirect,
-      sendResponse: this.options.sender
+      sendResponse: sender
         ? async (text) => {
-            await this.options.sender?.sendMessage(event.channelId, text);
+            await sendWithRateLimitRetry(
+              async () => {
+                await sender.sendMessage(event.channelId, text);
+              },
+              {
+                platform: "discord",
+                destination: event.channelId,
+              },
+            );
           }
         : undefined,
     });

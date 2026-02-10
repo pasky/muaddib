@@ -142,7 +142,7 @@ describe("runCliMessageMode", () => {
     );
   });
 
-  it("fails fast on provider credential refresh/session config", async () => {
+  it("fails fast with operator guidance on provider credential refresh/session config", async () => {
     const dir = await mkdtemp(join(tmpdir(), "muaddib-cli-"));
     tempDirs.push(dir);
 
@@ -189,7 +189,7 @@ describe("runCliMessageMode", () => {
         message: "!s hi",
       }),
     ).rejects.toThrow(
-      "Unsupported provider API credential config in the TypeScript runtime",
+      "Operator guidance: remove providers.openai.session and use providers.openai.key as a static string or OPENAI_API_KEY.",
     );
   });
 });
