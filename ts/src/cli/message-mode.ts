@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 
 import { createConfigApiKeyResolver } from "../app/api-keys.js";
+import { assertNoDeferredFeatureConfig } from "../app/deferred-features.js";
 import { MuaddibAgentRunner } from "../agent/muaddib-agent-runner.js";
 import { ChatHistoryStore } from "../history/chat-history-store.js";
 import { createModeClassifier } from "../rooms/command/classifier.js";
@@ -36,6 +37,8 @@ export interface CliMessageModeResult {
  */
 export async function runCliMessageMode(options: CliMessageModeOptions): Promise<CliMessageModeResult> {
   const config = JSON.parse(readFileSync(options.configPath, "utf-8")) as Record<string, unknown>;
+  assertNoDeferredFeatureConfig(config);
+
   const roomName = options.roomName ?? "irc";
   const roomConfig = getRoomConfig(config, roomName) as any;
   const commandConfig = roomConfig.command;

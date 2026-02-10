@@ -59,6 +59,7 @@
 - Primary migration plan and design decisions are documented in `docs/typescript-rewrite-plan.md`.
 - The target is full TS rewrite with `@mariozechner/pi-ai` + `@mariozechner/pi-agent`, replacing custom provider clients and custom actor loop.
 - Quests and proactive interjections are intentionally out of scope for TS parity v1.
+- TS runtime now fail-fast rejects deferred config knobs (`chronicler`, `chronicler.quests`, `quests`, `rooms.*.proactive`) to avoid misleading operators.
 - No backwards-compatibility shims for legacy behavior/config keys during rewrite.
 
 ### Mandatory per-milestone flow

@@ -2,6 +2,7 @@ import { pathToFileURL } from "node:url";
 import { join } from "node:path";
 
 import { createConfigApiKeyResolver } from "./api-keys.js";
+import { assertNoDeferredFeatureConfig } from "./deferred-features.js";
 import { ChatHistoryStore } from "../history/chat-history-store.js";
 import { getRoomConfig } from "../rooms/command/config.js";
 import { RoomCommandHandlerTs } from "../rooms/command/command-handler.js";
@@ -25,6 +26,7 @@ interface RunnableMonitor {
 export async function runMuaddibMain(argv: string[] = process.argv.slice(2)): Promise<void> {
   const args = parseAppArgs(argv);
   const config = loadConfig(args.configPath);
+  assertNoDeferredFeatureConfig(config);
 
   const historyDbPath = resolveMuaddibPath(
     (config.history as any)?.database?.path,

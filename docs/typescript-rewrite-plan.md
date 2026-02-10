@@ -307,11 +307,27 @@ At end of each milestone:
     - `ts/tests/discord-monitor.test.ts`
     - `ts/tests/slack-monitor.test.ts`
   - Validation passed: `cd ts && npm run typecheck`, `cd ts && npm test`, `uv run pytest`.
+- 2026-02-10: Milestone 7D complete (config-surface clarity + deferred-feature discipline).
+  - Added failing tests first for deferred-feature config rejection in both service startup and CLI message mode:
+    - `ts/tests/app-main.test.ts`
+    - `ts/tests/cli-message-mode.test.ts`
+  - Implemented fail-fast deferred-feature guardrails in TS runtime:
+    - `ts/src/app/deferred-features.ts` (collect + reject unsupported config keys)
+    - wired in `ts/src/app/main.ts` and `ts/src/cli/message-mode.ts`
+    - rejected keys include `chronicler`, `chronicler.quests`, `quests`, and `rooms.*.proactive`
+  - Added compatibility notes section clarifying intentional Python-vs-TS divergences for deferred features.
+  - Validation passed: `cd ts && npm run typecheck`, `cd ts && npm test`, `uv run pytest`.
 
 ### Remaining gaps (post-finalization)
 1. OAuth/session-backed API key refresh plumbing for non-static provider credentials in app bootstrap (currently relies on provider env vars/static tokens).
 2. Full production Slack/Discord operational hardening (retry policies, rate limits, richer identity resolution, message edit/thread nuances).
 3. Packaging/distribution cutover work to make TS service the default shipped runtime (Python entrypoint deprecation choreography).
+
+### Compatibility notes (intentional Python vs TS divergences)
+- TS runtime currently **fails fast** if deferred Python-only config keys are present, instead of silently ignoring them.
+  - rejected keys: `chronicler`, `chronicler.quests`, `quests`, and `rooms.*.proactive`
+- Python supports proactive interjections and chronicler/quests automation; TS parity target v1 intentionally does not.
+- TS still keeps storage-layer primitives (history + chronicle DB semantics) for migration continuity, but runtime automation for chronicling/proactive/quests remains deferred.
 
 ---
 
@@ -340,9 +356,9 @@ Legend:
 - [x] Add negative tests for startup/config errors and event-loop resilience.
 
 ### D. Scope discipline and migration clarity
-- [ ] Explicitly mark deferred features in TS runtime docs/config surface (proactive/chronicler/quests).
-- [ ] Either implement or strip unsupported config knobs from TS path to avoid misleading operators.
-- [ ] Add compatibility notes for intentional divergences.
+- [x] Explicitly mark deferred features in TS runtime docs/config surface (proactive/chronicler/quests).
+- [x] Either implement or strip unsupported config knobs from TS path to avoid misleading operators.
+- [x] Add compatibility notes for intentional divergences.
 
 ---
 

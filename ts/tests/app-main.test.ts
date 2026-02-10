@@ -155,6 +155,46 @@ describe("runMuaddibMain", () => {
     ).rejects.toThrow("IRC room is enabled but rooms.irc.varlink.socket_path is missing.");
   });
 
+  it("throws when deferred proactive/chronicler/quests config knobs are present", async () => {
+    await expect(
+      runWithConfig({
+        history: {
+          database: {
+            path: "/tmp/muaddib-test-history.db",
+          },
+        },
+        chronicler: {
+          model: "openai:gpt-4o-mini",
+          quests: {
+            arcs: ["libera##muaddib"],
+          },
+        },
+        rooms: {
+          common: {
+            command: baseCommandConfig(),
+            proactive: {
+              interjecting: ["libera##muaddib"],
+            },
+          },
+          irc: {
+            enabled: false,
+            proactive: {
+              interjecting: ["libera##muaddib"],
+            },
+          },
+          discord: {
+            enabled: false,
+          },
+          slack: {
+            enabled: false,
+          },
+        },
+      }),
+    ).rejects.toThrow(
+      "Deferred features are not supported in the TypeScript runtime. Remove unsupported config keys: chronicler, chronicler.quests, rooms.common.proactive, rooms.irc.proactive.",
+    );
+  });
+
   it("throws when no monitors are enabled", async () => {
     await expect(
       runWithConfig({
