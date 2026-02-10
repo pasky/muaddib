@@ -116,6 +116,7 @@ function createMonitors(
           appToken: slackAppToken,
           botToken,
           workspaceId,
+          workspaceName: workspaceConfig?.name,
           botNameFallback: workspaceConfig?.name,
         });
 

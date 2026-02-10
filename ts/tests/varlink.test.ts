@@ -1,10 +1,19 @@
+import { homedir } from "node:os";
+
 import { describe, expect, it } from "vitest";
 
 import {
+  BaseVarlinkClient,
   NullTerminatedJsonParser,
   calculateIrcMaxPayload,
   splitMessageForIrcPayload,
 } from "../src/rooms/irc/varlink.js";
+
+class InspectableVarlinkClient extends BaseVarlinkClient {
+  get resolvedSocketPath(): string {
+    return this.socketPath;
+  }
+}
 
 describe("varlink helpers", () => {
   it("parses null-terminated JSON frames across chunk boundaries", () => {
@@ -18,6 +27,11 @@ describe("varlink helpers", () => {
 
     expect(frames1).toEqual([{ a: 1 }]);
     expect(frames2).toEqual([{ b: 2 }]);
+  });
+
+  it("expands '~' in varlink socket path", () => {
+    const client = new InspectableVarlinkClient("~/.irssi/varlink.sock");
+    expect(client.resolvedSocketPath).toBe(`${homedir()}/.irssi/varlink.sock`);
   });
 
   it("splits long message into two payload-bounded parts", () => {

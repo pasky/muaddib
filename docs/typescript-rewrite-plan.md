@@ -272,6 +272,26 @@ At end of each milestone:
     - `ts/src/rooms/command/command-handler.ts`
     - `ts/src/agent/muaddib-agent-runner.ts`
   - Validation passed: `cd ts && npm run typecheck`, `cd ts && npm test`, `uv run pytest`.
+- 2026-02-10: Milestone 7B complete (identity/path parity hardening with red-green tests).
+  - Added failing tests first for:
+    - `resolveMuaddibPath` home expansion + absolute/relative semantics
+    - IRC varlink socket `~` expansion
+    - Discord mapping parity (`serverTag` via guild name, `platformId` via message id)
+    - Slack mapping parity (`serverTag` via workspace name, `platformId` via message ts, display-name-first identity fields)
+  - Implemented minimal fixes in:
+    - `ts/src/app/bootstrap.ts`
+    - `ts/src/rooms/irc/varlink.ts`
+    - `ts/src/rooms/discord/monitor.ts`
+    - `ts/src/rooms/discord/transport.ts`
+    - `ts/src/rooms/slack/monitor.ts`
+    - `ts/src/rooms/slack/transport.ts`
+    - `ts/src/app/main.ts`
+  - Added/updated regression tests:
+    - `ts/tests/app-main.test.ts`
+    - `ts/tests/varlink.test.ts`
+    - `ts/tests/discord-monitor.test.ts`
+    - `ts/tests/slack-monitor.test.ts`
+  - Validation passed: `cd ts && npm run typecheck`, `cd ts && npm test`, `uv run pytest`.
 
 ### Remaining gaps (post-finalization)
 1. OAuth/session-backed API key refresh plumbing for non-static provider credentials in app bootstrap (currently relies on provider env vars/static tokens).
@@ -294,10 +314,10 @@ Legend:
 - [x] Add regression tests that fail on each of the above before implementation (red-green).
 
 ### B. Identity/path compatibility correctness
-- [ ] Fix path resolution for `~` and absolute/relative behavior in TS bootstrap.
-- [ ] Expand `~` in IRC varlink socket path.
-- [ ] Align Discord/Slack `serverTag` and `platformId` semantics with Python behavior.
-- [ ] Add monitor mapping tests that assert name/id semantics and fail on current regressions.
+- [x] Fix path resolution for `~` and absolute/relative behavior in TS bootstrap.
+- [x] Expand `~` in IRC varlink socket path.
+- [x] Align Discord/Slack `serverTag` and `platformId` semantics with Python behavior.
+- [x] Add monitor mapping tests that assert name/id semantics and fail on current regressions.
 
 ### C. Operational guardrails parity
 - [ ] Remove silent no-op monitor startups when room is enabled but transport credentials are missing.

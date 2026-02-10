@@ -1,4 +1,6 @@
 import { createConnection, type Socket } from "node:net";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 export class NullTerminatedJsonParser {
   private buffer = "";
@@ -57,7 +59,7 @@ export class BaseVarlinkClient {
   protected readonly responses = new AsyncQueue<Record<string, unknown> | null>();
 
   constructor(socketPath: string) {
-    this.socketPath = socketPath;
+    this.socketPath = expandHomePath(socketPath);
   }
 
   async connect(): Promise<void> {
@@ -268,6 +270,18 @@ export function splitMessageForIrcPayload(message: string, maxPayload: number): 
   const head = chars.slice(0, splitAt).join("");
   const tail = chars.slice(splitAt).join("");
   return [head, tail];
+}
+
+function expandHomePath(path: string): string {
+  if (path === "~") {
+    return homedir();
+  }
+
+  if (path.startsWith("~/")) {
+    return join(homedir(), path.slice(2));
+  }
+
+  return path;
 }
 
 function trimToPayloadWithEllipsis(message: string, maxPayload: number): string {

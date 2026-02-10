@@ -15,11 +15,14 @@ export interface SlackMonitorRoomConfig {
 
 export interface SlackMessageEvent {
   workspaceId: string;
+  workspaceName?: string;
   channelId: string;
   channelName?: string;
+  userId?: string;
   username: string;
   text: string;
   mynick: string;
+  messageTs?: string;
   isDirectMessage?: boolean;
   mentionsBot?: boolean;
 }
@@ -94,12 +97,12 @@ export class SlackRoomMonitor {
     const cleanedContent = isDirect ? normalizeDirectContent(event.text, event.mynick) : event.text;
 
     const message: RoomMessage = {
-      serverTag: `slack:${event.workspaceId}`,
+      serverTag: `slack:${event.workspaceName ?? event.workspaceId}`,
       channelName: event.channelName ?? event.channelId,
       nick: event.username,
       mynick: event.mynick,
       content: cleanedContent,
-      platformId: event.channelId,
+      platformId: event.messageTs,
     };
 
     await this.options.commandHandler.handleIncomingMessage(message, {

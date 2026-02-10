@@ -16,8 +16,10 @@ export interface DiscordMonitorRoomConfig {
 
 export interface DiscordMessageEvent {
   guildId?: string;
+  guildName?: string;
   channelId: string;
   channelName?: string;
+  messageId?: string;
   username: string;
   content: string;
   mynick: string;
@@ -95,12 +97,16 @@ export class DiscordRoomMonitor {
     const cleanedContent = isDirect ? normalizeDirectContent(event.content, event.mynick) : event.content;
 
     const message: RoomMessage = {
-      serverTag: event.guildId ? `discord:${event.guildId}` : "discord:dm",
+      serverTag: event.guildName
+        ? `discord:${event.guildName}`
+        : event.guildId
+          ? `discord:${event.guildId}`
+          : "discord:_DM",
       channelName: event.channelName ?? event.channelId,
       nick: event.username,
       mynick: event.mynick,
       content: cleanedContent,
-      platformId: event.channelId,
+      platformId: event.messageId,
     };
 
     await this.options.commandHandler.handleIncomingMessage(message, {

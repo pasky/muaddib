@@ -1,14 +1,17 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { resolveMuaddibPath } from "../src/app/bootstrap.js";
 import { runMuaddibMain } from "../src/app/main.js";
 
 const tempDirs: string[] = [];
 
 afterEach(async () => {
+  delete process.env.MUADDIB_HOME;
+
   for (const dir of tempDirs.splice(0, tempDirs.length)) {
     await rm(dir, { recursive: true, force: true });
   }
@@ -36,6 +39,22 @@ function baseCommandConfig() {
     },
   };
 }
+
+describe("resolveMuaddibPath", () => {
+  it("expands '~' paths, preserves absolute paths, and resolves relative paths under MUADDIB_HOME", () => {
+    process.env.MUADDIB_HOME = "/tmp/mu-home";
+
+    expect(resolveMuaddibPath("~/chat_history.db", "/fallback.db")).toBe(
+      join(homedir(), "chat_history.db"),
+    );
+    expect(resolveMuaddibPath("/var/lib/muaddib/chat_history.db", "/fallback.db")).toBe(
+      "/var/lib/muaddib/chat_history.db",
+    );
+    expect(resolveMuaddibPath("chat_history.db", "/fallback.db")).toBe(
+      "/tmp/mu-home/chat_history.db",
+    );
+  });
+});
 
 describe("runMuaddibMain", () => {
   it("supports enabled/disabled monitor orchestration via config", async () => {

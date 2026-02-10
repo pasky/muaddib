@@ -126,12 +126,15 @@ export class DiscordGatewayTransport implements DiscordEventSource, DiscordSende
       message.guildId === null;
 
     const channelName = "name" in message.channel ? String(message.channel.name ?? "") : undefined;
+    const username = message.member?.displayName ?? message.author.displayName ?? message.author.username;
 
     return {
       guildId: message.guildId ?? undefined,
+      guildName: message.guild?.name,
       channelId: message.channelId,
       channelName,
-      username: message.author.username,
+      messageId: message.id,
+      username,
       content: message.content,
       mynick,
       isDirectMessage,

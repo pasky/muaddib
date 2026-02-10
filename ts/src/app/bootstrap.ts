@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 export interface AppArgs {
   configPath: string;
@@ -32,13 +32,31 @@ export function resolveMuaddibPath(path: string | undefined, fallback: string): 
     return fallback;
   }
 
-  if (path.startsWith("/")) {
-    return path;
+  const expandedPath = expandHomePath(path);
+  if (isAbsolute(expandedPath)) {
+    return expandedPath;
   }
 
-  return join(getMuaddibHome(), path);
+  return join(getMuaddibHome(), expandedPath);
 }
 
 export function getMuaddibHome(): string {
-  return process.env.MUADDIB_HOME ?? join(homedir(), ".muaddib");
+  const envHome = process.env.MUADDIB_HOME;
+  if (envHome) {
+    return resolve(expandHomePath(envHome));
+  }
+
+  return join(homedir(), ".muaddib");
+}
+
+function expandHomePath(path: string): string {
+  if (path === "~") {
+    return homedir();
+  }
+
+  if (path.startsWith("~/")) {
+    return join(homedir(), path.slice(2));
+  }
+
+  return path;
 }

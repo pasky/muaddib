@@ -48,6 +48,43 @@ describe("DiscordRoomMonitor", () => {
     await history.close();
   });
 
+  it("maps serverTag/platformId using Python parity semantics", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    let mappedServerTag = "";
+    let mappedPlatformId = "";
+
+    const monitor = new DiscordRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async (message) => {
+          mappedServerTag = message.serverTag;
+          mappedPlatformId = message.platformId ?? "";
+          return null;
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      guildId: "123456789",
+      guildName: "Rossum",
+      channelId: "chan-1",
+      channelName: "general",
+      messageId: "msg-42",
+      username: "alice",
+      content: "hello",
+      mynick: "muaddib",
+    });
+
+    expect(mappedServerTag).toBe("discord:Rossum");
+    expect(mappedPlatformId).toBe("msg-42");
+
+    await history.close();
+  });
+
   it("passes passive messages with isDirect=false", async () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();
