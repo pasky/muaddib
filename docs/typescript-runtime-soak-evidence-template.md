@@ -6,6 +6,9 @@ Runtime policy is fixed:
 - default runtime: `MUADDIB_RUNTIME=ts`
 - rollback runtime: `MUADDIB_RUNTIME=python`
 
+Append completed entries to `docs/typescript-runtime-soak-evidence-log.md`.
+Missing any required field in an entry is an **operational failure** for that window.
+
 ---
 
 ## Daily / post-deploy evidence entry template

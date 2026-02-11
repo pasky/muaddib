@@ -57,14 +57,15 @@
 
 ## TypeScript rewrite program (pi-ai + pi-agent)
 - Primary migration plan and design decisions are documented in `docs/typescript-rewrite-plan.md`.
-- The target is full TS rewrite with `@mariozechner/pi-ai` + `@mariozechner/pi-agent`, replacing custom provider clients and custom actor loop.
+- The target is full TS rewrite with `@mariozechner/pi-ai` + `@mariozechner/pi-agent-core` (agent package), replacing custom provider clients and custom actor loop.
 - Quests and proactive interjections are intentionally out of scope for TS parity v1.
 - TS runtime now fail-fast rejects deferred config knobs (`chronicler`, `chronicler.quests`, `quests`, `rooms.*.proactive`) to avoid misleading operators.
 - TS runtime fail-fast enforces provider credential contract: only static `providers.*.key` strings (or provider SDK env vars) are supported; non-static `providers.*.key` values and `providers.*.{oauth,session}` are rejected.
 - OAuth/session refresh plumbing is explicitly deferred until a stable `@mariozechner/pi-ai` provider refresh contract is available; errors must include concrete operator guidance (remove unsupported keys and use static key/env-var contract).
 - TS service runtime cutover uses TS-first entrypoint with explicit rollback window controls (`MUADDIB_RUNTIME=python`, `MUADDIB_TS_ROLLBACK_UNTIL`) during soak; do not remove rollback path before soak criteria are met.
 - Rollback-window exit criteria are authoritative in `docs/typescript-runtime-rollout.md` + `docs/typescript-runtime-runbook.md` (SLO thresholds, parity checks, rollback triggers, minimum soak duration); keep these docs in sync with runtime behavior.
-- During rollback window, operators must capture daily/post-deploy SLO+parity evidence using `docs/typescript-runtime-soak-evidence-template.md`, including explicit runtime-path proof for both `MUADDIB_RUNTIME=ts` (default) and `MUADDIB_RUNTIME=python` (rollback).
+- During rollback window, operators must capture daily/post-deploy SLO+parity evidence using `docs/typescript-runtime-soak-evidence-template.md` and append entries to `docs/typescript-runtime-soak-evidence-log.md`, including explicit runtime-path proof for both `MUADDIB_RUNTIME=ts` (default) and `MUADDIB_RUNTIME=python` (rollback).
+- Missing required evidence fields for a daily/deploy window is an operational failure and must be escalated before deprecation-gate decisions.
 - During soak, Discord/Slack send retry/failure instrumentation must stay operator-visible in runtime logs via `[muaddib][send-retry]` and `[muaddib][metric]` structured lines.
 - No backwards-compatibility shims for legacy behavior/config keys during rewrite.
 

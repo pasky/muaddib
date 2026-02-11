@@ -440,11 +440,34 @@ At end of each milestone:
     - `uv run pytest`
     - `MUADDIB_HOME=. uv run muaddib --message "milestone 7j ts parity hardening smoke test"`
     - `pre-commit run --all-files`
+- 2026-02-11: Milestone 7K complete (rollback-window execution bootstrap + evidence log discipline hardening).
+  - Live-soak regression intake status in this window:
+    - no newly observed concrete Slack/Discord/IRC regressions; therefore no red tests/runtime code changes were required in this milestone window.
+  - Started operational evidence execution artifacts:
+    - new append-only execution log: `docs/typescript-runtime-soak-evidence-log.md`
+    - captured initial daily bootstrap entry with runtime-path proof for both:
+      - `MUADDIB_RUNTIME=ts`
+      - `MUADDIB_RUNTIME=python`
+    - started final 7-day exit-gate table tracking (currently not yet green).
+  - Hardened operator docs/guardrails for evidence completeness:
+    - `docs/typescript-runtime-soak-evidence-template.md`
+    - `docs/typescript-runtime-rollout.md`
+    - `docs/typescript-runtime-runbook.md`
+    - `AGENTS.md`
+    - policy now explicit: missing required evidence fields is an operational failure.
+  - OAuth/session refresh policy unchanged: explicitly deferred until stable `@mariozechner/pi-ai` refresh contract exists (red tests first if contract lands).
+  - Validation passed:
+    - `cd ts && npm run typecheck`
+    - `cd ts && npm test`
+    - `uv run pytest`
+    - `MUADDIB_HOME=. uv run muaddib --message "milestone 7k ts parity hardening smoke test"`
+    - `pre-commit run --all-files`
 
-### Remaining gaps (post-7J)
+### Remaining gaps (post-7K)
 1. OAuth/session-backed token refresh plumbing remains explicitly deferred pending a stable provider/session refresh contract in `@mariozechner/pi-ai` (TS fail-fast rejects unsupported config with concrete operator guidance).
 2. Continue post-cutover soak hardening for additional live-room edge cases that emerge beyond currently-covered Slack/Discord/IRC reconnect and send-path behavior.
-3. Execute/track the new rollback-window SLO + parity gate operationally, then complete Python runtime deprecation only after criteria are actually met in production soak.
+3. Continue daily/post-deploy evidence capture with complete live telemetry + parity references until the final 7-day gate is fully green.
+4. Complete Python runtime deprecation only after rollback-window criteria are actually met in production soak; rollback path stays enabled until then.
 
 ### Compatibility notes (intentional Python vs TS divergences)
 - TS runtime currently **fails fast** if deferred Python-only config keys are present, instead of silently ignoring them.
@@ -532,6 +555,13 @@ Legend:
 - [x] Capture newly observed live regressions as red tests first (none newly observed in this milestone window).
 - [x] Add lightweight daily/post-deploy operator evidence template for SLO + parity tracking.
 - [x] Keep runtime-path guidance unambiguous for `MUADDIB_RUNTIME=ts` default vs `MUADDIB_RUNTIME=python` rollback.
+- [x] Keep OAuth/session refresh deferred pending stable `@mariozechner/pi-ai` contract.
+
+### K. Rollback-window execution discipline hardening
+- [x] Continue live-soak regression intake and keep red-test-first rule for any newly observed regressions (none observed in this window).
+- [x] Start append-only daily/post-deploy evidence execution log using the template.
+- [x] Treat missing evidence fields as operational failure in rollout/runbook/template/agent guardrails.
+- [x] Start final 7-day exit-gate table tracking and keep Python rollback path unchanged.
 - [x] Keep OAuth/session refresh deferred pending stable `@mariozechner/pi-ai` contract.
 
 ---
@@ -647,12 +677,28 @@ Completed:
 3. Kept OAuth/session refresh explicitly deferred pending stable `@mariozechner/pi-ai` contract.
 4. Re-ran full validation suites; commit + handoff.
 
-### Milestone 7K — Next
+### Milestone 7K — Complete
 Goal: continue rollback-window execution with strict red-first handling for newly observed room regressions.
 
+Completed:
+1. Checked live-soak regression intake; no newly observed concrete Slack/Discord/IRC regressions in this milestone window.
+2. Started daily evidence execution log using template:
+   - `docs/typescript-runtime-soak-evidence-log.md`
+3. Hardened operational policy to treat missing evidence fields as operational failure in:
+   - `docs/typescript-runtime-soak-evidence-template.md`
+   - `docs/typescript-runtime-rollout.md`
+   - `docs/typescript-runtime-runbook.md`
+   - `AGENTS.md`
+4. Started final 7-day exit-gate table progress tracking in evidence log; Python rollback path remains unchanged.
+5. Kept OAuth/session refresh explicitly deferred pending stable `@mariozechner/pi-ai` contract.
+6. Re-ran full validation suites; commit + handoff.
+
+### Milestone 7L — Next
+Goal: continue daily/post-deploy soak execution until exit-gate criteria are actually met, while preserving strict fail-fast scope discipline.
+
 Steps:
-1. During ongoing soak, convert any newly observed Slack/Discord/IRC runtime regressions into failing tests first, then apply minimal deterministic fixes.
-2. Start filling and reviewing daily evidence entries from `docs/typescript-runtime-soak-evidence-template.md`; treat missing evidence as an operational failure.
-3. Track final 7-day exit-gate table progress; do not remove Python rollback path before criteria are fully met.
-4. Keep OAuth/session refresh deferred unless stable `@mariozechner/pi-ai` refresh contract appears; if it does, start with red tests and bounded plumbing.
+1. Continue live-soak regression intake; for any newly observed Slack/Discord/IRC runtime regression, add failing tests first then apply minimal deterministic fixes.
+2. Append complete daily/post-deploy entries to `docs/typescript-runtime-soak-evidence-log.md` (runtime proof + SLO queries + parity evidence + decision).
+3. Drive final 7-day gate table toward fully green status; do not remove Python rollback path until all gate rows are green and no rollback occurred.
+4. Keep OAuth/session refresh deferred unless a stable `@mariozechner/pi-ai` contract lands; if it does, start with red tests and bounded plumbing.
 5. Re-run full validation suites; commit + handoff.

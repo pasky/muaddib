@@ -1,4 +1,4 @@
-# TypeScript Runtime Operator Rollout (Milestone 7J)
+# TypeScript Runtime Operator Rollout (Milestone 7K)
 
 This checklist governs the cutover from the Python service runtime to the TypeScript runtime (`cd ts && npm run start`) while keeping an explicit rollback window.
 
@@ -80,7 +80,8 @@ Any repeated parity failure (same check failing twice in a row) is a rollback tr
 ## Daily operator evidence checklist (rollback window)
 
 Record one entry per day (and one entry per deploy) using:
-- `docs/typescript-runtime-soak-evidence-template.md`
+- template: `docs/typescript-runtime-soak-evidence-template.md`
+- execution log: `docs/typescript-runtime-soak-evidence-log.md`
 
 Minimum evidence per entry:
 1. Runtime verification for both paths:
@@ -91,6 +92,8 @@ Minimum evidence per entry:
 4. Explicit decision for the window:
    - stay on `MUADDIB_RUNTIME=ts` (default), or
    - rollback to `MUADDIB_RUNTIME=python` with incident reference.
+
+Missing any required field in an entry is an **operational failure** for that window and must be escalated before deprecation-gate decisions.
 
 ## Rollback-window exit gate (Python deprecation readiness)
 
