@@ -300,6 +300,47 @@ This log is the execution record for daily and post-deploy rollback-window check
   - Production SLO and live parity evidence remain missing in this repo-only session, so this window is an operational failure.
   - Python rollback path remains enabled; final 7-day gate is still not met.
 
+### Date: 2026-02-11 (UTC) | Operator: @pi-agent | Window: 01:08-01:10 UTC (post-deploy validation continuation)
+
+#### Runtime path verification (required)
+- TS default command/output: `MUADDIB_RUNTIME=ts docker compose config | rg MUADDIB_RUNTIME`
+  - Evidence output:
+    ```
+    MUADDIB_RUNTIME: ts
+    ```
+- Python rollback command/output: `MUADDIB_RUNTIME=python docker compose config | rg MUADDIB_RUNTIME`
+  - Evidence output:
+    ```
+    MUADDIB_RUNTIME: python
+    ```
+
+#### Soak SLO evidence (required)
+| Metric | Threshold | Observed | Source | Pass/Fail |
+| --- | --- | --- | --- | --- |
+| Terminal send failures (`type="failed"`) per 24h | < 0.5% of outbound sends | Missing production telemetry in this repo session (`logs/` contains only `.keep`; no `[muaddib][send-retry|metric]` lines found) | `find logs -maxdepth 1 -type f | sort`; `rg -n "\[muaddib\]\[(send-retry|metric)\]" logs` (no matches, exit 1) | **Fail** |
+| Terminal failures for same destination in 15m | <= 3 | Missing production telemetry in this repo session (`logs/` contains only `.keep`; no `[muaddib][send-retry|metric]` lines found) | `find logs -maxdepth 1 -type f | sort`; `rg -n "\[muaddib\]\[(send-retry|metric)\]" logs` (no matches, exit 1) | **Fail** |
+| Retry events (`type="retry"`) per 24h | < 5% of outbound sends | Missing production telemetry in this repo session (`logs/` contains only `.keep`; no `[muaddib][send-retry|metric]` lines found) | `find logs -maxdepth 1 -type f | sort`; `rg -n "\[muaddib\]\[(send-retry|metric)\]" logs` (no matches, exit 1) | **Fail** |
+| Startup contract failures per deploy | <= 1 | 0 observed in this validation window | `cd ts && npm run typecheck`; `cd ts && npm test`; `uv run pytest`; `MUADDIB_HOME=. uv run muaddib --message "milestone 7l ts parity hardening smoke test"`; `pre-commit run --all-files` | Pass |
+
+#### Mandatory parity checks (required)
+- [ ] Discord direct mention -> valid reply (live evidence not attached)
+- [ ] Slack direct mention -> valid reply (live evidence not attached)
+- [ ] Slack channel thread behavior matches `reply_start_thread.channel` (live evidence not attached)
+- [ ] Slack DM remains non-threaded unless `reply_start_thread.dm=true` (live evidence not attached)
+- [ ] Discord reply metadata keeps `replyToMessageId` + `mentionAuthor` semantics (live evidence not attached)
+- [ ] Discord/Slack edit events update history by `platform_id` (live evidence not attached)
+- [ ] IRC reconnect keeps direct-address detection correct (live evidence not attached)
+
+#### Decision and incident tracking (required)
+- Decision:
+  - [x] Stay on TS default (`MUADDIB_RUNTIME=ts`)
+  - [ ] Roll back to Python (`MUADDIB_RUNTIME=python`)
+- If rollback selected: incident link + trigger + mitigation summary: N/A
+- Notes / follow-up actions:
+  - Live-soak regression intake in this window found no newly observed concrete Slack/Discord/IRC runtime regressions.
+  - Production SLO and live parity evidence remain missing in this repo-only session, so this window is an operational failure.
+  - Python rollback path remains enabled; final 7-day gate is still not met.
+
 ---
 
 ## Final exit-gate tracking (7-day final gate)
