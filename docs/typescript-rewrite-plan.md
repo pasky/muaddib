@@ -421,8 +421,27 @@ At end of each milestone:
     - `cd ts && npm test`
     - `uv run pytest`
     - `MUADDIB_HOME=. uv run muaddib --message "milestone 7i ts parity hardening smoke test"`
+- 2026-02-11: Milestone 7J complete (live-soak parity tracking hardening + operator evidence templates).
+  - Live-soak regression capture status in this window:
+    - no new concrete Slack/Discord/IRC regressions observed beyond already-covered 7H/7I cases
+    - no runtime monitor behavior changes were required
+  - Added lightweight operator evidence templates/checklists for rollback-window tracking:
+    - new template doc: `docs/typescript-runtime-soak-evidence-template.md`
+    - linked evidence workflow into:
+      - `docs/typescript-runtime-rollout.md`
+      - `docs/typescript-runtime-runbook.md`
+    - evidence template enforces unambiguous runtime path proof for:
+      - `MUADDIB_RUNTIME=ts` (default)
+      - `MUADDIB_RUNTIME=python` (rollback)
+  - OAuth/session refresh policy unchanged: explicitly deferred until stable `@mariozechner/pi-ai` refresh contract exists (red tests first if contract lands).
+  - Validation passed:
+    - `cd ts && npm run typecheck`
+    - `cd ts && npm test`
+    - `uv run pytest`
+    - `MUADDIB_HOME=. uv run muaddib --message "milestone 7j ts parity hardening smoke test"`
+    - `pre-commit run --all-files`
 
-### Remaining gaps (post-7I)
+### Remaining gaps (post-7J)
 1. OAuth/session-backed token refresh plumbing remains explicitly deferred pending a stable provider/session refresh contract in `@mariozechner/pi-ai` (TS fail-fast rejects unsupported config with concrete operator guidance).
 2. Continue post-cutover soak hardening for additional live-room edge cases that emerge beyond currently-covered Slack/Discord/IRC reconnect and send-path behavior.
 3. Execute/track the new rollback-window SLO + parity gate operationally, then complete Python runtime deprecation only after criteria are actually met in production soak.
@@ -508,6 +527,12 @@ Legend:
 - [x] Add explicit TS soak SLO thresholds for retry/failure/startup health in operator docs.
 - [x] Add explicit parity verification checklist and rollback triggers.
 - [x] Add explicit minimum soak duration + exit gate criteria before Python runtime deprecation.
+
+### J. Rollback-window evidence tracking hardening
+- [x] Capture newly observed live regressions as red tests first (none newly observed in this milestone window).
+- [x] Add lightweight daily/post-deploy operator evidence template for SLO + parity tracking.
+- [x] Keep runtime-path guidance unambiguous for `MUADDIB_RUNTIME=ts` default vs `MUADDIB_RUNTIME=python` rollback.
+- [x] Keep OAuth/session refresh deferred pending stable `@mariozechner/pi-ai` contract.
 
 ---
 
@@ -611,11 +636,23 @@ Completed:
 3. Kept OAuth/session refresh deferred (no runtime contract change).
 4. Re-ran full validation suites; commit + handoff.
 
-### Milestone 7J — Next
+### Milestone 7J — Complete
 Goal: continue live-soak parity hardening and operational gate tracking without expanding deferred scope.
 
+Completed:
+1. Checked live-soak regression intake status; no new concrete Slack/Discord/IRC regressions observed in this window.
+2. Added lightweight operator evidence templates/checklists for daily SLO+parity tracking:
+   - `docs/typescript-runtime-soak-evidence-template.md`
+   - evidence workflow links in rollout/runbook docs.
+3. Kept OAuth/session refresh explicitly deferred pending stable `@mariozechner/pi-ai` contract.
+4. Re-ran full validation suites; commit + handoff.
+
+### Milestone 7K — Next
+Goal: continue rollback-window execution with strict red-first handling for newly observed room regressions.
+
 Steps:
-1. Capture any newly observed Slack/Discord/IRC live regressions as red tests first, then apply minimal deterministic fixes.
-2. Add lightweight operator evidence templates/checklists for daily SLO+parity gate tracking during rollback window.
-3. Keep OAuth/session refresh deferred unless stable `@mariozechner/pi-ai` contract lands; if it does, start with red tests and bounded plumbing.
-4. Re-run full validation suites; commit + handoff.
+1. During ongoing soak, convert any newly observed Slack/Discord/IRC runtime regressions into failing tests first, then apply minimal deterministic fixes.
+2. Start filling and reviewing daily evidence entries from `docs/typescript-runtime-soak-evidence-template.md`; treat missing evidence as an operational failure.
+3. Track final 7-day exit-gate table progress; do not remove Python rollback path before criteria are fully met.
+4. Keep OAuth/session refresh deferred unless stable `@mariozechner/pi-ai` refresh contract appears; if it does, start with red tests and bounded plumbing.
+5. Re-run full validation suites; commit + handoff.

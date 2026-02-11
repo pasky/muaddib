@@ -1,4 +1,4 @@
-# TypeScript Runtime Operator Rollout (Milestone 7I)
+# TypeScript Runtime Operator Rollout (Milestone 7J)
 
 This checklist governs the cutover from the Python service runtime to the TypeScript runtime (`cd ts && npm run start`) while keeping an explicit rollback window.
 
@@ -76,6 +76,21 @@ Run at canary rollout, after every deploy, and daily during soak:
 7. IRC reconnect preserves direct-address detection (nick cache refresh behavior).
 
 Any repeated parity failure (same check failing twice in a row) is a rollback trigger.
+
+## Daily operator evidence checklist (rollback window)
+
+Record one entry per day (and one entry per deploy) using:
+- `docs/typescript-runtime-soak-evidence-template.md`
+
+Minimum evidence per entry:
+1. Runtime verification for both paths:
+   - `MUADDIB_RUNTIME=ts docker compose config | rg MUADDIB_RUNTIME`
+   - `MUADDIB_RUNTIME=python docker compose config | rg MUADDIB_RUNTIME`
+2. SLO values with source references (log query/dashboard snapshot links).
+3. Parity-check pass/fail with concrete room/message references.
+4. Explicit decision for the window:
+   - stay on `MUADDIB_RUNTIME=ts` (default), or
+   - rollback to `MUADDIB_RUNTIME=python` with incident reference.
 
 ## Rollback-window exit gate (Python deprecation readiness)
 

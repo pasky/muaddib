@@ -59,6 +59,18 @@ Evaluate every deployment and at least daily:
 6. Discord/Slack edit events update history by `platform_id`.
 7. IRC reconnect keeps direct-address detection correct.
 
+## Daily evidence capture workflow (rollback window)
+
+Use `docs/typescript-runtime-soak-evidence-template.md` for daily and post-deploy evidence entries.
+
+Required per entry:
+1. Runtime path proof (both commands captured in notes/output links):
+   - `MUADDIB_RUNTIME=ts docker compose config | rg MUADDIB_RUNTIME`
+   - `MUADDIB_RUNTIME=python docker compose config | rg MUADDIB_RUNTIME`
+2. SLO measurements with source links.
+3. Parity check outcomes with concrete room/message references.
+4. Operator decision: continue TS default (`MUADDIB_RUNTIME=ts`) or execute Python rollback (`MUADDIB_RUNTIME=python`).
+
 ## Rollback triggers
 
 Rollback to Python runtime (`MUADDIB_RUNTIME=python`) when any of these is true and cannot be mitigated within 30 minutes:

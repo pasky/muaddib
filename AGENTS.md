@@ -64,6 +64,7 @@
 - OAuth/session refresh plumbing is explicitly deferred until a stable `@mariozechner/pi-ai` provider refresh contract is available; errors must include concrete operator guidance (remove unsupported keys and use static key/env-var contract).
 - TS service runtime cutover uses TS-first entrypoint with explicit rollback window controls (`MUADDIB_RUNTIME=python`, `MUADDIB_TS_ROLLBACK_UNTIL`) during soak; do not remove rollback path before soak criteria are met.
 - Rollback-window exit criteria are authoritative in `docs/typescript-runtime-rollout.md` + `docs/typescript-runtime-runbook.md` (SLO thresholds, parity checks, rollback triggers, minimum soak duration); keep these docs in sync with runtime behavior.
+- During rollback window, operators must capture daily/post-deploy SLO+parity evidence using `docs/typescript-runtime-soak-evidence-template.md`, including explicit runtime-path proof for both `MUADDIB_RUNTIME=ts` (default) and `MUADDIB_RUNTIME=python` (rollback).
 - During soak, Discord/Slack send retry/failure instrumentation must stay operator-visible in runtime logs via `[muaddib][send-retry]` and `[muaddib][metric]` structured lines.
 - No backwards-compatibility shims for legacy behavior/config keys during rewrite.
 
