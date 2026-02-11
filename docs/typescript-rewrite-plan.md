@@ -479,7 +479,23 @@ At end of each milestone:
     - `MUADDIB_HOME=. uv run muaddib --message "milestone 7l ts parity hardening smoke test"`
     - `pre-commit run --all-files`
 
-### Remaining gaps (post-7L checkpoint 1)
+- 2026-02-11: Milestone 7L checkpoint 2 complete (rollback-window continuation + evidence checkpoint 2).
+  - Live-soak regression intake status in this window:
+    - no newly observed concrete Slack/Discord/IRC regressions; no new red tests/runtime monitor fixes were required.
+  - Continued operator evidence execution log:
+    - appended another post-deploy validation entry to `docs/typescript-runtime-soak-evidence-log.md`
+    - included runtime-path proof for both `MUADDIB_RUNTIME=ts` and `MUADDIB_RUNTIME=python`
+    - recorded explicit decision to stay on TS default and keep Python rollback path enabled
+  - Final 7-day gate status:
+    - still not green; production SLO/parity evidence remains incomplete in this repo-only session and is tracked as operational failure for this window.
+  - Validation passed:
+    - `cd ts && npm run typecheck`
+    - `cd ts && npm test`
+    - `uv run pytest`
+    - `MUADDIB_HOME=. uv run muaddib --message "milestone 7l ts parity hardening smoke test"`
+    - `pre-commit run --all-files`
+
+### Remaining gaps (post-7L checkpoint 2)
 1. OAuth/session-backed token refresh plumbing remains explicitly deferred pending a stable provider/session refresh contract in `@mariozechner/pi-ai` (TS fail-fast rejects unsupported config with concrete operator guidance).
 2. Continue post-cutover soak hardening for additional live-room edge cases that emerge beyond currently-covered Slack/Discord/IRC reconnect and send-path behavior.
 3. Continue daily/post-deploy evidence capture with complete live telemetry + parity references until the final 7-day gate is fully green.
@@ -581,8 +597,8 @@ Legend:
 - [x] Keep OAuth/session refresh deferred pending stable `@mariozechner/pi-ai` contract.
 
 ### L. Rollback-window execution continuation
-- [x] Continue live-soak regression intake for this window (no newly observed concrete regressions).
-- [x] Append next evidence-log entry with runtime-path proof + explicit decision.
+- [x] Continue live-soak regression intake for the latest checkpoint window (no newly observed concrete regressions).
+- [x] Append next evidence-log entry with runtime-path proof + explicit decision (checkpoint 2 complete).
 - [~] Collect complete production SLO query evidence and live parity room/message references for each window.
 - [~] Drive final 7-day gate table to fully green before Python rollback-path removal.
 - [x] Keep OAuth/session refresh deferred pending stable `@mariozechner/pi-ai` contract.
@@ -722,6 +738,12 @@ Goal: continue daily/post-deploy soak execution until exit-gate criteria are act
 Completed in checkpoint 1:
 1. Continued live-soak regression intake; no newly observed concrete Slack/Discord/IRC runtime regressions in this window.
 2. Appended the next post-deploy evidence entry to `docs/typescript-runtime-soak-evidence-log.md` with runtime-path proof + explicit decision.
+3. Re-ran full validation suites and confirmed green.
+4. Kept OAuth/session refresh explicitly deferred; no contract change observed.
+
+Completed in checkpoint 2:
+1. Continued live-soak regression intake; still no newly observed concrete Slack/Discord/IRC runtime regressions in this window.
+2. Appended an additional post-deploy evidence entry to `docs/typescript-runtime-soak-evidence-log.md` with runtime-path proof + explicit stay-on-TS decision.
 3. Re-ran full validation suites and confirmed green.
 4. Kept OAuth/session refresh explicitly deferred; no contract change observed.
 
