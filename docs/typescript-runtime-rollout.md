@@ -8,6 +8,7 @@ This checklist governs the cutover from the Python service runtime to the TypeSc
 - **Rollback window closes:** `2026-03-31T23:59:59Z`.
 - During the rollback window, operators can force Python runtime with:
   - `MUADDIB_RUNTIME=python`
+  - verify resolved override before restart: `MUADDIB_RUNTIME=python docker compose config | rg MUADDIB_RUNTIME`
 
 ## Preflight checklist
 
@@ -39,9 +40,13 @@ This checklist governs the cutover from the Python service runtime to the TypeSc
 2. Set runtime env:
    - `MUADDIB_RUNTIME=ts` (default)
    - `MUADDIB_TS_ROLLBACK_UNTIL=2026-03-31T23:59:59Z`
-3. Start canary rooms/workspaces.
-4. Observe logs for retry/failure instrumentation and transport health.
-5. Expand to full deployment.
+3. Validate compose/runtime resolution before rollout:
+   - `MUADDIB_RUNTIME=ts docker compose config | rg MUADDIB_RUNTIME`
+4. Start canary rooms/workspaces.
+5. Observe logs for retry/failure instrumentation and transport health.
+   - retry/failure events: `[muaddib][send-retry]`
+   - operator metric lines: `[muaddib][metric]`
+6. Expand to full deployment.
 
 ## Success criteria
 

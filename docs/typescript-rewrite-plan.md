@@ -366,10 +366,43 @@ At end of each milestone:
     - `cd ts && npm test`
     - `uv run pytest`
     - `MUADDIB_HOME=. uv run muaddib --message "milestone 7g ts parity hardening smoke test"`
+- 2026-02-11: Milestone 7H complete (post-cutover soak hardening + observability wiring + cutover verification pass).
+  - Added red tests first for soak regressions and implemented minimal deterministic fixes:
+    - Slack/Discord monitor startup now disconnects already-connected event sources if sender connect fails (fail-fast error still propagates)
+      - `ts/tests/slack-monitor.test.ts`
+      - `ts/tests/discord-monitor.test.ts`
+      - `ts/src/rooms/slack/monitor.ts`
+      - `ts/src/rooms/discord/monitor.ts`
+    - IRC monitor now clears cached server nick on varlink reconnect so post-reconnect direct-address detection stays correct
+      - `ts/tests/irc-monitor.test.ts`
+      - `ts/src/rooms/irc/monitor.ts`
+  - Hardened observability surface used by operators:
+    - wired default retry/failure event logger in `runMuaddibMain` monitor construction
+    - emits structured log lines:
+      - `[muaddib][send-retry]` (warn for retries, error for terminal failures)
+      - `[muaddib][metric]` (per-event metric-friendly line)
+    - added regression coverage in `ts/tests/app-main.test.ts`
+  - Cutover/rollback verification hardening:
+    - verified runtime env resolution for both modes via compose config:
+      - `MUADDIB_RUNTIME=ts docker compose config`
+      - `MUADDIB_RUNTIME=python docker compose config`
+    - verified rollback runtime entrypoint path directly:
+      - `MUADDIB_RUNTIME=python ./scripts/runtime-entrypoint.sh --help`
+    - removed obsolete compose `version` field to avoid rollout noise/warnings
+    - updated rollout/runbook/docker docs with explicit runtime verification and observability checks:
+      - `docs/typescript-runtime-rollout.md`
+      - `docs/typescript-runtime-runbook.md`
+      - `docs/docker.md`
+  - OAuth/session refresh policy unchanged: explicitly deferred until stable `@mariozechner/pi-ai` refresh contract exists.
+  - Validation passed:
+    - `cd ts && npm run typecheck`
+    - `cd ts && npm test`
+    - `uv run pytest`
+    - `MUADDIB_HOME=. uv run muaddib --message "milestone 7h ts parity hardening smoke test"`
 
-### Remaining gaps (post-7G)
+### Remaining gaps (post-7H)
 1. OAuth/session-backed token refresh plumbing remains explicitly deferred pending a stable provider/session refresh contract in `@mariozechner/pi-ai` (TS fail-fast rejects unsupported config with concrete operator guidance).
-2. Continue post-cutover soak hardening for transport observability and live-room edge cases beyond current test-covered Slack/Discord edit/thread/reply/mention parity.
+2. Continue post-cutover soak hardening for additional live-room edge cases that emerge beyond currently-covered Slack/Discord/IRC reconnect and send-path behavior.
 3. Complete Python runtime deprecation after rollback window closes and soak criteria are met.
 
 ### Compatibility notes (intentional Python vs TS divergences)
@@ -443,6 +476,11 @@ Legend:
 - [x] Keep non-rate-limit send failures fail-fast.
 - [x] Add monitor regression tests for retry success and non-retry failure paths.
 - [x] Complete message edit/thread nuance parity and richer mention/identity behavior coverage.
+
+### H. Post-cutover soak + observability hardening
+- [x] Add red tests for soak regressions in Slack/Discord/IRC room handling and implement deterministic fixes.
+- [x] Wire retry/failure instrumentation into operator-visible runtime log/metric lines.
+- [x] Verify TS deploy + Python rollback env flows and patch operator docs where gaps/noise were found.
 
 ---
 
@@ -528,11 +566,20 @@ Completed:
 3. Finalized operator rollout + deployment/rollback runbook and switched default container runtime entrypoint to TS with explicit rollback window.
 4. Added retry/failure instrumentation hooks consumed by monitor send paths.
 
-### Milestone 7H — Next
+### Milestone 7H — Complete
 Goal: post-cutover soak hardening + deprecation preparation without expanding deferred-feature scope.
 
+Completed:
+1. Added red tests for Slack/Discord startup connect-failure cleanup and IRC reconnect direct-detection regression.
+2. Implemented minimal deterministic monitor fixes (Slack/Discord connect cleanup; IRC nick-cache refresh on reconnect).
+3. Wired retry/failure instrumentation to operator-visible runtime logs/metric-friendly lines in TS main monitor construction.
+4. Verified runtime env resolution/rollback flows and patched rollout/runbook/docker docs; removed obsolete compose version field noise.
+
+### Milestone 7I — Next
+Goal: continue soak-driven parity hardening while preparing rollback-window exit criteria for Python runtime deprecation.
+
 Steps:
-1. Add red tests for any live-soak regressions in Slack/Discord/IRC room behavior.
-2. Tighten observability wiring for retry/failure events into operator-facing logs/metrics.
-3. Prepare Python runtime deprecation checklist gated on rollback-window completion.
+1. Collect and codify any additional live-soak Slack/Discord/IRC payload regressions as red tests first.
+2. Define explicit rollback-window exit SLO/criteria in operator docs (error budget, retry-failure thresholds, room parity checks).
+3. Keep OAuth/session refresh deferred unless stable `@mariozechner/pi-ai` refresh contract lands; if viable, start with red tests.
 4. Re-run full validation suites; commit + handoff.

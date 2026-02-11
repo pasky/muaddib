@@ -71,7 +71,16 @@ volumes:
   - ./muaddib-data:/data
 ```
 
-To force rollback runtime during the cutover window, export `MUADDIB_RUNTIME=python` before `docker compose up`.
+Validate runtime selection before bringing up services:
+```bash
+MUADDIB_RUNTIME=ts docker compose config | rg MUADDIB_RUNTIME
+```
+
+To force rollback runtime during the cutover window:
+```bash
+MUADDIB_RUNTIME=python docker compose config | rg MUADDIB_RUNTIME
+MUADDIB_RUNTIME=python docker compose up -d muaddib
+```
 
 ## Troubleshooting
 

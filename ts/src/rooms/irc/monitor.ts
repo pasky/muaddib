@@ -73,6 +73,7 @@ export class IrcRoomMonitor {
       if (response === null) {
         await this.varlinkEvents.disconnect();
         await this.varlinkSender.disconnect();
+        this.serverNicks.clear();
 
         if (await this.connectWithRetry()) {
           continue;

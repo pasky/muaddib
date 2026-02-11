@@ -11,10 +11,12 @@ Run muaddib service on the TypeScript runtime by default, with explicit rollback
 1. Ensure env:
    - `MUADDIB_RUNTIME=ts`
    - `MUADDIB_TS_ROLLBACK_UNTIL=2026-03-31T23:59:59Z`
-2. Rebuild and restart:
+2. Validate resolved compose runtime before deploy:
+   - `MUADDIB_RUNTIME=ts docker compose config | rg MUADDIB_RUNTIME`
+3. Rebuild and restart:
    - `docker compose build muaddib`
    - `docker compose up -d muaddib`
-3. Verify startup logs include:
+4. Verify startup logs include:
    - `Runtime=ts service mode`
 
 ### Non-compose/systemd style
@@ -34,6 +36,9 @@ npm run start -- --config /path/to/config.json
 2. Direct mention replies succeed on Discord/Slack.
 3. Slack/Discord edits update chat history records.
 4. No repeated bounded-retry exhaustion on outbound send paths.
+5. Retry/failure instrumentation is visible in deployment logs:
+   - `[muaddib][send-retry]` structured event lines (warn on retry, error on terminal failure)
+   - `[muaddib][metric]` structured counter lines per retry/failure event
 
 ## Rollback triggers
 
@@ -49,9 +54,11 @@ Rollback to Python runtime if any of the following persist and cannot be mitigat
 
 1. Set runtime override:
    - `MUADDIB_RUNTIME=python`
-2. Restart service:
+2. Validate resolved compose runtime before restart:
+   - `MUADDIB_RUNTIME=python docker compose config | rg MUADDIB_RUNTIME`
+3. Restart service:
    - `docker compose up -d muaddib`
-3. Verify log line:
+4. Verify log line:
    - `Runtime=python (rollback path)`
 
 ### Non-compose/systemd rollback

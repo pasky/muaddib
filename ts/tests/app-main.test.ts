@@ -5,7 +5,10 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { resolveMuaddibPath } from "../src/app/bootstrap.js";
-import { runMuaddibMain } from "../src/app/main.js";
+import {
+  createSendRetryEventLogger,
+  runMuaddibMain,
+} from "../src/app/main.js";
 
 const tempDirs: string[] = [];
 
@@ -68,6 +71,82 @@ describe("resolveMuaddibPath", () => {
     expect(resolveMuaddibPath("chat_history.db", "/fallback.db")).toBe(
       "/tmp/mu-home/chat_history.db",
     );
+  });
+});
+
+describe("createSendRetryEventLogger", () => {
+  it("emits operator-visible retry logs and metric lines", () => {
+    const infos: string[] = [];
+    const warns: string[] = [];
+    const errors: string[] = [];
+
+    const emit = createSendRetryEventLogger({
+      info: (...args: unknown[]) => {
+        infos.push(args.map(String).join(" "));
+      },
+      warn: (...args: unknown[]) => {
+        warns.push(args.map(String).join(" "));
+      },
+      error: (...args: unknown[]) => {
+        errors.push(args.map(String).join(" "));
+      },
+    });
+
+    emit({
+      type: "retry",
+      retryable: true,
+      platform: "slack",
+      destination: "C123",
+      attempt: 1,
+      maxAttempts: 3,
+      retryAfterMs: 1500,
+      error: new Error("rate limited"),
+    });
+
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toContain("[muaddib][send-retry]");
+    expect(warns[0]).toContain("\"type\":\"retry\"");
+    expect(infos).toHaveLength(1);
+    expect(infos[0]).toContain("[muaddib][metric]");
+    expect(infos[0]).toContain("\"platform\":\"slack\"");
+    expect(errors).toHaveLength(0);
+  });
+
+  it("emits operator-visible failure logs and metric lines", () => {
+    const infos: string[] = [];
+    const warns: string[] = [];
+    const errors: string[] = [];
+
+    const emit = createSendRetryEventLogger({
+      info: (...args: unknown[]) => {
+        infos.push(args.map(String).join(" "));
+      },
+      warn: (...args: unknown[]) => {
+        warns.push(args.map(String).join(" "));
+      },
+      error: (...args: unknown[]) => {
+        errors.push(args.map(String).join(" "));
+      },
+    });
+
+    emit({
+      type: "failed",
+      retryable: false,
+      platform: "discord",
+      destination: "chan-1",
+      attempt: 1,
+      maxAttempts: 3,
+      retryAfterMs: null,
+      error: new Error("forbidden"),
+    });
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("[muaddib][send-retry]");
+    expect(errors[0]).toContain("\"type\":\"failed\"");
+    expect(infos).toHaveLength(1);
+    expect(infos[0]).toContain("[muaddib][metric]");
+    expect(infos[0]).toContain("\"platform\":\"discord\"");
+    expect(warns).toHaveLength(0);
   });
 });
 

@@ -129,6 +129,107 @@ describe("IrcRoomMonitor", () => {
     await history.close();
   });
 
+  it("refreshes cached mynick after varlink reconnect so direct detection stays correct", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    const responses: Array<Record<string, unknown> | null> = [
+      {
+        parameters: {
+          event: {
+            type: "message",
+            subtype: "public",
+            server: "libera",
+            target: "#test",
+            nick: "alice",
+            message: "muaddib: first",
+          },
+        },
+      },
+      null,
+      {
+        parameters: {
+          event: {
+            type: "message",
+            subtype: "public",
+            server: "libera",
+            target: "#test",
+            nick: "alice",
+            message: "muaddib2: second",
+          },
+        },
+      },
+      {
+        error: "done",
+      },
+    ];
+
+    let offset = 0;
+    const seen: Array<{ mynick: string; content: string; isDirect: boolean }> = [];
+
+    const sender = {
+      connectionGeneration: -1,
+      async connect(): Promise<void> {
+        this.connectionGeneration += 1;
+      },
+      async disconnect(): Promise<void> {},
+      async sendMessage(): Promise<boolean> {
+        return true;
+      },
+      async getServerNick(): Promise<string | null> {
+        return this.connectionGeneration === 0 ? "muaddib" : "muaddib2";
+      },
+    };
+
+    const monitor = new IrcRoomMonitor({
+      roomConfig: {
+        varlink: {
+          socket_path: "/tmp/varlink.sock",
+        },
+      },
+      history,
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async (message, options) => {
+          seen.push({
+            mynick: message.mynick,
+            content: message.content,
+            isDirect: options.isDirect,
+          });
+          return null;
+        },
+      },
+      varlinkEvents: {
+        connect: async () => {},
+        disconnect: async () => {},
+        waitForEvents: async () => {},
+        receiveResponse: async () => {
+          const response = responses[offset];
+          offset += 1;
+          return response ?? null;
+        },
+      },
+      varlinkSender: sender,
+    });
+
+    await expect(monitor.run()).resolves.toBeUndefined();
+
+    expect(seen).toEqual([
+      {
+        mynick: "muaddib",
+        content: "first",
+        isDirect: true,
+      },
+      {
+        mynick: "muaddib2",
+        content: "second",
+        isDirect: true,
+      },
+    ]);
+
+    await history.close();
+  });
+
   it("keeps event loop alive after a single handler failure", async () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();

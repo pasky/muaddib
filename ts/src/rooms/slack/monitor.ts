@@ -89,17 +89,21 @@ export class SlackRoomMonitor {
       return;
     }
 
-    if (this.options.eventSource.connect) {
-      await this.options.eventSource.connect();
-    }
-
     const senderIsEventSource = Object.is(this.options.sender, this.options.eventSource);
-
-    if (this.options.sender && !senderIsEventSource && this.options.sender.connect) {
-      await this.options.sender.connect();
-    }
+    let eventSourceConnected = false;
+    let senderConnected = false;
 
     try {
+      if (this.options.eventSource.connect) {
+        await this.options.eventSource.connect();
+        eventSourceConnected = true;
+      }
+
+      if (this.options.sender && !senderIsEventSource && this.options.sender.connect) {
+        await this.options.sender.connect();
+        senderConnected = true;
+      }
+
       while (true) {
         const event = await this.options.eventSource.receiveEvent();
         if (!event) {
@@ -117,11 +121,11 @@ export class SlackRoomMonitor {
         }
       }
     } finally {
-      if (this.options.sender && !senderIsEventSource && this.options.sender.disconnect) {
+      if (this.options.sender && !senderIsEventSource && senderConnected && this.options.sender.disconnect) {
         await this.options.sender.disconnect();
       }
 
-      if (this.options.eventSource.disconnect) {
+      if (eventSourceConnected && this.options.eventSource.disconnect) {
         await this.options.eventSource.disconnect();
       }
     }

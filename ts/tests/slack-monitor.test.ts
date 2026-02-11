@@ -435,6 +435,49 @@ describe("SlackRoomMonitor", () => {
     await history.close();
   });
 
+  it("disconnects event source when sender connect fails after startup connect", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    let eventSourceConnectCalls = 0;
+    let eventSourceDisconnectCalls = 0;
+    let senderDisconnectCalls = 0;
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      eventSource: {
+        connect: async () => {
+          eventSourceConnectCalls += 1;
+        },
+        disconnect: async () => {
+          eventSourceDisconnectCalls += 1;
+        },
+        receiveEvent: async () => null,
+      },
+      sender: {
+        connect: async () => {
+          throw new Error("sender connect failed");
+        },
+        disconnect: async () => {
+          senderDisconnectCalls += 1;
+        },
+        sendMessage: async () => {},
+      },
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async () => null,
+      },
+    });
+
+    await expect(monitor.run()).rejects.toThrow("sender connect failed");
+    expect(eventSourceConnectCalls).toBe(1);
+    expect(eventSourceDisconnectCalls).toBe(1);
+    expect(senderDisconnectCalls).toBe(0);
+
+    await history.close();
+  });
+
   it("keeps event loop alive after a single handler failure", async () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();
