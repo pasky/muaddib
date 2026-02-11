@@ -40,13 +40,41 @@ npm run start -- --config /path/to/config.json
    - `[muaddib][send-retry]` structured event lines (warn on retry, error on terminal failure)
    - `[muaddib][metric]` structured counter lines per retry/failure event
 
+## Soak SLO checks (during rollback window)
+
+Evaluate every deployment and at least daily:
+
+1. Terminal send failures (`type="failed"`) are < 0.5% of outbound sends per 24h.
+2. Terminal send failures do not exceed 3 for same destination within 15 minutes.
+3. Retry events (`type="retry"`) are < 5% of outbound sends per 24h.
+4. Startup contract failures are <= 1 per deployment change.
+
+## Mandatory parity checks (during soak)
+
+1. Discord direct mention -> valid reply.
+2. Slack direct mention -> valid reply.
+3. Slack channel thread-start behavior matches `reply_start_thread.channel`.
+4. Slack DM non-threaded default remains intact unless explicitly enabled.
+5. Discord reply metadata (`replyToMessageId`, `mentionAuthor`) remains correct.
+6. Discord/Slack edit events update history by `platform_id`.
+7. IRC reconnect keeps direct-address detection correct.
+
 ## Rollback triggers
 
-Rollback to Python runtime if any of the following persist and cannot be mitigated quickly:
+Rollback to Python runtime (`MUADDIB_RUNTIME=python`) when any of these is true and cannot be mitigated within 30 minutes:
 
-- sustained transport send failures
-- parity regression in message routing, thread handling, or history persistence
-- repeated startup contract failures from production config that block service start
+- soak SLO breach from the thresholds above
+- same parity check fails twice in a row
+- startup contract failures block service start after one corrective attempt
+
+## Rollback-window exit gate (for removing Python runtime path)
+
+Do not remove Python runtime rollback path unless all are satisfied:
+
+1. `MUADDIB_RUNTIME=ts` is default in production for at least 14 consecutive days.
+2. Final 7 days stay within soak SLO thresholds.
+3. Final 7 days pass all mandatory parity checks.
+4. No rollback to `MUADDIB_RUNTIME=python` in those final 7 days.
 
 ## Rollback procedure
 

@@ -399,11 +399,33 @@ At end of each milestone:
     - `cd ts && npm test`
     - `uv run pytest`
     - `MUADDIB_HOME=. uv run muaddib --message "milestone 7h ts parity hardening smoke test"`
+- 2026-02-11: Milestone 7I complete (continued soak parity hardening + rollback-window exit criteria definition).
+  - Added red tests first for IRC startup partial-connect cleanup regressions:
+    - `ts/tests/irc-monitor.test.ts`
+      - verifies disconnect cleanup on sender-connect failure before retry
+      - verifies disconnect cleanup when `waitForEvents` fails on final attempt
+  - Implemented minimal deterministic IRC reconnect/startup hardening:
+    - `ts/src/rooms/irc/monitor.ts`
+      - `connectWithRetry(...)` now always disconnects both varlink clients after failed startup attempt before retry/final failure
+      - clears cached server nicks on failed startup attempts to avoid stale direct-detection state
+  - Defined explicit operator rollback-window guardrails and deprecation gate criteria:
+    - `docs/typescript-runtime-rollout.md`
+    - `docs/typescript-runtime-runbook.md`
+      - explicit SLO thresholds (retry/failure/startup budgets)
+      - mandatory parity checks
+      - rollback triggers and 30-minute mitigation window
+      - explicit 14-day soak + 7-day final gate requirements before removing Python rollback path
+  - OAuth/session refresh policy unchanged: explicitly deferred until stable `@mariozechner/pi-ai` refresh contract exists.
+  - Validation passed:
+    - `cd ts && npm run typecheck`
+    - `cd ts && npm test`
+    - `uv run pytest`
+    - `MUADDIB_HOME=. uv run muaddib --message "milestone 7i ts parity hardening smoke test"`
 
-### Remaining gaps (post-7H)
+### Remaining gaps (post-7I)
 1. OAuth/session-backed token refresh plumbing remains explicitly deferred pending a stable provider/session refresh contract in `@mariozechner/pi-ai` (TS fail-fast rejects unsupported config with concrete operator guidance).
 2. Continue post-cutover soak hardening for additional live-room edge cases that emerge beyond currently-covered Slack/Discord/IRC reconnect and send-path behavior.
-3. Complete Python runtime deprecation after rollback window closes and soak criteria are met.
+3. Execute/track the new rollback-window SLO + parity gate operationally, then complete Python runtime deprecation only after criteria are actually met in production soak.
 
 ### Compatibility notes (intentional Python vs TS divergences)
 - TS runtime currently **fails fast** if deferred Python-only config keys are present, instead of silently ignoring them.
@@ -481,6 +503,11 @@ Legend:
 - [x] Add red tests for soak regressions in Slack/Discord/IRC room handling and implement deterministic fixes.
 - [x] Wire retry/failure instrumentation into operator-visible runtime log/metric lines.
 - [x] Verify TS deploy + Python rollback env flows and patch operator docs where gaps/noise were found.
+
+### I. Rollback-window exit criteria hardening
+- [x] Add explicit TS soak SLO thresholds for retry/failure/startup health in operator docs.
+- [x] Add explicit parity verification checklist and rollback triggers.
+- [x] Add explicit minimum soak duration + exit gate criteria before Python runtime deprecation.
 
 ---
 
@@ -575,11 +602,20 @@ Completed:
 3. Wired retry/failure instrumentation to operator-visible runtime logs/metric-friendly lines in TS main monitor construction.
 4. Verified runtime env resolution/rollback flows and patched rollout/runbook/docker docs; removed obsolete compose version field noise.
 
-### Milestone 7I — Next
+### Milestone 7I — Complete
 Goal: continue soak-driven parity hardening while preparing rollback-window exit criteria for Python runtime deprecation.
 
+Completed:
+1. Added red regression tests for IRC startup partial-connect cleanup and implemented minimal deterministic cleanup behavior in retry loop.
+2. Defined explicit rollback-window SLO/guardrails and deprecation exit gate in operator docs.
+3. Kept OAuth/session refresh deferred (no runtime contract change).
+4. Re-ran full validation suites; commit + handoff.
+
+### Milestone 7J — Next
+Goal: continue live-soak parity hardening and operational gate tracking without expanding deferred scope.
+
 Steps:
-1. Collect and codify any additional live-soak Slack/Discord/IRC payload regressions as red tests first.
-2. Define explicit rollback-window exit SLO/criteria in operator docs (error budget, retry-failure thresholds, room parity checks).
-3. Keep OAuth/session refresh deferred unless stable `@mariozechner/pi-ai` refresh contract lands; if viable, start with red tests.
+1. Capture any newly observed Slack/Discord/IRC live regressions as red tests first, then apply minimal deterministic fixes.
+2. Add lightweight operator evidence templates/checklists for daily SLO+parity gate tracking during rollback window.
+3. Keep OAuth/session refresh deferred unless stable `@mariozechner/pi-ai` contract lands; if it does, start with red tests and bounded plumbing.
 4. Re-run full validation suites; commit + handoff.

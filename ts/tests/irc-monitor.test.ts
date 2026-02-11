@@ -230,6 +230,102 @@ describe("IrcRoomMonitor", () => {
     await history.close();
   });
 
+  it("cleans up partially-connected varlink clients before retrying startup connect", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    let eventsDisconnectCalls = 0;
+    let senderDisconnectCalls = 0;
+    let senderConnectCalls = 0;
+
+    const monitor = new IrcRoomMonitor({
+      roomConfig: {
+        varlink: {
+          socket_path: "/tmp/varlink.sock",
+        },
+      },
+      history,
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async () => null,
+      },
+      varlinkEvents: {
+        connect: async () => {},
+        disconnect: async () => {
+          eventsDisconnectCalls += 1;
+        },
+        waitForEvents: async () => {},
+        receiveResponse: async () => ({ error: "done" }),
+      },
+      varlinkSender: {
+        connect: async () => {
+          senderConnectCalls += 1;
+          if (senderConnectCalls === 1) {
+            throw new Error("sender connect failed");
+          }
+        },
+        disconnect: async () => {
+          senderDisconnectCalls += 1;
+        },
+        sendMessage: async () => true,
+        getServerNick: async () => "muaddib",
+      },
+    });
+
+    await expect((monitor as any).connectWithRetry(2)).resolves.toBe(true);
+
+    expect(eventsDisconnectCalls).toBe(1);
+    expect(senderDisconnectCalls).toBe(1);
+
+    await history.close();
+  });
+
+  it("cleans up both varlink clients when waitForEvents fails on final startup attempt", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    let eventsDisconnectCalls = 0;
+    let senderDisconnectCalls = 0;
+
+    const monitor = new IrcRoomMonitor({
+      roomConfig: {
+        varlink: {
+          socket_path: "/tmp/varlink.sock",
+        },
+      },
+      history,
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async () => null,
+      },
+      varlinkEvents: {
+        connect: async () => {},
+        disconnect: async () => {
+          eventsDisconnectCalls += 1;
+        },
+        waitForEvents: async () => {
+          throw new Error("wait failed");
+        },
+        receiveResponse: async () => ({ error: "done" }),
+      },
+      varlinkSender: {
+        connect: async () => {},
+        disconnect: async () => {
+          senderDisconnectCalls += 1;
+        },
+        sendMessage: async () => true,
+        getServerNick: async () => "muaddib",
+      },
+    });
+
+    await expect((monitor as any).connectWithRetry(1)).resolves.toBe(false);
+
+    expect(eventsDisconnectCalls).toBe(1);
+    expect(senderDisconnectCalls).toBe(1);
+
+    await history.close();
+  });
+
   it("keeps event loop alive after a single handler failure", async () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();

@@ -163,6 +163,12 @@ export class IrcRoomMonitor {
         await this.varlinkEvents.waitForEvents();
         return true;
       } catch {
+        await Promise.allSettled([
+          this.varlinkEvents.disconnect(),
+          this.varlinkSender.disconnect(),
+        ]);
+        this.serverNicks.clear();
+
         if (attempt >= maxRetries - 1) {
           return false;
         }

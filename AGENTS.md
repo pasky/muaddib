@@ -63,6 +63,7 @@
 - TS runtime fail-fast enforces provider credential contract: only static `providers.*.key` strings (or provider SDK env vars) are supported; non-static `providers.*.key` values and `providers.*.{oauth,session}` are rejected.
 - OAuth/session refresh plumbing is explicitly deferred until a stable `@mariozechner/pi-ai` provider refresh contract is available; errors must include concrete operator guidance (remove unsupported keys and use static key/env-var contract).
 - TS service runtime cutover uses TS-first entrypoint with explicit rollback window controls (`MUADDIB_RUNTIME=python`, `MUADDIB_TS_ROLLBACK_UNTIL`) during soak; do not remove rollback path before soak criteria are met.
+- Rollback-window exit criteria are authoritative in `docs/typescript-runtime-rollout.md` + `docs/typescript-runtime-runbook.md` (SLO thresholds, parity checks, rollback triggers, minimum soak duration); keep these docs in sync with runtime behavior.
 - During soak, Discord/Slack send retry/failure instrumentation must stay operator-visible in runtime logs via `[muaddib][send-retry]` and `[muaddib][metric]` structured lines.
 - No backwards-compatibility shims for legacy behavior/config keys during rewrite.
 

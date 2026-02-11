@@ -1,14 +1,15 @@
-# TypeScript Runtime Operator Rollout (Milestone 7G)
+# TypeScript Runtime Operator Rollout (Milestone 7I)
 
 This checklist governs the cutover from the Python service runtime to the TypeScript runtime (`cd ts && npm run start`) while keeping an explicit rollback window.
 
 ## Rollout window and rollback policy
 
-- **TS default runtime starts now**.
+- **Default runtime:** `MUADDIB_RUNTIME=ts`.
+- **Rollback runtime:** `MUADDIB_RUNTIME=python`.
 - **Rollback window closes:** `2026-03-31T23:59:59Z`.
-- During the rollback window, operators can force Python runtime with:
-  - `MUADDIB_RUNTIME=python`
-  - verify resolved override before restart: `MUADDIB_RUNTIME=python docker compose config | rg MUADDIB_RUNTIME`
+- During rollback window, always verify resolved runtime before restart:
+  - TS default: `MUADDIB_RUNTIME=ts docker compose config | rg MUADDIB_RUNTIME`
+  - Python rollback: `MUADDIB_RUNTIME=python docker compose config | rg MUADDIB_RUNTIME`
 
 ## Preflight checklist
 
@@ -47,6 +48,45 @@ This checklist governs the cutover from the Python service runtime to the TypeSc
    - retry/failure events: `[muaddib][send-retry]`
    - operator metric lines: `[muaddib][metric]`
 6. Expand to full deployment.
+
+## Soak SLO guardrails (required during rollback window)
+
+Track from runtime logs (`[muaddib][send-retry]` + `[muaddib][metric]`):
+
+1. **Terminal send failure budget**
+   - `type="failed"` events must stay **< 0.5% of outbound sends per 24h**, and
+   - must not exceed **3 terminal failures for the same destination within 15 minutes**.
+2. **Retry pressure budget**
+   - `type="retry"` events must stay **< 5% of outbound sends per 24h**.
+3. **Startup health budget**
+   - no more than **1 startup contract failure** (bad config/credentials) per deployment change.
+
+If any budget is breached and not mitigated within 30 minutes, trigger rollback.
+
+## Required parity verification checks
+
+Run at canary rollout, after every deploy, and daily during soak:
+
+1. Discord direct mention -> successful reply (no terminal send failure).
+2. Slack direct mention -> successful reply (no terminal send failure).
+3. Slack channel reply starts/uses thread per `reply_start_thread.channel`.
+4. Slack DM reply remains non-threaded unless `reply_start_thread.dm=true`.
+5. Discord replies preserve `replyToMessageId` + `mentionAuthor` semantics.
+6. Discord/Slack message edits update history records by `platform_id`.
+7. IRC reconnect preserves direct-address detection (nick cache refresh behavior).
+
+Any repeated parity failure (same check failing twice in a row) is a rollback trigger.
+
+## Rollback-window exit gate (Python deprecation readiness)
+
+Python runtime deprecation is allowed only when all are true:
+
+1. TS has run as default runtime for **at least 14 consecutive days**.
+2. SLO guardrails above stayed within budget for the final **7 consecutive days**.
+3. Required parity verification checks all pass for the final **7 consecutive days**.
+4. No rollback to `MUADDIB_RUNTIME=python` was required during those final 7 days.
+
+If the gate is not met by `2026-03-31T23:59:59Z`, keep Python rollback path enabled and extend the window.
 
 ## Success criteria
 
