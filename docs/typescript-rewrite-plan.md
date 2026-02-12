@@ -940,6 +940,18 @@ Completed in checkpoint 10:
 3. Re-ran full validation suites and confirmed green.
 4. Kept OAuth/session refresh explicitly deferred; no contract change observed.
 
+- 2026-02-12: Milestone 7L checkpoint 11 complete (runtime logging parity hardening).
+  - Added TS runtime structured logger (`ts/src/app/logging.ts`) with Python-style formatting.
+  - TS runtime now emits startup/monitor lifecycle INFO+ logs to stdout and appends logs to `$MUADDIB_HOME/logs/YYYY-MM-DD/system.log`.
+  - Deferred-feature ignore warnings are now routed through runtime logger (stdout + system.log) instead of raw `console.warn`.
+  - IRC/Discord/Slack monitors now emit deterministic lifecycle + failure logs (connect retries, reconnect failures, per-event handler failures).
+  - Added failing-first tests and parity assertions:
+    - `ts/tests/app-main.test.ts` (system log creation + startup/failure lines)
+    - `ts/tests/irc-monitor.test.ts` (failed startup connection attempts are logged)
+  - Updated operator docs:
+    - `docs/typescript-runtime-runbook.md`
+    - `docs/typescript-runtime-rollout.md`
+
 Next steps:
 1. Continue live-soak regression intake; for any newly observed Slack/Discord/IRC runtime regression, add failing tests first then apply minimal deterministic fixes.
 2. Append complete daily/post-deploy entries to `docs/typescript-runtime-soak-evidence-log.md` (runtime proof + SLO queries + parity evidence + decision) with production telemetry links.

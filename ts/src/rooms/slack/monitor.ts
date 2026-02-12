@@ -1,4 +1,5 @@
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
+import { createConsoleLogger, type RuntimeLogger } from "../../app/logging.js";
 import type { RoomMessage } from "../message.js";
 import {
   sendWithRateLimitRetry,
@@ -79,19 +80,27 @@ export interface SlackRoomMonitorOptions {
   eventSource?: SlackEventSource;
   sender?: SlackSender;
   onSendRetryEvent?: (event: SendRetryEvent) => void;
+  logger?: RuntimeLogger;
 }
 
 export class SlackRoomMonitor {
-  constructor(private readonly options: SlackRoomMonitorOptions) {}
+  private readonly logger: RuntimeLogger;
+
+  constructor(private readonly options: SlackRoomMonitorOptions) {
+    this.logger = options.logger ?? createConsoleLogger("muaddib.rooms.slack.monitor");
+  }
 
   async run(): Promise<void> {
     if (!this.options.eventSource) {
+      this.logger.warn("Slack monitor has no event source; skipping run.");
       return;
     }
 
     const senderIsEventSource = Object.is(this.options.sender, this.options.eventSource);
     let eventSourceConnected = false;
     let senderConnected = false;
+
+    this.logger.info("Slack monitor starting.");
 
     try {
       if (this.options.eventSource.connect) {
@@ -117,7 +126,7 @@ export class SlackRoomMonitor {
             await this.processMessageEvent(event);
           }
         } catch (error) {
-          console.error("Slack monitor failed to process event; continuing", error);
+          this.logger.error("Slack monitor failed to process event; continuing", error);
         }
       }
     } finally {
@@ -128,6 +137,8 @@ export class SlackRoomMonitor {
       if (eventSourceConnected && this.options.eventSource.disconnect) {
         await this.options.eventSource.disconnect();
       }
+
+      this.logger.info("Slack monitor stopped.");
     }
   }
 

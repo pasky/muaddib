@@ -72,11 +72,18 @@ export function collectDeferredFeatureConfigPaths(config: Record<string, unknown
   };
 }
 
-export function assertNoDeferredFeatureConfig(config: Record<string, unknown>): void {
+interface DeferredFeatureLogger {
+  warn(message: string): void;
+}
+
+export function assertNoDeferredFeatureConfig(
+  config: Record<string, unknown>,
+  logger: DeferredFeatureLogger = console,
+): void {
   const { blockingPaths, ignoredPaths } = collectDeferredFeatureConfigPaths(config);
 
   if (ignoredPaths.length > 0) {
-    console.warn(
+    logger.warn(
       `Deferred features are not supported in the TypeScript runtime and will be ignored unless explicitly enabled: ${ignoredPaths.join(", ")}.`,
     );
   }

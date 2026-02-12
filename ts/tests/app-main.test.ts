@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -43,7 +43,7 @@ function baseCommandConfig() {
   };
 }
 
-async function runWithConfig(config: Record<string, unknown>): Promise<void> {
+async function createConfigDir(config: Record<string, unknown>): Promise<{ dir: string; configPath: string }> {
   const dir = await mkdtemp(join(tmpdir(), "muaddib-app-main-"));
   tempDirs.push(dir);
 
@@ -55,6 +55,13 @@ async function runWithConfig(config: Record<string, unknown>): Promise<void> {
   const configPath = join(dir, "config.json");
   await writeFile(configPath, JSON.stringify(mutableConfig), "utf-8");
 
+  process.env.MUADDIB_HOME = dir;
+
+  return { dir, configPath };
+}
+
+async function runWithConfig(config: Record<string, unknown>): Promise<void> {
+  const { configPath } = await createConfigDir(config);
   await runMuaddibMain(["--config", configPath]);
 }
 
@@ -151,6 +158,49 @@ describe("createSendRetryEventLogger", () => {
 });
 
 describe("runMuaddibMain", () => {
+  it("writes startup and failure logs to $MUADDIB_HOME/logs/YYYY-MM-DD/system.log", async () => {
+    const { dir, configPath } = await createConfigDir({
+      history: {
+        database: {
+          path: "/tmp/muaddib-test-history.db",
+        },
+      },
+      rooms: {
+        common: {
+          command: baseCommandConfig(),
+        },
+        irc: {
+          enabled: false,
+        },
+        discord: {
+          enabled: false,
+        },
+        slack: {
+          enabled: false,
+        },
+      },
+    });
+
+    process.env.MUADDIB_HOME = dir;
+
+    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation((() => true) as any);
+
+    await expect(runMuaddibMain(["--config", configPath])).rejects.toThrow("No room monitors enabled.");
+
+    const datePath = new Date().toISOString().slice(0, 10);
+    const systemLogPath = join(dir, "logs", datePath, "system.log");
+    const systemLog = await readFile(systemLogPath, "utf-8");
+
+    expect(systemLog).toContain(" - muaddib.app.main - INFO - Starting TypeScript runtime");
+    expect(systemLog).toContain(" - muaddib.app.main - ERROR - No room monitors enabled.");
+
+    const stdout = stdoutSpy.mock.calls.map((args) => String(args[0] ?? "")).join("");
+    expect(stdout).toContain(" - muaddib.app.main - INFO - Starting TypeScript runtime");
+    expect(stdout).toContain(" - muaddib.app.main - ERROR - No room monitors enabled.");
+
+    stdoutSpy.mockRestore();
+  });
+
   it("throws when Discord is enabled without token", async () => {
     await expect(
       runWithConfig({
@@ -235,55 +285,56 @@ describe("runMuaddibMain", () => {
   });
 
   it("ignores deferred proactive/chronicler/quests config knobs when not explicitly enabled", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-    await expect(
-      runWithConfig({
-        history: {
-          database: {
-            path: "/tmp/muaddib-test-history.db",
-          },
+    const { dir, configPath } = await createConfigDir({
+      history: {
+        database: {
+          path: "/tmp/muaddib-test-history.db",
         },
-        chronicler: {
-          model: "openai:gpt-4o-mini",
-          quests: {
-            arcs: ["libera##muaddib"],
-          },
-        },
+      },
+      chronicler: {
+        model: "openai:gpt-4o-mini",
         quests: {
           arcs: ["libera##muaddib"],
         },
-        rooms: {
-          common: {
-            command: baseCommandConfig(),
-            proactive: {
-              interjecting: ["libera##muaddib"],
-            },
-          },
-          irc: {
-            enabled: false,
-            proactive: {
-              interjecting: ["libera##muaddib"],
-            },
-          },
-          discord: {
-            enabled: false,
-          },
-          slack: {
-            enabled: false,
+      },
+      quests: {
+        arcs: ["libera##muaddib"],
+      },
+      rooms: {
+        common: {
+          command: baseCommandConfig(),
+          proactive: {
+            interjecting: ["libera##muaddib"],
           },
         },
-      }),
-    ).rejects.toThrow("No room monitors enabled.");
+        irc: {
+          enabled: false,
+          proactive: {
+            interjecting: ["libera##muaddib"],
+          },
+        },
+        discord: {
+          enabled: false,
+        },
+        slack: {
+          enabled: false,
+        },
+      },
+    });
 
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy.mock.calls[0]?.[0]).toContain(
+    process.env.MUADDIB_HOME = dir;
+
+    await expect(runMuaddibMain(["--config", configPath])).rejects.toThrow("No room monitors enabled.");
+
+    const datePath = new Date().toISOString().slice(0, 10);
+    const systemLogPath = join(dir, "logs", datePath, "system.log");
+    const systemLog = await readFile(systemLogPath, "utf-8");
+
+    expect(systemLog).toContain(
       "Deferred features are not supported in the TypeScript runtime and will be ignored",
     );
-    expect(warnSpy.mock.calls[0]?.[0]).toContain("chronicler");
-    expect(warnSpy.mock.calls[0]?.[0]).toContain("rooms.common.proactive");
-
-    warnSpy.mockRestore();
+    expect(systemLog).toContain("chronicler");
+    expect(systemLog).toContain("rooms.common.proactive");
   });
 
   it("throws when deferred config knobs are explicitly enabled", async () => {

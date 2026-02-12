@@ -1,5 +1,10 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
+import { RuntimeLogWriter } from "../src/app/logging.js";
 import { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { IrcRoomMonitor } from "../src/rooms/irc/monitor.js";
 
@@ -323,6 +328,60 @@ describe("IrcRoomMonitor", () => {
     expect(eventsDisconnectCalls).toBe(1);
     expect(senderDisconnectCalls).toBe(1);
 
+    await history.close();
+  });
+
+  it("logs failed startup connection attempts before retrying", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    const logsHome = await mkdtemp(join(tmpdir(), "muaddib-irc-logs-"));
+    let connectCalls = 0;
+
+    const monitor = new IrcRoomMonitor({
+      roomConfig: {
+        varlink: {
+          socket_path: "/tmp/varlink.sock",
+        },
+      },
+      history,
+      logger: new RuntimeLogWriter({
+        muaddibHome: logsHome,
+        stdout: {
+          write: () => true,
+        } as unknown as NodeJS.WriteStream,
+      }).getLogger("muaddib.rooms.irc.monitor"),
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async () => null,
+      },
+      varlinkEvents: {
+        connect: async () => {
+          connectCalls += 1;
+          if (connectCalls === 1) {
+            throw new Error("connect failed once");
+          }
+        },
+        disconnect: async () => {},
+        waitForEvents: async () => {},
+        receiveResponse: async () => ({ error: "done" }),
+      },
+      varlinkSender: {
+        connect: async () => {},
+        disconnect: async () => {},
+        sendMessage: async () => true,
+        getServerNick: async () => "muaddib",
+      },
+    });
+
+    await expect((monitor as any).connectWithRetry(2)).resolves.toBe(true);
+
+    const datePath = new Date().toISOString().slice(0, 10);
+    const systemLogPath = join(logsHome, "logs", datePath, "system.log");
+    const systemLog = await readFile(systemLogPath, "utf-8");
+    expect(systemLog).toContain("Connection attempt 1 failed");
+
+    await rm(logsHome, { recursive: true, force: true });
     await history.close();
   });
 

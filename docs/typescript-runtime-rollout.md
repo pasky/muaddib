@@ -36,6 +36,9 @@ This checklist governs the cutover from the Python service runtime to the TypeSc
   - Slack DM threading remains opt-in (`reply_start_thread.dm`)
   - Discord reply sends include explicit `replyToMessageId` + `mentionAuthor` behavior
 - Mention/identity normalization parity hardened in Slack/Discord transports/monitors.
+- Logging parity hardened for operator observability:
+  - stdout emits INFO+ lifecycle lines with Python-style formatting (`timestamp - logger - LEVEL - message`)
+  - TS writes daily system logs to `$MUADDIB_HOME/logs/YYYY-MM-DD/system.log`
 
 ## Deployment sequence
 
@@ -49,6 +52,7 @@ This checklist governs the cutover from the Python service runtime to the TypeSc
 5. Observe logs for retry/failure instrumentation and transport health.
    - retry/failure events: `[muaddib][send-retry]`
    - operator metric lines: `[muaddib][metric]`
+   - startup/monitor lifecycle lines in stdout and `$MUADDIB_HOME/logs/YYYY-MM-DD/system.log`
 6. Expand to full deployment.
 
 ## Soak SLO guardrails (required during rollback window)

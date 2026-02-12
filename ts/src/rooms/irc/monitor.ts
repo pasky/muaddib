@@ -1,4 +1,5 @@
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
+import { createConsoleLogger, type RuntimeLogger } from "../../app/logging.js";
 import type { RoomMessage } from "../message.js";
 import type { RoomCommandHandlerTs } from "../command/command-handler.js";
 import { VarlinkClient, VarlinkSender } from "./varlink.js";
@@ -47,12 +48,14 @@ export interface IrcRoomMonitorOptions {
   varlinkEvents?: IrcEventsClient;
   varlinkSender?: IrcSender;
   responseCleaner?: (text: string, nick: string) => string;
+  logger?: RuntimeLogger;
 }
 
 export class IrcRoomMonitor {
   private readonly varlinkEvents: IrcEventsClient;
   private readonly varlinkSender: IrcSender;
   private readonly responseCleaner: (text: string, nick: string) => string;
+  private readonly logger: RuntimeLogger;
   private readonly serverNicks = new Map<string, string>();
 
   constructor(private readonly options: IrcRoomMonitorOptions) {
@@ -61,24 +64,31 @@ export class IrcRoomMonitor {
     this.varlinkSender =
       options.varlinkSender ?? new VarlinkSender(options.roomConfig.varlink.socket_path);
     this.responseCleaner = options.responseCleaner ?? defaultResponseCleaner;
+    this.logger = options.logger ?? createConsoleLogger("muaddib.rooms.irc.monitor");
   }
 
   async run(): Promise<void> {
     if (!(await this.connectWithRetry())) {
+      this.logger.error("Could not establish varlink connection; exiting IRC monitor.");
       return;
     }
+
+    this.logger.info("Muaddib started, waiting for IRC events...");
 
     while (true) {
       const response = await this.varlinkEvents.receiveResponse();
       if (response === null) {
+        this.logger.warn("IRC varlink connection lost; attempting reconnect.");
         await this.varlinkEvents.disconnect();
         await this.varlinkSender.disconnect();
         this.serverNicks.clear();
 
         if (await this.connectWithRetry()) {
+          this.logger.info("IRC varlink reconnect succeeded.");
           continue;
         }
 
+        this.logger.error("IRC varlink reconnect failed; exiting IRC monitor.");
         break;
       }
 
@@ -88,17 +98,19 @@ export class IrcRoomMonitor {
         try {
           await this.processMessageEvent(event);
         } catch (error) {
-          console.error("IRC monitor failed to process event; continuing", error);
+          this.logger.error("IRC monitor failed to process event; continuing", error);
         }
       }
 
       if (response.error) {
+        this.logger.error("IRC monitor received varlink error response", response.error);
         break;
       }
     }
 
     await this.varlinkEvents.disconnect();
     await this.varlinkSender.disconnect();
+    this.logger.info("IRC monitor stopped.");
   }
 
   async processMessageEvent(event: IrcEvent): Promise<void> {
@@ -161,8 +173,10 @@ export class IrcRoomMonitor {
         await this.varlinkEvents.connect();
         await this.varlinkSender.connect();
         await this.varlinkEvents.waitForEvents();
+        this.logger.info("Successfully connected to varlink sockets.");
         return true;
-      } catch {
+      } catch (error) {
+        this.logger.warn(`Connection attempt ${attempt + 1} failed.`, error);
         await Promise.allSettled([
           this.varlinkEvents.disconnect(),
           this.varlinkSender.disconnect(),
@@ -170,10 +184,12 @@ export class IrcRoomMonitor {
         this.serverNicks.clear();
 
         if (attempt >= maxRetries - 1) {
+          this.logger.error(`Failed to connect after ${maxRetries} attempts.`);
           return false;
         }
 
         const waitMs = 2 ** attempt * 1000;
+        this.logger.info(`Retrying in ${waitMs / 1000} seconds...`);
         await sleep(waitMs);
       }
     }

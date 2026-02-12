@@ -18,6 +18,10 @@ Run muaddib service on the TypeScript runtime by default, with explicit rollback
    - `docker compose up -d muaddib`
 4. Verify startup logs include:
    - `Runtime=ts service mode`
+   - `muaddib.app.main - INFO - Starting TypeScript runtime`
+5. Verify TS system log file is created and written:
+   - `find "$MUADDIB_HOME/logs/$(date +%F)" -maxdepth 1 -name system.log -type f`
+   - `rg -n "muaddib.app.main|muaddib.rooms" "$MUADDIB_HOME/logs/$(date +%F)/system.log"`
 
 ### Non-compose/systemd style
 
@@ -37,6 +41,20 @@ npm run start -- --config /path/to/config.json
 - TS runtime fail-fast rejects explicitly enabled deferred sections (`enabled: true`) under those keys.
 - When inactive deferred sections are present, startup/CLI emits an operator warning that they are being ignored.
 
+## TS logging contract (parity-critical)
+
+1. Console emits operator-visible runtime lines at INFO+ (including warnings/errors) in Python-style format:
+   - `YYYY-MM-DD HH:MM:SS,mmm - <logger-name> - <LEVEL> - <message>`
+2. TS runtime writes system logs under:
+   - `$MUADDIB_HOME/logs/YYYY-MM-DD/system.log`
+3. Startup must always emit at least:
+   - runtime start line (`muaddib.app.main`)
+   - enabled monitor lines (`Enabling ... room monitor`)
+   - monitor run start lines (`muaddib.rooms.*.monitor`)
+4. Send retry/failure instrumentation remains operator-visible in both stdout and system log:
+   - `[muaddib][send-retry]`
+   - `[muaddib][metric]`
+
 ## Operational checks after deploy
 
 1. Bot connects to enabled rooms.
@@ -46,6 +64,7 @@ npm run start -- --config /path/to/config.json
 5. Retry/failure instrumentation is visible in deployment logs:
    - `[muaddib][send-retry]` structured event lines (warn on retry, error on terminal failure)
    - `[muaddib][metric]` structured counter lines per retry/failure event
+6. `$MUADDIB_HOME/logs/YYYY-MM-DD/system.log` is created/updated by TS runtime startup.
 
 ## Soak SLO checks (during rollback window)
 

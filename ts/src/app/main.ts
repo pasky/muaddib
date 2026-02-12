@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import { createConfigApiKeyResolver } from "./api-keys.js";
 import { assertNoDeferredFeatureConfig } from "./deferred-features.js";
+import { RuntimeLogWriter } from "./logging.js";
 import { ChatHistoryStore } from "../history/chat-history-store.js";
 import { getRoomConfig } from "../rooms/command/config.js";
 import { RoomCommandHandlerTs } from "../rooms/command/command-handler.js";
@@ -26,8 +27,15 @@ interface RunnableMonitor {
 
 export async function runMuaddibMain(argv: string[] = process.argv.slice(2)): Promise<void> {
   const args = parseAppArgs(argv);
+  const runtimeLogger = new RuntimeLogWriter({
+    muaddibHome: getMuaddibHome(),
+  });
+  const logger = runtimeLogger.getLogger("muaddib.app.main");
+
+  logger.info("Starting TypeScript runtime", `config=${args.configPath}`);
+
   const config = loadConfig(args.configPath);
-  assertNoDeferredFeatureConfig(config);
+  assertNoDeferredFeatureConfig(config, logger);
 
   const historyDbPath = resolveMuaddibPath(
     (config.history as any)?.database?.path,
@@ -37,19 +45,24 @@ export async function runMuaddibMain(argv: string[] = process.argv.slice(2)): Pr
   const ircRoomConfig = getRoomConfig(config, "irc") as any;
   const defaultHistorySize = Number(ircRoomConfig?.command?.history_size ?? 40);
 
+  logger.info("Initializing history storage", `path=${historyDbPath}`, `history_size=${defaultHistorySize}`);
+
   const history = new ChatHistoryStore(historyDbPath, defaultHistorySize);
   await history.initialize();
 
   const apiKeyResolver = createConfigApiKeyResolver(config);
 
   try {
-    const monitors = createMonitors(config, history, apiKeyResolver);
+    const monitors = createMonitors(config, history, apiKeyResolver, runtimeLogger);
     if (monitors.length === 0) {
+      logger.error("No room monitors enabled.");
       throw new Error("No room monitors enabled.");
     }
 
+    logger.info("Launching room monitors", `count=${monitors.length}`);
     await Promise.all(monitors.map(async (monitor) => await monitor.run()));
   } finally {
+    logger.info("Shutting down history storage");
     await history.close();
   }
 }
@@ -58,8 +71,10 @@ function createMonitors(
   config: Record<string, unknown>,
   history: ChatHistoryStore,
   getApiKey: (provider: string) => Promise<string | undefined> | string | undefined,
+  runtimeLogger: RuntimeLogWriter,
 ): RunnableMonitor[] {
   const monitors: RunnableMonitor[] = [];
+  const logger = runtimeLogger.getLogger("muaddib.app.main");
 
   const ircRoomConfig = getRoomConfig(config, "irc") as any;
   if (isRoomEnabled(ircRoomConfig, true)) {
@@ -75,6 +90,7 @@ function createMonitors(
       (text) => text.replace(/\n/g, "; ").trim(),
     );
 
+    logger.info("Enabling IRC room monitor", `socket_path=${socketPath}`);
     monitors.push(
       new IrcRoomMonitor({
         roomConfig: {
@@ -86,6 +102,7 @@ function createMonitors(
         },
         history,
         commandHandler,
+        logger: runtimeLogger.getLogger("muaddib.rooms.irc.monitor"),
       }),
     );
   }
@@ -103,6 +120,7 @@ function createMonitors(
       botNameFallback: discordRoomConfig?.bot_name,
     });
 
+    logger.info("Enabling Discord room monitor");
     monitors.push(
       new DiscordRoomMonitor({
         roomConfig: discordRoomConfig,
@@ -110,7 +128,8 @@ function createMonitors(
         commandHandler,
         eventSource: transport,
         sender: transport,
-        onSendRetryEvent: createSendRetryEventLogger(),
+        onSendRetryEvent: createSendRetryEventLogger(runtimeLogger.getLogger("muaddib.send-retry.discord")),
+        logger: runtimeLogger.getLogger("muaddib.rooms.discord.monitor"),
       }),
     );
   }
@@ -143,6 +162,7 @@ function createMonitors(
         botNameFallback: workspaceConfig?.name,
       });
 
+      logger.info("Enabling Slack room monitor", `workspace=${workspaceId}`);
       monitors.push(
         new SlackRoomMonitor({
           roomConfig: slackRoomConfig,
@@ -150,7 +170,8 @@ function createMonitors(
           commandHandler,
           eventSource: transport,
           sender: transport,
-          onSendRetryEvent: createSendRetryEventLogger(),
+          onSendRetryEvent: createSendRetryEventLogger(runtimeLogger.getLogger(`muaddib.send-retry.slack.${workspaceId}`)),
+          logger: runtimeLogger.getLogger(`muaddib.rooms.slack.monitor.${workspaceId}`),
         }),
       );
     }
