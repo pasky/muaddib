@@ -20,7 +20,11 @@ The intent is to separate:
 - 2026-02-12 (cluster: command-path foundation / rate limiting):
   - Implemented TS command rate limiting with parity warning text (`Slow down a little, will you? (rate limiting)`).
   - Added TS test coverage proving limiter-denied requests skip runner execution and still persist user+assistant history rows.
-  - Remaining in this priority lane: command debounce/followup merge and steering/session queue compaction semantics.
+- 2026-02-12 (cluster: command debounce/followup merge):
+  - Implemented `command.debounce` in TS command handling and merged same-user followups into the current command turn.
+  - Added TS history-store support for `getRecentMessagesSince(...)` with thread-aware filtering.
+  - Added TS tests for debounce merge prompt behavior and thread-aware followup history retrieval.
+  - Remaining in this priority lane: steering/session queue compaction semantics.
 
 ---
 
@@ -36,7 +40,7 @@ Legend: ✅ implemented, ◐ partial, ❌ missing, ⚠ intentional deferred
 | Channel policy resolution (`classifier`, constrained classifier, forced trigger) | ✅ | ✅ | `resolve()` in both resolvers |
 | LLM classifier with fallback label | ✅ | ✅ | `muaddib/rooms/command.py::classify_mode`, `ts/src/rooms/command/classifier.ts::createModeClassifier` |
 | Command rate limiting + warning reply | ✅ | ✅ | Python `_handle_command_core`, TS `ts/src/rooms/command/command-handler.ts::execute` + `rate-limiter.ts` |
-| Command debounce / followup coalescing | ✅ | ❌ | Python `_handle_command_core` uses `command.debounce` + `get_recent_messages_since` |
+| Command debounce / followup coalescing | ✅ | ✅ | Python `_handle_command_core` + `history.get_recent_messages_since`; TS `command-handler.ts::collectDebouncedFollowups` + `chat-history-store.ts::getRecentMessagesSince` |
 | Steering queue/session compaction | ✅ | ❌ | Python `SteeringQueue` + `_run_or_queue_command`; TS has no queue model |
 | Context reduction integration | ✅ | ❌ | Python `MuaddibAgent.run_actor` + `ContextReducer`; TS command path has no reducer |
 | Response length policy (artifact fallback) | ✅ | ❌ | Python `_run_actor` + `_long_response_to_artifact`; TS command path lacks response_max_bytes/artifact conversion |
@@ -132,7 +136,7 @@ Legend: ✅ implemented, ◐ partial, ❌ missing, ⚠ intentional deferred
 |---|---:|---|---|
 | TS command path lacks steering queue/session compaction | P1 | Concurrent/followup command steering behavior differs; can drop conversational steering semantics tested in Python. | `muaddib/rooms/command.py::_run_or_queue_command`, `muaddib/rooms/steering_queue.py` vs missing in `ts/src/rooms/command/command-handler.ts` |
 | Command rate limiting in TS | ✅ closed (2026-02-12) | Burst traffic guard restored with user-facing warning response and no runner execution when denied. | Python `_handle_command_core` uses `RateLimiter`; TS now mirrors via `ts/src/rooms/command/command-handler.ts` + `ts/src/rooms/command/rate-limiter.ts` |
-| No command debounce/followup merge in TS | P2 | Split/rapid user inputs are not merged, reducing response quality and increasing call count. | Python `_handle_command_core` debounce path |
+| Command debounce/followup merge in TS | ✅ closed (2026-02-12) | Split/rapid user inputs are now coalesced via `command.debounce` + followup merge in TS command execution. | Python `_handle_command_core` debounce path; TS `command-handler.ts::collectDebouncedFollowups` |
 | Agent loop is single-turn + baseline tools only in TS | P0 | Major functional loss for tool-using tasks (search/web/code/artifacts/oracle), weaker response correctness for complex prompts. | Python `AgenticLLMActor.run_agent` + `agentic_actor/tools.py::TOOLS`; TS `MuaddibAgentRunner.runSingleTurn`, `baseline-tools.ts` |
 | No refusal fallback model behavior in TS app path | P1 | Safety refusal recovery behavior differs; higher user-visible refusal rate in certain prompts. | Python `providers/__init__.py::ModelRouter.call_raw_with_model` |
 | No response_max_bytes + artifact fallback in TS command path | P2 | Long answers risk truncation (especially IRC two-message bound), without artifact link recovery path. | Python `RoomCommandHandler._run_actor/_long_response_to_artifact` |
@@ -193,14 +197,14 @@ Tests (red/green):
 ## Phase 1 — command-path behavioral parity
 
 3. **Implement TS steering queue/session model** equivalent to Python (`SteeringQueue` semantics, thread-sharing, compaction policy).
-4. **Implement command debounce/followup merge** (`command.debounce` + recent messages merge).
+4. ✅ **Implement command debounce/followup merge** (`command.debounce` + recent messages merge). *(Completed 2026-02-12)*
 
 Tests (red/green):
 - Port/translate Python steering tests from `tests/rooms/test_command.py`:
   - followup command collapse,
   - thread-shared steering,
   - passive compaction behavior.
-- Add debounce behavior tests in TS command handler suite.
+- ✅ Added debounce behavior tests in `ts/tests/command-handler.test.ts` and thread-aware followup retrieval tests in `ts/tests/storage.test.ts`.
 
 ## Phase 2 — agent/tool parity core (highest product impact)
 

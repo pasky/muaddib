@@ -50,6 +50,11 @@ interface FullHistoryRow {
   timestamp: string;
 }
 
+interface RecentMessageDbRow {
+  message: string;
+  timestamp: string;
+}
+
 interface LlmCallDbRow {
   id: number;
   provider: string;
@@ -329,6 +334,59 @@ export class ChatHistoryStore {
       role: String(row.role),
       timestamp: String(row.timestamp),
     }));
+  }
+
+  async getRecentMessagesSince(
+    serverTag: string,
+    channelName: string,
+    nick: string,
+    timestamp: number,
+    threadId?: string,
+  ): Promise<Array<{ message: string; timestamp: string }>> {
+    const db = this.requireDb();
+    const sinceEpochSeconds = String(Math.trunc(timestamp));
+
+    const rows = threadId
+      ? await db.all<RecentMessageDbRow[]>(
+          `
+          SELECT message, timestamp FROM chat_messages
+          WHERE server_tag = ? AND channel_name = ? AND nick = ?
+          AND strftime('%s', timestamp) > ? AND thread_id = ?
+          ORDER BY timestamp ASC
+          `,
+          serverTag,
+          channelName,
+          nick,
+          sinceEpochSeconds,
+          threadId,
+        )
+      : await db.all<RecentMessageDbRow[]>(
+          `
+          SELECT message, timestamp FROM chat_messages
+          WHERE server_tag = ? AND channel_name = ? AND nick = ?
+          AND strftime('%s', timestamp) > ? AND thread_id IS NULL
+          ORDER BY timestamp ASC
+          `,
+          serverTag,
+          channelName,
+          nick,
+          sinceEpochSeconds,
+        );
+
+    return rows.flatMap((row) => {
+      const content = String(row.message);
+      const splitIndex = content.indexOf("> ");
+      if (splitIndex < 0) {
+        return [];
+      }
+
+      return [
+        {
+          message: content.slice(splitIndex + 2),
+          timestamp: String(row.timestamp),
+        },
+      ];
+    });
   }
 
   async countRecentUnchronicled(serverTag: string, channelName: string, days = 7): Promise<number> {

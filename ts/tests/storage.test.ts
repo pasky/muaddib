@@ -72,6 +72,67 @@ describe("ChatHistoryStore", () => {
     await store.close();
   });
 
+  it("returns recent followup messages since timestamp with thread-aware filtering", async () => {
+    const store = new ChatHistoryStore(":memory:", 10);
+    await store.initialize();
+
+    await store.addMessage({
+      serverTag: "libera",
+      channelName: "#test",
+      nick: "alice",
+      mynick: "muaddib",
+      content: "main followup",
+    });
+    await store.addMessage({
+      serverTag: "libera",
+      channelName: "#test",
+      nick: "alice",
+      mynick: "muaddib",
+      content: "thread followup",
+      threadId: "thread-1",
+    });
+    await store.addMessage({
+      serverTag: "libera",
+      channelName: "#test",
+      nick: "alice",
+      mynick: "muaddib",
+      content: "other thread followup",
+      threadId: "thread-2",
+    });
+    await store.addMessage({
+      serverTag: "libera",
+      channelName: "#test",
+      nick: "bob",
+      mynick: "muaddib",
+      content: "bob followup",
+      threadId: "thread-1",
+    });
+
+    const mainFollowups = await store.getRecentMessagesSince("libera", "#test", "alice", 0);
+    expect(mainFollowups).toEqual([
+      {
+        message: "main followup",
+        timestamp: expect.any(String),
+      },
+    ]);
+
+    const threadFollowups = await store.getRecentMessagesSince(
+      "libera",
+      "#test",
+      "alice",
+      0,
+      "thread-1",
+    );
+    expect(threadFollowups).toEqual([
+      {
+        message: "thread followup",
+        timestamp: expect.any(String),
+      },
+    ]);
+
+    await store.close();
+  });
+
   it("counts and marks chronicled messages", async () => {
     const store = new ChatHistoryStore(":memory:", 10);
     await store.initialize();

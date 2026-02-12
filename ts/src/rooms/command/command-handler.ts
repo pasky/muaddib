@@ -175,6 +175,7 @@ export class RoomCommandHandlerTs {
     }
 
     const context = await this.options.history.getContextForMessage(message, maxSize);
+    const followupMessages = await this.collectDebouncedFollowups(message, context);
 
     const resolved = await this.resolver.resolve({
       message,
@@ -182,48 +183,60 @@ export class RoomCommandHandlerTs {
       defaultSize,
     });
 
-    if (resolved.error) {
+    const resolvedWithFollowups: ResolvedCommand = {
+      ...resolved,
+      queryText: mergeQueryText(resolved.queryText, followupMessages),
+    };
+
+    if (resolvedWithFollowups.error) {
       return {
-        response: `${message.nick}: ${resolved.error}`,
-        resolved,
+        response: `${message.nick}: ${resolvedWithFollowups.error}`,
+        resolved: resolvedWithFollowups,
         model: null,
         usage: null,
       };
     }
 
-    if (resolved.helpRequested) {
+    if (resolvedWithFollowups.helpRequested) {
       return {
         response: this.resolver.buildHelpMessage(message.serverTag, message.channelName),
-        resolved,
+        resolved: resolvedWithFollowups,
         model: null,
         usage: null,
       };
     }
 
-    if (!resolved.modeKey || !resolved.runtime || !resolved.selectedTrigger) {
+    if (
+      !resolvedWithFollowups.modeKey ||
+      !resolvedWithFollowups.runtime ||
+      !resolvedWithFollowups.selectedTrigger
+    ) {
       return {
         response: `${message.nick}: Internal command resolution error.`,
-        resolved,
+        resolved: resolvedWithFollowups,
         model: null,
         usage: null,
       };
     }
 
-    const modeConfig = this.commandConfig.modes[resolved.modeKey];
+    const modeConfig = this.commandConfig.modes[resolvedWithFollowups.modeKey];
     const modelSpec =
-      resolved.modelOverride ?? resolved.runtime.model ?? pickModeModel(modeConfig.model) ?? null;
+      resolvedWithFollowups.modelOverride ??
+      resolvedWithFollowups.runtime.model ??
+      pickModeModel(modeConfig.model) ??
+      null;
 
     if (!modelSpec) {
       return {
-        response: `${message.nick}: No model configured for mode '${resolved.modeKey}'.`,
-        resolved,
+        response: `${message.nick}: No model configured for mode '${resolvedWithFollowups.modeKey}'.`,
+        resolved: resolvedWithFollowups,
         model: null,
         usage: null,
       };
     }
 
-    const selectedContext = (resolved.noContext ? context.slice(-1) : context).slice(
-      -resolved.runtime.historySize,
+    const selectedContext = (resolvedWithFollowups.noContext ? context.slice(-1) : context).slice(
+      -resolvedWithFollowups.runtime.historySize,
     );
 
     // The trigger message will be sent as the new prompt for this turn.
@@ -231,28 +244,28 @@ export class RoomCommandHandlerTs {
     const runnerContext = selectedContext.slice(0, -1).map(toRunnerContextMessage);
 
     const systemPrompt = this.buildSystemPrompt(
-      resolved.modeKey,
+      resolvedWithFollowups.modeKey,
       message.mynick,
-      resolved.modelOverride ?? undefined,
+      resolvedWithFollowups.modelOverride ?? undefined,
     );
 
-    const tools = this.selectTools(resolved.runtime.allowedTools);
+    const tools = this.selectTools(resolvedWithFollowups.runtime.allowedTools);
     const runner = this.runnerFactory({
       model: modelSpec,
       systemPrompt,
       tools,
     });
 
-    const agentResult = await runner.runSingleTurn(resolved.queryText, {
+    const agentResult = await runner.runSingleTurn(resolvedWithFollowups.queryText, {
       contextMessages: runnerContext,
-      thinkingLevel: normalizeThinkingLevel(resolved.runtime.reasoningEffort),
+      thinkingLevel: normalizeThinkingLevel(resolvedWithFollowups.runtime.reasoningEffort),
     });
 
     const cleaned = this.cleanResponseText(agentResult.text, message.nick);
 
     return {
       response: cleaned || null,
-      resolved,
+      resolved: resolvedWithFollowups,
       model: modelSpec,
       usage: agentResult.usage,
     };
@@ -288,6 +301,38 @@ export class RoomCommandHandlerTs {
     };
 
     return promptTemplate.replace(/\{([A-Za-z0-9_]+)\}/g, (full, key: string) => vars[key] ?? full);
+  }
+
+  private async collectDebouncedFollowups(
+    message: RoomMessage,
+    context: Array<{ role: string; content: string }>,
+  ): Promise<string[]> {
+    const debounceSeconds = numberWithDefault(this.commandConfig.debounce, 0);
+    if (debounceSeconds <= 0) {
+      return [];
+    }
+
+    const originalTimestamp = Date.now() / 1000;
+    await sleep(debounceSeconds * 1000);
+
+    const followups = await this.options.history.getRecentMessagesSince(
+      message.serverTag,
+      message.channelName,
+      message.nick,
+      originalTimestamp,
+      message.threadId,
+    );
+
+    const followupMessages = followups.map((entry) => entry.message).filter((entry) => entry.length > 0);
+    if (followupMessages.length > 0 && context.length > 0) {
+      const lastIndex = context.length - 1;
+      context[lastIndex] = {
+        ...context[lastIndex],
+        content: `${context[lastIndex].content}\n${followupMessages.join("\n")}`,
+      };
+    }
+
+    return followupMessages;
   }
 
   private rateLimitedResult(message: RoomMessage): CommandExecutionResult {
@@ -337,6 +382,22 @@ function numberWithDefault(value: unknown, fallback: number): number {
     return fallback;
   }
   return parsed;
+}
+
+function mergeQueryText(queryText: string, followupMessages: string[]): string {
+  if (followupMessages.length === 0) {
+    return queryText;
+  }
+  if (!queryText.trim()) {
+    return followupMessages.join("\n");
+  }
+  return `${queryText}\n${followupMessages.join("\n")}`;
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 function modelStrCore(model: unknown): string {

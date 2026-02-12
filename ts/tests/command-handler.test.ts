@@ -129,6 +129,94 @@ describe("RoomCommandHandlerTs", () => {
     await history.close();
   });
 
+  it("merges debounced same-user followups into the runner prompt", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    await history.addMessage({
+      ...makeMessage("previous context"),
+      nick: "bob",
+    });
+
+    const incoming: RoomMessage = {
+      ...makeMessage("!s first line"),
+      threadId: "thread-1",
+    };
+    await history.addMessage(incoming);
+
+    const recentSpy = vi.spyOn(history, "getRecentMessagesSince").mockResolvedValue([
+      { message: "second line", timestamp: "2026-01-01 00:00:01" },
+      { message: "third line", timestamp: "2026-01-01 00:00:02" },
+    ]);
+
+    let runnerPrompt = "";
+    let runnerContextContents: string[] = [];
+
+    const handler = new RoomCommandHandlerTs({
+      roomConfig: {
+        ...roomConfig,
+        command: {
+          ...roomConfig.command,
+          debounce: 0.001,
+        },
+      } as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: () => ({
+        runSingleTurn: async (prompt, options) => {
+          runnerPrompt = prompt;
+          runnerContextContents = (options?.contextMessages ?? []).map((entry) => entry.content);
+          return {
+            assistantMessage: {
+              role: "assistant",
+              content: [{ type: "text", text: "done" }],
+              api: "openai-completions",
+              provider: "openai",
+              model: "gpt-4o-mini",
+              usage: {
+                input: 1,
+                output: 1,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 2,
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+              },
+              stopReason: "stop",
+              timestamp: Date.now(),
+            },
+            text: "done",
+            stopReason: "stop",
+            usage: {
+              input: 1,
+              output: 1,
+              cacheRead: 0,
+              cacheWrite: 0,
+              totalTokens: 2,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+            },
+          };
+        },
+      }),
+    });
+
+    const result = await handler.execute(incoming);
+
+    expect(result.response).toBe("done");
+    expect(result.resolved.queryText).toBe("first line\nsecond line\nthird line");
+    expect(runnerPrompt).toBe("first line\nsecond line\nthird line");
+    expect(runnerContextContents.some((entry) => entry.includes("second line"))).toBe(false);
+    expect(recentSpy).toHaveBeenCalledTimes(1);
+    expect(recentSpy).toHaveBeenCalledWith(
+      "libera",
+      "#test",
+      "alice",
+      expect.any(Number),
+      "thread-1",
+    );
+
+    await history.close();
+  });
+
   it("returns help text for !h", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();
