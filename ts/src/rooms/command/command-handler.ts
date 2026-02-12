@@ -7,7 +7,10 @@ import {
   type RunnerContextMessage,
   type SingleTurnResult,
 } from "../../agent/muaddib-agent-runner.js";
-import { createBaselineAgentTools } from "../../agent/tools/baseline-tools.js";
+import {
+  createBaselineAgentTools,
+  type BaselineToolOptions,
+} from "../../agent/tools/baseline-tools.js";
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { parseModelSpec } from "../../models/model-spec.js";
 import { RateLimiter } from "./rate-limiter.js";
@@ -58,6 +61,12 @@ export interface CommandHandlerOptions {
   helpToken?: string;
   flagTokens?: string[];
   onProgressReport?: (text: string) => void | Promise<void>;
+  toolOptions?: Omit<BaselineToolOptions, "onProgressReport">;
+  agentLoop?: {
+    maxIterations?: number;
+    maxCompletionRetries?: number;
+    emptyCompletionRetryPrompt?: string;
+  };
 }
 
 export interface CommandExecutionResult {
@@ -101,6 +110,9 @@ export class RoomCommandHandlerTs {
           systemPrompt: input.systemPrompt,
           tools: input.tools,
           getApiKey: options.getApiKey,
+          maxIterations: options.agentLoop?.maxIterations,
+          maxCompletionRetries: options.agentLoop?.maxCompletionRetries,
+          emptyCompletionRetryPrompt: options.agentLoop?.emptyCompletionRetryPrompt,
         } as MuaddibAgentRunnerOptions));
 
     this.rateLimiter =
@@ -490,6 +502,7 @@ export class RoomCommandHandlerTs {
 
   private selectTools(allowedTools: string[] | null): AgentTool<any>[] {
     const baseline = createBaselineAgentTools({
+      ...this.options.toolOptions,
       onProgressReport: this.options.onProgressReport,
     });
 

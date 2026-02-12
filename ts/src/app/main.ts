@@ -88,6 +88,7 @@ function createMonitors(
       history,
       getApiKey,
       (text) => text.replace(/\n/g, "; ").trim(),
+      config,
     );
 
     logger.info("Enabling IRC room monitor", `socket_path=${socketPath}`);
@@ -109,7 +110,7 @@ function createMonitors(
 
   const discordRoomConfig = getRoomConfig(config, "discord") as any;
   if (isRoomEnabled(discordRoomConfig, false)) {
-    const commandHandler = createRoomCommandHandler(discordRoomConfig, history, getApiKey);
+    const commandHandler = createRoomCommandHandler(discordRoomConfig, history, getApiKey, undefined, config);
     const discordToken = requireNonEmptyString(
       discordRoomConfig?.token,
       "Discord room is enabled but rooms.discord.token is missing.",
@@ -136,7 +137,7 @@ function createMonitors(
 
   const slackRoomConfig = getRoomConfig(config, "slack") as any;
   if (isRoomEnabled(slackRoomConfig, false)) {
-    const commandHandler = createRoomCommandHandler(slackRoomConfig, history, getApiKey);
+    const commandHandler = createRoomCommandHandler(slackRoomConfig, history, getApiKey, undefined, config);
     const slackAppToken = requireNonEmptyString(
       slackRoomConfig?.app_token,
       "Slack room is enabled but rooms.slack.app_token is missing.",
@@ -187,13 +188,45 @@ function requireNonEmptyString(value: unknown, message: string): string {
   return value;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
+function numberOrUndefined(value: unknown): number | undefined {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return undefined;
+  }
+  return parsed;
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 function createRoomCommandHandler(
   roomConfig: any,
   history: ChatHistoryStore,
   getApiKey: (provider: string) => Promise<string | undefined> | string | undefined,
   responseCleaner?: (text: string, nick: string) => string,
+  runtimeConfig?: Record<string, unknown>,
 ): RoomCommandHandlerTs {
   const commandConfig = roomConfig?.command ?? {};
+
+  const actorConfig = asRecord(runtimeConfig?.actor);
+  const toolsConfig = asRecord(runtimeConfig?.tools);
+
+  const maxIterations = numberOrUndefined(actorConfig?.max_iterations);
+  const maxCompletionRetries = numberOrUndefined(actorConfig?.max_completion_retries);
+  const jinaApiKey = stringOrUndefined(asRecord(toolsConfig?.jina)?.api_key);
 
   return new RoomCommandHandlerTs({
     roomConfig,
@@ -201,6 +234,13 @@ function createRoomCommandHandler(
     classifyMode: createModeClassifier(commandConfig, { getApiKey }),
     getApiKey,
     responseCleaner,
+    agentLoop: {
+      maxIterations,
+      maxCompletionRetries,
+    },
+    toolOptions: {
+      jinaApiKey,
+    },
   });
 }
 

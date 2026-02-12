@@ -42,7 +42,13 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
   const roomName = options.roomName ?? "irc";
   const roomConfig = getRoomConfig(config, roomName) as any;
   const commandConfig = roomConfig.command;
+  const actorConfig = asRecord(config.actor);
+  const toolsConfig = asRecord(config.tools);
   const getApiKey = createConfigApiKeyResolver(config);
+
+  const maxIterations = numberOrUndefined(actorConfig?.max_iterations);
+  const maxCompletionRetries = numberOrUndefined(actorConfig?.max_completion_retries);
+  const jinaApiKey = stringOrUndefined(asRecord(toolsConfig?.jina)?.api_key);
 
   if (!commandConfig) {
     throw new Error(`Room '${roomName}' does not define command config.`);
@@ -65,6 +71,8 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
       systemPrompt: input.systemPrompt,
       tools: input.tools,
       getApiKey,
+      maxIterations,
+      maxCompletionRetries,
     });
 
   const commandHandler = new RoomCommandHandlerTs({
@@ -73,6 +81,13 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
     classifyMode: createModeClassifier(commandConfig, { getApiKey }),
     getApiKey,
     runnerFactory: options.runnerFactory ?? defaultRunnerFactory,
+    agentLoop: {
+      maxIterations,
+      maxCompletionRetries,
+    },
+    toolOptions: {
+      jinaApiKey,
+    },
   });
 
   const result = await commandHandler.handleIncomingMessage(message, {
@@ -86,4 +101,27 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
     trigger: result?.resolved.selectedTrigger ?? null,
     selectedAutomatically: result?.resolved.selectedAutomatically ?? false,
   };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
+function numberOrUndefined(value: unknown): number | undefined {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return undefined;
+  }
+  return parsed;
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
