@@ -4,6 +4,17 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
+import {
+  completeSimple,
+  type AssistantMessage,
+  type Model,
+  type SimpleStreamOptions,
+  type UserMessage,
+} from "@mariozechner/pi-ai";
+
+import { parseModelSpec } from "../../models/model-spec.js";
+import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
+
 export interface ExecuteCodeInput {
   code: string;
   language?: "python" | "bash";
@@ -17,6 +28,26 @@ export interface EditArtifactInput {
   new_string: string;
 }
 
+export interface OracleInput {
+  query: string;
+}
+
+export interface GenerateImageInput {
+  prompt: string;
+  image_urls?: string[];
+}
+
+export interface GeneratedImageResultItem {
+  data: string;
+  mimeType: string;
+  artifactUrl: string;
+}
+
+export interface GenerateImageResult {
+  summaryText: string;
+  images: GeneratedImageResultItem[];
+}
+
 export interface VisitWebpageImageResult {
   kind: "image";
   data: string;
@@ -25,12 +56,20 @@ export interface VisitWebpageImageResult {
 
 export type VisitWebpageResult = string | VisitWebpageImageResult;
 
+type CompleteSimpleFn = (
+  model: Model<any>,
+  context: { messages: UserMessage[]; systemPrompt?: string },
+  options?: SimpleStreamOptions,
+) => Promise<AssistantMessage>;
+
 export interface BaselineToolExecutors {
   webSearch: (query: string) => Promise<string>;
   visitWebpage: (url: string) => Promise<VisitWebpageResult>;
   executeCode: (input: ExecuteCodeInput) => Promise<string>;
   shareArtifact: (content: string) => Promise<string>;
   editArtifact: (input: EditArtifactInput) => Promise<string>;
+  oracle: (input: OracleInput) => Promise<string>;
+  generateImage: (input: GenerateImageInput) => Promise<GenerateImageResult>;
 }
 
 export interface DefaultToolExecutorOptions {
@@ -42,13 +81,31 @@ export interface DefaultToolExecutorOptions {
   executeCodeWorkingDirectory?: string;
   artifactsPath?: string;
   artifactsUrl?: string;
+  getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+  modelAdapter?: PiAiModelAdapter;
+  completeSimpleFn?: CompleteSimpleFn;
+  oracleModel?: string;
+  oraclePrompt?: string;
+  imageGenModel?: string;
+  openRouterBaseUrl?: string;
+  imageGenTimeoutMs?: number;
 }
 
 const DEFAULT_WEB_CONTENT_LIMIT = 40_000;
 const DEFAULT_IMAGE_LIMIT = 3_500_000;
 const DEFAULT_EXECUTE_TIMEOUT_MS = 60_000;
 const DEFAULT_CAPTURE_LIMIT = 24_000;
+const DEFAULT_IMAGE_GEN_TIMEOUT_MS = 30_000;
+const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+const DEFAULT_ORACLE_SYSTEM_PROMPT =
+  "You are an oracle - a powerful reasoning entity consulted for complex analysis.";
 const ARTIFACT_ID_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+const IMAGE_SUFFIX_BY_MIME_TYPE: Record<string, string> = {
+  "image/png": ".png",
+  "image/jpeg": ".jpg",
+  "image/webp": ".webp",
+  "image/gif": ".gif",
+};
 const ARTIFACT_VIEWER_HTML = `<!doctype html>
 <html>
   <head>
@@ -85,6 +142,8 @@ export function createDefaultToolExecutors(
     executeCode: createDefaultExecuteCodeExecutor(options),
     shareArtifact: createDefaultShareArtifactExecutor(options),
     editArtifact: createDefaultEditArtifactExecutor(options),
+    oracle: createDefaultOracleExecutor(options),
+    generateImage: createDefaultGenerateImageExecutor(options),
   };
 }
 
@@ -287,6 +346,149 @@ function createDefaultExecuteCodeExecutor(
   };
 }
 
+function createDefaultOracleExecutor(
+  options: DefaultToolExecutorOptions,
+): BaselineToolExecutors["oracle"] {
+  const modelAdapter = options.modelAdapter ?? new PiAiModelAdapter();
+  const completeFn = options.completeSimpleFn ?? completeSimple;
+
+  return async (input: OracleInput): Promise<string> => {
+    const query = input.query.trim();
+    if (!query) {
+      throw new Error("oracle.query must be non-empty.");
+    }
+
+    const configuredModel = toConfiguredString(options.oracleModel);
+    if (!configuredModel) {
+      throw new Error("oracle tool requires tools.oracle.model configuration.");
+    }
+
+    const resolvedModel = modelAdapter.resolve(configuredModel);
+    const systemPrompt = toConfiguredString(options.oraclePrompt) ?? DEFAULT_ORACLE_SYSTEM_PROMPT;
+
+    const response = await completeFn(
+      resolvedModel.model,
+      {
+        systemPrompt,
+        messages: [
+          {
+            role: "user",
+            content: query,
+            timestamp: Date.now(),
+          },
+        ],
+      },
+      {
+        apiKey: await resolveProviderApiKey(options, String(resolvedModel.model.provider)),
+        reasoning: "high",
+      },
+    );
+
+    const output = response.content
+      .filter((block) => block.type === "text")
+      .map((block) => block.text)
+      .join("\n")
+      .trim();
+
+    if (!output) {
+      throw new Error("oracle returned empty response.");
+    }
+
+    return output;
+  };
+}
+
+function createDefaultGenerateImageExecutor(
+  options: DefaultToolExecutorOptions,
+): BaselineToolExecutors["generateImage"] {
+  const fetchImpl = getFetch(options);
+  const openRouterBaseUrl = (toConfiguredString(options.openRouterBaseUrl) ?? DEFAULT_OPENROUTER_BASE_URL).replace(/\/+$/, "");
+  const maxImageBytes = options.maxImageBytes ?? DEFAULT_IMAGE_LIMIT;
+  const timeoutMs = options.imageGenTimeoutMs ?? DEFAULT_IMAGE_GEN_TIMEOUT_MS;
+
+  return async (input: GenerateImageInput): Promise<GenerateImageResult> => {
+    const prompt = input.prompt.trim();
+    if (!prompt) {
+      throw new Error("generate_image.prompt must be non-empty.");
+    }
+
+    const configuredModel = toConfiguredString(options.imageGenModel);
+    if (!configuredModel) {
+      throw new Error("generate_image tool requires tools.image_gen.model configuration.");
+    }
+
+    const modelSpec = parseModelSpec(configuredModel);
+    if (modelSpec.provider !== "openrouter") {
+      throw new Error(`tools.image_gen.model must use openrouter provider, got: ${modelSpec.provider}`);
+    }
+
+    const apiKey = await resolveOpenRouterApiKey(options);
+    if (!apiKey) {
+      throw new Error(
+        "generate_image requires OpenRouter API key via providers.openrouter.key or OPENROUTER_API_KEY.",
+      );
+    }
+
+    const contentBlocks: Array<Record<string, unknown>> = [{ type: "text", text: prompt }];
+    const imageUrls = input.image_urls ?? [];
+
+    for (const rawImageUrl of imageUrls) {
+      const imageUrl = rawImageUrl.trim();
+      if (!imageUrl) {
+        throw new Error("generate_image.image_urls entries must be non-empty URLs.");
+      }
+
+      const dataUrl = await fetchImageAsDataUrl(fetchImpl, imageUrl, maxImageBytes);
+      contentBlocks.push({
+        type: "image_url",
+        image_url: {
+          url: dataUrl,
+        },
+      });
+    }
+
+    const responsePayload = await callOpenRouterImageGeneration(fetchImpl, {
+      baseUrl: openRouterBaseUrl,
+      apiKey,
+      modelId: modelSpec.modelId,
+      timeoutMs,
+      contentBlocks,
+    });
+
+    const dataUrls = extractGeneratedImageDataUrls(responsePayload);
+    if (dataUrls.length === 0) {
+      throw new Error("Image generation failed: No images generated by model.");
+    }
+
+    const images: GeneratedImageResultItem[] = [];
+    for (const dataUrl of dataUrls) {
+      const parsedImage = parseDataUrlImage(dataUrl);
+      const imageBytes = Buffer.from(parsedImage.data, "base64");
+
+      if (imageBytes.length > maxImageBytes) {
+        throw new Error(
+          `Generated image too large (${imageBytes.length} bytes). Maximum allowed: ${maxImageBytes} bytes`,
+        );
+      }
+
+      const suffix = IMAGE_SUFFIX_BY_MIME_TYPE[parsedImage.mimeType.toLowerCase()] ?? ".png";
+      const artifactUrl = await writeArtifactBytes(options, imageBytes, suffix);
+      images.push({
+        data: parsedImage.data,
+        mimeType: parsedImage.mimeType,
+        artifactUrl,
+      });
+    }
+
+    const summaryText = images.map((entry) => `Generated image: ${entry.artifactUrl}`).join("\n");
+
+    return {
+      summaryText,
+      images,
+    };
+  };
+}
+
 function createDefaultShareArtifactExecutor(
   options: DefaultToolExecutorOptions,
 ): BaselineToolExecutors["shareArtifact"] {
@@ -403,6 +605,30 @@ async function writeArtifactText(
   const filePath = join(artifactsPath, filename);
 
   await writeFile(filePath, content, "utf-8");
+
+  return toArtifactViewerUrl(artifactsUrl, filename);
+}
+
+async function writeArtifactBytes(
+  options: DefaultToolExecutorOptions,
+  data: Buffer,
+  suffix: string,
+): Promise<string> {
+  const artifactsPath = options.artifactsPath;
+  const artifactsUrl = options.artifactsUrl;
+
+  if (!artifactsPath || !artifactsUrl) {
+    throw new Error("Artifact tools require tools.artifacts.path and tools.artifacts.url configuration.");
+  }
+
+  await ensureArtifactsDirectory(artifactsPath);
+
+  const artifactId = generateArtifactId();
+  const normalizedSuffix = suffix.startsWith(".") ? suffix : `.${suffix}`;
+  const filename = `${artifactId}${normalizedSuffix}`;
+  const filePath = join(artifactsPath, filename);
+
+  await writeFile(filePath, data);
 
   return toArtifactViewerUrl(artifactsUrl, filename);
 }
@@ -555,6 +781,291 @@ function countOccurrences(content: string, needle: string): number {
     count += 1;
     index = found + needle.length;
   }
+}
+
+interface OpenRouterImageGenerationRequest {
+  baseUrl: string;
+  apiKey: string;
+  modelId: string;
+  timeoutMs: number;
+  contentBlocks: Array<Record<string, unknown>>;
+}
+
+async function callOpenRouterImageGeneration(
+  fetchImpl: typeof fetch,
+  request: OpenRouterImageGenerationRequest,
+): Promise<unknown> {
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(() => {
+    abortController.abort();
+  }, request.timeoutMs);
+
+  try {
+    const response = await fetchImpl(`${request.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${request.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: request.modelId,
+        messages: [
+          {
+            role: "user",
+            content: request.contentBlocks,
+          },
+        ],
+        modalities: ["image", "text"],
+      }),
+      signal: abortController.signal,
+    });
+
+    const bodyText = (await response.text()).trim();
+    const parsedBody = parseJsonResponseBody(bodyText);
+
+    if (!response.ok) {
+      const details = toResponseErrorDetail(parsedBody, bodyText);
+      throw new Error(`Image generation failed: OpenRouter HTTP ${response.status}: ${details}`);
+    }
+
+    const responseError = extractErrorMessage(parsedBody);
+    if (responseError) {
+      throw new Error(`Image generation failed: ${responseError}`);
+    }
+
+    return parsedBody;
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new Error(`generate_image request timed out after ${request.timeoutMs}ms.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function extractGeneratedImageDataUrls(payload: unknown): string[] {
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+
+  const response = payload as {
+    choices?: Array<{ message?: { images?: unknown[]; content?: unknown } }>;
+  };
+
+  const dataUrls: string[] = [];
+
+  const choices = response.choices ?? [];
+  for (const choice of choices) {
+    const message = choice?.message;
+    if (!message || typeof message !== "object") {
+      continue;
+    }
+
+    const images = Array.isArray(message.images) ? message.images : [];
+    for (const imageEntry of images) {
+      const url = extractImageUrlFromPayloadEntry(imageEntry);
+      if (url && url.startsWith("data:")) {
+        dataUrls.push(url);
+      }
+    }
+
+    if (Array.isArray(message.content)) {
+      for (const contentEntry of message.content) {
+        if (!contentEntry || typeof contentEntry !== "object") {
+          continue;
+        }
+
+        const asRecord = contentEntry as Record<string, unknown>;
+        const type = asRecord.type;
+        if (type !== "image_url") {
+          continue;
+        }
+
+        const imageUrlPayload = asRecord.image_url;
+        if (!imageUrlPayload || typeof imageUrlPayload !== "object") {
+          continue;
+        }
+
+        const imageUrl = (imageUrlPayload as { url?: unknown }).url;
+        if (typeof imageUrl === "string" && imageUrl.startsWith("data:")) {
+          dataUrls.push(imageUrl);
+        }
+      }
+    }
+  }
+
+  return dataUrls;
+}
+
+function extractImageUrlFromPayloadEntry(entry: unknown): string | undefined {
+  if (typeof entry === "string") {
+    return entry;
+  }
+
+  if (!entry || typeof entry !== "object") {
+    return undefined;
+  }
+
+  const asRecord = entry as {
+    url?: unknown;
+    image_url?: {
+      url?: unknown;
+    };
+  };
+
+  if (typeof asRecord.url === "string") {
+    return asRecord.url;
+  }
+
+  if (typeof asRecord.image_url?.url === "string") {
+    return asRecord.image_url.url;
+  }
+
+  return undefined;
+}
+
+interface ParsedDataUrlImage {
+  mimeType: string;
+  data: string;
+}
+
+function parseDataUrlImage(dataUrl: string): ParsedDataUrlImage {
+  const match = dataUrl.match(/^data:([^;,]+);base64,([\s\S]+)$/i);
+  if (!match) {
+    throw new Error("Image generation returned unsupported image payload format.");
+  }
+
+  const mimeType = match[1].trim().toLowerCase();
+  const data = match[2].trim();
+  if (!mimeType || !data) {
+    throw new Error("Image generation returned empty image payload.");
+  }
+
+  return {
+    mimeType,
+    data,
+  };
+}
+
+async function fetchImageAsDataUrl(
+  fetchImpl: typeof fetch,
+  imageUrl: string,
+  maxImageBytes: number,
+): Promise<string> {
+  const parsedUrl = new URL(imageUrl);
+  if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+    throw new Error(`Failed to fetch reference image ${imageUrl}: URL must use http:// or https://.`);
+  }
+
+  const response = await fetchImpl(imageUrl, {
+    headers: {
+      "User-Agent": "muaddib-ts/1.0",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch reference image ${imageUrl}: HTTP ${response.status}.`);
+  }
+
+  const contentType = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+  if (!contentType.startsWith("image/")) {
+    throw new Error(
+      `Failed to fetch reference image ${imageUrl}: URL is not an image (content-type: ${contentType || "unknown"}).`,
+    );
+  }
+
+  const imageBytes = Buffer.from(await response.arrayBuffer());
+  if (imageBytes.length > maxImageBytes) {
+    throw new Error(
+      `Failed to fetch reference image ${imageUrl}: Image too large (${imageBytes.length} bytes). Maximum allowed: ${maxImageBytes} bytes.`,
+    );
+  }
+
+  return `data:${contentType};base64,${imageBytes.toString("base64")}`;
+}
+
+async function resolveProviderApiKey(
+  options: DefaultToolExecutorOptions,
+  provider: string,
+): Promise<string | undefined> {
+  if (!options.getApiKey) {
+    return undefined;
+  }
+
+  const key = await options.getApiKey(provider);
+  return toConfiguredString(key);
+}
+
+async function resolveOpenRouterApiKey(options: DefaultToolExecutorOptions): Promise<string | undefined> {
+  const fromConfig = await resolveProviderApiKey(options, "openrouter");
+  if (fromConfig) {
+    return fromConfig;
+  }
+
+  return toConfiguredString(process.env.OPENROUTER_API_KEY);
+}
+
+function toConfiguredString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function parseJsonResponseBody(body: string): unknown {
+  if (!body) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(body) as unknown;
+  } catch {
+    return {
+      raw: body,
+    };
+  }
+}
+
+function toResponseErrorDetail(parsedBody: unknown, rawBody: string): string {
+  const fromParsed = extractErrorMessage(parsedBody);
+  if (fromParsed) {
+    return fromParsed;
+  }
+
+  if (rawBody) {
+    return rawBody;
+  }
+
+  return "(empty response body)";
+}
+
+function extractErrorMessage(value: unknown): string | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const asRecord = value as Record<string, unknown>;
+  const directError = asRecord.error;
+
+  if (typeof directError === "string") {
+    return directError;
+  }
+
+  if (directError && typeof directError === "object") {
+    const message = (directError as Record<string, unknown>).message;
+    if (typeof message === "string" && message.trim()) {
+      return message.trim();
+    }
+  }
+
+  return undefined;
+}
+
+function isAbortError(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && (error as { name?: unknown }).name === "AbortError");
 }
 
 function getFetch(options: DefaultToolExecutorOptions): typeof fetch {

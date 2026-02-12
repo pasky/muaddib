@@ -7,6 +7,8 @@ import {
   type DefaultToolExecutorOptions,
   type EditArtifactInput,
   type ExecuteCodeInput,
+  type GenerateImageInput,
+  type OracleInput,
   type VisitWebpageResult,
 } from "./core-executors.js";
 
@@ -18,7 +20,7 @@ export interface BaselineToolOptions extends DefaultToolExecutorOptions {
 /**
  * Baseline tool set for command-path parity.
  * Expanded with core workflow tools first: web_search, visit_webpage, execute_code,
- * then advanced artifact helpers: share_artifact, edit_artifact.
+ * then advanced artifact/media helpers: share_artifact, edit_artifact, generate_image, oracle.
  */
 export function createBaselineAgentTools(options: BaselineToolOptions = {}): AgentTool<any>[] {
   const defaultExecutors = createDefaultToolExecutors(options);
@@ -28,6 +30,8 @@ export function createBaselineAgentTools(options: BaselineToolOptions = {}): Age
     executeCode: options.executors?.executeCode ?? defaultExecutors.executeCode,
     shareArtifact: options.executors?.shareArtifact ?? defaultExecutors.shareArtifact,
     editArtifact: options.executors?.editArtifact ?? defaultExecutors.editArtifact,
+    generateImage: options.executors?.generateImage ?? defaultExecutors.generateImage,
+    oracle: options.executors?.oracle ?? defaultExecutors.oracle,
   };
 
   return [
@@ -36,6 +40,8 @@ export function createBaselineAgentTools(options: BaselineToolOptions = {}): Age
     createExecuteCodeTool(executors),
     createShareArtifactTool(executors),
     createEditArtifactTool(executors),
+    createGenerateImageTool(executors),
+    createOracleTool(executors),
     createProgressReportTool(options),
     createMakePlanTool(),
     createFinalAnswerTool(),
@@ -174,6 +180,69 @@ export function createEditArtifactTool(executors: Pick<BaselineToolExecutors, "e
         details: {
           artifactUrl: params.artifact_url,
           kind: "edit_artifact",
+        },
+      };
+    },
+  };
+}
+
+export function createGenerateImageTool(
+  executors: Pick<BaselineToolExecutors, "generateImage">,
+): AgentTool<any> {
+  return {
+    name: "generate_image",
+    label: "Generate Image",
+    description:
+      "Generate image(s) using tools.image_gen.model. Optionally include reference image URLs for edits or variations.",
+    parameters: Type.Object({
+      prompt: Type.String({
+        description: "Text description of the image to generate.",
+      }),
+      image_urls: Type.Optional(
+        Type.Array(Type.String({ format: "uri" }), {
+          description: "Optional list of reference image URLs to include.",
+        }),
+      ),
+    }),
+    execute: async (_toolCallId, params: GenerateImageInput) => {
+      const output = await executors.generateImage(params);
+      return {
+        content: [
+          { type: "text", text: output.summaryText },
+          ...output.images.map((image) => ({
+            type: "image" as const,
+            data: image.data,
+            mimeType: image.mimeType,
+          })),
+        ],
+        details: {
+          kind: "generate_image",
+          count: output.images.length,
+          artifactUrls: output.images.map((image) => image.artifactUrl),
+        },
+      };
+    },
+  };
+}
+
+export function createOracleTool(executors: Pick<BaselineToolExecutors, "oracle">): AgentTool<any> {
+  return {
+    name: "oracle",
+    label: "Oracle",
+    description:
+      "Consult the oracle model for deeper analysis or creative problem-solving guidance.",
+    parameters: Type.Object({
+      query: Type.String({
+        description: "The question or task for the oracle.",
+      }),
+    }),
+    execute: async (_toolCallId, params: OracleInput) => {
+      const output = await executors.oracle(params);
+      return {
+        content: [{ type: "text", text: output }],
+        details: {
+          kind: "oracle",
+          query: params.query,
         },
       };
     },

@@ -4,6 +4,8 @@ import {
   createBaselineAgentTools,
   createEditArtifactTool,
   createExecuteCodeTool,
+  createGenerateImageTool,
+  createOracleTool,
   createProgressReportTool,
   createShareArtifactTool,
   createVisitWebpageTool,
@@ -19,6 +21,8 @@ describe("baseline agent tools", () => {
         executeCode: async () => "",
         shareArtifact: async () => "",
         editArtifact: async () => "",
+        generateImage: async () => ({ summaryText: "", images: [] }),
+        oracle: async () => "",
       },
     });
 
@@ -28,6 +32,8 @@ describe("baseline agent tools", () => {
       "execute_code",
       "share_artifact",
       "edit_artifact",
+      "generate_image",
+      "oracle",
       "progress_report",
       "make_plan",
       "final_answer",
@@ -113,5 +119,46 @@ describe("baseline agent tools", () => {
       type: "text",
       text: "Artifact edited successfully. New version: https://example.com/?next.py",
     });
+  });
+
+  it("generate_image tool delegates to configured executor and returns text + image blocks", async () => {
+    const generateImage = vi.fn(async () => ({
+      summaryText: "Generated image: https://example.com/artifacts/?img.png",
+      images: [
+        {
+          data: "aW1n",
+          mimeType: "image/png",
+          artifactUrl: "https://example.com/artifacts/?img.png",
+        },
+      ],
+    }));
+    const tool = createGenerateImageTool({ generateImage });
+
+    const params = {
+      prompt: "Draw a cat",
+      image_urls: ["https://example.com/ref.png"],
+    };
+
+    const result = await tool.execute("call-7", params, undefined, undefined);
+
+    expect(generateImage).toHaveBeenCalledWith(params);
+    expect(result.content).toEqual([
+      { type: "text", text: "Generated image: https://example.com/artifacts/?img.png" },
+      { type: "image", data: "aW1n", mimeType: "image/png" },
+    ]);
+  });
+
+  it("oracle tool delegates to configured executor", async () => {
+    const oracle = vi.fn(async () => "Deep oracle answer");
+    const tool = createOracleTool({ oracle });
+
+    const params = {
+      query: "How should I structure this migration?",
+    };
+
+    const result = await tool.execute("call-8", params, undefined, undefined);
+
+    expect(oracle).toHaveBeenCalledWith(params);
+    expect(result.content[0]).toEqual({ type: "text", text: "Deep oracle answer" });
   });
 });

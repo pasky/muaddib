@@ -224,6 +224,10 @@ function createRoomCommandHandler(
   const actorConfig = asRecord(runtimeConfig?.actor);
   const toolsConfig = asRecord(runtimeConfig?.tools);
   const artifactsConfig = asRecord(toolsConfig?.artifacts);
+  const oracleConfig = asRecord(toolsConfig?.oracle);
+  const imageGenConfig = asRecord(toolsConfig?.image_gen);
+  const providersConfig = asRecord(runtimeConfig?.providers);
+  const openRouterProviderConfig = asRecord(providersConfig?.openrouter);
 
   const maxIterations = numberOrUndefined(actorConfig?.max_iterations);
   const maxCompletionRetries = numberOrUndefined(actorConfig?.max_completion_retries);
@@ -233,6 +237,10 @@ function createRoomCommandHandler(
     ? resolveMuaddibPath(artifactsPathRaw, join(getMuaddibHome(), "artifacts"))
     : undefined;
   const artifactsUrl = stringOrUndefined(artifactsConfig?.url);
+  const oracleModel = stringOrUndefined(oracleConfig?.model);
+  const oraclePrompt = stringOrUndefined(oracleConfig?.prompt);
+  const imageGenModel = stringOrUndefined(imageGenConfig?.model);
+  const openRouterBaseUrl = stringOrUndefined(openRouterProviderConfig?.base_url);
 
   return new RoomCommandHandlerTs({
     roomConfig,
@@ -248,6 +256,11 @@ function createRoomCommandHandler(
       jinaApiKey,
       artifactsPath,
       artifactsUrl,
+      getApiKey,
+      oracleModel,
+      oraclePrompt,
+      imageGenModel,
+      openRouterBaseUrl,
     },
   });
 }

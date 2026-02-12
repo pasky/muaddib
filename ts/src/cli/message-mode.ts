@@ -47,6 +47,10 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
   const actorConfig = asRecord(config.actor);
   const toolsConfig = asRecord(config.tools);
   const artifactsConfig = asRecord(toolsConfig?.artifacts);
+  const oracleConfig = asRecord(toolsConfig?.oracle);
+  const imageGenConfig = asRecord(toolsConfig?.image_gen);
+  const providersConfig = asRecord(config.providers);
+  const openRouterProviderConfig = asRecord(providersConfig?.openrouter);
   const getApiKey = createConfigApiKeyResolver(config);
 
   const maxIterations = numberOrUndefined(actorConfig?.max_iterations);
@@ -57,6 +61,10 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
     ? resolveMuaddibPath(artifactsPathRaw, join(getMuaddibHome(), "artifacts"))
     : undefined;
   const artifactsUrl = stringOrUndefined(artifactsConfig?.url);
+  const oracleModel = stringOrUndefined(oracleConfig?.model);
+  const oraclePrompt = stringOrUndefined(oracleConfig?.prompt);
+  const imageGenModel = stringOrUndefined(imageGenConfig?.model);
+  const openRouterBaseUrl = stringOrUndefined(openRouterProviderConfig?.base_url);
 
   if (!commandConfig) {
     throw new Error(`Room '${roomName}' does not define command config.`);
@@ -97,6 +105,11 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
       jinaApiKey,
       artifactsPath,
       artifactsUrl,
+      getApiKey,
+      oracleModel,
+      oraclePrompt,
+      imageGenModel,
+      openRouterBaseUrl,
     },
   });
 
