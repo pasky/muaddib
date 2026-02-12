@@ -49,6 +49,8 @@ export interface ModeClassifierConfig {
 
 export interface CommandConfig {
   history_size: number;
+  rate_limit?: number;
+  rate_period?: number;
   default_mode?: string;
   channel_modes?: Record<string, string>;
   ignore_users?: string[];

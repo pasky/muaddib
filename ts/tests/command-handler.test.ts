@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { RoomCommandHandlerTs } from "../src/rooms/command/command-handler.js";
@@ -149,6 +149,49 @@ describe("RoomCommandHandlerTs", () => {
 
     expect(result.response).toContain("default is");
     expect(result.resolved.helpRequested).toBe(true);
+
+    await history.close();
+  });
+
+  it("returns rate-limit warning and skips runner when limiter denies request", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const incoming = makeMessage("!s should be rate limited");
+    const sent: string[] = [];
+
+    const handler = new RoomCommandHandlerTs({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      rateLimiter: {
+        checkLimit: vi.fn().mockReturnValue(false),
+      },
+      runnerFactory: () => {
+        throw new Error("runner should not be called when rate-limited");
+      },
+    });
+
+    const result = await handler.handleIncomingMessage(incoming, {
+      isDirect: true,
+      sendResponse: async (text) => {
+        sent.push(text);
+      },
+    });
+
+    expect(result?.response).toContain("rate limiting");
+    expect(result?.model).toBeNull();
+    expect(result?.usage).toBeNull();
+    expect(sent).toEqual(["alice: Slow down a little, will you? (rate limiting)"]);
+
+    const rows = await history.getFullHistory("libera", "#test");
+    expect(rows).toHaveLength(2);
+    expect(rows[0].role).toBe("user");
+    expect(rows[1].role).toBe("assistant");
+    expect(rows[1].message).toContain("rate limiting");
+
+    const llmCalls = await history.getLlmCalls();
+    expect(llmCalls).toHaveLength(0);
 
     await history.close();
   });

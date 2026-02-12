@@ -15,6 +15,13 @@ The intent is to separate:
 1. **Intentional divergences** (explicitly deferred / fail-fast policy), vs
 2. **Accidental parity gaps** (missing TS behavior that Python currently has).
 
+### Progress log (parity-fix execution)
+
+- 2026-02-12 (cluster: command-path foundation / rate limiting):
+  - Implemented TS command rate limiting with parity warning text (`Slow down a little, will you? (rate limiting)`).
+  - Added TS test coverage proving limiter-denied requests skip runner execution and still persist user+assistant history rows.
+  - Remaining in this priority lane: command debounce/followup merge and steering/session queue compaction semantics.
+
 ---
 
 ## 1) Feature matrix
@@ -28,7 +35,7 @@ Legend: ✅ implemented, ◐ partial, ❌ missing, ⚠ intentional deferred
 | Prefix parsing (`!mode`, `!c`, `@model`, `!h`) | ✅ | ✅ | `muaddib/rooms/resolver.py::parse_prefix`, `ts/src/rooms/command/resolver.ts::parsePrefix` |
 | Channel policy resolution (`classifier`, constrained classifier, forced trigger) | ✅ | ✅ | `resolve()` in both resolvers |
 | LLM classifier with fallback label | ✅ | ✅ | `muaddib/rooms/command.py::classify_mode`, `ts/src/rooms/command/classifier.ts::createModeClassifier` |
-| Command rate limiting + warning reply | ✅ | ❌ | Python `_handle_command_core`; no TS equivalent |
+| Command rate limiting + warning reply | ✅ | ✅ | Python `_handle_command_core`, TS `ts/src/rooms/command/command-handler.ts::execute` + `rate-limiter.ts` |
 | Command debounce / followup coalescing | ✅ | ❌ | Python `_handle_command_core` uses `command.debounce` + `get_recent_messages_since` |
 | Steering queue/session compaction | ✅ | ❌ | Python `SteeringQueue` + `_run_or_queue_command`; TS has no queue model |
 | Context reduction integration | ✅ | ❌ | Python `MuaddibAgent.run_actor` + `ContextReducer`; TS command path has no reducer |
@@ -124,7 +131,7 @@ Legend: ✅ implemented, ◐ partial, ❌ missing, ⚠ intentional deferred
 | Gap | Severity | User/operator impact | Evidence |
 |---|---:|---|---|
 | TS command path lacks steering queue/session compaction | P1 | Concurrent/followup command steering behavior differs; can drop conversational steering semantics tested in Python. | `muaddib/rooms/command.py::_run_or_queue_command`, `muaddib/rooms/steering_queue.py` vs missing in `ts/src/rooms/command/command-handler.ts` |
-| No command rate limiting in TS | P1 | Burst traffic can spike provider load/cost and increase 429 pressure. | Python `_handle_command_core` uses `RateLimiter`; TS command handler has no limiter |
+| Command rate limiting in TS | ✅ closed (2026-02-12) | Burst traffic guard restored with user-facing warning response and no runner execution when denied. | Python `_handle_command_core` uses `RateLimiter`; TS now mirrors via `ts/src/rooms/command/command-handler.ts` + `ts/src/rooms/command/rate-limiter.ts` |
 | No command debounce/followup merge in TS | P2 | Split/rapid user inputs are not merged, reducing response quality and increasing call count. | Python `_handle_command_core` debounce path |
 | Agent loop is single-turn + baseline tools only in TS | P0 | Major functional loss for tool-using tasks (search/web/code/artifacts/oracle), weaker response correctness for complex prompts. | Python `AgenticLLMActor.run_agent` + `agentic_actor/tools.py::TOOLS`; TS `MuaddibAgentRunner.runSingleTurn`, `baseline-tools.ts` |
 | No refusal fallback model behavior in TS app path | P1 | Safety refusal recovery behavior differs; higher user-visible refusal rate in certain prompts. | Python `providers/__init__.py::ModelRouter.call_raw_with_model` |
@@ -177,11 +184,11 @@ Legend: ✅ implemented, ◐ partial, ❌ missing, ⚠ intentional deferred
 ## Phase 0 — reliability guardrails (first)
 
 1. **Add Discord/Slack reconnect supervision in monitors** (retry loop with bounded backoff, no silent exit on transient disconnect).
-2. **Add command rate limiting parity** in `RoomCommandHandlerTs` (`rate_limit`, `rate_period`) with user-facing warning response.
+2. ✅ **Add command rate limiting parity** in `RoomCommandHandlerTs` (`rate_limit`, `rate_period`) with user-facing warning response. *(Completed 2026-02-12)*
 
 Tests (red/green):
 - Extend `ts/tests/discord-monitor.test.ts` + `ts/tests/slack-monitor.test.ts` with reconnect-after-null scenarios.
-- Extend `ts/tests/command-handler.test.ts` with rate-limit deny path and persisted warning behavior.
+- ✅ Extended `ts/tests/command-handler.test.ts` with rate-limit deny path and persisted warning behavior.
 
 ## Phase 1 — command-path behavioral parity
 

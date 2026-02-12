@@ -10,6 +10,7 @@ import {
 import { createBaselineAgentTools } from "../../agent/tools/baseline-tools.js";
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { parseModelSpec } from "../../models/model-spec.js";
+import { RateLimiter } from "./rate-limiter.js";
 import type { RoomMessage } from "../message.js";
 import {
   CommandResolver,
@@ -37,11 +38,16 @@ export interface CommandRunnerFactoryInput {
 
 export type CommandRunnerFactory = (input: CommandRunnerFactoryInput) => CommandRunner;
 
+export interface CommandRateLimiter {
+  checkLimit(): boolean;
+}
+
 export interface CommandHandlerOptions {
   roomConfig: CommandHandlerRoomConfig;
   history: ChatHistoryStore;
   classifyMode: (context: Array<{ role: string; content: string }>) => Promise<string>;
   runnerFactory?: CommandRunnerFactory;
+  rateLimiter?: CommandRateLimiter;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   responseCleaner?: (text: string, nick: string) => string;
   helpToken?: string;
@@ -68,6 +74,7 @@ export class RoomCommandHandlerTs {
   readonly resolver: CommandResolver;
   private readonly commandConfig: CommandConfig;
   private readonly runnerFactory: CommandRunnerFactory;
+  private readonly rateLimiter: CommandRateLimiter;
 
   constructor(private readonly options: CommandHandlerOptions) {
     this.commandConfig = options.roomConfig.command;
@@ -89,6 +96,13 @@ export class RoomCommandHandlerTs {
           tools: input.tools,
           getApiKey: options.getApiKey,
         } as MuaddibAgentRunnerOptions));
+
+    this.rateLimiter =
+      options.rateLimiter ??
+      new RateLimiter(
+        numberWithDefault(this.commandConfig.rate_limit, 30),
+        numberWithDefault(this.commandConfig.rate_period, 900),
+      );
   }
 
   shouldIgnoreUser(nick: string): boolean {
@@ -155,6 +169,10 @@ export class RoomCommandHandlerTs {
       defaultSize,
       ...Object.values(this.commandConfig.modes).map((mode) => Number(mode.history_size ?? 0)),
     );
+
+    if (!this.rateLimiter.checkLimit()) {
+      return this.rateLimitedResult(message);
+    }
 
     const context = await this.options.history.getContextForMessage(message, maxSize);
 
@@ -272,6 +290,25 @@ export class RoomCommandHandlerTs {
     return promptTemplate.replace(/\{([A-Za-z0-9_]+)\}/g, (full, key: string) => vars[key] ?? full);
   }
 
+  private rateLimitedResult(message: RoomMessage): CommandExecutionResult {
+    return {
+      response: `${message.nick}: Slow down a little, will you? (rate limiting)`,
+      resolved: {
+        noContext: false,
+        queryText: message.content,
+        modelOverride: null,
+        selectedLabel: null,
+        selectedTrigger: null,
+        modeKey: null,
+        runtime: null,
+        helpRequested: false,
+        selectedAutomatically: false,
+      },
+      model: null,
+      usage: null,
+    };
+  }
+
   private cleanResponseText(text: string, nick: string): string {
     const cleaned = text.trim();
     if (!this.options.responseCleaner) {
@@ -292,6 +329,14 @@ export class RoomCommandHandlerTs {
     const allowed = new Set(allowedTools);
     return baseline.filter((tool) => allowed.has(tool.name));
   }
+}
+
+function numberWithDefault(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return parsed;
 }
 
 function modelStrCore(model: unknown): string {
