@@ -25,6 +25,12 @@ The intent is to separate:
   - Added TS history-store support for `getRecentMessagesSince(...)` with thread-aware filtering.
   - Added TS tests for debounce merge prompt behavior and thread-aware followup history retrieval.
   - Remaining in this priority lane: steering/session queue compaction semantics.
+- 2026-02-12 (cluster: steering/session queue compaction parity):
+  - Implemented TS steering queue state machine in `ts/src/rooms/command/steering-queue.ts` (followup collapse, thread-scoped steering keys, passive compaction policy).
+  - Integrated queue/bypass handling into `RoomCommandHandlerTs.handleIncomingMessage` with queued command runner/session flow.
+  - Added steering-context injection for queued followups into command execution context.
+  - Extended `ts/tests/command-handler.test.ts` with followup collapse, thread-shared steering, and passive compaction scenarios.
+  - Next remaining accidental gap after this cluster: agent loop is still single-turn with baseline tools only.
 
 ---
 
@@ -41,7 +47,7 @@ Legend: ✅ implemented, ◐ partial, ❌ missing, ⚠ intentional deferred
 | LLM classifier with fallback label | ✅ | ✅ | `muaddib/rooms/command.py::classify_mode`, `ts/src/rooms/command/classifier.ts::createModeClassifier` |
 | Command rate limiting + warning reply | ✅ | ✅ | Python `_handle_command_core`, TS `ts/src/rooms/command/command-handler.ts::execute` + `rate-limiter.ts` |
 | Command debounce / followup coalescing | ✅ | ✅ | Python `_handle_command_core` + `history.get_recent_messages_since`; TS `command-handler.ts::collectDebouncedFollowups` + `chat-history-store.ts::getRecentMessagesSince` |
-| Steering queue/session compaction | ✅ | ❌ | Python `SteeringQueue` + `_run_or_queue_command`; TS has no queue model |
+| Steering queue/session compaction | ✅ | ✅ | Python `SteeringQueue` + `_run_or_queue_command`; TS `steering-queue.ts` + queued runner integration in `command-handler.ts` |
 | Context reduction integration | ✅ | ❌ | Python `MuaddibAgent.run_actor` + `ContextReducer`; TS command path has no reducer |
 | Response length policy (artifact fallback) | ✅ | ❌ | Python `_run_actor` + `_long_response_to_artifact`; TS command path lacks response_max_bytes/artifact conversion |
 | Cost follow-up/operator cost milestones | ✅ | ❌ | Python `_route_command`; TS does not emit cost followups |
@@ -132,9 +138,11 @@ Legend: ✅ implemented, ◐ partial, ❌ missing, ⚠ intentional deferred
 
 ### Accidental / not-yet-implemented parity gaps
 
+Next priority gap after the steering/session queue cluster: **agent loop is still single-turn with baseline tools only** (P0).
+
 | Gap | Severity | User/operator impact | Evidence |
 |---|---:|---|---|
-| TS command path lacks steering queue/session compaction | P1 | Concurrent/followup command steering behavior differs; can drop conversational steering semantics tested in Python. | `muaddib/rooms/command.py::_run_or_queue_command`, `muaddib/rooms/steering_queue.py` vs missing in `ts/src/rooms/command/command-handler.ts` |
+| Steering/session queue compaction in TS command path | ✅ closed (2026-02-12) | Followup command collapse, thread-shared steering context, and passive compaction semantics are now mirrored in TS command flow. | Python `_run_or_queue_command`/`SteeringQueue`; TS `ts/src/rooms/command/steering-queue.ts` + `ts/src/rooms/command/command-handler.ts` + `ts/tests/command-handler.test.ts` |
 | Command rate limiting in TS | ✅ closed (2026-02-12) | Burst traffic guard restored with user-facing warning response and no runner execution when denied. | Python `_handle_command_core` uses `RateLimiter`; TS now mirrors via `ts/src/rooms/command/command-handler.ts` + `ts/src/rooms/command/rate-limiter.ts` |
 | Command debounce/followup merge in TS | ✅ closed (2026-02-12) | Split/rapid user inputs are now coalesced via `command.debounce` + followup merge in TS command execution. | Python `_handle_command_core` debounce path; TS `command-handler.ts::collectDebouncedFollowups` |
 | Agent loop is single-turn + baseline tools only in TS | P0 | Major functional loss for tool-using tasks (search/web/code/artifacts/oracle), weaker response correctness for complex prompts. | Python `AgenticLLMActor.run_agent` + `agentic_actor/tools.py::TOOLS`; TS `MuaddibAgentRunner.runSingleTurn`, `baseline-tools.ts` |
@@ -196,7 +204,7 @@ Tests (red/green):
 
 ## Phase 1 — command-path behavioral parity
 
-3. **Implement TS steering queue/session model** equivalent to Python (`SteeringQueue` semantics, thread-sharing, compaction policy).
+3. ✅ **Implement TS steering queue/session model** equivalent to Python (`SteeringQueue` semantics, thread-sharing, compaction policy). *(Completed 2026-02-12)*
 4. ✅ **Implement command debounce/followup merge** (`command.debounce` + recent messages merge). *(Completed 2026-02-12)*
 
 Tests (red/green):

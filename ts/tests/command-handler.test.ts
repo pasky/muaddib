@@ -52,6 +52,53 @@ function makeMessage(content: string): RoomMessage {
   };
 }
 
+function makeRunnerResult(text: string) {
+  return {
+    assistantMessage: {
+      role: "assistant" as const,
+      content: [{ type: "text" as const, text }],
+      api: "openai-completions",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      usage: {
+        input: 1,
+        output: 1,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 2,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "stop" as const,
+      timestamp: Date.now(),
+    },
+    text,
+    stopReason: "stop" as const,
+    usage: {
+      input: 1,
+      output: 1,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 2,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+  };
+}
+
+function createDeferred<T>() {
+  let resolve: ((value: T | PromiseLike<T>) => void) | undefined;
+  let reject: ((reason?: unknown) => void) | undefined;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+
+  return {
+    promise,
+    resolve: resolve ?? (() => {}),
+    reject: reject ?? (() => {}),
+  };
+}
+
 describe("RoomCommandHandlerTs", () => {
   it("routes command to runner without duplicating trigger message and propagates reasoning level", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
@@ -343,6 +390,255 @@ describe("RoomCommandHandlerTs", () => {
     expect(llmCalls[0].model).toBe("gpt-4o-mini");
     expect(llmCalls[0].triggerMessageId).toBeGreaterThan(0);
     expect(llmCalls[0].responseMessageId).toBeGreaterThan(0);
+
+    await history.close();
+  });
+
+  it("collapses queued followup commands into one followup runner turn", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const firstStarted = createDeferred<void>();
+    const releaseFirst = createDeferred<void>();
+
+    let runCount = 0;
+    const prompts: string[] = [];
+    const runnerContextContents: string[][] = [];
+    const sent: string[] = [];
+
+    const handler = new RoomCommandHandlerTs({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: () => ({
+        runSingleTurn: async (prompt, options) => {
+          runCount += 1;
+          prompts.push(prompt);
+          runnerContextContents.push((options?.contextMessages ?? []).map((entry) => entry.content));
+
+          if (runCount === 1) {
+            firstStarted.resolve();
+            await releaseFirst.promise;
+            return makeRunnerResult("first response");
+          }
+
+          return makeRunnerResult("second response");
+        },
+      }),
+    });
+
+    const t1 = handler.handleIncomingMessage(makeMessage("!s first"), {
+      isDirect: true,
+      sendResponse: async (text) => {
+        sent.push(text);
+      },
+    });
+
+    await firstStarted.promise;
+
+    const t2 = handler.handleIncomingMessage(makeMessage("!s second"), {
+      isDirect: true,
+      sendResponse: async (text) => {
+        sent.push(text);
+      },
+    });
+    const t3 = handler.handleIncomingMessage(makeMessage("!s third"), {
+      isDirect: true,
+      sendResponse: async (text) => {
+        sent.push(text);
+      },
+    });
+
+    releaseFirst.resolve();
+
+    const [result1, result2, result3] = await Promise.all([t1, t2, t3]);
+
+    expect(runCount).toBe(2);
+    expect(prompts).toEqual(["first", "second"]);
+    expect(runnerContextContents[1]).toContain("<alice> !s third");
+    expect(sent).toEqual(["first response", "second response"]);
+
+    expect(result1?.response).toBe("first response");
+    expect(result2?.response).toBe("second response");
+    expect(result3).toBeNull();
+
+    await history.close();
+  });
+
+  it("shares steering queue context across users in the same thread", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const firstStarted = createDeferred<void>();
+    const releaseFirst = createDeferred<void>();
+
+    let runCount = 0;
+    const prompts: string[] = [];
+    const runnerContextContents: string[][] = [];
+    const sent: string[] = [];
+
+    const handler = new RoomCommandHandlerTs({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: () => ({
+        runSingleTurn: async (prompt, options) => {
+          runCount += 1;
+          prompts.push(prompt);
+          runnerContextContents.push((options?.contextMessages ?? []).map((entry) => entry.content));
+
+          if (runCount === 1) {
+            firstStarted.resolve();
+            await releaseFirst.promise;
+            return makeRunnerResult("first response");
+          }
+
+          return makeRunnerResult("second response");
+        },
+      }),
+    });
+
+    const t1 = handler.handleIncomingMessage(
+      {
+        ...makeMessage("!s first"),
+        threadId: "thread-1",
+      },
+      {
+        isDirect: true,
+        sendResponse: async (text) => {
+          sent.push(text);
+        },
+      },
+    );
+
+    await firstStarted.promise;
+
+    const t2 = handler.handleIncomingMessage(
+      {
+        ...makeMessage("!s second"),
+        nick: "bob",
+        threadId: "thread-1",
+      },
+      {
+        isDirect: true,
+        sendResponse: async (text) => {
+          sent.push(text);
+        },
+      },
+    );
+
+    const t3 = handler.handleIncomingMessage(
+      {
+        ...makeMessage("!s third"),
+        nick: "carol",
+        threadId: "thread-1",
+      },
+      {
+        isDirect: true,
+        sendResponse: async (text) => {
+          sent.push(text);
+        },
+      },
+    );
+
+    releaseFirst.resolve();
+
+    const [, result2, result3] = await Promise.all([t1, t2, t3]);
+
+    expect(runCount).toBe(2);
+    expect(prompts[0]).toBe("first");
+    expect(["second", "third"]).toContain(prompts[1]);
+
+    const collapsedPrompt = result2?.response ? "<carol> !s third" : "<bob> !s second";
+    expect(runnerContextContents[1]).toContain(collapsedPrompt);
+    expect(sent).toEqual(["first response", "second response"]);
+
+    expect(Boolean(result2?.response) || Boolean(result3?.response)).toBe(true);
+    expect([result2, result3].filter((result) => result === null)).toHaveLength(1);
+
+    await history.close();
+  });
+
+  it("compacts passives around queued commands and keeps only the tail passive for steering", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const firstStarted = createDeferred<void>();
+    const releaseFirst = createDeferred<void>();
+
+    let runCount = 0;
+    const prompts: string[] = [];
+    const runnerContextContents: string[][] = [];
+    const sent: string[] = [];
+
+    const handler = new RoomCommandHandlerTs({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: () => ({
+        runSingleTurn: async (prompt, options) => {
+          runCount += 1;
+          prompts.push(prompt);
+          runnerContextContents.push((options?.contextMessages ?? []).map((entry) => entry.content));
+
+          if (runCount === 1) {
+            firstStarted.resolve();
+            await releaseFirst.promise;
+            return makeRunnerResult("first response");
+          }
+
+          return makeRunnerResult("second response");
+        },
+      }),
+    });
+
+    const t1 = handler.handleIncomingMessage(makeMessage("!s first"), {
+      isDirect: true,
+      sendResponse: async (text) => {
+        sent.push(text);
+      },
+    });
+
+    await firstStarted.promise;
+
+    const p1 = handler.handleIncomingMessage(makeMessage("p1"), {
+      isDirect: false,
+    });
+    const p2 = handler.handleIncomingMessage(makeMessage("p2"), {
+      isDirect: false,
+    });
+    const c2 = handler.handleIncomingMessage(makeMessage("!s second"), {
+      isDirect: true,
+      sendResponse: async (text) => {
+        sent.push(text);
+      },
+    });
+    const p3 = handler.handleIncomingMessage(makeMessage("p3"), {
+      isDirect: false,
+    });
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 20);
+    });
+
+    releaseFirst.resolve();
+
+    const [passiveResult1, passiveResult2, commandResult2, passiveResult3] = await Promise.all([
+      p1,
+      p2,
+      c2,
+      p3,
+    ]);
+
+    expect(runCount).toBe(2);
+    expect(prompts).toEqual(["first", "second"]);
+    expect(runnerContextContents[1]).toContain("<alice> p3");
+    expect(sent).toEqual(["first response", "second response"]);
+
+    expect(passiveResult1).toBeNull();
+    expect(passiveResult2).toBeNull();
+    expect(commandResult2?.response).toBe("second response");
+    expect(passiveResult3).toBeNull();
 
     await history.close();
   });

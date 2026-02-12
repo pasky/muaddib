@@ -13,6 +13,11 @@ import { parseModelSpec } from "../../models/model-spec.js";
 import { RateLimiter } from "./rate-limiter.js";
 import type { RoomMessage } from "../message.js";
 import {
+  SteeringQueue,
+  type QueuedInboundMessage,
+  type SteeringKey,
+} from "./steering-queue.js";
+import {
   CommandResolver,
   type CommandConfig,
   type ResolvedCommand,
@@ -75,6 +80,7 @@ export class RoomCommandHandlerTs {
   private readonly commandConfig: CommandConfig;
   private readonly runnerFactory: CommandRunnerFactory;
   private readonly rateLimiter: CommandRateLimiter;
+  private readonly steeringQueue: SteeringQueue;
 
   constructor(private readonly options: CommandHandlerOptions) {
     this.commandConfig = options.roomConfig.command;
@@ -103,6 +109,7 @@ export class RoomCommandHandlerTs {
         numberWithDefault(this.commandConfig.rate_limit, 30),
         numberWithDefault(this.commandConfig.rate_period, 900),
       );
+    this.steeringQueue = new SteeringQueue();
   }
 
   shouldIgnoreUser(nick: string): boolean {
@@ -117,53 +124,30 @@ export class RoomCommandHandlerTs {
     const triggerMessageId = await this.options.history.addMessage(message);
 
     if (!options.isDirect) {
+      await this.handlePassiveMessage(message, options.sendResponse);
       return null;
     }
 
-    const result = await this.execute(message);
-    if (!result.response) {
-      return result;
-    }
-
-    let llmCallId: number | null = null;
-    if (result.model && result.usage) {
-      const spec = parseModelSpec(result.model);
-      llmCallId = await this.options.history.logLlmCall({
-        provider: spec.provider,
-        model: spec.modelId,
-        inputTokens: result.usage.input,
-        outputTokens: result.usage.output,
-        cost: result.usage.cost.total,
-        callType: "agent_run",
-        arcName: `${message.serverTag}#${message.channelName}`,
+    if (this.resolver.shouldBypassSteeringQueue(message)) {
+      return this.executeAndPersist(
+        message,
         triggerMessageId,
-      });
+        options.sendResponse,
+        SteeringQueue.keyForMessage(message),
+      );
     }
 
-    if (options.sendResponse) {
-      await options.sendResponse(result.response);
-    }
-
-    const responseMessageId = await this.options.history.addMessage(
-      {
-        ...message,
-        nick: message.mynick,
-        content: result.response,
-      },
-      {
-        mode: result.resolved.selectedTrigger ?? undefined,
-        llmCallId,
-      },
-    );
-
-    if (llmCallId) {
-      await this.options.history.updateLlmCallResponse(llmCallId, responseMessageId);
-    }
-
-    return result;
+    return this.runOrQueueCommand(message, triggerMessageId, options.sendResponse);
   }
 
   async execute(message: RoomMessage): Promise<CommandExecutionResult> {
+    return this.executeWithSteering(message, SteeringQueue.keyForMessage(message));
+  }
+
+  private async executeWithSteering(
+    message: RoomMessage,
+    steeringKey: SteeringKey,
+  ): Promise<CommandExecutionResult> {
     const defaultSize = this.commandConfig.history_size;
     const maxSize = Math.max(
       defaultSize,
@@ -235,13 +219,21 @@ export class RoomCommandHandlerTs {
       };
     }
 
+    const steeringMessages =
+      resolvedWithFollowups.runtime.steering && !resolvedWithFollowups.noContext
+        ? this.steeringQueue.drainSteeringContextMessages(steeringKey)
+        : [];
+
     const selectedContext = (resolvedWithFollowups.noContext ? context.slice(-1) : context).slice(
       -resolvedWithFollowups.runtime.historySize,
     );
 
     // The trigger message will be sent as the new prompt for this turn.
-    // Keep only prior context here to avoid sending the trigger twice.
-    const runnerContext = selectedContext.slice(0, -1).map(toRunnerContextMessage);
+    // Keep only prior context from history here to avoid sending the trigger twice.
+    const runnerContext = [
+      ...selectedContext.slice(0, -1),
+      ...steeringMessages,
+    ].map(toRunnerContextMessage);
 
     const systemPrompt = this.buildSystemPrompt(
       resolvedWithFollowups.modeKey,
@@ -269,6 +261,140 @@ export class RoomCommandHandlerTs {
       model: modelSpec,
       usage: agentResult.usage,
     };
+  }
+
+  private async executeAndPersist(
+    message: RoomMessage,
+    triggerMessageId: number,
+    sendResponse: ((text: string) => Promise<void>) | undefined,
+    steeringKey: SteeringKey,
+  ): Promise<CommandExecutionResult> {
+    const result = await this.executeWithSteering(message, steeringKey);
+    await this.persistExecutionResult(message, triggerMessageId, result, sendResponse);
+    return result;
+  }
+
+  private async persistExecutionResult(
+    message: RoomMessage,
+    triggerMessageId: number,
+    result: CommandExecutionResult,
+    sendResponse: ((text: string) => Promise<void>) | undefined,
+  ): Promise<void> {
+    if (!result.response) {
+      return;
+    }
+
+    let llmCallId: number | null = null;
+    if (result.model && result.usage) {
+      const spec = parseModelSpec(result.model);
+      llmCallId = await this.options.history.logLlmCall({
+        provider: spec.provider,
+        model: spec.modelId,
+        inputTokens: result.usage.input,
+        outputTokens: result.usage.output,
+        cost: result.usage.cost.total,
+        callType: "agent_run",
+        arcName: `${message.serverTag}#${message.channelName}`,
+        triggerMessageId,
+      });
+    }
+
+    if (sendResponse) {
+      await sendResponse(result.response);
+    }
+
+    const responseMessageId = await this.options.history.addMessage(
+      {
+        ...message,
+        nick: message.mynick,
+        content: result.response,
+      },
+      {
+        mode: result.resolved.selectedTrigger ?? undefined,
+        llmCallId,
+      },
+    );
+
+    if (llmCallId) {
+      await this.options.history.updateLlmCallResponse(llmCallId, responseMessageId);
+    }
+  }
+
+  private async runOrQueueCommand(
+    message: RoomMessage,
+    triggerMessageId: number,
+    sendResponse: ((text: string) => Promise<void>) | undefined,
+  ): Promise<CommandExecutionResult | null> {
+    const {
+      isRunner,
+      steeringKey,
+      item: runnerItem,
+    } = this.steeringQueue.enqueueCommandOrStartRunner(message, triggerMessageId, sendResponse);
+
+    if (!isRunner) {
+      await runnerItem.completion;
+      return (runnerItem.result as CommandExecutionResult | null) ?? null;
+    }
+
+    let activeItem: QueuedInboundMessage | null = runnerItem;
+
+    try {
+      while (activeItem) {
+        if (activeItem.kind === "command") {
+          if (activeItem.triggerMessageId === null) {
+            throw new Error("Queued command item is missing trigger message id.");
+          }
+
+          activeItem.result = await this.executeAndPersist(
+            activeItem.message,
+            activeItem.triggerMessageId,
+            activeItem.sendResponse,
+            steeringKey,
+          );
+        } else {
+          await this.handlePassiveMessageCore(activeItem.message, activeItem.sendResponse);
+          activeItem.result = null;
+        }
+
+        this.steeringQueue.finishItem(activeItem);
+
+        const { dropped, nextItem } = this.steeringQueue.takeNextWorkCompacted(steeringKey);
+        for (const droppedItem of dropped) {
+          droppedItem.result = null;
+          this.steeringQueue.finishItem(droppedItem);
+        }
+
+        activeItem = nextItem;
+      }
+    } catch (error) {
+      this.steeringQueue.abortSession(steeringKey, error);
+      if (activeItem) {
+        this.steeringQueue.failItem(activeItem, error);
+      }
+      throw error;
+    }
+
+    return (runnerItem.result as CommandExecutionResult | null) ?? null;
+  }
+
+  private async handlePassiveMessage(
+    message: RoomMessage,
+    sendResponse: ((text: string) => Promise<void>) | undefined,
+  ): Promise<void> {
+    const queuedItem = this.steeringQueue.enqueuePassiveIfSessionExists(message, sendResponse);
+    if (!queuedItem) {
+      await this.handlePassiveMessageCore(message, sendResponse);
+      return;
+    }
+
+    await queuedItem.completion;
+  }
+
+  private async handlePassiveMessageCore(
+    _message: RoomMessage,
+    _sendResponse: ((text: string) => Promise<void>) | undefined,
+  ): Promise<void> {
+    // Proactive/chronicling passive handling stays out of scope in TS parity v1.
   }
 
   buildSystemPrompt(mode: string, mynick: string, modelOverride?: string): string {

@@ -12,7 +12,8 @@ Historical milestone-by-milestone notes were intentionally removed; use git hist
 Latest update:
 - 2026-02-12: Switched TS parity-fix stream validation to TS-only (`cd ts && npm run typecheck && npm test`) and started closing parity-audit backlog incrementally.
 - 2026-02-12: Added `docs/typescript-parity-audit.md` with a code-referenced Python-vs-TS matrix, severity-ranked gaps, architecture risks, and remediation plan.
-- 2026-02-12: Closed TS command debounce/followup merge parity gap (`command.debounce` + thread-aware followup coalescing in command path); next command-path gap is steering/session queue compaction semantics.
+- 2026-02-12: Closed TS command debounce/followup merge parity gap (`command.debounce` + thread-aware followup coalescing in command path).
+- 2026-02-12: Closed TS steering/session queue compaction parity gap (`steering-queue.ts` + queued command/session integration in `RoomCommandHandlerTs` + queue scenario tests). Next priority accidental gap: agent loop/tooling parity (TS still single-turn with baseline tools only).
 
 ---
 
@@ -150,18 +151,22 @@ Python rollback path must remain available until soak/parity/SLO gates are fully
 
 ## Remaining gaps / next parity work
 
-1. **OAuth/session credential refresh support**
+1. **Agent loop/tooling parity (highest accidental gap)**
+   - TS command execution still uses single-turn runner + baseline tool surface.
+   - Next parity cluster should implement multi-turn tool loop behavior and expand tool coverage toward Python core workflows.
+
+2. **OAuth/session credential refresh support**
    - Still deferred; blocked on stable upstream provider refresh contract.
 
-2. **Deferred Python-only runtime features**
+3. **Deferred Python-only runtime features**
    - chronicler automation,
    - quests,
    - proactive interjections.
 
-3. **Soak evidence completion**
+4. **Soak evidence completion**
    - Continue production parity/SLO evidence capture until all deprecation gates are green.
 
-4. **Final parity verification before Python removal**
+5. **Final parity verification before Python removal**
    - Confirm no unresolved functional/architectural gaps remain before deprecating rollback path.
 
 ---
@@ -170,4 +175,4 @@ Python rollback path must remain available until soak/parity/SLO gates are fully
 Use the authoritative parity audit as the execution backlog:
 - `docs/typescript-parity-audit.md`
 
-Immediate priority is closing accidental P0/P1 gaps from that audit before rollback-path deprecation decisions.
+Immediate priority is the next accidental P0 gap from that audit: multi-turn agent-loop/tooling parity beyond the current single-turn baseline.
