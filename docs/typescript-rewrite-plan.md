@@ -35,6 +35,12 @@ Latest update:
   - Added command-path persistence semantics for callback output as `[internal monologue] {message}` assistant history rows.
   - Added fail-fast validation for malformed/unsupported `tools.summary.model` in app + CLI paths.
   - Added/extended tests for callback invocation/non-invocation, error paths, and callback persistence assertions.
+- 2026-02-12: Closed chronicler/quest tool-surface parity slice in TS baseline/executor path:
+  - Baseline tools now include `chronicle_read`, `chronicle_append`, `quest_start`, `subquest_start`, `quest_snooze` (`ts/src/agent/tools/baseline-tools.ts`).
+  - Added executor wiring for chronicler/quest tools (`ts/src/agent/tools/core-executors.ts`) and per-message arc injection in command-path tool creation (`ts/src/rooms/command/command-handler.ts`).
+  - Extended `ChronicleStore` with relative chapter rendering used by `chronicle_read` (`ts/src/chronicle/chronicle-store.ts`).
+  - Preserved deferred-runtime guardrails: quest executors return explicit deferred-runtime rejection guidance in parity v1.
+  - Added/extended tests for baseline tool wiring, executor behavior, command allowed-tools filtering, runner persistence-summary behavior, and chronicle relative rendering (`ts/tests/baseline-tools.test.ts`, `ts/tests/core-executors.test.ts`, `ts/tests/command-handler.test.ts`, `ts/tests/muaddib-agent-runner.test.ts`, `ts/tests/storage.test.ts`).
 
 ---
 
@@ -172,9 +178,9 @@ Python rollback path must remain available until soak/parity/SLO gates are fully
 
 ## Remaining gaps / next parity work
 
-1. **Advanced tool-surface parity after core loop closure (current accidental gap)**
-   - TS now covers multi-turn tool loop semantics + core tools (`web_search`, `visit_webpage`, `execute_code`), artifact tools (`share_artifact`, `edit_artifact`), advanced tools (`oracle`, `generate_image`), command-path refusal-fallback behavior, and persistence-summary callback flow (`tools.summary.model`).
-   - Remaining parity work in this lane: chronicler/quest tool-surface follow-up.
+1. **Post-tooling parity follow-up gaps (current accidental backlog)**
+   - TS now covers multi-turn tool loop semantics + core tools (`web_search`, `visit_webpage`, `execute_code`), artifact tools (`share_artifact`, `edit_artifact`), advanced tools (`oracle`, `generate_image`), chronicler/quest tool-surface names, command-path refusal-fallback behavior, and persistence-summary callback flow (`tools.summary.model`).
+   - Remaining parity work in this lane now shifts to response-length artifact fallback (`response_max_bytes`) and transport-side attachment/secrets/reconnect parity items from the audit.
 
 2. **OAuth/session credential refresh support**
    - Still deferred; blocked on stable upstream provider refresh contract.
@@ -196,4 +202,4 @@ Python rollback path must remain available until soak/parity/SLO gates are fully
 Use the authoritative parity audit as the execution backlog:
 - `docs/typescript-parity-audit.md`
 
-Immediate priority from the parity audit is advancing beyond closed advanced-tool + refusal-fallback + persistence-summary parity into remaining chronicler/quest tool-surface gaps.
+Immediate priority from the parity audit is advancing beyond closed advanced-tool + refusal-fallback + persistence-summary + chronicler/quest tool-surface slices into response-length artifact fallback parity (`response_max_bytes`) and transport P1 gaps (attachments/secrets + reconnect supervision).

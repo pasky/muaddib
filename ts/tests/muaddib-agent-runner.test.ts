@@ -298,6 +298,97 @@ describe("MuaddibAgentRunner", () => {
     expect(persistenceCalls).toEqual(["Summary: Searched for muaddib references."]);
   });
 
+  it("treats chronicler/quest tool calls as persistent-summary inputs", async () => {
+    let streamCallIndex = 0;
+
+    const streamFn: StreamFn = async () => {
+      streamCallIndex += 1;
+
+      if (streamCallIndex === 1) {
+        return streamWithMessage(
+          makeAssistantMessage([
+            {
+              type: "toolCall",
+              id: "tool-chronicle",
+              name: "chronicle_read",
+              arguments: { relative_chapter_id: -1 },
+            },
+          ], "toolUse"),
+        );
+      }
+
+      if (streamCallIndex === 2) {
+        return streamWithMessage(
+          makeAssistantMessage([
+            {
+              type: "toolCall",
+              id: "tool-quest",
+              name: "quest_start",
+              arguments: {
+                id: "quest-1",
+                goal: "Close parity",
+                success_criteria: "done",
+              },
+            },
+          ], "toolUse"),
+        );
+      }
+
+      return streamWithMessage(makeAssistantMessage([{ type: "text", text: "done" }], "stop"));
+    };
+
+    const completeSimpleFn = vi.fn(async () =>
+      makeAssistantMessage([{ type: "text", text: "Summary with chronicler + quest tools" }], "stop"),
+    );
+
+    const runner = new MuaddibAgentRunner({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "summary test",
+      streamFn,
+      completeSimpleFn,
+      tools: [
+        {
+          name: "chronicle_read",
+          label: "Chronicle Read",
+          description: "read",
+          parameters: Type.Object({
+            relative_chapter_id: Type.Integer(),
+          }),
+          execute: async () => ({
+            content: [{ type: "text", text: "# Arc: test" }],
+            details: {},
+          }),
+        },
+        {
+          name: "quest_start",
+          label: "Quest Start",
+          description: "quest",
+          parameters: Type.Object({
+            id: Type.String(),
+            goal: Type.String(),
+            success_criteria: Type.String(),
+          }),
+          execute: async () => ({
+            content: [{ type: "text", text: "REJECTED: quests runtime is deferred" }],
+            details: {},
+          }),
+        },
+      ],
+    });
+
+    const summaries: string[] = [];
+    const result = await runner.runSingleTurn("do it", {
+      persistenceSummaryModel: "openai:gpt-4o-mini",
+      onPersistenceSummary: async (text) => {
+        summaries.push(text);
+      },
+    });
+
+    expect(result.text).toBe("done");
+    expect(completeSimpleFn).toHaveBeenCalledTimes(1);
+    expect(summaries).toEqual(["Summary with chronicler + quest tools"]);
+  });
+
   it("does not invoke persistence summary callback when no persistent tools were used", async () => {
     const completeSimpleFn = vi.fn();
     const onPersistenceSummary = vi.fn();

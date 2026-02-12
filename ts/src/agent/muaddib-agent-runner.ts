@@ -40,6 +40,11 @@ const TOOL_PERSISTENCE_POLICY: Readonly<Record<string, ToolPersistType | "none">
   edit_artifact: "artifact",
   generate_image: "artifact",
   oracle: "none",
+  chronicle_read: "summary",
+  chronicle_append: "summary",
+  quest_start: "summary",
+  subquest_start: "summary",
+  quest_snooze: "summary",
 };
 
 interface PersistentToolCall {

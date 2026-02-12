@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createDefaultToolExecutors } from "../src/agent/tools/core-executors.js";
+import { ChronicleStore } from "../src/chronicle/chronicle-store.js";
 
 const tempDirs: string[] = [];
 
@@ -209,6 +210,73 @@ describe("core tool executors artifact support", () => {
         new_string: "muaddib",
       }),
     ).rejects.toThrow("Path traversal detected in artifact URL");
+  });
+});
+
+describe("core tool executors chronicler/quest support", () => {
+  it("chronicle_read and chronicle_append operate when chronicle store context is provided", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "muaddib-ts-chronicle-"));
+    tempDirs.push(dir);
+
+    const chronicleStore = new ChronicleStore(join(dir, "chronicle.db"));
+    await chronicleStore.initialize();
+
+    const executors = createDefaultToolExecutors({
+      chronicleStore,
+      chronicleArc: "libera##test",
+    });
+
+    const appendResult = await executors.chronicleAppend({ text: "Noted." });
+    const readResult = await executors.chronicleRead({ relative_chapter_id: 0 });
+
+    expect(appendResult).toBe("OK");
+    expect(readResult).toContain("Arc: libera##test");
+    expect(readResult).toContain("Noted.");
+
+    await chronicleStore.close();
+  });
+
+  it("chronicle tools return deferred guidance when store context is missing", async () => {
+    const executors = createDefaultToolExecutors();
+
+    await expect(executors.chronicleRead({ relative_chapter_id: 0 })).resolves.toContain(
+      "deferred in the TypeScript runtime",
+    );
+    await expect(executors.chronicleAppend({ text: "memory" })).resolves.toContain(
+      "deferred in the TypeScript runtime",
+    );
+  });
+
+  it("quest tools return deferred-runtime rejection while validating input", async () => {
+    const executors = createDefaultToolExecutors();
+
+    await expect(
+      executors.questStart({
+        id: "quest-1",
+        goal: "Do a thing",
+        success_criteria: "Done",
+      }),
+    ).resolves.toContain("REJECTED");
+
+    await expect(
+      executors.subquestStart({
+        id: "sub-1",
+        goal: "Do sub thing",
+        success_criteria: "Done",
+      }),
+    ).resolves.toBe("Error: subquest_start requires an active quest context.");
+
+    await expect(executors.questSnooze({ until: "tomorrow" })).resolves.toBe(
+      "Error: quest_snooze requires an active quest context.",
+    );
+
+    await expect(
+      executors.questStart({
+        id: " ",
+        goal: "Do a thing",
+        success_criteria: "Done",
+      }),
+    ).rejects.toThrow("quest_start.id must be non-empty.");
   });
 });
 

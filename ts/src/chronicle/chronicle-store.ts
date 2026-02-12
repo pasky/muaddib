@@ -174,6 +174,47 @@ export class ChronicleStore {
     return lines.join("\n");
   }
 
+  async renderChapterRelative(arc: string, relativeChapterId: number, lastN?: number): Promise<string> {
+    if (!Number.isInteger(relativeChapterId)) {
+      throw new Error("relativeChapterId must be an integer.");
+    }
+
+    const resolvedChapter = await this.resolveChapterRelative(arc, relativeChapterId);
+    if (!resolvedChapter) {
+      return `# Arc: ${arc} — No chapters at relative offset ${relativeChapterId}\n\n(Empty)`;
+    }
+
+    const db = this.requireDb();
+    const rows = await db.all<Array<{ ts: string; content: string }>>(
+      "SELECT ts, content FROM paragraphs WHERE chapter_id = ? ORDER BY ts ASC",
+      resolvedChapter.id,
+    );
+
+    const selectedRows = lastN && lastN > 0 ? rows.slice(-lastN) : rows;
+
+    const relativeDesc =
+      relativeChapterId === 0
+        ? "current"
+        : `${Math.abs(relativeChapterId)} chapter${Math.abs(relativeChapterId) > 1 ? "s" : ""} ${relativeChapterId < 0 ? "back" : "forward"}`;
+
+    let title = `# Arc: ${arc} — Chapter ${resolvedChapter.id} (${relativeDesc}, opened ${resolvedChapter.openedAt.split(".")[0]})`;
+    if (resolvedChapter.closedAt) {
+      title += `, closed ${resolvedChapter.closedAt.split(".")[0]}`;
+    }
+
+    const lines = [title, "", "Paragraphs:"];
+    for (const row of selectedRows) {
+      const hhmm = row.ts.length >= 16 ? row.ts.slice(11, 16) : row.ts;
+      lines.push(`[${hhmm}] ${row.content}`);
+    }
+
+    if (selectedRows.length === 0) {
+      lines.push("(No paragraphs)");
+    }
+
+    return lines.join("\n");
+  }
+
   private async getOrCreateArc(arc: string): Promise<[number, boolean]> {
     const db = this.requireDb();
     const existing = await db.get<{ id: number }>("SELECT id FROM arcs WHERE name = ?", arc);
@@ -240,6 +281,61 @@ export class ChronicleStore {
       openedAt: String(row.opened_at),
       closedAt: row.closed_at,
       metaJson: row.meta_json,
+    };
+  }
+
+  private async resolveChapterRelative(arc: string, relativeChapterId: number): Promise<Chapter | null> {
+    const db = this.requireDb();
+    const [arcId] = await this.getOrCreateArc(arc);
+
+    const rows = await db.all<
+      Array<{
+        id: number;
+        arc_id: number;
+        opened_at: string;
+        closed_at: string | null;
+        meta_json: string | null;
+      }>
+    >(
+      `
+      SELECT id, arc_id, opened_at, closed_at, meta_json
+      FROM chapters
+      WHERE arc_id = ?
+      ORDER BY opened_at ASC
+      `,
+      arcId,
+    );
+
+    if (rows.length === 0) {
+      return null;
+    }
+
+    const open = await this.getOpenChapter(arcId);
+    const currentChapterId = open ? open.id : Number(rows[rows.length - 1].id);
+    const chapterIds = rows.map((row) => Number(row.id));
+    const currentIndex = chapterIds.indexOf(currentChapterId);
+
+    if (currentIndex < 0) {
+      return null;
+    }
+
+    const targetIndex = currentIndex + relativeChapterId;
+    if (targetIndex < 0 || targetIndex >= chapterIds.length) {
+      return null;
+    }
+
+    const targetChapterId = chapterIds[targetIndex];
+    const targetRow = rows.find((row) => Number(row.id) === targetChapterId);
+    if (!targetRow) {
+      return null;
+    }
+
+    return {
+      id: Number(targetRow.id),
+      arcId: Number(targetRow.arc_id),
+      openedAt: String(targetRow.opened_at),
+      closedAt: targetRow.closed_at,
+      metaJson: targetRow.meta_json,
     };
   }
 

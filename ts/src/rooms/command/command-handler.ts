@@ -271,7 +271,7 @@ export class RoomCommandHandlerTs {
       resolvedWithFollowups.modelOverride ?? undefined,
     );
 
-    const tools = this.selectTools(resolvedWithFollowups.runtime.allowedTools);
+    const tools = this.selectTools(message, resolvedWithFollowups.runtime.allowedTools);
 
     const persistenceSummaryCallback = this.options.persistenceSummaryModel
       ? async (text: string) => {
@@ -680,9 +680,10 @@ export class RoomCommandHandlerTs {
     return this.options.responseCleaner(cleaned, nick).trim();
   }
 
-  private selectTools(allowedTools: string[] | null): AgentTool<any>[] {
+  private selectTools(message: RoomMessage, allowedTools: string[] | null): AgentTool<any>[] {
     const baseline = createBaselineAgentTools({
       ...this.options.toolOptions,
+      chronicleArc: `${message.serverTag}#${message.channelName}`,
       onProgressReport: this.options.onProgressReport,
     });
 

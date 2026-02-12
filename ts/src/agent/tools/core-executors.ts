@@ -12,6 +12,7 @@ import {
   type UserMessage,
 } from "@mariozechner/pi-ai";
 
+import type { ChronicleStore } from "../../chronicle/chronicle-store.js";
 import { parseModelSpec } from "../../models/model-spec.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 
@@ -35,6 +36,30 @@ export interface OracleInput {
 export interface GenerateImageInput {
   prompt: string;
   image_urls?: string[];
+}
+
+export interface ChronicleReadInput {
+  relative_chapter_id: number;
+}
+
+export interface ChronicleAppendInput {
+  text: string;
+}
+
+export interface QuestStartInput {
+  id: string;
+  goal: string;
+  success_criteria: string;
+}
+
+export interface SubquestStartInput {
+  id: string;
+  goal: string;
+  success_criteria: string;
+}
+
+export interface QuestSnoozeInput {
+  until: string;
 }
 
 export interface GeneratedImageResultItem {
@@ -70,6 +95,11 @@ export interface BaselineToolExecutors {
   editArtifact: (input: EditArtifactInput) => Promise<string>;
   oracle: (input: OracleInput) => Promise<string>;
   generateImage: (input: GenerateImageInput) => Promise<GenerateImageResult>;
+  chronicleRead: (input: ChronicleReadInput) => Promise<string>;
+  chronicleAppend: (input: ChronicleAppendInput) => Promise<string>;
+  questStart: (input: QuestStartInput) => Promise<string>;
+  subquestStart: (input: SubquestStartInput) => Promise<string>;
+  questSnooze: (input: QuestSnoozeInput) => Promise<string>;
 }
 
 export interface DefaultToolExecutorOptions {
@@ -89,6 +119,9 @@ export interface DefaultToolExecutorOptions {
   imageGenModel?: string;
   openRouterBaseUrl?: string;
   imageGenTimeoutMs?: number;
+  chronicleStore?: ChronicleStore;
+  chronicleArc?: string;
+  currentQuestId?: string | null;
 }
 
 const DEFAULT_WEB_CONTENT_LIMIT = 40_000;
@@ -99,6 +132,8 @@ const DEFAULT_IMAGE_GEN_TIMEOUT_MS = 30_000;
 const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const DEFAULT_ORACLE_SYSTEM_PROMPT =
   "You are an oracle - a powerful reasoning entity consulted for complex analysis.";
+const DEFERRED_QUEST_TOOL_MESSAGE =
+  "REJECTED: quests runtime is deferred in the TypeScript runtime (parity v1).";
 const ARTIFACT_ID_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 const IMAGE_SUFFIX_BY_MIME_TYPE: Record<string, string> = {
   "image/png": ".png",
@@ -144,6 +179,11 @@ export function createDefaultToolExecutors(
     editArtifact: createDefaultEditArtifactExecutor(options),
     oracle: createDefaultOracleExecutor(options),
     generateImage: createDefaultGenerateImageExecutor(options),
+    chronicleRead: createDefaultChronicleReadExecutor(options),
+    chronicleAppend: createDefaultChronicleAppendExecutor(options),
+    questStart: createDefaultQuestStartExecutor(options),
+    subquestStart: createDefaultSubquestStartExecutor(options),
+    questSnooze: createDefaultQuestSnoozeExecutor(options),
   };
 }
 
@@ -486,6 +526,114 @@ function createDefaultGenerateImageExecutor(
       summaryText,
       images,
     };
+  };
+}
+
+function createDefaultChronicleReadExecutor(
+  options: DefaultToolExecutorOptions,
+): BaselineToolExecutors["chronicleRead"] {
+  return async (input: ChronicleReadInput): Promise<string> => {
+    if (!Number.isInteger(input.relative_chapter_id)) {
+      throw new Error("chronicle_read.relative_chapter_id must be an integer.");
+    }
+
+    const chronicleStore = options.chronicleStore;
+    const arc = toConfiguredString(options.chronicleArc);
+
+    if (!chronicleStore || !arc) {
+      return "Error: chronicle_read is unavailable because chronicler runtime is deferred in the TypeScript runtime.";
+    }
+
+    return await chronicleStore.renderChapterRelative(arc, input.relative_chapter_id);
+  };
+}
+
+function createDefaultChronicleAppendExecutor(
+  options: DefaultToolExecutorOptions,
+): BaselineToolExecutors["chronicleAppend"] {
+  return async (input: ChronicleAppendInput): Promise<string> => {
+    const text = input.text.trim();
+    if (!text) {
+      throw new Error("chronicle_append.text must be non-empty.");
+    }
+
+    const chronicleStore = options.chronicleStore;
+    const arc = toConfiguredString(options.chronicleArc);
+
+    if (!chronicleStore || !arc) {
+      return "Error: chronicle_append is unavailable because chronicler runtime is deferred in the TypeScript runtime.";
+    }
+
+    await chronicleStore.appendParagraph(arc, text);
+    return "OK";
+  };
+}
+
+function createDefaultQuestStartExecutor(
+  _options: DefaultToolExecutorOptions,
+): BaselineToolExecutors["questStart"] {
+  return async (input: QuestStartInput): Promise<string> => {
+    if (!toConfiguredString(input.id)) {
+      throw new Error("quest_start.id must be non-empty.");
+    }
+
+    if (!toConfiguredString(input.goal)) {
+      throw new Error("quest_start.goal must be non-empty.");
+    }
+
+    if (!toConfiguredString(input.success_criteria)) {
+      throw new Error("quest_start.success_criteria must be non-empty.");
+    }
+
+    return DEFERRED_QUEST_TOOL_MESSAGE;
+  };
+}
+
+function createDefaultSubquestStartExecutor(
+  options: DefaultToolExecutorOptions,
+): BaselineToolExecutors["subquestStart"] {
+  return async (input: SubquestStartInput): Promise<string> => {
+    if (!toConfiguredString(options.currentQuestId)) {
+      return "Error: subquest_start requires an active quest context.";
+    }
+
+    if (!toConfiguredString(input.id)) {
+      throw new Error("subquest_start.id must be non-empty.");
+    }
+
+    if (!toConfiguredString(input.goal)) {
+      throw new Error("subquest_start.goal must be non-empty.");
+    }
+
+    if (!toConfiguredString(input.success_criteria)) {
+      throw new Error("subquest_start.success_criteria must be non-empty.");
+    }
+
+    return DEFERRED_QUEST_TOOL_MESSAGE;
+  };
+}
+
+function createDefaultQuestSnoozeExecutor(
+  options: DefaultToolExecutorOptions,
+): BaselineToolExecutors["questSnooze"] {
+  return async (input: QuestSnoozeInput): Promise<string> => {
+    if (!toConfiguredString(options.currentQuestId)) {
+      return "Error: quest_snooze requires an active quest context.";
+    }
+
+    const until = input.until.trim();
+    const match = until.match(/^(\d{1,2}):(\d{2})$/);
+    if (!match) {
+      return "Error: Invalid time format. Use HH:MM (e.g., 14:30)";
+    }
+
+    const hour = Number(match[1]);
+    const minute = Number(match[2]);
+    if (hour > 23 || minute > 59) {
+      return "Error: Invalid time. Hours must be 0-23, minutes 0-59";
+    }
+
+    return DEFERRED_QUEST_TOOL_MESSAGE;
   };
 }
 

@@ -7,8 +7,13 @@ import {
   type DefaultToolExecutorOptions,
   type EditArtifactInput,
   type ExecuteCodeInput,
+  type ChronicleAppendInput,
+  type ChronicleReadInput,
   type GenerateImageInput,
   type OracleInput,
+  type QuestSnoozeInput,
+  type QuestStartInput,
+  type SubquestStartInput,
   type VisitWebpageResult,
 } from "./core-executors.js";
 
@@ -20,7 +25,7 @@ export interface BaselineToolOptions extends DefaultToolExecutorOptions {
 /**
  * Baseline tool set for command-path parity.
  * Expanded with core workflow tools first: web_search, visit_webpage, execute_code,
- * then advanced artifact/media helpers: share_artifact, edit_artifact, generate_image, oracle.
+ * advanced artifact/media helpers, and chronicler/quest tool-surface parity.
  */
 export function createBaselineAgentTools(options: BaselineToolOptions = {}): AgentTool<any>[] {
   const defaultExecutors = createDefaultToolExecutors(options);
@@ -32,6 +37,11 @@ export function createBaselineAgentTools(options: BaselineToolOptions = {}): Age
     editArtifact: options.executors?.editArtifact ?? defaultExecutors.editArtifact,
     generateImage: options.executors?.generateImage ?? defaultExecutors.generateImage,
     oracle: options.executors?.oracle ?? defaultExecutors.oracle,
+    chronicleRead: options.executors?.chronicleRead ?? defaultExecutors.chronicleRead,
+    chronicleAppend: options.executors?.chronicleAppend ?? defaultExecutors.chronicleAppend,
+    questStart: options.executors?.questStart ?? defaultExecutors.questStart,
+    subquestStart: options.executors?.subquestStart ?? defaultExecutors.subquestStart,
+    questSnooze: options.executors?.questSnooze ?? defaultExecutors.questSnooze,
   };
 
   return [
@@ -42,6 +52,11 @@ export function createBaselineAgentTools(options: BaselineToolOptions = {}): Age
     createEditArtifactTool(executors),
     createGenerateImageTool(executors),
     createOracleTool(executors),
+    createChronicleReadTool(executors),
+    createChronicleAppendTool(executors),
+    createQuestStartTool(executors),
+    createSubquestStartTool(executors),
+    createQuestSnoozeTool(executors),
     createProgressReportTool(options),
     createMakePlanTool(),
     createFinalAnswerTool(),
@@ -243,6 +258,146 @@ export function createOracleTool(executors: Pick<BaselineToolExecutors, "oracle"
         details: {
           kind: "oracle",
           query: params.query,
+        },
+      };
+    },
+  };
+}
+
+export function createChronicleReadTool(
+  executors: Pick<BaselineToolExecutors, "chronicleRead">,
+): AgentTool<any> {
+  return {
+    name: "chronicle_read",
+    label: "Chronicle Read",
+    description:
+      "Read from a relative chapter in the Chronicle (0=current, -1=previous chapter, etc.).",
+    parameters: Type.Object({
+      relative_chapter_id: Type.Integer({
+        description:
+          "Relative chapter offset from current chapter. Use -1 for previous chapter, -2 for two chapters back.",
+      }),
+    }),
+    execute: async (_toolCallId, params: ChronicleReadInput) => {
+      const output = await executors.chronicleRead(params);
+      return {
+        content: [{ type: "text", text: output }],
+        details: {
+          kind: "chronicle_read",
+          relativeChapterId: params.relative_chapter_id,
+        },
+      };
+    },
+  };
+}
+
+export function createChronicleAppendTool(
+  executors: Pick<BaselineToolExecutors, "chronicleAppend">,
+): AgentTool<any> {
+  return {
+    name: "chronicle_append",
+    label: "Chronicle Append",
+    description:
+      "Append a concise paragraph to the current Chronicle chapter for future recall.",
+    parameters: Type.Object({
+      text: Type.String({
+        description: "Paragraph text to append.",
+      }),
+    }),
+    execute: async (_toolCallId, params: ChronicleAppendInput) => {
+      const output = await executors.chronicleAppend(params);
+      return {
+        content: [{ type: "text", text: output }],
+        details: {
+          kind: "chronicle_append",
+        },
+      };
+    },
+  };
+}
+
+export function createQuestStartTool(
+  executors: Pick<BaselineToolExecutors, "questStart">,
+): AgentTool<any> {
+  return {
+    name: "quest_start",
+    label: "Quest Start",
+    description:
+      "Start a top-level quest. Only use when a user explicitly asks for a multi-step autonomous task.",
+    parameters: Type.Object({
+      id: Type.String({
+        description: "Quest identifier (letters, numbers, hyphens, underscores).",
+      }),
+      goal: Type.String({
+        description: "What the quest should accomplish.",
+      }),
+      success_criteria: Type.String({
+        description: "Specific criteria for quest completion.",
+      }),
+    }),
+    execute: async (_toolCallId, params: QuestStartInput) => {
+      const output = await executors.questStart(params);
+      return {
+        content: [{ type: "text", text: output }],
+        details: {
+          kind: "quest_start",
+          questId: params.id,
+        },
+      };
+    },
+  };
+}
+
+export function createSubquestStartTool(
+  executors: Pick<BaselineToolExecutors, "subquestStart">,
+): AgentTool<any> {
+  return {
+    name: "subquest_start",
+    label: "Subquest Start",
+    description: "Start a subquest for the active quest context.",
+    parameters: Type.Object({
+      id: Type.String({
+        description: "Subquest identifier.",
+      }),
+      goal: Type.String({
+        description: "What the subquest should accomplish.",
+      }),
+      success_criteria: Type.String({
+        description: "Specific criteria for subquest completion.",
+      }),
+    }),
+    execute: async (_toolCallId, params: SubquestStartInput) => {
+      const output = await executors.subquestStart(params);
+      return {
+        content: [{ type: "text", text: output }],
+        details: {
+          kind: "subquest_start",
+          subquestId: params.id,
+        },
+      };
+    },
+  };
+}
+
+export function createQuestSnoozeTool(
+  executors: Pick<BaselineToolExecutors, "questSnooze">,
+): AgentTool<any> {
+  return {
+    name: "quest_snooze",
+    label: "Quest Snooze",
+    description: "Snooze the active quest until HH:MM local time.",
+    parameters: Type.Object({
+      until: Type.String({
+        description: "Resume time in HH:MM (24-hour) format.",
+      }),
+    }),
+    execute: async (_toolCallId, params: QuestSnoozeInput) => {
+      const output = await executors.questSnooze(params);
+      return {
+        content: [{ type: "text", text: output }],
+        details: {
+          kind: "quest_snooze",
+          until: params.until,
         },
       };
     },

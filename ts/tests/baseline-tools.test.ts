@@ -2,12 +2,17 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createBaselineAgentTools,
+  createChronicleAppendTool,
+  createChronicleReadTool,
   createEditArtifactTool,
   createExecuteCodeTool,
   createGenerateImageTool,
   createOracleTool,
   createProgressReportTool,
+  createQuestSnoozeTool,
+  createQuestStartTool,
   createShareArtifactTool,
+  createSubquestStartTool,
   createVisitWebpageTool,
   createWebSearchTool,
 } from "../src/agent/tools/baseline-tools.js";
@@ -23,6 +28,11 @@ describe("baseline agent tools", () => {
         editArtifact: async () => "",
         generateImage: async () => ({ summaryText: "", images: [] }),
         oracle: async () => "",
+        chronicleRead: async () => "",
+        chronicleAppend: async () => "",
+        questStart: async () => "",
+        subquestStart: async () => "",
+        questSnooze: async () => "",
       },
     });
 
@@ -34,6 +44,11 @@ describe("baseline agent tools", () => {
       "edit_artifact",
       "generate_image",
       "oracle",
+      "chronicle_read",
+      "chronicle_append",
+      "quest_start",
+      "subquest_start",
+      "quest_snooze",
       "progress_report",
       "make_plan",
       "final_answer",
@@ -160,5 +175,63 @@ describe("baseline agent tools", () => {
 
     expect(oracle).toHaveBeenCalledWith(params);
     expect(result.content[0]).toEqual({ type: "text", text: "Deep oracle answer" });
+  });
+
+  it("chronicle tools delegate to configured executors", async () => {
+    const chronicleRead = vi.fn(async () => "# Arc: test");
+    const chronicleAppend = vi.fn(async () => "OK");
+
+    const readTool = createChronicleReadTool({ chronicleRead });
+    const appendTool = createChronicleAppendTool({ chronicleAppend });
+
+    const readResult = await readTool.execute(
+      "call-9",
+      { relative_chapter_id: -1 },
+      undefined,
+      undefined,
+    );
+    const appendResult = await appendTool.execute(
+      "call-10",
+      { text: "Remember this." },
+      undefined,
+      undefined,
+    );
+
+    expect(chronicleRead).toHaveBeenCalledWith({ relative_chapter_id: -1 });
+    expect(chronicleAppend).toHaveBeenCalledWith({ text: "Remember this." });
+    expect(readResult.content[0]).toEqual({ type: "text", text: "# Arc: test" });
+    expect(appendResult.content[0]).toEqual({ type: "text", text: "OK" });
+  });
+
+  it("quest tools delegate to configured executors", async () => {
+    const questStart = vi.fn(async () => "Quest started");
+    const subquestStart = vi.fn(async () => "Subquest started");
+    const questSnooze = vi.fn(async () => "Quest snoozed");
+
+    const questStartTool = createQuestStartTool({ questStart });
+    const subquestStartTool = createSubquestStartTool({ subquestStart });
+    const questSnoozeTool = createQuestSnoozeTool({ questSnooze });
+
+    const startParams = {
+      id: "migration-quest",
+      goal: "Close parity gaps",
+      success_criteria: "All tests pass",
+    };
+
+    const startResult = await questStartTool.execute("call-11", startParams, undefined, undefined);
+    const subResult = await subquestStartTool.execute("call-12", startParams, undefined, undefined);
+    const snoozeResult = await questSnoozeTool.execute(
+      "call-13",
+      { until: "14:30" },
+      undefined,
+      undefined,
+    );
+
+    expect(questStart).toHaveBeenCalledWith(startParams);
+    expect(subquestStart).toHaveBeenCalledWith(startParams);
+    expect(questSnooze).toHaveBeenCalledWith({ until: "14:30" });
+    expect(startResult.content[0]).toEqual({ type: "text", text: "Quest started" });
+    expect(subResult.content[0]).toEqual({ type: "text", text: "Subquest started" });
+    expect(snoozeResult.content[0]).toEqual({ type: "text", text: "Quest snoozed" });
   });
 });

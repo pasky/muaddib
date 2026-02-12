@@ -176,6 +176,45 @@ describe("RoomCommandHandlerTs", () => {
     await history.close();
   });
 
+  it("filters baseline tools via allowed_tools including chronicler/quest tool names", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const incoming = makeMessage("!s scoped tools");
+    const seenToolNames: string[] = [];
+
+    const handler = new RoomCommandHandlerTs({
+      roomConfig: {
+        ...roomConfig,
+        command: {
+          ...roomConfig.command,
+          modes: {
+            ...roomConfig.command.modes,
+            serious: {
+              ...roomConfig.command.modes.serious,
+              allowed_tools: ["chronicle_read", "quest_start", "final_answer"],
+            },
+          },
+        },
+      } as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: (input) => {
+        seenToolNames.push(...input.tools.map((tool) => tool.name));
+        return {
+          runSingleTurn: async () => makeRunnerResult("done"),
+        };
+      },
+    });
+
+    const result = await handler.execute(incoming);
+
+    expect(result.response).toBe("done");
+    expect(seenToolNames).toEqual(["chronicle_read", "quest_start", "final_answer"]);
+
+    await history.close();
+  });
+
   it("merges debounced same-user followups into the runner prompt", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();

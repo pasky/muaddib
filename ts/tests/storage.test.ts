@@ -186,6 +186,10 @@ describe("ChronicleStore", () => {
     expect(rendered).toContain("Arc: libera##test");
     expect(rendered).toContain("Important update");
 
+    const relativeRendered = await store.renderChapterRelative("libera##test", 0);
+    expect(relativeRendered).toContain("current");
+    expect(relativeRendered).toContain("Important update");
+
     await store.close();
   });
 });
