@@ -158,6 +158,7 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
         prompt: contextReducerPrompt,
       },
       autoChronicler,
+      chronicleStore,
       runnerFactory: options.runnerFactory ?? defaultRunnerFactory,
       agentLoop: {
         maxIterations,

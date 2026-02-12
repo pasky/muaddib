@@ -57,6 +57,11 @@ Latest update:
   - Added `AutoChroniclerTs` and wired trigger semantics into shared command handler direct+passive paths (threshold, lookback, overlap, per-arc locking).
   - Wired app + CLI runtime chronicler setup (`chronicle.db`, lifecycle/autochronicler wiring) and command-path tool executor context so `chronicle_append` uses lifecycle automation when available.
   - Kept quests/proactive runtime deferred policy unchanged (`chronicler.quests`, `quests`, `rooms.*.proactive`).
+- 2026-02-12: Closed chapter-context prepending parity and lower-priority runtime gaps:
+  - Added command-path `include_chapter_summary` parity in `RoomCommandHandlerTs` (chapter context prepending by default, disabled via mode config or `!c` no-context path).
+  - Added TS chronicle quest internals (`ChronicleStore` quest schema/methods + `QuestRuntimeTs` paragraph hook/heartbeat runtime + unresolved quest carryover during chapter rollover).
+  - Closed IRC per-event concurrency throughput delta by dispatching event handlers concurrently in `IrcRoomMonitor.run`.
+  - Added regression tests for chapter-context prepending, quest lifecycle/heartbeat internals, unresolved quest chapter rollover carryover, and IRC concurrent event dispatch behavior.
 
 ---
 
@@ -73,7 +78,7 @@ while preserving core service behavior and configuration semantics.
 - ✅ Persistent history + chronicle storage compatibility
 - ✅ CLI message mode parity path
 - ✅ Config-first behavior and strict `provider:model` model references
-- ❌ Quests runtime support (deferred)
+- ◐ Quests runtime internals implemented (storage/lifecycle/heartbeat), operator enablement remains deferred by policy
 - ❌ Proactive interjections runtime support (deferred)
 
 ---
@@ -128,7 +133,8 @@ while preserving core service behavior and configuration semantics.
 
 ### Data/storage
 - SQLite chat history store (messages/context + llm_calls linkages).
-- Chronicle storage + lifecycle automation maintained (chapter rollover, summaries, recap insertion, and autochronicler trigger flow).
+- Chronicle storage + lifecycle automation maintained (chapter rollover, summaries, recap insertion, unresolved-quest carryover, and autochronicler trigger flow).
+- Quest persistence/lifecycle internals implemented in chronicle storage/runtime (`quest_*` methods + heartbeat runtime scaffolding), with operator-facing enablement still policy-deferred.
 - Platform-id update plumbing for message edit parity in adapters.
 
 ### CLI
@@ -146,6 +152,7 @@ Python supports runtime automation for:
 
 TS runtime behavior:
 - core chronicler runtime behavior is now supported,
+- quest persistence/lifecycle internals are implemented in TS chronicler components,
 - deferred keys are now `chronicler.quests`, `quests`, and `rooms.*.proactive`,
 - inactive deferred-key presence is tolerated with warning,
 - explicit deferred-key enablement (`enabled: true`) is fail-fast rejected.
@@ -196,14 +203,14 @@ Python rollback path must remain available until soak/parity/SLO gates are fully
 ## Remaining gaps / next parity work
 
 1. **Post-tooling parity follow-up gaps (current accidental backlog)**
-   - TS now covers multi-turn tool loop semantics + core tools (`web_search`, `visit_webpage`, `execute_code`), artifact tools (`share_artifact`, `edit_artifact`), advanced tools (`oracle`, `generate_image`), chronicler/quest tool-surface names, command-path refusal-fallback behavior, persistence-summary callback flow (`tools.summary.model`), `response_max_bytes` long-response artifact fallback, transport UX parity (reply-edit debounce + Slack mention formatting/typing lifecycle), reconnect boundary semantics, command-path context reduction, and chronicle lifecycle automation + autochronicler triggers.
-   - Remaining parity work now concentrates on deferred quest/proactive runtime surfaces and lower-priority runtime/throughput deltas.
+   - TS now covers multi-turn tool loop semantics + core tools (`web_search`, `visit_webpage`, `execute_code`), artifact tools (`share_artifact`, `edit_artifact`), advanced tools (`oracle`, `generate_image`), chronicler/quest tool-surface names, command-path refusal-fallback behavior, persistence-summary callback flow (`tools.summary.model`), `response_max_bytes` long-response artifact fallback, transport UX parity (reply-edit debounce + Slack mention formatting/typing lifecycle), reconnect boundary semantics, command-path context reduction, chapter-context prepending (`include_chapter_summary`), chronicle lifecycle automation + autochronicler triggers, quest persistence/heartbeat internals, and IRC per-event concurrency.
+   - Remaining accidental parity work is now mostly lower-priority command/actor deltas (for example cost follow-up messaging and vision fallback handling).
 
 2. **OAuth/session credential refresh support**
    - Still deferred; blocked on stable upstream provider refresh contract.
 
-3. **Deferred Python-only runtime features**
-   - quests,
+3. **Deferred Python-only runtime feature enablement**
+   - quest operator enablement via deferred config keys (`chronicler.quests`, `quests`),
    - proactive interjections.
 
 4. **Soak evidence completion**
@@ -218,4 +225,4 @@ Python rollback path must remain available until soak/parity/SLO gates are fully
 Use the authoritative parity audit as the execution backlog:
 - `docs/typescript-parity-audit.md`
 
-Immediate priority from the parity audit is closing remaining quest-runtime parity gaps while keeping proactive runtime deferred per policy until scope changes.
+Immediate priority from the parity audit is clearing remaining lower-priority runtime deltas and maintaining soak evidence/docs parity while proactive runtime stays deferred by policy.

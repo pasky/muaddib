@@ -32,6 +32,21 @@ class FakeSender {
   }
 }
 
+function createDeferred<T = void>() {
+  let resolve: ((value: T | PromiseLike<T>) => void) | undefined;
+  let reject: ((reason?: unknown) => void) | undefined;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+
+  return {
+    promise,
+    resolve: resolve ?? (() => {}),
+    reject: reject ?? (() => {}),
+  };
+}
+
 describe("IrcRoomMonitor", () => {
   it("routes direct message events into command handler and sender", async () => {
     const history = new ChatHistoryStore(":memory:", 20);
@@ -521,6 +536,91 @@ describe("IrcRoomMonitor", () => {
 
     await expect(monitor.run()).resolves.toBeUndefined();
     expect(processed).toEqual(["first", "second"]);
+
+    await history.close();
+  });
+
+  it("processes IRC events concurrently without waiting for previous handler completion", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    const responses: Array<Record<string, unknown>> = [
+      {
+        parameters: {
+          event: {
+            type: "message",
+            subtype: "public",
+            server: "libera",
+            target: "#test",
+            nick: "alice",
+            message: "muaddib: first",
+          },
+        },
+      },
+      {
+        parameters: {
+          event: {
+            type: "message",
+            subtype: "public",
+            server: "libera",
+            target: "#test",
+            nick: "alice",
+            message: "muaddib: second",
+          },
+        },
+      },
+      {
+        error: "done",
+      },
+    ];
+
+    let offset = 0;
+    const firstStarted = createDeferred<void>();
+    const releaseFirst = createDeferred<void>();
+    const secondObserved = createDeferred<void>();
+
+    const monitor = new IrcRoomMonitor({
+      roomConfig: {
+        varlink: {
+          socket_path: "/tmp/varlink.sock",
+        },
+      },
+      history,
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async (message) => {
+          if (message.content === "first") {
+            firstStarted.resolve();
+            await releaseFirst.promise;
+            return null;
+          }
+
+          if (message.content === "second") {
+            secondObserved.resolve();
+            releaseFirst.resolve();
+          }
+
+          return null;
+        },
+      },
+      varlinkEvents: {
+        connect: async () => {},
+        disconnect: async () => {},
+        waitForEvents: async () => {},
+        receiveResponse: async () => {
+          const response = responses[offset];
+          offset += 1;
+          return response ?? null;
+        },
+      },
+      varlinkSender: new FakeSender(),
+    });
+
+    const runPromise = monitor.run();
+
+    await firstStarted.promise;
+    await secondObserved.promise;
+    await expect(runPromise).resolves.toBeUndefined();
 
     await history.close();
   });

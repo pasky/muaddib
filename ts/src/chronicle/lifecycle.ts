@@ -28,12 +28,17 @@ export interface ChronicleLifecycle {
   appendParagraph(arc: string, text: string): Promise<{ id: number; chapter_id: number; ts: string; content: string }>;
 }
 
+interface ChronicleQuestRuntimeHook {
+  onChronicleAppend(arc: string, paragraphText: string, paragraphId: number): Promise<void>;
+}
+
 export interface ChronicleLifecycleTsOptions {
   chronicleStore: ChronicleStore;
   config: ChronicleLifecycleConfig;
   modelAdapter?: PiAiModelAdapter;
   completeFn?: CompleteSimpleFn;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+  questRuntime?: ChronicleQuestRuntimeHook;
 }
 
 const DEFAULT_PARAGRAPHS_PER_CHAPTER = 3;
@@ -51,6 +56,7 @@ export class ChronicleLifecycleTs implements ChronicleLifecycle {
   private readonly config: ChronicleLifecycleConfig;
   private readonly modelAdapter: PiAiModelAdapter;
   private readonly completeFn: CompleteSimpleFn;
+  private readonly questRuntime: ChronicleQuestRuntimeHook | null;
   private readonly arcQueues = new Map<string, Promise<void>>();
 
   constructor(options: ChronicleLifecycleTsOptions) {
@@ -58,6 +64,7 @@ export class ChronicleLifecycleTs implements ChronicleLifecycle {
     this.config = options.config;
     this.modelAdapter = options.modelAdapter ?? new PiAiModelAdapter();
     this.completeFn = options.completeFn ?? completeSimple;
+    this.questRuntime = options.questRuntime ?? null;
     this.getApiKey = async (provider: string) => {
       if (!options.getApiKey) {
         return undefined;
@@ -80,7 +87,13 @@ export class ChronicleLifecycleTs implements ChronicleLifecycle {
     return await this.withArcLock(arc, async () => {
       const currentChapter = await this.chronicleStore.getOrOpenCurrentChapter(arc);
       await this.rollChapterIfNeeded(arc, currentChapter);
-      return await this.chronicleStore.appendParagraph(arc, trimmed);
+      const appended = await this.chronicleStore.appendParagraph(arc, trimmed);
+
+      if (this.questRuntime) {
+        await this.questRuntime.onChronicleAppend(arc, trimmed, appended.id);
+      }
+
+      return appended;
     });
   }
 
@@ -102,6 +115,45 @@ export class ChronicleLifecycleTs implements ChronicleLifecycle {
 
     await this.chronicleStore.getOrOpenCurrentChapter(arc);
     await this.chronicleStore.appendParagraph(arc, `Previous chapter recap: ${summary}`);
+
+    const unresolvedQuestParagraphs = this.collectUnresolvedQuestParagraphs(chapterParagraphs);
+    for (const questParagraph of unresolvedQuestParagraphs) {
+      await this.chronicleStore.appendParagraph(arc, questParagraph);
+    }
+  }
+
+  private collectUnresolvedQuestParagraphs(chapterParagraphs: string[]): string[] {
+    const questRegex = /<\s*quest\s+id="([^"]+)"\s*>/i;
+    const finishedRegex = /<\s*quest_finished\s+id="([^"]+)"\s*>/i;
+    const latestByQuestId = new Map<string, { paragraph: string; isFinished: boolean }>();
+
+    for (const paragraph of chapterParagraphs) {
+      const finishedMatch = finishedRegex.exec(paragraph);
+      if (finishedMatch) {
+        latestByQuestId.set(finishedMatch[1], {
+          paragraph,
+          isFinished: true,
+        });
+        continue;
+      }
+
+      const questMatch = questRegex.exec(paragraph);
+      if (questMatch) {
+        latestByQuestId.set(questMatch[1], {
+          paragraph,
+          isFinished: false,
+        });
+      }
+    }
+
+    const unresolved: string[] = [];
+    for (const entry of latestByQuestId.values()) {
+      if (!entry.isFinished) {
+        unresolved.push(entry.paragraph);
+      }
+    }
+
+    return unresolved;
   }
 
   private async generateChapterSummary(arc: string, chapterParagraphs: string[]): Promise<string> {

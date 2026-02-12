@@ -378,6 +378,7 @@ function createRoomCommandHandler(
       prompt: contextReducerPrompt,
     },
     autoChronicler: chroniclerRuntime.autoChronicler,
+    chronicleStore: chroniclerRuntime.chronicleStore,
     agentLoop: {
       maxIterations,
       maxCompletionRetries,

@@ -7,6 +7,7 @@ import {
   type RunnerContextMessage,
   type SingleTurnResult,
 } from "../../agent/muaddib-agent-runner.js";
+import type { ChronicleStore } from "../../chronicle/chronicle-store.js";
 import {
   createBaselineAgentTools,
   type BaselineToolOptions,
@@ -74,6 +75,7 @@ export interface CommandHandlerOptions {
   contextReducer?: ContextReducer;
   contextReducerConfig?: ContextReducerConfig;
   autoChronicler?: AutoChronicler;
+  chronicleStore?: Pick<ChronicleStore, "getChapterContextMessages">;
   responseCleaner?: (text: string, nick: string) => string;
   helpToken?: string;
   flagTokens?: string[];
@@ -118,6 +120,7 @@ export class RoomCommandHandlerTs {
   private readonly shareArtifact: (content: string) => Promise<string>;
   private readonly contextReducer: ContextReducer;
   private readonly autoChronicler: AutoChronicler | null;
+  private readonly chronicleStore: Pick<ChronicleStore, "getChapterContextMessages"> | null;
 
   constructor(private readonly options: CommandHandlerOptions) {
     this.commandConfig = options.roomConfig.command;
@@ -157,6 +160,7 @@ export class RoomCommandHandlerTs {
         getApiKey: options.getApiKey,
       });
     this.autoChronicler = options.autoChronicler ?? null;
+    this.chronicleStore = options.chronicleStore ?? null;
 
     this.rateLimiter =
       options.rateLimiter ??
@@ -285,6 +289,17 @@ export class RoomCommandHandlerTs {
       resolvedWithFollowups.modelOverride ?? undefined,
     );
 
+    let prependedContext: Array<{ role: string; content: string }> = [];
+    if (
+      !resolvedWithFollowups.noContext &&
+      resolvedWithFollowups.runtime.includeChapterSummary &&
+      this.chronicleStore
+    ) {
+      prependedContext = await this.chronicleStore.getChapterContextMessages(
+        `${message.serverTag}#${message.channelName}`,
+      );
+    }
+
     let selectedContext = (resolvedWithFollowups.noContext ? context.slice(-1) : context).slice(
       -resolvedWithFollowups.runtime.historySize,
     );
@@ -295,7 +310,9 @@ export class RoomCommandHandlerTs {
       this.contextReducer.isConfigured &&
       selectedContext.length > 1
     ) {
-      const reducedContext = await this.contextReducer.reduce(selectedContext, systemPrompt);
+      const fullContext = [...prependedContext, ...selectedContext];
+      const reducedContext = await this.contextReducer.reduce(fullContext, systemPrompt);
+      prependedContext = [];
       selectedContext = [
         ...reducedContext,
         selectedContext[selectedContext.length - 1],
@@ -305,6 +322,7 @@ export class RoomCommandHandlerTs {
     // The trigger message will be sent as the new prompt for this turn.
     // Keep only prior context from history here to avoid sending the trigger twice.
     const runnerContext = [
+      ...prependedContext,
       ...selectedContext.slice(0, -1),
       ...steeringMessages,
     ].map(toRunnerContextMessage);

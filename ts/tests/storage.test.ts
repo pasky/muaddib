@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChronicleStore } from "../src/chronicle/chronicle-store.js";
 import { ChronicleLifecycleTs } from "../src/chronicle/lifecycle.js";
+import { QuestRuntimeTs } from "../src/chronicle/quest-runtime.js";
 import { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { AutoChroniclerTs } from "../src/rooms/autochronicler.js";
 
@@ -233,7 +234,7 @@ describe("ChronicleStore", () => {
       completeFn,
     });
 
-    await lifecycle.appendParagraph("libera##test", "First operational note.");
+    await lifecycle.appendParagraph("libera##test", '<quest id="quest-1">First operational note.</quest>');
     const chapterBefore = await chronicleStore.getOrOpenCurrentChapter("libera##test");
 
     await lifecycle.appendParagraph("libera##test", "Second operational note.");
@@ -244,10 +245,125 @@ describe("ChronicleStore", () => {
 
     const currentChapter = await chronicleStore.renderChapterRelative("libera##test", 0);
     expect(currentChapter).toContain("Previous chapter recap: Chapter summary paragraph.");
+    expect(currentChapter).toContain('<quest id="quest-1">First operational note.</quest>');
     expect(currentChapter).toContain("Second operational note.");
 
     const previousChapter = await chronicleStore.renderChapterRelative("libera##test", -1);
-    expect(previousChapter).toContain("First operational note.");
+    expect(previousChapter).toContain('<quest id="quest-1">First operational note.</quest>');
+
+    await chronicleStore.close();
+  });
+
+  it("stores quest rows and respects heartbeat readiness/status transitions", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "muaddib-chronicle-"));
+    createdDirs.push(dir);
+
+    const chronicleStore = new ChronicleStore(join(dir, "chronicle.db"));
+    await chronicleStore.initialize();
+
+    const paragraph = await chronicleStore.appendParagraph(
+      "libera##test",
+      '<quest id="quest-1">Initial state</quest>',
+    );
+
+    await chronicleStore.questStart(
+      "quest-1",
+      "libera##test",
+      paragraph.id,
+      '<quest id="quest-1">Initial state</quest>',
+    );
+
+    expect(await chronicleStore.questsCountUnfinished("libera##test")).toBe(1);
+    expect(await chronicleStore.questsReadyForHeartbeat("libera##test", 0)).toMatchObject([
+      {
+        id: "quest-1",
+        status: "ongoing",
+      },
+    ]);
+
+    expect(await chronicleStore.questSetPlan("quest-1", "Collect evidence and report")).toBe(true);
+    expect(await chronicleStore.questSetResumeAt("quest-1", "2999-01-01 00:00:00")).toBe(true);
+    expect(await chronicleStore.questsReadyForHeartbeat("libera##test", 0)).toEqual([]);
+
+    expect(await chronicleStore.questSetResumeAt("quest-1", null)).toBe(true);
+    expect(await chronicleStore.questTryTransition("quest-1", "ongoing", "in_step")).toBe(true);
+    expect(await chronicleStore.questTryTransition("quest-1", "ongoing", "in_step")).toBe(false);
+    await chronicleStore.questSetStatus("quest-1", "ongoing");
+
+    await chronicleStore.questFinish("quest-1", paragraph.id);
+    const finishedQuest = await chronicleStore.questGet("quest-1");
+    expect(finishedQuest?.status).toBe("finished");
+    expect(await chronicleStore.questsCountUnfinished("libera##test")).toBe(0);
+
+    await chronicleStore.close();
+  });
+
+  it("tracks quest append lifecycle and heartbeat quest steps via QuestRuntimeTs", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "muaddib-chronicle-"));
+    createdDirs.push(dir);
+
+    const chronicleStore = new ChronicleStore(join(dir, "chronicle.db"));
+    await chronicleStore.initialize();
+
+    let lifecycle: ChronicleLifecycleTs | null = null;
+
+    const runQuestStep = vi.fn(async ({ questId }: { questId: string }) => {
+      return {
+        paragraphText: `<quest_finished id="${questId}">Done. CONFIRMED ACHIEVED</quest_finished>`,
+      };
+    });
+
+    const questRuntime = new QuestRuntimeTs({
+      chronicleStore,
+      appendParagraph: async (arc: string, text: string) => {
+        if (!lifecycle) {
+          throw new Error("Quest runtime appendParagraph called before lifecycle initialization.");
+        }
+        await lifecycle.appendParagraph(arc, text);
+      },
+      config: {
+        arcs: ["libera##test"],
+        cooldownSeconds: 0.001,
+      },
+      runQuestStep,
+      logger: {
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+      },
+    });
+
+    lifecycle = new ChronicleLifecycleTs({
+      chronicleStore,
+      config: {
+        model: "openai:gpt-4o-mini",
+        paragraphs_per_chapter: 10,
+      },
+      completeFn: vi.fn(async () => makeAssistantText("summary")),
+      questRuntime,
+    });
+
+    await lifecycle.appendParagraph("libera##test", '<quest id="quest-1">Do the thing</quest>');
+
+    const created = await chronicleStore.questGet("quest-1");
+    expect(created?.status).toBe("ongoing");
+
+    await questRuntime.heartbeatTick();
+    await questRuntime.stopHeartbeat();
+
+    expect(runQuestStep).toHaveBeenCalledTimes(1);
+    expect(runQuestStep).toHaveBeenCalledWith({
+      arc: "libera##test",
+      questId: "quest-1",
+      lastState: '<quest id="quest-1">Do the thing</quest>',
+    });
+
+    const finished = await chronicleStore.questGet("quest-1");
+    expect(finished?.status).toBe("finished");
+
+    const rendered = await chronicleStore.renderChapter("libera##test");
+    expect(rendered).toContain("CONFIRMED ACHIEVED");
 
     await chronicleStore.close();
   });

@@ -75,6 +75,8 @@ export class IrcRoomMonitor {
 
     this.logger.info("Muaddib started, waiting for IRC events...");
 
+    const inFlightEvents = new Set<Promise<void>>();
+
     while (true) {
       const response = await this.varlinkEvents.receiveResponse();
       if (response === null) {
@@ -95,17 +97,25 @@ export class IrcRoomMonitor {
       const parameters = (response.parameters as Record<string, unknown> | undefined) ?? {};
       const event = parameters.event as IrcEvent | undefined;
       if (event) {
-        try {
-          await this.processMessageEvent(event);
-        } catch (error) {
-          this.logger.error("IRC monitor failed to process event; continuing", error);
-        }
+        const task = this.processMessageEvent(event)
+          .catch((error) => {
+            this.logger.error("IRC monitor failed to process event; continuing", error);
+          })
+          .finally(() => {
+            inFlightEvents.delete(task);
+          });
+
+        inFlightEvents.add(task);
       }
 
       if (response.error) {
         this.logger.error("IRC monitor received varlink error response", response.error);
         break;
       }
+    }
+
+    if (inFlightEvents.size > 0) {
+      await Promise.allSettled([...inFlightEvents]);
     }
 
     await this.varlinkEvents.disconnect();

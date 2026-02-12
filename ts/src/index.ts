@@ -18,6 +18,7 @@ export * from "./rooms/slack/transport.js";
 export * from "./history/chat-history-store.js";
 export * from "./chronicle/chronicle-store.js";
 export * from "./chronicle/lifecycle.js";
+export * from "./chronicle/quest-runtime.js";
 export * from "./cli/message-mode.js";
 export * from "./app/bootstrap.js";
 export * from "./app/main.js";

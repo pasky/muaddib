@@ -103,6 +103,14 @@ The intent is to separate:
   - Wired app + CLI runtime chronicler initialization (`chronicle.db`, lifecycle, autochronicler, tool executor context) while keeping quest/proactive deferred policy unchanged.
   - Updated chronicler tool executor path so `chronicle_append` uses lifecycle automation when runtime lifecycle hook is available.
   - Added/extended tests for lifecycle boundaries, autochronicler trigger+marking behavior, command-path autochronicler hooks, core-executor lifecycle hook wiring, and deferred-policy regression expectations.
+- 2026-02-12 (cluster: chapter-context prepending + quest-runtime internals + IRC concurrency):
+  - Added command-path parity for `include_chapter_summary` in `RoomCommandHandlerTs` by prepending chronicle chapter context before model calls (and bypassing prepending when `include_chapter_summary: false` or `!c` no-context mode).
+  - Added chronicle quest runtime internals in TS:
+    - quest schema/method parity in `ChronicleStore` (`quest_*` methods + heartbeat readiness query),
+    - `QuestRuntimeTs` paragraph-hook + heartbeat scheduler with step-runner injection,
+    - lifecycle integration hook and unresolved-quest carryover on chapter rollover.
+  - Closed IRC per-event throughput gap by dispatching event handlers concurrently in monitor run loop while preserving per-event error isolation.
+  - Added/extended tests for chapter-context prepending behavior, quest lifecycle/heartbeat internals, unresolved quest carryover on chapter rollover, and concurrent IRC event dispatch semantics.
 
 ---
 
@@ -121,6 +129,7 @@ Legend: ✅ implemented, ◐ partial, ❌ missing, ⚠ intentional deferred
 | Command debounce / followup coalescing | ✅ | ✅ | Python `_handle_command_core` + `history.get_recent_messages_since`; TS `command-handler.ts::collectDebouncedFollowups` + `chat-history-store.ts::getRecentMessagesSince` |
 | Steering queue/session compaction | ✅ | ✅ | Python `SteeringQueue` + `_run_or_queue_command`; TS `steering-queue.ts` + queued runner integration in `command-handler.ts` |
 | Context reduction integration | ✅ | ✅ | Python `MuaddibAgent.run_actor` + `ContextReducer`; TS now mirrors `auto_reduce_context` + root `context_reducer` config via `ContextReducerTs` in shared command path |
+| Chapter context prepending (`include_chapter_summary`) | ✅ | ✅ | Python `MuaddibAgent.run_actor` prepends chapter context by default; TS `RoomCommandHandlerTs` now mirrors this with `include_chapter_summary` + `!c` no-context behavior |
 | Response length policy (artifact fallback) | ✅ | ✅ | Python `_run_actor` + `_long_response_to_artifact`; TS `RoomCommandHandlerTs` now enforces `response_max_bytes` + artifact-link fallback semantics |
 | Cost follow-up/operator cost milestones | ✅ | ❌ | Python `_route_command`; TS does not emit cost followups |
 
@@ -131,7 +140,7 @@ Legend: ✅ implemented, ◐ partial, ❌ missing, ⚠ intentional deferred
 | IRC direct/passive detection + bridged sender normalization | ✅ | ✅ | `muaddib/rooms/irc/monitor.py::process_message_event`, `ts/src/rooms/irc/monitor.ts::processMessageEvent` |
 | IRC reconnect with exponential backoff | ✅ | ✅ | `_connect_with_retry` / `connectWithRetry` |
 | IRC event handling isolation (continue after single event failure) | ✅ | ✅ | `tests/rooms/irc/test_monitor.py`, `ts/tests/irc-monitor.test.ts` |
-| IRC concurrent event handling | ✅ | ❌ | Python spawns per-event (`muaddib.spawn`), TS awaits sequentially in run loop |
+| IRC concurrent event handling | ✅ | ✅ | Python spawns per-event (`muaddib.spawn`); TS now dispatches per-event handlers concurrently from the receive loop while preserving per-event error isolation |
 | Discord message edit persistence by platform id | ✅ | ✅ | `process_message_edit` vs `processMessageEditEvent` |
 | Discord attachment block injection into message content | ✅ | ✅ | Python `process_message_event` attachment handling; TS Discord transport+monitor now inject `[Attachments]` blocks |
 | Discord reply-edit debounce (edit previous bot response) | ✅ | ✅ | Python `reply_edit_debounce_seconds` logic; TS monitor now edits prior bot response inside debounce window |
@@ -154,7 +163,7 @@ Legend: ✅ implemented, ◐ partial, ❌ missing, ⚠ intentional deferred
 | Chronicle base storage (arcs/chapters/paragraphs) | ✅ | ✅ | `muaddib/chronicler/chronicle.py`, `ts/src/chronicle/chronicle-store.ts` |
 | Chapter rollover + summary + recap paragraph | ✅ | ✅ | Python `chronicler/chapters.py::chapter_append_paragraph`; TS `chronicle/lifecycle.ts::ChronicleLifecycleTs.appendParagraph` |
 | Auto-chronicling trigger from chat history thresholds | ✅ | ✅ | Python `rooms/autochronicler.py`; TS `rooms/autochronicler.ts::AutoChroniclerTs.checkAndChronicle` wired via `RoomCommandHandlerTs` |
-| Quest tables + quest lifecycle + heartbeat | ✅ | ❌ | Python `chronicler/chronicle.py` quests methods + `chronicler/quests.py`; TS chronicle schema has no quests |
+| Quest tables + quest lifecycle + heartbeat | ✅ | ◐ | TS now has quest schema/method parity in `chronicle-store.ts` and `QuestRuntimeTs` heartbeat internals; explicit quest runtime enablement remains deferred by policy (`chronicler.quests` / `quests`) |
 | Proactive interjection -> chronicler side effects | ✅ | ⚠ | Python in `RoomCommandHandler`; TS intentionally deferred via `assertNoDeferredFeatureConfig` |
 
 ### D. Tool / agent loop behavior
@@ -204,13 +213,13 @@ Legend: ✅ implemented, ◐ partial, ❌ missing, ⚠ intentional deferred
 
 | Gap | Severity | Impact |
 |---|---:|---|
-| Deferred runtime features: quests + proactive interjections | P1 (accepted) | TS ignores inactive deferred knobs (`chronicler.quests`, `quests`, `rooms.*.proactive`) and rejects explicit enablement. |
+| Deferred runtime feature enablement: quests + proactive interjections | P1 (accepted) | TS keeps deferred-key policy for operator enablement (`chronicler.quests`, `quests`, `rooms.*.proactive`): inactive keys are ignored, explicit enablement is rejected. Quest persistence/heartbeat internals are implemented but not operator-enabled in parity v1. |
 | Credential contract narrowed to static `providers.*.key` or env var fallback; OAuth/session rejected | P1 (accepted) | Existing dynamic credential refresh configs must be removed before TS startup. |
 | Message log writer no LRU file-handle cache | P2 (accepted) | Slightly different I/O behavior; functional parity is retained. |
 
 ### Accidental / not-yet-implemented parity gaps
 
-After closing `response_max_bytes`, transport UX parity, reconnect boundary semantics, context reduction parity, and chronicle lifecycle automation, the highest-priority remaining accidental gaps are now quest runtime persistence/heartbeat continuity and lower-priority adapter/runtime throughput deltas.
+After closing `response_max_bytes`, transport UX parity, reconnect boundary semantics, context reduction parity, chronicle lifecycle automation, chapter-context prepending parity, quest-runtime internals, and IRC per-event concurrency, remaining accidental gaps are now concentrated in lower-priority lanes (for example cost follow-up messages and vision fallback handling).
 
 | Gap | Severity | User/operator impact | Evidence |
 |---|---:|---|---|
@@ -230,9 +239,9 @@ After closing `response_max_bytes`, transport UX parity, reconnect boundary sema
 | Slack mention-formatting for outgoing replies missing in TS | ✅ closed (2026-02-12) | TS Slack sender now formats `@DisplayName` mentions to `<@USER_ID>` when cached mapping is available. | Python `_format_mentions_for_slack` |
 | Slack typing indicator lifecycle missing in TS | ✅ closed (2026-02-12) | TS Slack monitor/transport now set, refresh, and clear typing status around direct command handling. | Python `_set_typing_indicator` / `_clear_typing_indicator` |
 | Context reducer parity in TS command path | ✅ closed (2026-02-12) | TS command path now supports root `context_reducer` config + mode `auto_reduce_context` behavior through `ContextReducerTs`. | Python `ContextReducer` + `RoomCommandHandler._run_actor` |
-| Quest tables + quest lifecycle/heartbeat runtime missing in TS | P1 | Chronicle lifecycle automation now exists, but quest persistence/continuity runtime remains deferred in parity v1. | Python `chronicler/chronicle.py` quests schema/methods, `chronicler/quests.py` |
+| Quest tables + quest lifecycle/heartbeat runtime missing in TS | ✅ closed (2026-02-12) | TS now includes quest schema/method parity (`ChronicleStore`) and a quest paragraph-hook + heartbeat runtime (`QuestRuntimeTs`) integrated with lifecycle hooks; operator config enablement remains deferred per policy. | `ts/src/chronicle/chronicle-store.ts`, `ts/src/chronicle/quest-runtime.ts`, `ts/src/chronicle/lifecycle.ts` |
 | Discord/Slack null-event supervision policy not explicit in TS docs/tests | ✅ closed (2026-02-12) | TS now codifies/tests policy: receive errors reconnect under policy; `null` events are graceful shutdown signals without reconnect. | `ts/src/rooms/discord/monitor.ts::run`, `ts/src/rooms/slack/monitor.ts::run`, monitor test boundary cases |
-| IRC monitor processes events serially (no per-event task spawn) | P2 | Head-of-line blocking during long command turns; throughput degradation under load. | Python `muaddib.spawn(self.process_message_event(event))` vs TS `await this.processMessageEvent(event)` |
+| IRC monitor processes events serially (no per-event task spawn) | ✅ closed (2026-02-12) | TS now dispatches per-event handlers concurrently from the receive loop, removing serial head-of-line blocking behavior. | `ts/src/rooms/irc/monitor.ts` |
 
 ---
 
@@ -242,7 +251,7 @@ After closing `response_max_bytes`, transport UX parity, reconnect boundary sema
 
 - **Good:** per-message history persistence and direct/passive branching are centralized (`RoomCommandHandlerTs.handleIncomingMessage`), reducing adapter divergence.
 - **Good:** steering/session queue compaction parity is now implemented in TS (`steering-queue.ts`) with queue-aware command/passive sequencing.
-- **Residual risk:** quest lifecycle runtime remains deferred (no quest tables/heartbeat automation), so long-horizon autonomous quest continuity is still narrower in TS even though tool-surface names now exist.
+- **Residual policy gap:** quest persistence/lifecycle internals now exist in TS, but operator-facing quest enablement remains deferred by config policy (`chronicler.quests` / `quests`) in parity v1.
 
 ### B. Reconnect behavior
 
@@ -262,8 +271,8 @@ After closing `response_max_bytes`, transport UX parity, reconnect boundary sema
 
 ### E. Idempotency + race risks
 
-- **Race reduced by serialization:** TS monitor loops process one event at a time.
-- **Trade-off:** serialization introduces head-of-line blocking and weakens parity with Python’s concurrent event processing + steering queue model.
+- **IRC parity update:** TS IRC monitor now dispatches event handlers concurrently from the receive loop, matching Python’s per-event spawn behavior more closely.
+- **Residual trade-off:** shared-state race exposure now matches Python’s concurrency model and must continue being covered by targeted queue/locking tests.
 
 ---
 
@@ -309,7 +318,7 @@ Tests (red/green):
   - tool-result continuation,
   - non-empty completion retry behavior.
 - ✅ Extended baseline/executor/runner/command tests for core + artifact + advanced + chronicler/quest tool wiring (`web_search`, `visit_webpage`, `execute_code`, `share_artifact`, `edit_artifact`, `oracle`, `generate_image`, `chronicle_read`, `chronicle_append`, `quest_start`, `subquest_start`, `quest_snooze`) and focused persistence-summary semantics.
-- Remaining in this lane: quest runtime persistence/heartbeat surfaces and broader deferred-runtime behavior.
+- Remaining in this lane: lower-priority tool/runtime deltas (for example vision fallback behavior and cost follow-up messaging parity), plus deferred-policy decisions for quest/proactive operator enablement.
 
 ## Phase 3 — adapter UX/completeness parity
 

@@ -238,6 +238,77 @@ describe("RoomCommandHandlerTs", () => {
     await history.close();
   });
 
+  it("prepends chapter context by default and skips it when include_chapter_summary is disabled", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    await history.addMessage({
+      ...makeMessage("previous context"),
+      nick: "bob",
+    });
+
+    const incoming = makeMessage("!s include summary please");
+    await history.addMessage(incoming);
+
+    const chapterContext = [
+      {
+        role: "user" as const,
+        content: "<context_summary>chapter recap</context_summary>",
+      },
+    ];
+
+    const chronicleStore = {
+      getChapterContextMessages: vi.fn(async () => chapterContext),
+    };
+
+    const runnerContextWithSummary: string[][] = [];
+
+    const handlerWithSummary = new RoomCommandHandlerTs({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      chronicleStore,
+      runnerFactory: () => ({
+        runSingleTurn: async (_prompt, options) => {
+          runnerContextWithSummary.push((options?.contextMessages ?? []).map((entry) => entry.content));
+          return makeRunnerResult("done");
+        },
+      }),
+    });
+
+    await handlerWithSummary.execute(incoming);
+
+    expect(chronicleStore.getChapterContextMessages).toHaveBeenCalledWith("libera##test");
+    expect(runnerContextWithSummary[0][0]).toBe("<context_summary>chapter recap</context_summary>");
+
+    const handlerWithoutSummary = new RoomCommandHandlerTs({
+      roomConfig: {
+        ...roomConfig,
+        command: {
+          ...roomConfig.command,
+          modes: {
+            ...roomConfig.command.modes,
+            serious: {
+              ...roomConfig.command.modes.serious,
+              include_chapter_summary: false,
+            },
+          },
+        },
+      } as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      chronicleStore,
+      runnerFactory: () => ({
+        runSingleTurn: async () => makeRunnerResult("done"),
+      }),
+    });
+
+    await handlerWithoutSummary.execute(incoming);
+    expect(chronicleStore.getChapterContextMessages).toHaveBeenCalledTimes(1);
+
+    await history.close();
+  });
+
   it("filters baseline tools via allowed_tools including chronicler/quest tool names", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();

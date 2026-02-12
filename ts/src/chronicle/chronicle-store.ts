@@ -16,6 +16,20 @@ interface ParagraphRow {
   content: string;
 }
 
+export type QuestStatus = "ongoing" | "in_step" | "finished";
+
+export interface QuestRow {
+  id: string;
+  arc_id: number;
+  parent_id: string | null;
+  status: QuestStatus;
+  last_state: string | null;
+  plan: string | null;
+  resume_at: string | null;
+  created_by_paragraph_id: number | null;
+  last_updated_by_paragraph_id: number | null;
+}
+
 export class ChronicleStore {
   private readonly dbPath: string;
   private db: Database | null = null;
@@ -69,7 +83,35 @@ export class ChronicleStore {
 
       CREATE INDEX IF NOT EXISTS idx_chapters_arc_opened
       ON chapters(arc_id, opened_at);
+
+      CREATE TABLE IF NOT EXISTS quests (
+        id TEXT PRIMARY KEY,
+        arc_id INTEGER NOT NULL,
+        parent_id TEXT,
+        status TEXT NOT NULL CHECK(status IN ('ongoing', 'in_step', 'finished')),
+        last_state TEXT,
+        plan TEXT,
+        resume_at TEXT,
+        created_by_paragraph_id INTEGER,
+        last_updated_by_paragraph_id INTEGER,
+        FOREIGN KEY (arc_id) REFERENCES arcs(id),
+        FOREIGN KEY (parent_id) REFERENCES quests(id),
+        FOREIGN KEY (created_by_paragraph_id) REFERENCES paragraphs(id),
+        FOREIGN KEY (last_updated_by_paragraph_id) REFERENCES paragraphs(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_quests_arc_status
+      ON quests(arc_id, status);
+
+      CREATE INDEX IF NOT EXISTS idx_quests_parent
+      ON quests(parent_id);
     `);
+
+    const questColumns = await db.all<Array<{ name: string }>>("PRAGMA table_info(quests)");
+    const hasResumeAt = questColumns.some((column) => column.name === "resume_at");
+    if (!hasResumeAt) {
+      await db.exec("ALTER TABLE quests ADD COLUMN resume_at TEXT");
+    }
   }
 
   async close(): Promise<void> {
@@ -161,6 +203,144 @@ export class ChronicleStore {
       role: "user" as const,
       content: `<context_summary>${paragraph}</context_summary>`,
     }));
+  }
+
+  async questStart(
+    questId: string,
+    arc: string,
+    paragraphId: number,
+    stateText: string,
+    parentId: string | null = null,
+  ): Promise<void> {
+    const db = this.requireDb();
+    const [arcId] = await this.getOrCreateArc(arc);
+
+    await db.run(
+      `INSERT INTO quests
+         (id, arc_id, parent_id, status, last_state, created_by_paragraph_id, last_updated_by_paragraph_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      questId,
+      arcId,
+      parentId,
+      "ongoing",
+      stateText,
+      paragraphId,
+      paragraphId,
+    );
+  }
+
+  async questUpdate(questId: string, stateText: string, paragraphId: number): Promise<void> {
+    const db = this.requireDb();
+    await db.run(
+      `UPDATE quests
+       SET last_state = ?, last_updated_by_paragraph_id = ?
+       WHERE id = ?`,
+      stateText,
+      paragraphId,
+      questId,
+    );
+  }
+
+  async questFinish(questId: string, paragraphId: number): Promise<void> {
+    const db = this.requireDb();
+    await db.run(
+      `UPDATE quests
+       SET status = ?, last_updated_by_paragraph_id = ?
+       WHERE id = ?`,
+      "finished",
+      paragraphId,
+      questId,
+    );
+  }
+
+  async questSetStatus(questId: string, status: QuestStatus): Promise<void> {
+    const db = this.requireDb();
+    await db.run("UPDATE quests SET status = ? WHERE id = ?", status, questId);
+  }
+
+  async questTryTransition(
+    questId: string,
+    fromStatus: QuestStatus,
+    toStatus: QuestStatus,
+  ): Promise<boolean> {
+    const db = this.requireDb();
+    const result = await db.run(
+      "UPDATE quests SET status = ? WHERE id = ? AND status = ?",
+      toStatus,
+      questId,
+      fromStatus,
+    );
+
+    return Number(result.changes ?? 0) > 0;
+  }
+
+  async questGet(questId: string): Promise<QuestRow | null> {
+    const db = this.requireDb();
+    const row = await db.get<QuestRow>(
+      `SELECT id, arc_id, parent_id, status, last_state, plan, resume_at,
+              created_by_paragraph_id, last_updated_by_paragraph_id
+       FROM quests
+       WHERE id = ?`,
+      questId,
+    );
+
+    return row ?? null;
+  }
+
+  async questSetPlan(questId: string, plan: string): Promise<boolean> {
+    const db = this.requireDb();
+    const result = await db.run("UPDATE quests SET plan = ? WHERE id = ?", plan, questId);
+    return Number(result.changes ?? 0) > 0;
+  }
+
+  async questSetResumeAt(questId: string, resumeAt: string | null): Promise<boolean> {
+    const db = this.requireDb();
+    const result = await db.run(
+      "UPDATE quests SET resume_at = ? WHERE id = ?",
+      resumeAt,
+      questId,
+    );
+
+    return Number(result.changes ?? 0) > 0;
+  }
+
+  async questsReadyForHeartbeat(arc: string, cooldownSeconds: number): Promise<QuestRow[]> {
+    const db = this.requireDb();
+    const [arcId] = await this.getOrCreateArc(arc);
+
+    const rows = await db.all<QuestRow[]>(
+      `SELECT q.id, q.arc_id, q.parent_id, q.status, q.last_state, q.plan, q.resume_at,
+              q.created_by_paragraph_id, q.last_updated_by_paragraph_id
+       FROM quests q
+       JOIN paragraphs p ON q.last_updated_by_paragraph_id = p.id
+       WHERE q.arc_id = ?
+         AND q.status = ?
+         AND datetime(p.ts, '+' || ? || ' seconds') <= datetime('now')
+         AND (q.resume_at IS NULL OR datetime('now') >= datetime(q.resume_at))
+         AND NOT EXISTS (
+           SELECT 1 FROM quests c
+           WHERE c.parent_id = q.id AND c.status IN (?, ?)
+         )`,
+      arcId,
+      "ongoing",
+      Math.max(0, Math.trunc(cooldownSeconds)),
+      "ongoing",
+      "in_step",
+    );
+
+    return rows;
+  }
+
+  async questsCountUnfinished(arc: string): Promise<number> {
+    const db = this.requireDb();
+    const [arcId] = await this.getOrCreateArc(arc);
+    const row = await db.get<{ count: number }>(
+      "SELECT COUNT(*) as count FROM quests WHERE arc_id = ? AND status != ?",
+      arcId,
+      "finished",
+    );
+
+    return Number(row?.count ?? 0);
   }
 
   async renderChapter(arc: string, chapterId?: number, lastN?: number): Promise<string> {

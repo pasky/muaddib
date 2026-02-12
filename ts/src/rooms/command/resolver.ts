@@ -27,6 +27,7 @@ export interface RuntimeSettings {
   allowedTools: string[] | null;
   steering: boolean;
   autoReduceContext: boolean;
+  includeChapterSummary: boolean;
   model: string | null;
   historySize: number;
 }
@@ -38,6 +39,7 @@ export interface ModeConfig {
   allowed_tools?: string[];
   steering?: boolean;
   auto_reduce_context?: boolean;
+  include_chapter_summary?: boolean;
   prompt?: string;
   triggers: Record<string, Record<string, unknown>>;
 }
@@ -198,6 +200,10 @@ export class CommandResolver {
           (overrides.auto_reduce_context as boolean | undefined) ??
           modeConfig.auto_reduce_context ??
           false,
+        includeChapterSummary:
+          (overrides.include_chapter_summary as boolean | undefined) ??
+          modeConfig.include_chapter_summary ??
+          true,
         model: (overrides.model as string | undefined) ?? null,
         historySize: Number(modeConfig.history_size ?? this.commandConfig.history_size),
       },
