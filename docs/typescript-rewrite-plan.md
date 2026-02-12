@@ -9,6 +9,9 @@ Keep a compact, up-to-date plan for the TypeScript runtime rewrite, focused on:
 
 Historical milestone-by-milestone notes were intentionally removed; use git history for full chronology.
 
+Latest update:
+- 2026-02-12: Added `docs/typescript-parity-audit.md` with a code-referenced Python-vs-TS matrix, severity-ranked gaps, architecture risks, and remediation plan.
+
 ---
 
 ## Rewrite objective
@@ -162,7 +165,7 @@ Python rollback path must remain available until soak/parity/SLO gates are fully
 ---
 
 ## Current focus
-Perform a full Python-vs-TS comparison pass (feature completeness + architecture correctness) and convert findings into:
-- explicit missing-functionality list,
-- severity-ranked parity gaps,
-- concrete remediation plan.
+Use the authoritative parity audit as the execution backlog:
+- `docs/typescript-parity-audit.md`
+
+Immediate priority is closing accidental P0/P1 gaps from that audit before rollback-path deprecation decisions.
