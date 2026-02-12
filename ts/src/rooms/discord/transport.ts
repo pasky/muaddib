@@ -9,6 +9,7 @@ import {
 
 import type {
   DiscordEventSource,
+  DiscordAttachment,
   DiscordIncomingEvent,
   DiscordMessageEditEvent,
   DiscordMessageEvent,
@@ -40,6 +41,11 @@ class AsyncQueue<T> {
   }
 }
 
+interface DiscordTransportSignal {
+  kind: "disconnect";
+  reason: string;
+}
+
 export interface DiscordTransportOptions {
   token: string;
   botNameFallback?: string;
@@ -49,7 +55,7 @@ export interface DiscordTransportOptions {
  * Real Discord gateway transport behind monitor abstractions.
  */
 export class DiscordGatewayTransport implements DiscordEventSource, DiscordSender {
-  private readonly queue = new AsyncQueue<DiscordIncomingEvent | null>();
+  private readonly queue = new AsyncQueue<DiscordIncomingEvent | DiscordTransportSignal | null>();
   private readonly client: Client;
   private connected = false;
 
@@ -83,12 +89,18 @@ export class DiscordGatewayTransport implements DiscordEventSource, DiscordSende
       }
     });
 
-    this.client.on("error", () => {
-      this.queue.push(null);
+    this.client.on("error", (error) => {
+      this.queue.push({
+        kind: "disconnect",
+        reason: error?.message ?? "discord client error",
+      });
     });
 
-    this.client.on("shardDisconnect", () => {
-      this.queue.push(null);
+    this.client.on("shardDisconnect", (event) => {
+      this.queue.push({
+        kind: "disconnect",
+        reason: event?.reason ?? "discord shard disconnect",
+      });
     });
   }
 
@@ -112,7 +124,11 @@ export class DiscordGatewayTransport implements DiscordEventSource, DiscordSende
   }
 
   async receiveEvent(): Promise<DiscordIncomingEvent | null> {
-    return await this.queue.shift();
+    const next = await this.queue.shift();
+    if (isDiscordTransportSignal(next)) {
+      throw new Error(`Discord gateway disconnected: ${next.reason}`);
+    }
+    return next;
   }
 
   async sendMessage(channelId: string, message: string, options?: DiscordSendOptions): Promise<void> {
@@ -182,6 +198,7 @@ export class DiscordGatewayTransport implements DiscordEventSource, DiscordSende
       username,
       content: normalizeDiscordContent(message.cleanContent || message.content),
       mynick,
+      attachments: mapDiscordAttachments(message.attachments),
       botUserId: this.client.user?.id,
       isDirectMessage,
       mentionsBot,
@@ -258,4 +275,19 @@ function isFullMessage(message: Message | PartialMessage): message is Message {
 function isThreadChannel(channel: Message["channel"]): channel is Message["channel"] & { id: string; name: string; parent?: { name?: string | null } } {
   return typeof (channel as { isThread?: () => boolean }).isThread === "function" &&
     Boolean((channel as { isThread: () => boolean }).isThread());
+}
+
+function isDiscordTransportSignal(
+  value: DiscordIncomingEvent | DiscordTransportSignal | null,
+): value is DiscordTransportSignal {
+  return Boolean(value && typeof value === "object" && "kind" in value && value.kind === "disconnect");
+}
+
+function mapDiscordAttachments(attachments: Message["attachments"]): DiscordAttachment[] {
+  return Array.from(attachments.values()).map((attachment) => ({
+    url: attachment.url,
+    contentType: attachment.contentType ?? undefined,
+    filename: attachment.name ?? undefined,
+    size: attachment.size ?? undefined,
+  }));
 }

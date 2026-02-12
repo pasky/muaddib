@@ -49,6 +49,7 @@ export interface ModeClassifierConfig {
 
 export interface CommandConfig {
   history_size: number;
+  response_max_bytes?: number;
   debounce?: number;
   rate_limit?: number;
   rate_period?: number;

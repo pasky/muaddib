@@ -11,6 +11,7 @@ import {
   createBaselineAgentTools,
   type BaselineToolOptions,
 } from "../../agent/tools/baseline-tools.js";
+import { createDefaultToolExecutors } from "../../agent/tools/core-executors.js";
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { parseModelSpec } from "../../models/model-spec.js";
 import { RateLimiter } from "./rate-limiter.js";
@@ -104,6 +105,8 @@ export class RoomCommandHandlerTs {
   private readonly rateLimiter: CommandRateLimiter;
   private readonly steeringQueue: SteeringQueue;
   private readonly refusalFallbackModel: string | null;
+  private readonly responseMaxBytes: number;
+  private readonly shareArtifact: (content: string) => Promise<string>;
 
   constructor(private readonly options: CommandHandlerOptions) {
     this.commandConfig = options.roomConfig.command;
@@ -132,6 +135,10 @@ export class RoomCommandHandlerTs {
     this.refusalFallbackModel = options.refusalFallbackModel
       ? normalizeModelSpec(options.refusalFallbackModel)
       : null;
+    this.responseMaxBytes = parseResponseMaxBytes(this.commandConfig.response_max_bytes);
+    const defaultExecutors = createDefaultToolExecutors(options.toolOptions ?? {});
+    this.shareArtifact =
+      options.toolOptions?.executors?.shareArtifact ?? defaultExecutors.shareArtifact;
 
     this.rateLimiter =
       options.rateLimiter ??
@@ -303,11 +310,14 @@ export class RoomCommandHandlerTs {
       },
     );
 
-    let cleaned = this.cleanResponseText(runResult.agentResult.text, message.nick);
+    let responseText = runResult.agentResult.text;
     if (runResult.fallbackModelSpec) {
       const fallbackSpec = parseModelSpec(runResult.fallbackModelSpec);
-      cleaned = `${cleaned} [refusal fallback to ${fallbackSpec.modelId}]`.trim();
+      responseText = `${responseText} [refusal fallback to ${fallbackSpec.modelId}]`.trim();
     }
+
+    responseText = await this.applyResponseLengthPolicy(responseText);
+    const cleaned = this.cleanResponseText(responseText, message.nick);
 
     return {
       response: cleaned || null,
@@ -680,10 +690,41 @@ export class RoomCommandHandlerTs {
     return this.options.responseCleaner(cleaned, nick).trim();
   }
 
+  private async applyResponseLengthPolicy(responseText: string): Promise<string> {
+    if (!responseText) {
+      return responseText;
+    }
+
+    if (byteLengthUtf8(responseText) <= this.responseMaxBytes) {
+      return responseText;
+    }
+
+    return await this.longResponseToArtifact(responseText);
+  }
+
+  private async longResponseToArtifact(fullResponse: string): Promise<string> {
+    const artifactResult = await this.shareArtifact(fullResponse);
+    const artifactUrl = extractSharedArtifactUrl(artifactResult);
+
+    let trimmed = trimToMaxBytes(fullResponse, this.responseMaxBytes);
+
+    const minLength = Math.max(0, trimmed.length - 100);
+    const lastSentence = trimmed.lastIndexOf(".");
+    const lastWord = trimmed.lastIndexOf(" ");
+    if (lastSentence > minLength) {
+      trimmed = trimmed.slice(0, lastSentence + 1);
+    } else if (lastWord > minLength) {
+      trimmed = trimmed.slice(0, lastWord);
+    }
+
+    return `${trimmed}... full response: ${artifactUrl}`;
+  }
+
   private selectTools(message: RoomMessage, allowedTools: string[] | null): AgentTool<any>[] {
     const baseline = createBaselineAgentTools({
       ...this.options.toolOptions,
       chronicleArc: `${message.serverTag}#${message.channelName}`,
+      secrets: message.secrets,
       onProgressReport: this.options.onProgressReport,
     });
 
@@ -811,4 +852,40 @@ function formatCurrentTime(date = new Date()): string {
   const hour = String(date.getHours()).padStart(2, "0");
   const minute = String(date.getMinutes()).padStart(2, "0");
   return `${year}-${month}-${day} ${hour}:${minute}`;
+}
+
+function parseResponseMaxBytes(value: unknown): number {
+  if (value === undefined || value === null) {
+    return 600;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error("command.response_max_bytes must be a positive integer.");
+  }
+
+  return parsed;
+}
+
+function byteLengthUtf8(text: string): number {
+  return Buffer.byteLength(text, "utf8");
+}
+
+function trimToMaxBytes(text: string, maxBytes: number): string {
+  let trimmed = text;
+  while (trimmed.length > 0 && byteLengthUtf8(trimmed) > maxBytes) {
+    trimmed = trimmed.slice(0, -1);
+  }
+  return trimmed;
+}
+
+function extractSharedArtifactUrl(result: string): string {
+  const prefix = "Artifact shared: ";
+  if (!result.startsWith(prefix)) {
+    throw new Error(
+      `response_max_bytes artifact fallback expected 'Artifact shared: <url>' but got: ${result}`,
+    );
+  }
+
+  return result.slice(prefix.length).trim();
 }

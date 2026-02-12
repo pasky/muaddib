@@ -2,6 +2,7 @@ import { App } from "@slack/bolt";
 
 import type {
   SlackEventSource,
+  SlackFileAttachment,
   SlackIncomingEvent,
   SlackMessageEditEvent,
   SlackMessageEvent,
@@ -33,6 +34,11 @@ class AsyncQueue<T> {
   }
 }
 
+interface SlackTransportSignal {
+  kind: "disconnect";
+  reason: string;
+}
+
 export interface SlackSocketTransportOptions {
   appToken: string;
   botToken: string;
@@ -45,7 +51,7 @@ export interface SlackSocketTransportOptions {
  * Real Slack socket-mode transport behind monitor abstractions.
  */
 export class SlackSocketTransport implements SlackEventSource, SlackSender {
-  private readonly queue = new AsyncQueue<SlackIncomingEvent | null>();
+  private readonly queue = new AsyncQueue<SlackIncomingEvent | SlackTransportSignal | null>();
   private readonly app: App;
   private connected = false;
   private botUserId: string | null = null;
@@ -67,8 +73,11 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
       }
     });
 
-    this.app.error(async () => {
-      this.queue.push(null);
+    this.app.error(async (error) => {
+      this.queue.push({
+        kind: "disconnect",
+        reason: stringifyError(error),
+      });
     });
   }
 
@@ -102,7 +111,11 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
   }
 
   async receiveEvent(): Promise<SlackIncomingEvent | null> {
-    return await this.queue.shift();
+    const next = await this.queue.shift();
+    if (isSlackTransportSignal(next)) {
+      throw new Error(`Slack socket disconnected: ${next.reason}`);
+    }
+    return next;
   }
 
   async sendMessage(channelId: string, message: string, options?: SlackSendOptions): Promise<void> {
@@ -132,8 +145,9 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
     const rawText = typeof event.text === "string" ? event.text : "";
     const channelId = typeof event.channel === "string" ? event.channel : "";
     const userId = typeof event.user === "string" ? event.user : "";
+    const files = mapSlackFiles(event.files);
 
-    if (!rawText || !channelId || !userId) {
+    if (!channelId || !userId || (!rawText && files.length === 0)) {
       return null;
     }
 
@@ -162,6 +176,8 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
       username,
       text: normalizedText,
       mynick: this.botDisplayName ?? this.options.botNameFallback ?? "muaddib",
+      files,
+      secrets: buildSlackFileSecrets(files, this.options.botToken),
       botUserId: this.botUserId ?? undefined,
       messageTs: typeof event.ts === "string" ? event.ts : undefined,
       threadTs: typeof event.thread_ts === "string" ? event.thread_ts : undefined,
@@ -298,4 +314,65 @@ function decodeSlackEntities(text: string): string {
     .replaceAll("&amp;", "&")
     .replaceAll("&lt;", "<")
     .replaceAll("&gt;", ">");
+}
+
+function mapSlackFiles(value: unknown): SlackFileAttachment[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry) => asRecord(entry))
+    .filter((entry): entry is Record<string, unknown> => entry !== null)
+    .map((entry) => ({
+      mimetype: typeof entry.mimetype === "string" ? entry.mimetype : undefined,
+      filetype: typeof entry.filetype === "string" ? entry.filetype : undefined,
+      name: typeof entry.name === "string" ? entry.name : undefined,
+      title: typeof entry.title === "string" ? entry.title : undefined,
+      size: typeof entry.size === "number" ? entry.size : undefined,
+      urlPrivate: typeof entry.url_private === "string" ? entry.url_private : undefined,
+      urlPrivateDownload:
+        typeof entry.url_private_download === "string" ? entry.url_private_download : undefined,
+    }));
+}
+
+function buildSlackFileSecrets(
+  files: SlackFileAttachment[],
+  botToken: string,
+): Record<string, unknown> | undefined {
+  if (files.length === 0) {
+    return undefined;
+  }
+
+  const hasPrivateSlackUrl = files.some(
+    (file) =>
+      (file.urlPrivate && file.urlPrivate.startsWith("https://files.slack.com/")) ||
+      (file.urlPrivateDownload && file.urlPrivateDownload.startsWith("https://files.slack.com/")),
+  );
+
+  if (!hasPrivateSlackUrl) {
+    return undefined;
+  }
+
+  return {
+    http_header_prefixes: {
+      "https://files.slack.com/": {
+        Authorization: `Bearer ${botToken}`,
+      },
+    },
+  };
+}
+
+function isSlackTransportSignal(
+  value: SlackIncomingEvent | SlackTransportSignal | null,
+): value is SlackTransportSignal {
+  return Boolean(value && typeof value === "object" && "kind" in value && value.kind === "disconnect");
+}
+
+function stringifyError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
 }

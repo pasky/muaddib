@@ -70,6 +70,15 @@ The intent is to separate:
   - Wired command-path baseline creation to pass per-message arc context (`server#channel`) into tool options (`ts/src/rooms/command/command-handler.ts`) and extended `ChronicleStore` with relative chapter rendering used by `chronicle_read` (`ts/src/chronicle/chronicle-store.ts`).
   - Kept deferred-runtime guardrails unchanged: quest executors continue returning explicit deferred-runtime rejection guidance in TS parity v1.
   - Extended tests for tool wiring/invocation and persistence semantics (`ts/tests/baseline-tools.test.ts`, `ts/tests/core-executors.test.ts`, `ts/tests/muaddib-agent-runner.test.ts`, `ts/tests/command-handler.test.ts`, `ts/tests/storage.test.ts`).
+- 2026-02-12 (cluster: response-length + transport P1 parity tranche):
+  - Added TS command-path `response_max_bytes` handling with Python-aligned long-response artifact fallback semantics (`RoomCommandHandlerTs` now converts oversized responses into `... full response: <artifact-url>` after publishing full text via `share_artifact`).
+  - Added fail-fast validation for invalid `command.response_max_bytes` values and covered app + CLI command-path wiring/validation.
+  - Extended command tests for long-response trigger/non-trigger behavior, persistence semantics, and fallback-model LLM-call linkage when artifact fallback is active.
+  - Added transport/monitor parity for file context:
+    - Discord monitor now injects `[Attachments]...[/Attachments]` blocks from transport attachment metadata.
+    - Slack transport/monitor now propagate attachment blocks and private-file auth secrets (`http_header_prefixes`) into room messages.
+    - `visit_webpage` now applies secrets-derived auth headers and uses direct fetch when auth headers are required (private URL support parity).
+  - Added reconnect supervision scaffolding in Discord/Slack monitor loops (configurable reconnect policy + targeted monitor tests), with transport disconnect signals surfaced as receive-loop errors.
 
 ---
 
@@ -88,7 +97,7 @@ Legend: ✅ implemented, ◐ partial, ❌ missing, ⚠ intentional deferred
 | Command debounce / followup coalescing | ✅ | ✅ | Python `_handle_command_core` + `history.get_recent_messages_since`; TS `command-handler.ts::collectDebouncedFollowups` + `chat-history-store.ts::getRecentMessagesSince` |
 | Steering queue/session compaction | ✅ | ✅ | Python `SteeringQueue` + `_run_or_queue_command`; TS `steering-queue.ts` + queued runner integration in `command-handler.ts` |
 | Context reduction integration | ✅ | ❌ | Python `MuaddibAgent.run_actor` + `ContextReducer`; TS command path has no reducer |
-| Response length policy (artifact fallback) | ✅ | ❌ | Python `_run_actor` + `_long_response_to_artifact`; TS command path lacks response_max_bytes/artifact conversion |
+| Response length policy (artifact fallback) | ✅ | ✅ | Python `_run_actor` + `_long_response_to_artifact`; TS `RoomCommandHandlerTs` now enforces `response_max_bytes` + artifact-link fallback semantics |
 | Cost follow-up/operator cost milestones | ✅ | ❌ | Python `_route_command`; TS does not emit cost followups |
 
 ### B. Room monitors / transports (IRC, Discord, Slack)
@@ -100,16 +109,16 @@ Legend: ✅ implemented, ◐ partial, ❌ missing, ⚠ intentional deferred
 | IRC event handling isolation (continue after single event failure) | ✅ | ✅ | `tests/rooms/irc/test_monitor.py`, `ts/tests/irc-monitor.test.ts` |
 | IRC concurrent event handling | ✅ | ❌ | Python spawns per-event (`muaddib.spawn`), TS awaits sequentially in run loop |
 | Discord message edit persistence by platform id | ✅ | ✅ | `process_message_edit` vs `processMessageEditEvent` |
-| Discord attachment block injection into message content | ✅ | ❌ | Python `process_message_event` attachment handling; TS monitor/transport omit attachments |
+| Discord attachment block injection into message content | ✅ | ✅ | Python `process_message_event` attachment handling; TS Discord transport+monitor now inject `[Attachments]` blocks |
 | Discord reply-edit debounce (edit previous bot response) | ✅ | ❌ | Python `reply_edit_debounce_seconds` logic; TS always send new message |
 | Discord typing indicator while generating response | ✅ | ❌ | Python `async with message.channel.typing()`; TS none |
 | Slack message edit persistence by platform id | ✅ | ✅ | Python `_handle_message_edit`; TS `processMessageEditEvent` |
-| Slack attachment block + private-file auth secrets propagation | ✅ | ❌ | Python `_build_attachment_block` + `secrets`; TS monitor/transport do not build attachments or secrets |
+| Slack attachment block + private-file auth secrets propagation | ✅ | ✅ | Python `_build_attachment_block` + `secrets`; TS Slack transport+monitor now build attachment blocks and propagate `http_header_prefixes` secrets |
 | Slack reply-edit debounce (`chat_update`) | ✅ | ❌ | Python `reply_edit_debounce_seconds`; TS always send new message |
 | Slack mention formatting in replies (`@Name` -> `<@U...>`) | ✅ | ❌ | Python `_format_mentions_for_slack`; TS none |
 | Slack typing indicator (`assistant.threads.setStatus`) | ✅ | ❌ | Python `_set_typing_indicator` / `_clear_typing_indicator`; TS none |
 | Discord/Slack send retry on rate limit | ❌ | ✅ | TS `sendWithRateLimitRetry`; Python does not have unified retry helper |
-| Discord/Slack monitor auto-recovery strategy | ◐ | ◐ | Python relies SDK runtime loops (`client.start`, `SocketModeHandler.start_async`); TS monitor exits on `null` event without reconnect loop |
+| Discord/Slack monitor auto-recovery strategy | ◐ | ◐ | Python relies SDK runtime loops (`client.start`, `SocketModeHandler.start_async`); TS now has configurable reconnect supervision for receive-loop failures, while graceful `null` shutdown still terminates loop |
 
 ### C. History + chronicle behavior (including automation)
 
@@ -177,7 +186,7 @@ Legend: ✅ implemented, ◐ partial, ❌ missing, ⚠ intentional deferred
 
 ### Accidental / not-yet-implemented parity gaps
 
-Next priority gap after advanced tool + refusal-fallback + persistence-summary + chronicler/quest tool-surface closure is now **response_max_bytes + artifact fallback parity in TS command flow** (P2), followed by transport P1 gaps (Discord/Slack attachments/secrets and reconnect supervision).
+After closing `response_max_bytes` + artifact fallback parity and the first transport P1 tranche (attachments/secrets + reconnect scaffolding), the highest-priority remaining accidental gaps are transport UX behaviors (reply-edit debounce, Slack mention formatting/typing indicators), context reduction, and chronicle lifecycle automation.
 
 | Gap | Severity | User/operator impact | Evidence |
 |---|---:|---|---|
@@ -189,15 +198,15 @@ Next priority gap after advanced tool + refusal-fallback + persistence-summary +
 | Advanced tool parity step 3 in TS (`oracle`, `generate_image`) | ✅ closed (2026-02-12) | TS command path now includes oracle and image-generation tool wiring/executors with validation/error coverage. | Python `agentic_actor/tools.py::TOOLS`; TS `baseline-tools.ts`, `core-executors.ts`, `app/main.ts`, `cli/message-mode.ts`, `ts/tests/baseline-tools.test.ts`, `ts/tests/core-executors.test.ts` |
 | Remaining chronicler/quest tools parity | ✅ closed (2026-02-12) | TS baseline now includes chronicler/quest tool names and executor wiring; quest executors keep explicit deferred-runtime rejection semantics in parity v1. | Python `agentic_actor/tools.py::TOOLS`; TS `baseline-tools.ts`, `core-executors.ts`, `command-handler.ts`, `chronicle-store.ts`, `ts/tests/baseline-tools.test.ts`, `ts/tests/core-executors.test.ts`, `ts/tests/muaddib-agent-runner.test.ts` |
 | Refusal fallback model behavior in TS command/app path | ✅ closed (2026-02-12) | TS now retries on deterministic explicit refusal/error markers using `router.refusal_fallback_model`, appends fallback suffix, and persists/logs usage under the effective fallback model. | Python `providers/__init__.py::ModelRouter.call_raw_with_model`; TS `ts/src/rooms/command/command-handler.ts` + `ts/src/app/refusal-fallback.ts` |
-| No response_max_bytes + artifact fallback in TS command path | P2 | Long answers risk truncation (especially IRC two-message bound), without artifact link recovery path. | Python `RoomCommandHandler._run_actor/_long_response_to_artifact` |
-| Discord attachments not injected into prompt context in TS | P1 | Users sending files/images lose context; assistant misses key inputs. | Python `rooms/discord/monitor.py::process_message_event` attachment block |
+| No response_max_bytes + artifact fallback in TS command path | ✅ closed (2026-02-12) | TS command path now enforces `response_max_bytes` and converts oversized responses to artifact-linked text fallback. | Python `RoomCommandHandler._run_actor/_long_response_to_artifact`; TS `RoomCommandHandlerTs.applyResponseLengthPolicy` |
+| Discord attachments not injected into prompt context in TS | ✅ closed (2026-02-12) | TS Discord monitor now preserves attachment context via `[Attachments]...[/Attachments]` blocks. | Python `rooms/discord/monitor.py::process_message_event`; TS `rooms/discord/monitor.ts` + `rooms/discord/transport.ts` |
 | Discord reply-edit debounce missing in TS | P2 | Bot emits multiple messages instead of compact edits, noisier UX. | Python `reply_edit_debounce_seconds` logic |
-| Slack attachments + secrets propagation missing in TS | P1 | Private Slack files cannot be fetched by tools; multimodal/file workflows break. | Python `rooms/slack/monitor.py::process_message_event` (`_build_attachment_block`, `secrets`) |
+| Slack attachments + secrets propagation missing in TS | ✅ closed (2026-02-12) | TS Slack transport/monitor now append attachment context and propagate private-file auth secrets for tool fetches. | Python `rooms/slack/monitor.py::process_message_event`; TS `rooms/slack/transport.ts`, `rooms/slack/monitor.ts`, `agent/tools/core-executors.ts` |
 | Slack reply-edit debounce missing in TS | P2 | Noisy multi-message output instead of consolidated updates. | Python `reply_edit_debounce_seconds` logic |
 | Slack mention-formatting for outgoing replies missing in TS | P2 | `@Name` may not notify intended users in Slack. | Python `_format_mentions_for_slack` |
 | Slack typing indicator lifecycle missing in TS | P2 | Reduced operator/user feedback for long-running direct replies. | Python `_set_typing_indicator` / `_clear_typing_indicator` |
 | Chronicle chapter rollover/summary/recap and quest tables missing in TS | P1 | Chronicle persistence exists but lifecycle intelligence and quest continuity are absent. | Python `chronicler/chapters.py`, `chronicler/chronicle.py` quests schema/methods |
-| Discord/Slack monitor stop-on-null-event without reconnect loop | P1 | Transient transport failures can terminate monitor until process restart. | `ts/src/rooms/discord/monitor.ts::run`, `ts/src/rooms/slack/monitor.ts::run` |
+| Discord/Slack monitor stop-on-null-event without reconnect loop | P1 (partial) | TS now reconnects on receive-loop transport errors when reconnect policy is enabled, but graceful `null` termination still stops monitors. | `ts/src/rooms/discord/monitor.ts::run`, `ts/src/rooms/slack/monitor.ts::run`, transport disconnect signals |
 | IRC monitor processes events serially (no per-event task spawn) | P2 | Head-of-line blocking during long command turns; throughput degradation under load. | Python `muaddib.spawn(self.process_message_event(event))` vs TS `await this.processMessageEvent(event)` |
 
 ---
@@ -213,13 +222,13 @@ Next priority gap after advanced tool + refusal-fallback + persistence-summary +
 ### B. Reconnect behavior
 
 - **IRC:** reasonably robust (retry + reconnect + mynick cache reset) in TS.
-- **Discord/Slack:** monitor loops terminate when event source yields `null`; no reconnect supervisor/backoff exists in monitor layer.
-  - Risk type: availability (channel stops handling messages after transient failure).
+- **Discord/Slack:** TS now includes configurable reconnect supervision for receive-loop failures, with transport disconnect signals surfaced as errors and targeted monitor tests.
+  - Residual risk: graceful `null` event termination still ends monitor loops by design.
 
 ### C. Error isolation
 
 - **Good:** monitor loops wrap per-event processing in try/catch and continue on handler exceptions (`irc`, `discord`, `slack` tests explicitly cover this).
-- **Gap:** transport-level disconnects still stop Discord/Slack monitor loops.
+- **Residual gap:** reconnect depends on enabled reconnect policy and transport error signaling; graceful `null` shutdown paths still terminate loops.
 
 ### D. Persistence correctness
 
@@ -237,7 +246,7 @@ Next priority gap after advanced tool + refusal-fallback + persistence-summary +
 
 ## Phase 0 — reliability guardrails (first)
 
-1. **Add Discord/Slack reconnect supervision in monitors** (retry loop with bounded backoff, no silent exit on transient disconnect).
+1. ◐ **Add Discord/Slack reconnect supervision in monitors** (retry loop with bounded backoff, no silent exit on transient disconnect). *(Partially completed 2026-02-12: reconnect-on-error supervision landed; graceful `null` shutdown still terminates loop.)*
 2. ✅ **Add command rate limiting parity** in `RoomCommandHandlerTs` (`rate_limit`, `rate_period`) with user-facing warning response. *(Completed 2026-02-12)*
 
 Tests (red/green):
@@ -273,12 +282,12 @@ Tests (red/green):
   - tool-result continuation,
   - non-empty completion retry behavior.
 - ✅ Extended baseline/executor/runner/command tests for core + artifact + advanced + chronicler/quest tool wiring (`web_search`, `visit_webpage`, `execute_code`, `share_artifact`, `edit_artifact`, `oracle`, `generate_image`, `chronicle_read`, `chronicle_append`, `quest_start`, `subquest_start`, `quest_snooze`) and focused persistence-summary semantics.
-- Remaining: response-length artifact fallback parity (`response_max_bytes`) and transport-side attachment/secrets/reconnect P1 gaps.
+- Remaining in this lane: transport UX deltas (reply-edit debounce, Slack mention formatting/typing indicators) and broader command/runtime parity items (context reduction, chronicle lifecycle automation).
 
 ## Phase 3 — adapter UX/completeness parity
 
-8. **Discord attachments + reply-edit debounce parity**.
-9. **Slack attachments+secrets, reply-edit debounce, mention formatting, typing indicators**.
+8. **Discord reply-edit debounce parity**.
+9. **Slack reply-edit debounce, mention formatting, typing indicators parity**.
 
 Tests (red/green):
 - Extend existing TS monitor suites using Python test cases as source-of-truth equivalents.

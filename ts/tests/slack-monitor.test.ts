@@ -42,6 +42,65 @@ describe("SlackRoomMonitor", () => {
     await history.close();
   });
 
+  it("includes Slack attachment context and propagates secrets", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    let seenText = "";
+    let seenSecrets: Record<string, unknown> | undefined;
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async (message) => {
+          seenText = message.content;
+          seenSecrets = message.secrets as Record<string, unknown> | undefined;
+          return null;
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      workspaceId: "T123",
+      channelId: "C123",
+      username: "alice",
+      text: "muaddib: hi",
+      mynick: "muaddib",
+      mentionsBot: true,
+      files: [
+        {
+          mimetype: "text/plain",
+          name: "notes.txt",
+          size: 1024,
+          urlPrivate: "https://files.slack.com/files-pri/T123-F456/notes.txt",
+        },
+      ],
+      secrets: {
+        http_header_prefixes: {
+          "https://files.slack.com/": {
+            Authorization: "Bearer xoxb-secret",
+          },
+        },
+      },
+    });
+
+    expect(seenText).toContain("hi");
+    expect(seenText).toContain("[Attachments]");
+    expect(seenText).toContain("1. text/plain (filename: notes.txt) (size: 1024): https://files.slack.com/files-pri/T123-F456/notes.txt");
+    expect(seenText).toContain("[/Attachments]");
+    expect(seenSecrets).toEqual({
+      http_header_prefixes: {
+        "https://files.slack.com/": {
+          Authorization: "Bearer xoxb-secret",
+        },
+      },
+    });
+
+    await history.close();
+  });
+
   it("normalizes repeated leading mention prefixes using Slack bot id + bot nick", async () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();
@@ -474,6 +533,69 @@ describe("SlackRoomMonitor", () => {
     expect(eventSourceConnectCalls).toBe(1);
     expect(eventSourceDisconnectCalls).toBe(1);
     expect(senderDisconnectCalls).toBe(0);
+
+    await history.close();
+  });
+
+  it("reconnects receive loop when event source errors and reconnect policy is enabled", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    let connectCalls = 0;
+    let disconnectCalls = 0;
+    let emittedAfterReconnect = false;
+    const processed: string[] = [];
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: {
+        enabled: true,
+        reconnect: {
+          enabled: true,
+          delay_ms: 0,
+          max_attempts: 2,
+        },
+      },
+      history,
+      eventSource: {
+        connect: async () => {
+          connectCalls += 1;
+        },
+        disconnect: async () => {
+          disconnectCalls += 1;
+        },
+        receiveEvent: async () => {
+          if (connectCalls === 1) {
+            throw new Error("socket disconnected");
+          }
+
+          if (!emittedAfterReconnect) {
+            emittedAfterReconnect = true;
+            return {
+              workspaceId: "T123",
+              channelId: "C123",
+              username: "alice",
+              text: "muaddib: second session",
+              mynick: "muaddib",
+              mentionsBot: true,
+            };
+          }
+
+          return null;
+        },
+      },
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async (message) => {
+          processed.push(message.content);
+          return null;
+        },
+      },
+    });
+
+    await expect(monitor.run()).resolves.toBeUndefined();
+    expect(processed).toEqual(["second session"]);
+    expect(connectCalls).toBe(2);
+    expect(disconnectCalls).toBe(2);
 
     await history.close();
   });

@@ -105,6 +105,7 @@ export interface BaselineToolExecutors {
 export interface DefaultToolExecutorOptions {
   fetchImpl?: typeof fetch;
   jinaApiKey?: string;
+  secrets?: Record<string, unknown>;
   maxWebContentLength?: number;
   maxImageBytes?: number;
   executeCodeTimeoutMs?: number;
@@ -233,15 +234,15 @@ function createDefaultVisitWebpageExecutor(
       throw new Error("Invalid URL. Must start with http:// or https://");
     }
 
-    const directHeaders = {
+    const requestHeaders = buildVisitHeaders(options, url, {
       "User-Agent": "muaddib-ts/1.0",
-    };
+    });
 
     let contentType = "";
     try {
       const headResponse = await fetchImpl(url, {
         method: "HEAD",
-        headers: directHeaders,
+        headers: requestHeaders,
       });
       if (headResponse.ok) {
         contentType = (headResponse.headers.get("content-type") ?? "").toLowerCase();
@@ -252,7 +253,7 @@ function createDefaultVisitWebpageExecutor(
 
     if (contentType.startsWith("image/") || looksLikeImageUrl(url)) {
       const imageResponse = await fetchImpl(url, {
-        headers: directHeaders,
+        headers: requestHeaders,
       });
       if (!imageResponse.ok) {
         throw new Error(`Failed to download image: HTTP ${imageResponse.status}`);
@@ -272,6 +273,32 @@ function createDefaultVisitWebpageExecutor(
         data: imageBytes.toString("base64"),
         mimeType: imageMimeType,
       };
+    }
+
+    const hasAuthHeaders = Object.entries(requestHeaders).some(
+      ([key, value]) => key.toLowerCase() !== "user-agent" && String(value).trim().length > 0,
+    );
+
+    if (hasAuthHeaders) {
+      const response = await fetchImpl(url, {
+        headers: requestHeaders,
+      });
+
+      const body = (await response.text()).trim();
+      if (!response.ok) {
+        throw new Error(`visit_webpage failed: HTTP ${response.status}: ${body}`);
+      }
+
+      if (!body) {
+        return `## Content from ${url}\n\n(Empty response)`;
+      }
+
+      const limitedBody =
+        body.length > maxWebContentLength
+          ? `${body.slice(0, maxWebContentLength)}\n\n..._Content truncated_...`
+          : body;
+
+      return `## Content from ${url}\n\n${limitedBody}`;
     }
 
     const readerUrl = `https://r.jina.ai/${url}`;
@@ -1236,6 +1263,65 @@ function buildJinaHeaders(apiKey?: string, extras: Record<string, string> = {}):
   }
 
   return headers;
+}
+
+function buildVisitHeaders(
+  options: DefaultToolExecutorOptions,
+  url: string,
+  extras: Record<string, string> = {},
+): Record<string, string> {
+  const headers = {
+    ...extras,
+  };
+
+  const prefixHeaders = resolveHttpHeaderPrefixes(options.secrets);
+  for (const [prefix, values] of Object.entries(prefixHeaders)) {
+    if (!url.startsWith(prefix)) {
+      continue;
+    }
+
+    Object.assign(headers, values);
+  }
+
+  return headers;
+}
+
+function resolveHttpHeaderPrefixes(
+  secrets: Record<string, unknown> | undefined,
+): Record<string, Record<string, string>> {
+  const raw = asObjectRecord(secrets?.http_header_prefixes);
+  if (!raw) {
+    return {};
+  }
+
+  const resolved: Record<string, Record<string, string>> = {};
+  for (const [prefix, headerObject] of Object.entries(raw)) {
+    const headers = asObjectRecord(headerObject);
+    if (!headers || !prefix) {
+      continue;
+    }
+
+    const normalized: Record<string, string> = {};
+    for (const [name, value] of Object.entries(headers)) {
+      if (typeof value === "string" && value.trim()) {
+        normalized[name] = value;
+      }
+    }
+
+    if (Object.keys(normalized).length > 0) {
+      resolved[prefix] = normalized;
+    }
+  }
+
+  return resolved;
+}
+
+function asObjectRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+
+  return value as Record<string, unknown>;
 }
 
 function looksLikeImageUrl(url: string): boolean {

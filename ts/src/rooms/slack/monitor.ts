@@ -14,12 +14,29 @@ interface CommandLike {
   ): Promise<{ response: string | null } | null>;
 }
 
+export interface SlackReconnectConfig {
+  enabled?: boolean;
+  delay_ms?: number;
+  max_attempts?: number;
+}
+
 export interface SlackMonitorRoomConfig {
   enabled?: boolean;
   reply_start_thread?: {
     channel?: boolean;
     dm?: boolean;
   };
+  reconnect?: SlackReconnectConfig;
+}
+
+export interface SlackFileAttachment {
+  mimetype?: string;
+  filetype?: string;
+  name?: string;
+  title?: string;
+  size?: number;
+  urlPrivate?: string;
+  urlPrivateDownload?: string;
 }
 
 export interface SlackMessageEvent {
@@ -33,6 +50,8 @@ export interface SlackMessageEvent {
   username: string;
   text: string;
   mynick: string;
+  files?: SlackFileAttachment[];
+  secrets?: Record<string, unknown>;
   botUserId?: string;
   messageTs?: string;
   threadTs?: string;
@@ -97,53 +116,84 @@ export class SlackRoomMonitor {
     }
 
     const senderIsEventSource = Object.is(this.options.sender, this.options.eventSource);
-    let eventSourceConnected = false;
-    let senderConnected = false;
+    const reconnectPolicy = resolveReconnectPolicy(this.options.roomConfig.reconnect);
 
     this.logger.info("Slack monitor starting.");
 
+    let reconnectAttempts = 0;
+
     try {
-      if (this.options.eventSource.connect) {
-        await this.options.eventSource.connect();
-        eventSourceConnected = true;
-      }
-
-      if (this.options.sender && !senderIsEventSource && this.options.sender.connect) {
-        await this.options.sender.connect();
-        senderConnected = true;
-      }
-
       while (true) {
-        const event = await this.options.eventSource.receiveEvent();
-        if (!event) {
-          break;
-        }
+        let eventSourceConnected = false;
+        let senderConnected = false;
 
         try {
-          if (isSlackMessageEditEvent(event)) {
-            await this.processMessageEditEvent(event);
-          } else {
-            await this.processMessageEvent(event);
+          if (this.options.eventSource.connect) {
+            await this.options.eventSource.connect();
+            eventSourceConnected = true;
+          }
+
+          if (this.options.sender && !senderIsEventSource && this.options.sender.connect) {
+            await this.options.sender.connect();
+            senderConnected = true;
+          }
+
+          while (true) {
+            const event = await this.options.eventSource.receiveEvent();
+            if (!event) {
+              return;
+            }
+
+            try {
+              if (isSlackMessageEditEvent(event)) {
+                await this.processMessageEditEvent(event);
+              } else {
+                await this.processMessageEvent(event);
+              }
+            } catch (error) {
+              this.logger.error("Slack monitor failed to process event; continuing", error);
+            }
           }
         } catch (error) {
-          this.logger.error("Slack monitor failed to process event; continuing", error);
+          if (!reconnectPolicy.enabled) {
+            throw error;
+          }
+
+          reconnectAttempts += 1;
+          if (reconnectAttempts > reconnectPolicy.maxAttempts) {
+            throw error;
+          }
+
+          this.logger.warn(
+            "Slack monitor receive loop failed; reconnecting",
+            `attempt=${reconnectAttempts}`,
+            `delay_ms=${reconnectPolicy.delayMs}`,
+            error,
+          );
+        } finally {
+          if (this.options.sender && !senderIsEventSource && senderConnected && this.options.sender.disconnect) {
+            await this.options.sender.disconnect();
+          }
+
+          if (eventSourceConnected && this.options.eventSource.disconnect) {
+            await this.options.eventSource.disconnect();
+          }
         }
+
+        await sleep(reconnectPolicy.delayMs);
       }
     } finally {
-      if (this.options.sender && !senderIsEventSource && senderConnected && this.options.sender.disconnect) {
-        await this.options.sender.disconnect();
-      }
-
-      if (eventSourceConnected && this.options.eventSource.disconnect) {
-        await this.options.eventSource.disconnect();
-      }
-
       this.logger.info("Slack monitor stopped.");
     }
   }
 
   async processMessageEvent(event: SlackMessageEvent): Promise<void> {
-    if (!event.workspaceId || !event.channelId || !event.username || !event.text || !event.mynick) {
+    if (!event.workspaceId || !event.channelId || !event.username || !event.mynick) {
+      return;
+    }
+
+    const files = event.files ?? [];
+    if (!event.text && files.length === 0) {
       return;
     }
 
@@ -156,9 +206,11 @@ export class SlackRoomMonitor {
     }
 
     const isDirect = Boolean(event.isDirectMessage || event.mentionsBot);
-    const cleanedContent = isDirect
+    const textContent = isDirect
       ? normalizeDirectContent(event.text, event.mynick, event.botUserId)
       : event.text.trim();
+    const attachmentBlock = buildSlackAttachmentBlock(files);
+    const cleanedContent = appendAttachmentBlock(textContent, attachmentBlock);
 
     if (!cleanedContent) {
       return;
@@ -188,6 +240,7 @@ export class SlackRoomMonitor {
       threadId,
       threadStarterId,
       responseThreadId,
+      secrets: event.secrets,
     };
 
     const sender = this.options.sender;
@@ -264,6 +317,46 @@ function isSlackMessageEditEvent(event: SlackIncomingEvent): event is SlackMessa
   return event.kind === "message_edit";
 }
 
+function buildSlackAttachmentBlock(files: SlackFileAttachment[]): string {
+  if (files.length === 0) {
+    return "";
+  }
+
+  const lines = files
+    .map((file, index) => {
+      let meta = file.mimetype || file.filetype || "attachment";
+      const filename = file.name || file.title;
+      if (filename) {
+        meta += ` (filename: ${filename})`;
+      }
+      if (file.size) {
+        meta += ` (size: ${file.size})`;
+      }
+
+      const url = file.urlPrivate || file.urlPrivateDownload || "";
+      return `${index + 1}. ${meta}: ${url}`;
+    })
+    .filter((line) => line.trim().length > 0);
+
+  if (lines.length === 0) {
+    return "";
+  }
+
+  return ["[Attachments]", ...lines, "[/Attachments]"].join("\n");
+}
+
+function appendAttachmentBlock(content: string, attachmentBlock: string): string {
+  if (!attachmentBlock) {
+    return content.trim();
+  }
+
+  if (!content.trim()) {
+    return attachmentBlock;
+  }
+
+  return `${content.trim()}\n\n${attachmentBlock}`;
+}
+
 function resolveReplyThreadTs(
   roomConfig: SlackMonitorRoomConfig,
   event: Pick<SlackMessageEvent, "threadTs" | "messageTs" | "channelType" | "isDirectMessage">,
@@ -332,4 +425,28 @@ function normalizeName(name: string): string {
 
 function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function resolveReconnectPolicy(config: SlackReconnectConfig | undefined): {
+  enabled: boolean;
+  delayMs: number;
+  maxAttempts: number;
+} {
+  const enabled = config?.enabled ?? false;
+  const delayMs = Number.isFinite(Number(config?.delay_ms)) ? Math.max(0, Number(config?.delay_ms)) : 1_000;
+  const maxAttempts = Number.isFinite(Number(config?.max_attempts))
+    ? Math.max(1, Math.trunc(Number(config?.max_attempts)))
+    : 5;
+
+  return {
+    enabled,
+    delayMs,
+    maxAttempts,
+  };
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }

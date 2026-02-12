@@ -14,9 +14,23 @@ interface CommandLike {
   ): Promise<{ response: string | null } | null>;
 }
 
+export interface DiscordReconnectConfig {
+  enabled?: boolean;
+  delay_ms?: number;
+  max_attempts?: number;
+}
+
 export interface DiscordMonitorRoomConfig {
   enabled?: boolean;
   bot_name?: string;
+  reconnect?: DiscordReconnectConfig;
+}
+
+export interface DiscordAttachment {
+  url: string;
+  contentType?: string;
+  filename?: string;
+  size?: number;
 }
 
 export interface DiscordMessageEvent {
@@ -30,6 +44,7 @@ export interface DiscordMessageEvent {
   username: string;
   content: string;
   mynick: string;
+  attachments?: DiscordAttachment[];
   botUserId?: string;
   isDirectMessage?: boolean;
   mentionsBot?: boolean;
@@ -91,47 +106,73 @@ export class DiscordRoomMonitor {
     }
 
     const senderIsEventSource = Object.is(this.options.sender, this.options.eventSource);
-    let eventSourceConnected = false;
-    let senderConnected = false;
+    const reconnectPolicy = resolveReconnectPolicy(this.options.roomConfig.reconnect);
 
     this.logger.info("Discord monitor starting.");
 
+    let reconnectAttempts = 0;
+
     try {
-      if (this.options.eventSource.connect) {
-        await this.options.eventSource.connect();
-        eventSourceConnected = true;
-      }
-
-      if (this.options.sender && !senderIsEventSource && this.options.sender.connect) {
-        await this.options.sender.connect();
-        senderConnected = true;
-      }
-
       while (true) {
-        const event = await this.options.eventSource.receiveEvent();
-        if (!event) {
-          break;
-        }
+        let eventSourceConnected = false;
+        let senderConnected = false;
 
         try {
-          if (isDiscordMessageEditEvent(event)) {
-            await this.processMessageEditEvent(event);
-          } else {
-            await this.processMessageEvent(event);
+          if (this.options.eventSource.connect) {
+            await this.options.eventSource.connect();
+            eventSourceConnected = true;
+          }
+
+          if (this.options.sender && !senderIsEventSource && this.options.sender.connect) {
+            await this.options.sender.connect();
+            senderConnected = true;
+          }
+
+          while (true) {
+            const event = await this.options.eventSource.receiveEvent();
+            if (!event) {
+              return;
+            }
+
+            try {
+              if (isDiscordMessageEditEvent(event)) {
+                await this.processMessageEditEvent(event);
+              } else {
+                await this.processMessageEvent(event);
+              }
+            } catch (error) {
+              this.logger.error("Discord monitor failed to process event; continuing", error);
+            }
           }
         } catch (error) {
-          this.logger.error("Discord monitor failed to process event; continuing", error);
+          if (!reconnectPolicy.enabled) {
+            throw error;
+          }
+
+          reconnectAttempts += 1;
+          if (reconnectAttempts > reconnectPolicy.maxAttempts) {
+            throw error;
+          }
+
+          this.logger.warn(
+            "Discord monitor receive loop failed; reconnecting",
+            `attempt=${reconnectAttempts}`,
+            `delay_ms=${reconnectPolicy.delayMs}`,
+            error,
+          );
+        } finally {
+          if (this.options.sender && !senderIsEventSource && senderConnected && this.options.sender.disconnect) {
+            await this.options.sender.disconnect();
+          }
+
+          if (eventSourceConnected && this.options.eventSource.disconnect) {
+            await this.options.eventSource.disconnect();
+          }
         }
+
+        await sleep(reconnectPolicy.delayMs);
       }
     } finally {
-      if (this.options.sender && !senderIsEventSource && senderConnected && this.options.sender.disconnect) {
-        await this.options.sender.disconnect();
-      }
-
-      if (eventSourceConnected && this.options.eventSource.disconnect) {
-        await this.options.eventSource.disconnect();
-      }
-
       this.logger.info("Discord monitor stopped.");
     }
   }
@@ -150,9 +191,12 @@ export class DiscordRoomMonitor {
     }
 
     const isDirect = Boolean(event.isDirectMessage || event.mentionsBot);
-    const cleanedContent = isDirect
-      ? normalizeDirectContent(event.content, event.mynick, event.botUserId)
-      : normalizeContent(event.content).trim();
+    const baseContent = normalizeContent(event.content).trim();
+    const directOrPassiveContent = isDirect
+      ? normalizeDirectContent(baseContent, event.mynick, event.botUserId)
+      : baseContent;
+    const attachmentBlock = buildDiscordAttachmentBlock(event.attachments ?? []);
+    const cleanedContent = appendAttachmentBlock(directOrPassiveContent, attachmentBlock);
 
     if (!cleanedContent) {
       return;
@@ -273,6 +317,44 @@ function normalizeContent(content: string): string {
   return content.replace(/<a?:([0-9A-Za-z_]+):\d+>/g, ":$1:");
 }
 
+function buildDiscordAttachmentBlock(attachments: DiscordAttachment[]): string {
+  if (attachments.length === 0) {
+    return "";
+  }
+
+  const lines = attachments
+    .map((attachment, index) => {
+      let meta = attachment.contentType || "attachment";
+      if (attachment.filename) {
+        meta += ` (filename: ${attachment.filename})`;
+      }
+      if (attachment.size) {
+        meta += ` (size: ${attachment.size})`;
+      }
+
+      return `${index + 1}. ${meta}: ${attachment.url}`;
+    })
+    .filter((line) => line.trim().length > 0);
+
+  if (lines.length === 0) {
+    return "";
+  }
+
+  return ["[Attachments]", ...lines, "[/Attachments]"].join("\n");
+}
+
+function appendAttachmentBlock(content: string, attachmentBlock: string): string {
+  if (!attachmentBlock) {
+    return content.trim();
+  }
+
+  if (!content.trim()) {
+    return attachmentBlock;
+  }
+
+  return `${content.trim()}\n\n${attachmentBlock}`;
+}
+
 function normalizeDirectContent(content: string, mynick: string, botUserId?: string): string {
   let cleaned = content.trimStart();
 
@@ -303,4 +385,28 @@ function normalizeDirectContent(content: string, mynick: string, botUserId?: str
 
 function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function resolveReconnectPolicy(config: DiscordReconnectConfig | undefined): {
+  enabled: boolean;
+  delayMs: number;
+  maxAttempts: number;
+} {
+  const enabled = config?.enabled ?? false;
+  const delayMs = Number.isFinite(Number(config?.delay_ms)) ? Math.max(0, Number(config?.delay_ms)) : 1_000;
+  const maxAttempts = Number.isFinite(Number(config?.max_attempts))
+    ? Math.max(1, Math.trunc(Number(config?.max_attempts)))
+    : 5;
+
+  return {
+    enabled,
+    delayMs,
+    maxAttempts,
+  };
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }

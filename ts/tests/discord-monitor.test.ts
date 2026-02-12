@@ -53,6 +53,49 @@ describe("DiscordRoomMonitor", () => {
     await history.close();
   });
 
+  it("includes attachment metadata block in command content", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    let seenContent = "";
+
+    const monitor = new DiscordRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async (message) => {
+          seenContent = message.content;
+          return null;
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      guildId: "guild-1",
+      channelId: "chan-1",
+      username: "alice",
+      content: "muaddib: please inspect",
+      mynick: "muaddib",
+      mentionsBot: true,
+      attachments: [
+        {
+          url: "https://cdn.discordapp.com/attachments/123/report.txt",
+          contentType: "text/plain",
+          filename: "report.txt",
+          size: 512,
+        },
+      ],
+    });
+
+    expect(seenContent).toContain("please inspect");
+    expect(seenContent).toContain("[Attachments]");
+    expect(seenContent).toContain("1. text/plain (filename: report.txt) (size: 512): https://cdn.discordapp.com/attachments/123/report.txt");
+    expect(seenContent).toContain("[/Attachments]");
+
+    await history.close();
+  });
+
   it("writes direct-message logs to Discord arc-sharded files", async () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();
@@ -441,6 +484,68 @@ describe("DiscordRoomMonitor", () => {
     expect(eventSourceConnectCalls).toBe(1);
     expect(eventSourceDisconnectCalls).toBe(1);
     expect(senderDisconnectCalls).toBe(0);
+
+    await history.close();
+  });
+
+  it("reconnects receive loop when event source errors and reconnect policy is enabled", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    let connectCalls = 0;
+    let disconnectCalls = 0;
+    let emittedAfterReconnect = false;
+    const processed: string[] = [];
+
+    const monitor = new DiscordRoomMonitor({
+      roomConfig: {
+        enabled: true,
+        reconnect: {
+          enabled: true,
+          delay_ms: 0,
+          max_attempts: 2,
+        },
+      },
+      history,
+      eventSource: {
+        connect: async () => {
+          connectCalls += 1;
+        },
+        disconnect: async () => {
+          disconnectCalls += 1;
+        },
+        receiveEvent: async () => {
+          if (connectCalls === 1) {
+            throw new Error("socket disconnected");
+          }
+
+          if (!emittedAfterReconnect) {
+            emittedAfterReconnect = true;
+            return {
+              channelId: "chan-1",
+              username: "alice",
+              content: "muaddib: second session",
+              mynick: "muaddib",
+              mentionsBot: true,
+            };
+          }
+
+          return null;
+        },
+      },
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async (message) => {
+          processed.push(message.content);
+          return null;
+        },
+      },
+    });
+
+    await expect(monitor.run()).resolves.toBeUndefined();
+    expect(processed).toEqual(["second session"]);
+    expect(connectCalls).toBe(2);
+    expect(disconnectCalls).toBe(2);
 
     await history.close();
   });

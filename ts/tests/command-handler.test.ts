@@ -473,6 +473,176 @@ describe("RoomCommandHandlerTs", () => {
     await history.close();
   });
 
+  it("converts oversized command responses into artifact links and keeps llm linkage", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const incoming = makeMessage("!s make it long");
+    const longResponse = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. ".repeat(8).trim();
+    const shareArtifact = vi
+      .fn<(_: string) => Promise<string>>()
+      .mockResolvedValue("Artifact shared: https://example.com/artifacts/?long-response.txt");
+    const sent: string[] = [];
+
+    const handler = new RoomCommandHandlerTs({
+      roomConfig: {
+        ...roomConfig,
+        command: {
+          ...roomConfig.command,
+          response_max_bytes: 120,
+        },
+      } as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      toolOptions: {
+        executors: {
+          shareArtifact,
+        },
+      },
+      runnerFactory: () => ({
+        runSingleTurn: async () => makeRunnerResult(longResponse),
+      }),
+    });
+
+    const result = await handler.handleIncomingMessage(incoming, {
+      isDirect: true,
+      sendResponse: async (text) => {
+        sent.push(text);
+      },
+    });
+
+    expect(shareArtifact).toHaveBeenCalledWith(longResponse);
+    expect(result?.response).toContain("... full response: https://example.com/artifacts/?long-response.txt");
+    expect(sent).toEqual([result?.response ?? ""]);
+
+    const rows = await history.getFullHistory("libera", "#test");
+    expect(rows).toHaveLength(2);
+    expect(rows[1].message).toContain("full response: https://example.com/artifacts/?long-response.txt");
+
+    const llmCalls = await history.getLlmCalls();
+    expect(llmCalls).toHaveLength(1);
+    expect(llmCalls[0].responseMessageId).toBe(rows[1].id);
+
+    await history.close();
+  });
+
+  it("does not convert response into artifact when response_max_bytes is not exceeded", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const incoming = makeMessage("!s short response");
+    const shareArtifact = vi
+      .fn<(_: string) => Promise<string>>()
+      .mockResolvedValue("Artifact shared: https://example.com/artifacts/?unused.txt");
+
+    const handler = new RoomCommandHandlerTs({
+      roomConfig: {
+        ...roomConfig,
+        command: {
+          ...roomConfig.command,
+          response_max_bytes: 500,
+        },
+      } as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      toolOptions: {
+        executors: {
+          shareArtifact,
+        },
+      },
+      runnerFactory: () => ({
+        runSingleTurn: async () => makeRunnerResult("short answer"),
+      }),
+    });
+
+    const result = await handler.handleIncomingMessage(incoming, { isDirect: true });
+
+    expect(result?.response).toBe("short answer");
+    expect(shareArtifact).not.toHaveBeenCalled();
+
+    await history.close();
+  });
+
+  it("keeps fallback-model llm logging/linkage when oversized response is converted to artifact", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const incoming = makeMessage("!s refusal + long fallback");
+    const shareArtifact = vi
+      .fn<(_: string) => Promise<string>>()
+      .mockResolvedValue("Artifact shared: https://example.com/artifacts/?fallback-long.txt");
+    const longFallbackResponse = "Fallback answer with a lot of detail. ".repeat(10).trim();
+
+    const handler = new RoomCommandHandlerTs({
+      roomConfig: {
+        ...roomConfig,
+        command: {
+          ...roomConfig.command,
+          response_max_bytes: 120,
+        },
+      } as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      refusalFallbackModel: "anthropic:claude-3-5-haiku",
+      toolOptions: {
+        executors: {
+          shareArtifact,
+        },
+      },
+      runnerFactory: (input) => {
+        if (input.model === "openai:gpt-4o-mini") {
+          return {
+            runSingleTurn: async () => makeRunnerResult("The AI refused to respond to this request"),
+          };
+        }
+
+        return {
+          runSingleTurn: async () => makeRunnerResult(longFallbackResponse),
+        };
+      },
+    });
+
+    const result = await handler.handleIncomingMessage(incoming, { isDirect: true });
+
+    expect(result?.model).toBe("anthropic:claude-3-5-haiku");
+    expect(result?.response).toContain("full response: https://example.com/artifacts/?fallback-long.txt");
+    expect(shareArtifact).toHaveBeenCalledTimes(1);
+
+    const rows = await history.getFullHistory("libera", "#test");
+    expect(rows).toHaveLength(2);
+    expect(rows[1].message).toContain("full response: https://example.com/artifacts/?fallback-long.txt");
+
+    const llmCalls = await history.getLlmCalls();
+    expect(llmCalls).toHaveLength(1);
+    expect(llmCalls[0].provider).toBe("anthropic");
+    expect(llmCalls[0].model).toBe("claude-3-5-haiku");
+    expect(llmCalls[0].responseMessageId).toBe(rows[1].id);
+
+    await history.close();
+  });
+
+  it("fails fast when command.response_max_bytes is invalid", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    expect(
+      () =>
+        new RoomCommandHandlerTs({
+          roomConfig: {
+            ...roomConfig,
+            command: {
+              ...roomConfig.command,
+              response_max_bytes: 0,
+            },
+          } as any,
+          history,
+          classifyMode: async () => "EASY_SERIOUS",
+        }),
+    ).toThrow("command.response_max_bytes must be a positive integer.");
+
+    await history.close();
+  });
+
   it("retries on explicit refusal text with router.refusal_fallback_model and persists fallback model usage", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();

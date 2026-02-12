@@ -213,6 +213,57 @@ describe("core tool executors artifact support", () => {
   });
 });
 
+describe("core tool executors webpage secret header support", () => {
+  it("visit_webpage uses direct fetch with configured auth headers for matching URL prefixes", async () => {
+    const privateUrl = "https://files.slack.com/files-pri/T123/F456/report.txt";
+
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+
+      if (url === privateUrl && init?.method === "HEAD") {
+        expect(headers.Authorization).toBe("Bearer xoxb-secret");
+        return new Response("", {
+          status: 200,
+          headers: {
+            "content-type": "text/plain",
+          },
+        });
+      }
+
+      if (url === privateUrl) {
+        expect(headers.Authorization).toBe("Bearer xoxb-secret");
+        return new Response("private file contents", {
+          status: 200,
+          headers: {
+            "content-type": "text/plain",
+          },
+        });
+      }
+
+      throw new Error(`Unexpected fetch URL in test: ${url}`);
+    });
+
+    const executors = createDefaultToolExecutors({
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      secrets: {
+        http_header_prefixes: {
+          "https://files.slack.com/": {
+            Authorization: "Bearer xoxb-secret",
+          },
+        },
+      },
+    });
+
+    const result = await executors.visitWebpage(privateUrl);
+
+    expect(result).toContain("## Content from https://files.slack.com/files-pri/T123/F456/report.txt");
+    expect(result).toContain("private file contents");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls.map((call: unknown[]) => String(call[0]))).toEqual([privateUrl, privateUrl]);
+  });
+});
+
 describe("core tool executors chronicler/quest support", () => {
   it("chronicle_read and chronicle_append operate when chronicle store context is provided", async () => {
     const dir = await mkdtemp(join(tmpdir(), "muaddib-ts-chronicle-"));

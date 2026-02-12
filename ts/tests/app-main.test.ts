@@ -284,6 +284,35 @@ describe("runMuaddibMain", () => {
     ).rejects.toThrow("IRC room is enabled but rooms.irc.varlink.socket_path is missing.");
   });
 
+  it("fails fast when command.response_max_bytes is invalid", async () => {
+    await expect(
+      runWithConfig({
+        history: {
+          database: {
+            path: "/tmp/muaddib-test-history.db",
+          },
+        },
+        rooms: {
+          common: {
+            command: {
+              ...baseCommandConfig(),
+              response_max_bytes: 0,
+            },
+          },
+          irc: {
+            enabled: false,
+          },
+          discord: {
+            enabled: true,
+          },
+          slack: {
+            enabled: false,
+          },
+        },
+      }),
+    ).rejects.toThrow("command.response_max_bytes must be a positive integer.");
+  });
+
   it("ignores deferred proactive/chronicler/quests config knobs when not explicitly enabled", async () => {
     const { dir, configPath } = await createConfigDir({
       history: {
