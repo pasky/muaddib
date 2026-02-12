@@ -1,13 +1,20 @@
+import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 
 export interface ExecuteCodeInput {
   code: string;
   language?: "python" | "bash";
   input_artifacts?: string[];
   output_files?: string[];
+}
+
+export interface EditArtifactInput {
+  artifact_url: string;
+  old_string: string;
+  new_string: string;
 }
 
 export interface VisitWebpageImageResult {
@@ -22,6 +29,8 @@ export interface BaselineToolExecutors {
   webSearch: (query: string) => Promise<string>;
   visitWebpage: (url: string) => Promise<VisitWebpageResult>;
   executeCode: (input: ExecuteCodeInput) => Promise<string>;
+  shareArtifact: (content: string) => Promise<string>;
+  editArtifact: (input: EditArtifactInput) => Promise<string>;
 }
 
 export interface DefaultToolExecutorOptions {
@@ -31,12 +40,41 @@ export interface DefaultToolExecutorOptions {
   maxImageBytes?: number;
   executeCodeTimeoutMs?: number;
   executeCodeWorkingDirectory?: string;
+  artifactsPath?: string;
+  artifactsUrl?: string;
 }
 
 const DEFAULT_WEB_CONTENT_LIMIT = 40_000;
 const DEFAULT_IMAGE_LIMIT = 3_500_000;
 const DEFAULT_EXECUTE_TIMEOUT_MS = 60_000;
 const DEFAULT_CAPTURE_LIMIT = 24_000;
+const ARTIFACT_ID_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+const ARTIFACT_VIEWER_HTML = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Muaddib Artifact Viewer</title>
+  </head>
+  <body>
+    <pre id="artifact"></pre>
+    <script>
+      const filename = decodeURIComponent(window.location.search.slice(1));
+      if (filename) {
+        fetch(filename)
+          .then((response) => response.text())
+          .then((text) => {
+            document.getElementById('artifact').textContent = text;
+          })
+          .catch(() => {
+            document.getElementById('artifact').textContent = 'Failed to load artifact.';
+          });
+      } else {
+        document.getElementById('artifact').textContent = 'No artifact selected.';
+      }
+    </script>
+  </body>
+</html>
+`;
 
 export function createDefaultToolExecutors(
   options: DefaultToolExecutorOptions = {},
@@ -45,6 +83,8 @@ export function createDefaultToolExecutors(
     webSearch: createDefaultWebSearchExecutor(options),
     visitWebpage: createDefaultVisitWebpageExecutor(options),
     executeCode: createDefaultExecuteCodeExecutor(options),
+    shareArtifact: createDefaultShareArtifactExecutor(options),
+    editArtifact: createDefaultEditArtifactExecutor(options),
   };
 }
 
@@ -247,6 +287,276 @@ function createDefaultExecuteCodeExecutor(
   };
 }
 
+function createDefaultShareArtifactExecutor(
+  options: DefaultToolExecutorOptions,
+): BaselineToolExecutors["shareArtifact"] {
+  return async (content: string): Promise<string> => {
+    if (!content.trim()) {
+      throw new Error("share_artifact.content must be non-empty.");
+    }
+
+    const artifactUrl = await writeArtifactText(options, content, ".txt");
+    return `Artifact shared: ${artifactUrl}`;
+  };
+}
+
+function createDefaultEditArtifactExecutor(
+  options: DefaultToolExecutorOptions,
+): BaselineToolExecutors["editArtifact"] {
+  const visitWebpage = createDefaultVisitWebpageExecutor(options);
+
+  return async (input: EditArtifactInput): Promise<string> => {
+    const artifactUrl = input.artifact_url.trim();
+    if (!artifactUrl) {
+      throw new Error("edit_artifact.artifact_url must be non-empty.");
+    }
+
+    if (!input.old_string) {
+      throw new Error("edit_artifact.old_string must be non-empty.");
+    }
+
+    if (!input.new_string && input.new_string !== "") {
+      throw new Error("edit_artifact.new_string must be provided.");
+    }
+
+    let sourceContent: string;
+    try {
+      sourceContent = await loadArtifactContentForEdit(options, artifactUrl, visitWebpage);
+    } catch (error) {
+      const message = toErrorMessage(error);
+      if (message.includes("Cannot edit binary artifacts")) {
+        throw new Error(message);
+      }
+      throw new Error(`Failed to fetch artifact: ${message}`);
+    }
+
+    if (!sourceContent.includes(input.old_string)) {
+      throw new Error("edit_artifact.old_string not found in artifact content.");
+    }
+
+    const occurrences = countOccurrences(sourceContent, input.old_string);
+    if (occurrences > 1) {
+      throw new Error(
+        `edit_artifact.old_string appears ${occurrences} times; add more surrounding context to make it unique.`,
+      );
+    }
+
+    const updatedContent = sourceContent.replace(input.old_string, input.new_string);
+    const suffix = deriveArtifactSuffixFromUrl(artifactUrl);
+    const updatedArtifactUrl = await writeArtifactText(options, updatedContent, suffix);
+
+    return `Artifact edited successfully. New version: ${updatedArtifactUrl}`;
+  };
+}
+
+async function loadArtifactContentForEdit(
+  options: DefaultToolExecutorOptions,
+  artifactUrl: string,
+  visitWebpage: BaselineToolExecutors["visitWebpage"],
+): Promise<string> {
+  const localArtifactPath = extractLocalArtifactPath(artifactUrl, options.artifactsUrl);
+  if (localArtifactPath && options.artifactsPath) {
+    if (looksLikeImageUrl(localArtifactPath)) {
+      throw new Error("Cannot edit binary artifacts (images).");
+    }
+
+    return await readLocalArtifact(options.artifactsPath, localArtifactPath);
+  }
+
+  const fetchedContent = await visitWebpage(artifactUrl);
+  if (typeof fetchedContent !== "string") {
+    throw new Error("Cannot edit binary artifacts (images).");
+  }
+
+  return unwrapVisitWebpageResponse(fetchedContent);
+}
+
+async function readLocalArtifact(artifactsPath: string, relativeArtifactPath: string): Promise<string> {
+  const artifactsBasePath = resolve(artifactsPath);
+  const resolvedArtifactPath = resolve(artifactsBasePath, relativeArtifactPath);
+  const relativeToBase = relative(artifactsBasePath, resolvedArtifactPath);
+
+  if (relativeToBase.startsWith("..") || isAbsolute(relativeToBase)) {
+    throw new Error("Path traversal detected in artifact URL.");
+  }
+
+  return await readFile(resolvedArtifactPath, "utf-8");
+}
+
+async function writeArtifactText(
+  options: DefaultToolExecutorOptions,
+  content: string,
+  suffix: string,
+): Promise<string> {
+  const artifactsPath = options.artifactsPath;
+  const artifactsUrl = options.artifactsUrl;
+
+  if (!artifactsPath || !artifactsUrl) {
+    throw new Error("Artifact tools require tools.artifacts.path and tools.artifacts.url configuration.");
+  }
+
+  await ensureArtifactsDirectory(artifactsPath);
+
+  const artifactId = generateArtifactId();
+  const normalizedSuffix = suffix.startsWith(".") ? suffix : `.${suffix}`;
+  const filename = `${artifactId}${normalizedSuffix}`;
+  const filePath = join(artifactsPath, filename);
+
+  await writeFile(filePath, content, "utf-8");
+
+  return toArtifactViewerUrl(artifactsUrl, filename);
+}
+
+async function ensureArtifactsDirectory(path: string): Promise<void> {
+  await mkdir(path, { recursive: true });
+
+  const indexPath = join(path, "index.html");
+  let currentIndex: string | null = null;
+
+  try {
+    currentIndex = await readFile(indexPath, "utf-8");
+  } catch {
+    // Recovery strategy: index file may not exist yet.
+  }
+
+  if (currentIndex !== ARTIFACT_VIEWER_HTML) {
+    await writeFile(indexPath, ARTIFACT_VIEWER_HTML, "utf-8");
+  }
+}
+
+function deriveArtifactSuffixFromUrl(url: string): string {
+  const filename = extractFilenameFromUrl(url) ?? "";
+  if (!filename.includes(".")) {
+    return ".txt";
+  }
+
+  const parts = filename.split(".");
+  return `.${parts.slice(1).join(".")}`;
+}
+
+function extractFilenameFromUrl(url: string): string | undefined {
+  const parsedUrl = new URL(url);
+  const queryFilename = extractFilenameFromQuery(parsedUrl.search.slice(1));
+  if (queryFilename) {
+    return queryFilename;
+  }
+
+  const decodedPath = decodeURIComponent(parsedUrl.pathname);
+  if (!decodedPath || decodedPath.endsWith("/")) {
+    return undefined;
+  }
+
+  const pathLeaf = decodedPath.split("/").pop();
+  if (!pathLeaf || pathLeaf === "index.html") {
+    return undefined;
+  }
+
+  return pathLeaf;
+}
+
+function extractLocalArtifactPath(url: string, artifactsUrl: string | undefined): string | undefined {
+  if (!artifactsUrl) {
+    return undefined;
+  }
+
+  const base = artifactsUrl.replace(/\/+$/, "");
+  if (!(url === base || url.startsWith(`${base}/`) || url.startsWith(`${base}?`))) {
+    return undefined;
+  }
+
+  let remainder = url.slice(base.length);
+  if (remainder.startsWith("/")) {
+    remainder = remainder.slice(1);
+  }
+
+  if (remainder.startsWith("?")) {
+    return extractFilenameFromQuery(remainder.slice(1));
+  }
+
+  if (remainder.startsWith("index.html?")) {
+    return extractFilenameFromQuery(remainder.slice("index.html?".length));
+  }
+
+  if (remainder.includes("?")) {
+    const [pathPart, query] = remainder.split("?", 2);
+    if (pathPart === "index.html") {
+      return extractFilenameFromQuery(query);
+    }
+  }
+
+  if (!remainder) {
+    return undefined;
+  }
+
+  return decodeURIComponent(remainder);
+}
+
+function extractFilenameFromQuery(query: string): string | undefined {
+  if (!query) {
+    return undefined;
+  }
+
+  if (!query.includes("=")) {
+    return decodeURIComponent(query.trim());
+  }
+
+  const params = new URLSearchParams(query);
+  const keyBased = params.get("file") ?? params.get("filename");
+  if (!keyBased) {
+    return undefined;
+  }
+
+  const trimmed = keyBased.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function unwrapVisitWebpageResponse(content: string): string {
+  if (!content.startsWith("## Content from ")) {
+    return content;
+  }
+
+  const parts = content.split("\n\n", 2);
+  if (parts.length !== 2) {
+    return content;
+  }
+
+  return parts[1];
+}
+
+function toArtifactViewerUrl(baseUrl: string, filename: string): string {
+  return `${baseUrl.replace(/\/+$/, "")}/?${encodeURIComponent(filename)}`;
+}
+
+function generateArtifactId(length = 8): string {
+  const bytes = randomBytes(length);
+  let id = "";
+
+  for (let i = 0; i < length; i += 1) {
+    id += ARTIFACT_ID_ALPHABET[bytes[i] % ARTIFACT_ID_ALPHABET.length];
+  }
+
+  return id;
+}
+
+function countOccurrences(content: string, needle: string): number {
+  if (!needle) {
+    return 0;
+  }
+
+  let index = 0;
+  let count = 0;
+
+  while (true) {
+    const found = content.indexOf(needle, index);
+    if (found === -1) {
+      return count;
+    }
+
+    count += 1;
+    index = found + needle.length;
+  }
+}
+
 function getFetch(options: DefaultToolExecutorOptions): typeof fetch {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
   if (!fetchImpl) {
@@ -271,6 +581,14 @@ function buildJinaHeaders(apiKey?: string, extras: Record<string, string> = {}):
 
 function looksLikeImageUrl(url: string): boolean {
   return /\.(?:png|jpe?g|gif|webp)(?:$|[?#])/i.test(url);
+}
+
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
 }
 
 interface RunCommandOptions {

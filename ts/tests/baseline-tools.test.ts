@@ -2,8 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createBaselineAgentTools,
+  createEditArtifactTool,
   createExecuteCodeTool,
   createProgressReportTool,
+  createShareArtifactTool,
   createVisitWebpageTool,
   createWebSearchTool,
 } from "../src/agent/tools/baseline-tools.js";
@@ -15,6 +17,8 @@ describe("baseline agent tools", () => {
         webSearch: async () => "",
         visitWebpage: async () => "",
         executeCode: async () => "",
+        shareArtifact: async () => "",
+        editArtifact: async () => "",
       },
     });
 
@@ -22,6 +26,8 @@ describe("baseline agent tools", () => {
       "web_search",
       "visit_webpage",
       "execute_code",
+      "share_artifact",
+      "edit_artifact",
       "progress_report",
       "make_plan",
       "final_answer",
@@ -75,5 +81,37 @@ describe("baseline agent tools", () => {
     expect(executeCode).toHaveBeenCalledWith({ code: "print('hi')" });
     expect(result.details.language).toBe("python");
     expect(result.content[0]).toEqual({ type: "text", text: "execution-output" });
+  });
+
+  it("share_artifact tool delegates to configured executor", async () => {
+    const shareArtifact = vi.fn(async (content: string) => `Artifact shared: https://example.com/?${content.length}`);
+    const tool = createShareArtifactTool({ shareArtifact });
+
+    const result = await tool.execute("call-5", { content: "artifact body" }, undefined, undefined);
+
+    expect(shareArtifact).toHaveBeenCalledWith("artifact body");
+    expect(result.content[0]).toEqual({
+      type: "text",
+      text: "Artifact shared: https://example.com/?13",
+    });
+  });
+
+  it("edit_artifact tool delegates to configured executor", async () => {
+    const editArtifact = vi.fn(async () => "Artifact edited successfully. New version: https://example.com/?next.py");
+    const tool = createEditArtifactTool({ editArtifact });
+
+    const params = {
+      artifact_url: "https://example.com/?orig.py",
+      old_string: "return 1",
+      new_string: "return 2",
+    };
+
+    const result = await tool.execute("call-6", params, undefined, undefined);
+
+    expect(editArtifact).toHaveBeenCalledWith(params);
+    expect(result.content[0]).toEqual({
+      type: "text",
+      text: "Artifact edited successfully. New version: https://example.com/?next.py",
+    });
   });
 });

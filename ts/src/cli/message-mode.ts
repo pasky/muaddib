@@ -1,7 +1,9 @@
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { createConfigApiKeyResolver } from "../app/api-keys.js";
 import { assertNoDeferredFeatureConfig } from "../app/deferred-features.js";
+import { getMuaddibHome, resolveMuaddibPath } from "../app/bootstrap.js";
 import { MuaddibAgentRunner } from "../agent/muaddib-agent-runner.js";
 import { ChatHistoryStore } from "../history/chat-history-store.js";
 import { createModeClassifier } from "../rooms/command/classifier.js";
@@ -44,11 +46,17 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
   const commandConfig = roomConfig.command;
   const actorConfig = asRecord(config.actor);
   const toolsConfig = asRecord(config.tools);
+  const artifactsConfig = asRecord(toolsConfig?.artifacts);
   const getApiKey = createConfigApiKeyResolver(config);
 
   const maxIterations = numberOrUndefined(actorConfig?.max_iterations);
   const maxCompletionRetries = numberOrUndefined(actorConfig?.max_completion_retries);
   const jinaApiKey = stringOrUndefined(asRecord(toolsConfig?.jina)?.api_key);
+  const artifactsPathRaw = stringOrUndefined(artifactsConfig?.path);
+  const artifactsPath = artifactsPathRaw
+    ? resolveMuaddibPath(artifactsPathRaw, join(getMuaddibHome(), "artifacts"))
+    : undefined;
+  const artifactsUrl = stringOrUndefined(artifactsConfig?.url);
 
   if (!commandConfig) {
     throw new Error(`Room '${roomName}' does not define command config.`);
@@ -87,6 +95,8 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
     },
     toolOptions: {
       jinaApiKey,
+      artifactsPath,
+      artifactsUrl,
     },
   });
 

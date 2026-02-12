@@ -5,6 +5,7 @@ import {
   createDefaultToolExecutors,
   type BaselineToolExecutors,
   type DefaultToolExecutorOptions,
+  type EditArtifactInput,
   type ExecuteCodeInput,
   type VisitWebpageResult,
 } from "./core-executors.js";
@@ -16,7 +17,8 @@ export interface BaselineToolOptions extends DefaultToolExecutorOptions {
 
 /**
  * Baseline tool set for command-path parity.
- * Expanded with core workflow tools first: web_search, visit_webpage, execute_code.
+ * Expanded with core workflow tools first: web_search, visit_webpage, execute_code,
+ * then advanced artifact helpers: share_artifact, edit_artifact.
  */
 export function createBaselineAgentTools(options: BaselineToolOptions = {}): AgentTool<any>[] {
   const defaultExecutors = createDefaultToolExecutors(options);
@@ -24,12 +26,16 @@ export function createBaselineAgentTools(options: BaselineToolOptions = {}): Age
     webSearch: options.executors?.webSearch ?? defaultExecutors.webSearch,
     visitWebpage: options.executors?.visitWebpage ?? defaultExecutors.visitWebpage,
     executeCode: options.executors?.executeCode ?? defaultExecutors.executeCode,
+    shareArtifact: options.executors?.shareArtifact ?? defaultExecutors.shareArtifact,
+    editArtifact: options.executors?.editArtifact ?? defaultExecutors.editArtifact,
   };
 
   return [
     createWebSearchTool(executors),
     createVisitWebpageTool(executors),
     createExecuteCodeTool(executors),
+    createShareArtifactTool(executors),
+    createEditArtifactTool(executors),
     createProgressReportTool(options),
     createMakePlanTool(),
     createFinalAnswerTool(),
@@ -112,6 +118,62 @@ export function createExecuteCodeTool(executors: Pick<BaselineToolExecutors, "ex
         content: [{ type: "text", text: output }],
         details: {
           language: params.language ?? "python",
+        },
+      };
+    },
+  };
+}
+
+export function createShareArtifactTool(
+  executors: Pick<BaselineToolExecutors, "shareArtifact">,
+): AgentTool<any> {
+  return {
+    name: "share_artifact",
+    label: "Share Artifact",
+    description:
+      "Share additional content as an artifact and return a public URL. Use for scripts, reports, or large outputs.",
+    parameters: Type.Object({
+      content: Type.String({
+        description: "The text content to publish as an artifact.",
+      }),
+    }),
+    execute: async (_toolCallId, params) => {
+      const output = await executors.shareArtifact(params.content);
+      return {
+        content: [{ type: "text", text: output }],
+        details: {
+          kind: "share_artifact",
+        },
+      };
+    },
+  };
+}
+
+export function createEditArtifactTool(executors: Pick<BaselineToolExecutors, "editArtifact">): AgentTool<any> {
+  return {
+    name: "edit_artifact",
+    label: "Edit Artifact",
+    description:
+      "Edit an existing artifact by replacing a unique old_string with new_string and return a new artifact URL.",
+    parameters: Type.Object({
+      artifact_url: Type.String({
+        format: "uri",
+        description: "Artifact URL to edit.",
+      }),
+      old_string: Type.String({
+        description: "Exact text to replace; must match uniquely.",
+      }),
+      new_string: Type.String({
+        description: "Replacement text (can be empty).",
+      }),
+    }),
+    execute: async (_toolCallId, params: EditArtifactInput) => {
+      const output = await executors.editArtifact(params);
+      return {
+        content: [{ type: "text", text: output }],
+        details: {
+          artifactUrl: params.artifact_url,
+          kind: "edit_artifact",
         },
       };
     },

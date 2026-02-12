@@ -223,10 +223,16 @@ function createRoomCommandHandler(
 
   const actorConfig = asRecord(runtimeConfig?.actor);
   const toolsConfig = asRecord(runtimeConfig?.tools);
+  const artifactsConfig = asRecord(toolsConfig?.artifacts);
 
   const maxIterations = numberOrUndefined(actorConfig?.max_iterations);
   const maxCompletionRetries = numberOrUndefined(actorConfig?.max_completion_retries);
   const jinaApiKey = stringOrUndefined(asRecord(toolsConfig?.jina)?.api_key);
+  const artifactsPathRaw = stringOrUndefined(artifactsConfig?.path);
+  const artifactsPath = artifactsPathRaw
+    ? resolveMuaddibPath(artifactsPathRaw, join(getMuaddibHome(), "artifacts"))
+    : undefined;
+  const artifactsUrl = stringOrUndefined(artifactsConfig?.url);
 
   return new RoomCommandHandlerTs({
     roomConfig,
@@ -240,6 +246,8 @@ function createRoomCommandHandler(
     },
     toolOptions: {
       jinaApiKey,
+      artifactsPath,
+      artifactsUrl,
     },
   });
 }

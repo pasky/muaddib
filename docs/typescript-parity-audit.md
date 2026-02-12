@@ -42,6 +42,12 @@ The intent is to separate:
     - `visit_webpage`,
     - `execute_code`.
   - Added TS loop/tool tests in existing suites (`ts/tests/muaddib-agent-runner.test.ts`, `ts/tests/baseline-tools.test.ts`) covering iteration cap, repeated tool calls, tool-result continuation, and non-empty completion retries.
+- 2026-02-12 (cluster: advanced artifact tool parity step 2):
+  - Added TS baseline/executor support for `share_artifact` and `edit_artifact` in `ts/src/agent/tools/baseline-tools.ts` + `ts/src/agent/tools/core-executors.ts`.
+  - Wired artifact tools to `tools.artifacts.path`/`tools.artifacts.url` with MUADDIB_HOME-relative path resolution in both runtime app path and CLI message mode (`ts/src/app/main.ts`, `ts/src/cli/message-mode.ts`).
+  - Added/extended TS tests:
+    - baseline tool wiring for artifact tools in `ts/tests/baseline-tools.test.ts`,
+    - focused artifact write/edit executor coverage (including validation/error cases) in `ts/tests/core-executors.test.ts`.
 
 ---
 
@@ -102,7 +108,7 @@ Legend: ✅ implemented, ◐ partial, ❌ missing, ⚠ intentional deferred
 |---|---:|---:|---|
 | Multi-turn agent loop with iteration cap | ✅ | ✅ | Python `AgenticLLMActor.run_agent`; TS `MuaddibAgentRunner.runSingleTurn` now enforces iterative loop + max-iteration cap |
 | Tool-call execution loop with tool results fed back to model | ✅ | ✅ | Python `run_agent`; TS runner now relies on `Agent` loop semantics and validates tool-result continuation in `ts/tests/muaddib-agent-runner.test.ts` |
-| Broad tool surface (web_search, visit_webpage, execute_code, oracle, artifacts, image gen, quest/chronicler tools) | ✅ | ◐ | TS now includes `web_search`/`visit_webpage`/`execute_code` in baseline tools; advanced Python tools remain pending |
+| Broad tool surface (web_search, visit_webpage, execute_code, oracle, artifacts, image gen, quest/chronicler tools) | ✅ | ◐ | TS now includes `web_search`/`visit_webpage`/`execute_code` plus `share_artifact`/`edit_artifact`; `oracle`/`generate_image` and quest/chronicler tools remain pending |
 | Progress callback + persistence summary callback | ✅ | ◐ | Python supports both; TS supports progress callback, still no persistence-summary callback flow |
 | Refusal fallback model stickiness | ✅ | ❌ | Python `providers/ModelRouter.call_raw_with_model`; TS path has no equivalent fallback policy wiring |
 | Vision fallback when image tool output appears | ✅ | ❌ | Python `AgenticLLMActor.run_agent`; TS no equivalent |
@@ -149,7 +155,7 @@ Legend: ✅ implemented, ◐ partial, ❌ missing, ⚠ intentional deferred
 
 ### Accidental / not-yet-implemented parity gaps
 
-Next priority gap after the steering/session queue cluster is now **advanced tool-surface parity beyond the core trio** (P1).
+Next priority gap after artifact-tool step 2 is now **remaining advanced tool-surface parity (`oracle`, `generate_image`) and refusal fallback behavior** (P1).
 
 | Gap | Severity | User/operator impact | Evidence |
 |---|---:|---|---|
@@ -157,7 +163,8 @@ Next priority gap after the steering/session queue cluster is now **advanced too
 | Command rate limiting in TS | ✅ closed (2026-02-12) | Burst traffic guard restored with user-facing warning response and no runner execution when denied. | Python `_handle_command_core` uses `RateLimiter`; TS now mirrors via `ts/src/rooms/command/command-handler.ts` + `ts/src/rooms/command/rate-limiter.ts` |
 | Command debounce/followup merge in TS | ✅ closed (2026-02-12) | Split/rapid user inputs are now coalesced via `command.debounce` + followup merge in TS command execution. | Python `_handle_command_core` debounce path; TS `command-handler.ts::collectDebouncedFollowups` |
 | Agent loop/tooling core parity (`web_search`, `visit_webpage`, `execute_code`) | ✅ closed (2026-02-12) | TS command path now supports iterative tool loops with iteration cap and non-empty completion handling. | Python `AgenticLLMActor.run_agent`; TS `muaddib-agent-runner.ts`, `baseline-tools.ts`, `core-executors.ts`, `ts/tests/muaddib-agent-runner.test.ts` |
-| Advanced Python tool surface still missing in TS (`oracle`, artifacts/edit, image gen, chronicler/quest tools) | P1 | Complex workflows remain narrower in TS vs Python even after core tool-loop parity. | Python `agentic_actor/tools.py::TOOLS`; TS baseline tools currently stop at core trio + progress/make_plan/final_answer |
+| Artifact tool parity in TS (`share_artifact`, `edit_artifact`) | ✅ closed (2026-02-12) | TS command path now supports core artifact sharing/edit workflows with configured artifact storage path/URL wiring. | Python `agentic_actor/tools.py::ShareArtifactExecutor`, `EditArtifactExecutor`; TS `baseline-tools.ts`, `core-executors.ts`, `app/main.ts`, `cli/message-mode.ts`, `ts/tests/core-executors.test.ts` |
+| Remaining advanced Python tools missing in TS (`oracle`, `generate_image`, chronicler/quest tools) | P1 | Complex multi-step reasoning/media/chronicler workflows remain narrower in TS vs Python. | Python `agentic_actor/tools.py::TOOLS`; TS baseline tools now include artifact tools but still omit oracle/image/chronicler/quest tools |
 | No refusal fallback model behavior in TS app path | P1 | Safety refusal recovery behavior differs; higher user-visible refusal rate in certain prompts. | Python `providers/__init__.py::ModelRouter.call_raw_with_model` |
 | No response_max_bytes + artifact fallback in TS command path | P2 | Long answers risk truncation (especially IRC two-message bound), without artifact link recovery path. | Python `RoomCommandHandler._run_actor/_long_response_to_artifact` |
 | Discord attachments not injected into prompt context in TS | P1 | Users sending files/images lose context; assistant misses key inputs. | Python `rooms/discord/monitor.py::process_message_event` attachment block |
@@ -178,7 +185,7 @@ Next priority gap after the steering/session queue cluster is now **advanced too
 
 - **Good:** per-message history persistence and direct/passive branching are centralized (`RoomCommandHandlerTs.handleIncomingMessage`), reducing adapter divergence.
 - **Good:** steering/session queue compaction parity is now implemented in TS (`steering-queue.ts`) with queue-aware command/passive sequencing.
-- **Residual risk:** advanced Python tool-surface behaviors (oracle/artifact/image flows, persistence summary callbacks) are still absent, so long-horizon workflows remain narrower in TS.
+- **Residual risk:** remaining advanced Python tool-surface behaviors (`oracle`, `generate_image`, chronicler/quest tools, persistence summary callbacks) are still absent, so long-horizon workflows remain narrower in TS.
 
 ### B. Reconnect behavior
 
@@ -231,7 +238,8 @@ Tests (red/green):
 5. ✅ **Replace single-turn runner wrapper with multi-turn tool loop** around pi-agent-core state/events.
 6. **Expand tool surface incrementally**:
    - ✅ step 1: `web_search`, `visit_webpage`, `execute_code`,
-   - pending step 2: `share_artifact`, `edit_artifact`, `oracle`, `generate_image`.
+   - ✅ step 2: `share_artifact`, `edit_artifact`,
+   - pending step 3: `oracle`, `generate_image`.
 7. **Add refusal fallback policy** equivalent to Python router behavior (or document explicit replacement contract if pi-ai-native policy differs).
 
 Tests (red/green):
@@ -240,8 +248,8 @@ Tests (red/green):
   - iteration cap,
   - tool-result continuation,
   - non-empty completion retry behavior.
-- ✅ Extended baseline tool tests for core trio wiring (`web_search`, `visit_webpage`, `execute_code`).
-- Remaining: add parity tests for advanced tools and refusal-fallback behavior.
+- ✅ Extended baseline tool tests for core + artifact wiring (`web_search`, `visit_webpage`, `execute_code`, `share_artifact`, `edit_artifact`) and added focused artifact executor tests.
+- Remaining: add parity tests for remaining advanced tools (`oracle`, `generate_image`) and refusal-fallback behavior.
 
 ## Phase 3 — adapter UX/completeness parity
 
