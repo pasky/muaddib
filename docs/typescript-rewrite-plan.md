@@ -46,6 +46,12 @@ Latest update:
   - Added app/CLI-path validation coverage and command-path tests for long-response trigger/non-trigger behavior, persistence semantics, and fallback-model LLM linkage when artifact fallback is active.
   - Added Discord/Slack attachment context parity in monitors/transports and Slack private-file secrets propagation into room messages/tool fetches.
   - Added configurable Discord/Slack reconnect supervision for receive-loop failures (transport disconnect signals + monitor reconnect tests).
+- 2026-02-12: Closed transport UX + reconnect-boundary parity slice and command-path context reducer parity:
+  - Discord monitor/transport now support reply-edit debounce behavior (rapid followups merged by editing prior bot reply in-window).
+  - Slack monitor/transport now support reply-edit debounce (`chat.update`), outgoing mention formatting (`@DisplayName` -> `<@USER_ID>` where cached), and typing-indicator lifecycle (`assistant.threads.setStatus` set/refresh/clear).
+  - Discord/Slack reconnect policy is now explicit and tested: receive-loop errors trigger supervised reconnect (when enabled), while `null` events are graceful shutdown signals (no reconnect).
+  - Added reconnect boundary tests for null shutdown, reconnect disabled/enabled, and max-attempts exhaustion in both Discord and Slack monitor suites.
+  - Added shared command-path context reducer support (`context_reducer` root config + mode `auto_reduce_context`) via `ContextReducerTs`, with app/CLI wiring and integration tests.
 
 ---
 
@@ -184,9 +190,8 @@ Python rollback path must remain available until soak/parity/SLO gates are fully
 ## Remaining gaps / next parity work
 
 1. **Post-tooling parity follow-up gaps (current accidental backlog)**
-   - TS now covers multi-turn tool loop semantics + core tools (`web_search`, `visit_webpage`, `execute_code`), artifact tools (`share_artifact`, `edit_artifact`), advanced tools (`oracle`, `generate_image`), chronicler/quest tool-surface names, command-path refusal-fallback behavior, persistence-summary callback flow (`tools.summary.model`), and `response_max_bytes` long-response artifact fallback.
-   - Latest transport tranche closed attachment/secrets parity and landed reconnect supervision scaffolding for Discord/Slack receive-loop failures.
-   - Remaining parity work now concentrates on transport UX deltas (reply-edit debounce, Slack mention formatting/typing indicators), context reducer parity, and chronicle lifecycle automation.
+   - TS now covers multi-turn tool loop semantics + core tools (`web_search`, `visit_webpage`, `execute_code`), artifact tools (`share_artifact`, `edit_artifact`), advanced tools (`oracle`, `generate_image`), chronicler/quest tool-surface names, command-path refusal-fallback behavior, persistence-summary callback flow (`tools.summary.model`), `response_max_bytes` long-response artifact fallback, transport UX parity (reply-edit debounce + Slack mention formatting/typing lifecycle), reconnect boundary semantics, and command-path context reduction.
+   - Remaining parity work now concentrates on chronicle lifecycle automation gaps (chapter rollover/summary/recap), with quests/proactive runtime still policy-deferred.
 
 2. **OAuth/session credential refresh support**
    - Still deferred; blocked on stable upstream provider refresh contract.
@@ -208,4 +213,4 @@ Python rollback path must remain available until soak/parity/SLO gates are fully
 Use the authoritative parity audit as the execution backlog:
 - `docs/typescript-parity-audit.md`
 
-Immediate priority from the parity audit is advancing beyond the now-closed `response_max_bytes` + attachment/secrets tranche into remaining transport UX parity (reply-edit debounce, Slack mention formatting/typing indicators), plus context reducer and chronicle lifecycle gaps.
+Immediate priority from the parity audit is closing remaining chronicle lifecycle automation gaps (chapter rollover/summary/recap) while keeping quests/proactive runtime deferred per policy until scope changes.

@@ -1,0 +1,158 @@
+import {
+  completeSimple,
+  type AssistantMessage,
+  type Model,
+  type SimpleStreamOptions,
+  type UserMessage,
+} from "@mariozechner/pi-ai";
+
+import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
+
+type CompleteSimpleFn = (
+  model: Model<any>,
+  context: { messages: UserMessage[]; systemPrompt?: string },
+  options?: SimpleStreamOptions,
+) => Promise<AssistantMessage>;
+
+export interface ContextReducerConfig {
+  model?: string;
+  prompt?: string;
+}
+
+export interface ContextReducer {
+  readonly isConfigured: boolean;
+  reduce(
+    context: Array<{ role: string; content: string }>,
+    agentSystemPrompt: string,
+  ): Promise<Array<{ role: string; content: string }>>;
+}
+
+export interface ContextReducerTsOptions {
+  config?: ContextReducerConfig;
+  modelAdapter?: PiAiModelAdapter;
+  completeFn?: CompleteSimpleFn;
+  getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+}
+
+export class ContextReducerTs implements ContextReducer {
+  private readonly config: ContextReducerConfig;
+  private readonly modelAdapter: PiAiModelAdapter;
+  private readonly completeFn: CompleteSimpleFn;
+
+  constructor(private readonly options: ContextReducerTsOptions = {}) {
+    this.config = options.config ?? {};
+    this.modelAdapter = options.modelAdapter ?? new PiAiModelAdapter();
+    this.completeFn = options.completeFn ?? completeSimple;
+  }
+
+  get isConfigured(): boolean {
+    return Boolean(this.config.model && this.config.prompt);
+  }
+
+  async reduce(
+    context: Array<{ role: string; content: string }>,
+    agentSystemPrompt: string,
+  ): Promise<Array<{ role: string; content: string }>> {
+    const contextToReduce = context.slice(0, -1);
+
+    if (!this.isConfigured) {
+      return contextToReduce;
+    }
+
+    if (contextToReduce.length === 0) {
+      return [];
+    }
+
+    const reducerModel = this.modelAdapter.resolve(this.config.model ?? "").model;
+    const formattedContext = this.formatContextForReduction(context, agentSystemPrompt);
+
+    try {
+      const response = await this.completeFn(
+        reducerModel,
+        {
+          messages: [
+            {
+              role: "user",
+              content: formattedContext,
+              timestamp: Date.now(),
+            },
+          ],
+          systemPrompt: this.config.prompt,
+        },
+        {
+          apiKey: this.options.getApiKey
+            ? await this.options.getApiKey(reducerModel.provider)
+            : undefined,
+          maxTokens: 2_048,
+        },
+      );
+
+      const reducedText = response.content
+        .filter((entry) => entry.type === "text")
+        .map((entry) => entry.text)
+        .join("\n")
+        .trim();
+
+      if (!reducedText) {
+        return contextToReduce;
+      }
+
+      return this.parseReducedContext(reducedText);
+    } catch {
+      return contextToReduce;
+    }
+  }
+
+  private formatContextForReduction(
+    context: Array<{ role: string; content: string }>,
+    agentSystemPrompt: string,
+  ): string {
+    const lines: string[] = [];
+
+    lines.push("## AGENT SYSTEM PROMPT (for context)");
+    lines.push(agentSystemPrompt);
+
+    lines.push("");
+    lines.push("## CONVERSATION HISTORY TO CONDENSE");
+
+    for (const message of context.slice(0, -1)) {
+      const role = message.role === "assistant" ? "ASSISTANT" : "USER";
+      lines.push(`[${role}]: ${message.content}`);
+    }
+
+    lines.push("");
+    lines.push("## TRIGGERING INPUT (for relevance - do not include in output)");
+    lines.push(context[context.length - 1]?.content ?? "");
+
+    return lines.join("\n");
+  }
+
+  private parseReducedContext(response: string): Array<{ role: string; content: string }> {
+    const messages: Array<{ role: string; content: string }> = [];
+    const pattern = /\[(USER|ASSISTANT)\]:\s*(.*?)(?=\n\[(?:USER|ASSISTANT)\]:|$)/gis;
+
+    for (const match of response.matchAll(pattern)) {
+      const role = match[1]?.toLowerCase();
+      const content = match[2]?.trim() ?? "";
+      if (!content) {
+        continue;
+      }
+
+      messages.push({
+        role: role === "assistant" ? "assistant" : "user",
+        content,
+      });
+    }
+
+    if (messages.length > 0) {
+      return messages;
+    }
+
+    return [
+      {
+        role: "user",
+        content: `<context_summary>${response.trim()}</context_summary>`,
+      },
+    ];
+  }
+}

@@ -7,6 +7,7 @@ import type {
   SlackMessageEditEvent,
   SlackMessageEvent,
   SlackSendOptions,
+  SlackSendResult,
   SlackSender,
 } from "./monitor.js";
 
@@ -47,6 +48,13 @@ export interface SlackSocketTransportOptions {
   botNameFallback?: string;
 }
 
+const TYPING_LOADING_MESSAGES = [
+  "Thinking...",
+  "Consulting the spice...",
+  "The worm is turning...",
+  "Prescience loading...",
+];
+
 /**
  * Real Slack socket-mode transport behind monitor abstractions.
  */
@@ -57,6 +65,7 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
   private botUserId: string | null = null;
   private botDisplayName: string | null = null;
   private readonly userDisplayNameCache = new Map<string, string>();
+  private readonly userIdByDisplayNameCache = new Map<string, string>();
   private readonly channelNameCache = new Map<string, string>();
 
   constructor(private readonly options: SlackSocketTransportOptions) {
@@ -118,13 +127,108 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
     return next;
   }
 
-  async sendMessage(channelId: string, message: string, options?: SlackSendOptions): Promise<void> {
-    await this.app.client.chat.postMessage({
+  async sendMessage(
+    channelId: string,
+    message: string,
+    options?: SlackSendOptions,
+  ): Promise<SlackSendResult> {
+    const response = await this.app.client.chat.postMessage({
       channel: channelId,
       text: message,
       thread_ts: options?.threadTs,
       token: this.options.botToken,
     });
+
+    return {
+      messageTs: typeof response.ts === "string" ? response.ts : undefined,
+      text: message,
+    };
+  }
+
+  async updateMessage(
+    channelId: string,
+    messageTs: string,
+    message: string,
+  ): Promise<SlackSendResult> {
+    const response = await this.app.client.chat.update({
+      channel: channelId,
+      ts: messageTs,
+      text: message,
+      token: this.options.botToken,
+    });
+
+    return {
+      messageTs: typeof response.ts === "string" ? response.ts : messageTs,
+      text: message,
+    };
+  }
+
+  async formatOutgoingMentions(message: string): Promise<string> {
+    if (!message) {
+      return message;
+    }
+
+    if (this.userIdByDisplayNameCache.size === 0) {
+      return message;
+    }
+
+    const sortedDisplayNames = Array.from(this.userIdByDisplayNameCache.keys()).sort(
+      (left, right) => right.length - left.length,
+    );
+
+    let result = message;
+
+    for (const displayNameKey of sortedDisplayNames) {
+      const userId = this.userIdByDisplayNameCache.get(displayNameKey);
+      if (!userId) {
+        continue;
+      }
+
+      const pattern = new RegExp(`@${escapeRegExp(displayNameKey)}`, "giu");
+      result = result.replace(pattern, `<@${userId}>`);
+    }
+
+    return result;
+  }
+
+  async setTypingIndicator(channelId: string, threadTs: string): Promise<boolean> {
+    if (!threadTs) {
+      return false;
+    }
+
+    try {
+      await this.app.client.apiCall("assistant.threads.setStatus", {
+        channel_id: channelId,
+        thread_ts: threadTs,
+        status: "is thinking...",
+        loading_messages: TYPING_LOADING_MESSAGES,
+        token: this.options.botToken,
+      });
+      return true;
+    } catch (error) {
+      const errorCode = slackErrorCode(error);
+      if (errorCode === "missing_scope" || errorCode === "thread_not_found") {
+        return false;
+      }
+      return false;
+    }
+  }
+
+  async clearTypingIndicator(channelId: string, threadTs: string): Promise<void> {
+    if (!threadTs) {
+      return;
+    }
+
+    try {
+      await this.app.client.apiCall("assistant.threads.setStatus", {
+        channel_id: channelId,
+        thread_ts: threadTs,
+        status: "",
+        token: this.options.botToken,
+      });
+    } catch {
+      // Best effort cleanup.
+    }
   }
 
   private async mapEvent(event: Record<string, unknown>): Promise<SlackIncomingEvent | null> {
@@ -250,6 +354,7 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
   private async getUserDisplayName(userId: string): Promise<string> {
     const cached = this.userDisplayNameCache.get(userId);
     if (cached) {
+      this.userIdByDisplayNameCache.set(cached.toLowerCase(), userId);
       return cached;
     }
 
@@ -267,9 +372,11 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
         userId;
 
       this.userDisplayNameCache.set(userId, displayName);
+      this.userIdByDisplayNameCache.set(displayName.toLowerCase(), userId);
       return displayName;
     } catch {
       this.userDisplayNameCache.set(userId, userId);
+      this.userIdByDisplayNameCache.set(userId.toLowerCase(), userId);
       return userId;
     }
   }
@@ -375,4 +482,27 @@ function stringifyError(error: unknown): string {
   }
 
   return String(error);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function slackErrorCode(error: unknown): string {
+  const record = asRecord(error);
+  if (!record) {
+    return "";
+  }
+
+  const direct = record.error;
+  if (typeof direct === "string") {
+    return direct;
+  }
+
+  const data = asRecord(record.data);
+  if (data && typeof data.error === "string") {
+    return data.error;
+  }
+
+  return "";
 }

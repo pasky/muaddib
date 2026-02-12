@@ -324,6 +324,162 @@ describe("SlackRoomMonitor", () => {
     await history.close();
   });
 
+  it("debounces rapid Slack replies by updating the previous bot message", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    const sendCalls: Array<{ text: string; threadTs?: string }> = [];
+    const updateCalls: Array<{ messageTs: string; text: string }> = [];
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true, reply_edit_debounce_seconds: 15 },
+      history,
+      sender: {
+        sendMessage: async (_channelId, text, options) => {
+          sendCalls.push({ text, threadTs: options?.threadTs });
+          return {
+            messageTs: "1700000000.3000",
+          };
+        },
+        updateMessage: async (_channelId, messageTs, text) => {
+          updateCalls.push({ messageTs, text });
+          return {
+            messageTs,
+          };
+        },
+      },
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async (_message, options) => {
+          await options.sendResponse?.("first");
+          await options.sendResponse?.("second");
+          return { response: "second" };
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      workspaceId: "T123",
+      channelId: "C123",
+      channelName: "#general",
+      username: "alice",
+      text: "muaddib: hello",
+      mynick: "muaddib",
+      messageTs: "1700000000.2000",
+      channelType: "channel",
+      mentionsBot: true,
+    });
+
+    expect(sendCalls).toEqual([
+      {
+        text: "first",
+        threadTs: "1700000000.2000",
+      },
+    ]);
+    expect(updateCalls).toEqual([
+      {
+        messageTs: "1700000000.3000",
+        text: "first\nsecond",
+      },
+    ]);
+
+    await history.close();
+  });
+
+  it("formats outgoing Slack mentions before sending replies", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    const sent: string[] = [];
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      sender: {
+        formatOutgoingMentions: async (text) => text.replace("@Alice", "<@U123>"),
+        sendMessage: async (_channelId, text) => {
+          sent.push(text);
+          return {
+            messageTs: "1700000000.3000",
+          };
+        },
+      },
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async (_message, options) => {
+          await options.sendResponse?.("@Alice please check this");
+          return { response: "ok" };
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      workspaceId: "T123",
+      channelId: "C123",
+      channelName: "#general",
+      username: "alice",
+      text: "muaddib: ping",
+      mynick: "muaddib",
+      messageTs: "1700000000.2000",
+      channelType: "channel",
+      mentionsBot: true,
+    });
+
+    expect(sent).toEqual(["<@U123> please check this"]);
+
+    await history.close();
+  });
+
+  it("manages Slack typing indicator lifecycle for direct messages", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    const typingSetCalls: Array<{ channelId: string; threadTs: string }> = [];
+    const typingClearCalls: Array<{ channelId: string; threadTs: string }> = [];
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      sender: {
+        setTypingIndicator: async (channelId, threadTs) => {
+          typingSetCalls.push({ channelId, threadTs });
+          return true;
+        },
+        clearTypingIndicator: async (channelId, threadTs) => {
+          typingClearCalls.push({ channelId, threadTs });
+        },
+        sendMessage: async () => ({ messageTs: "1700000000.3000" }),
+      },
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async (_message, options) => {
+          await options.sendResponse?.("working");
+          return { response: "working" };
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      workspaceId: "T123",
+      channelId: "C123",
+      channelName: "#general",
+      username: "alice",
+      text: "muaddib: run",
+      mynick: "muaddib",
+      messageTs: "1700000000.2000",
+      channelType: "channel",
+      mentionsBot: true,
+    });
+
+    expect(typingSetCalls).toEqual([
+      { channelId: "C123", threadTs: "1700000000.2000" },
+      { channelId: "C123", threadTs: "1700000000.2000" },
+    ]);
+    expect(typingClearCalls).toEqual([{ channelId: "C123", threadTs: "1700000000.2000" }]);
+
+    await history.close();
+  });
+
   it("updates edited messages by platform id with history parity", async () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();
@@ -596,6 +752,127 @@ describe("SlackRoomMonitor", () => {
     expect(processed).toEqual(["second session"]);
     expect(connectCalls).toBe(2);
     expect(disconnectCalls).toBe(2);
+
+    await history.close();
+  });
+
+  it("stops gracefully on null Slack events even when reconnect is enabled", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    let connectCalls = 0;
+    let disconnectCalls = 0;
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: {
+        enabled: true,
+        reconnect: {
+          enabled: true,
+          delay_ms: 0,
+          max_attempts: 3,
+        },
+      },
+      history,
+      eventSource: {
+        connect: async () => {
+          connectCalls += 1;
+        },
+        disconnect: async () => {
+          disconnectCalls += 1;
+        },
+        receiveEvent: async () => null,
+      },
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async () => null,
+      },
+    });
+
+    await expect(monitor.run()).resolves.toBeUndefined();
+    expect(connectCalls).toBe(1);
+    expect(disconnectCalls).toBe(1);
+
+    await history.close();
+  });
+
+  it("fails after Slack reconnect max_attempts is exhausted", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    let connectCalls = 0;
+    let disconnectCalls = 0;
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: {
+        enabled: true,
+        reconnect: {
+          enabled: true,
+          delay_ms: 0,
+          max_attempts: 2,
+        },
+      },
+      history,
+      eventSource: {
+        connect: async () => {
+          connectCalls += 1;
+        },
+        disconnect: async () => {
+          disconnectCalls += 1;
+        },
+        receiveEvent: async () => {
+          throw new Error("socket disconnected");
+        },
+      },
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async () => null,
+      },
+    });
+
+    await expect(monitor.run()).rejects.toThrow("socket disconnected");
+    expect(connectCalls).toBe(3);
+    expect(disconnectCalls).toBe(3);
+
+    await history.close();
+  });
+
+  it("does not reconnect Slack monitor when reconnect policy is disabled", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    let connectCalls = 0;
+    let disconnectCalls = 0;
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: {
+        enabled: true,
+        reconnect: {
+          enabled: false,
+          delay_ms: 0,
+          max_attempts: 2,
+        },
+      },
+      history,
+      eventSource: {
+        connect: async () => {
+          connectCalls += 1;
+        },
+        disconnect: async () => {
+          disconnectCalls += 1;
+        },
+        receiveEvent: async () => {
+          throw new Error("socket disconnected");
+        },
+      },
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async () => null,
+      },
+    });
+
+    await expect(monitor.run()).rejects.toThrow("socket disconnected");
+    expect(connectCalls).toBe(1);
+    expect(disconnectCalls).toBe(1);
 
     await history.close();
   });

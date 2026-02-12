@@ -224,6 +224,7 @@ function createRoomCommandHandler(
   const commandConfig = roomConfig?.command ?? {};
 
   const actorConfig = asRecord(runtimeConfig?.actor);
+  const contextReducerConfig = asRecord(runtimeConfig?.context_reducer);
   const toolsConfig = asRecord(runtimeConfig?.tools);
   const artifactsConfig = asRecord(toolsConfig?.artifacts);
   const oracleConfig = asRecord(toolsConfig?.oracle);
@@ -235,6 +236,8 @@ function createRoomCommandHandler(
 
   const maxIterations = numberOrUndefined(actorConfig?.max_iterations);
   const maxCompletionRetries = numberOrUndefined(actorConfig?.max_completion_retries);
+  const contextReducerModel = stringOrUndefined(contextReducerConfig?.model);
+  const contextReducerPrompt = stringOrUndefined(contextReducerConfig?.prompt);
   const jinaApiKey = stringOrUndefined(asRecord(toolsConfig?.jina)?.api_key);
   const artifactsPathRaw = stringOrUndefined(artifactsConfig?.path);
   const artifactsPath = artifactsPathRaw
@@ -254,6 +257,10 @@ function createRoomCommandHandler(
     responseCleaner,
     refusalFallbackModel,
     persistenceSummaryModel,
+    contextReducerConfig: {
+      model: contextReducerModel,
+      prompt: contextReducerPrompt,
+    },
     agentLoop: {
       maxIterations,
       maxCompletionRetries,

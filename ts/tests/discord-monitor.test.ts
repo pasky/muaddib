@@ -280,6 +280,129 @@ describe("DiscordRoomMonitor", () => {
     await history.close();
   });
 
+  it("debounces rapid Discord replies by editing the previous bot message", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    const sendCalls: Array<{ text: string; options?: { replyToMessageId?: string; mentionAuthor?: boolean } }> = [];
+    const editCalls: Array<{ messageId: string; text: string }> = [];
+
+    const monitor = new DiscordRoomMonitor({
+      roomConfig: { enabled: true, reply_edit_debounce_seconds: 15 },
+      history,
+      sender: {
+        sendMessage: async (_channelId, text, options) => {
+          sendCalls.push({ text, options });
+          return {
+            messageId: "bot-reply-1",
+          };
+        },
+        editMessage: async (_channelId, messageId, text) => {
+          editCalls.push({ messageId, text });
+          return {
+            messageId,
+          };
+        },
+      },
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async (_message, options) => {
+          await options.sendResponse?.("first");
+          await options.sendResponse?.("second");
+          return { response: "second" };
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      guildId: "123456789",
+      channelId: "chan-1",
+      messageId: "msg-42",
+      username: "alice",
+      content: "muaddib: hello",
+      mynick: "muaddib",
+      mentionsBot: true,
+    });
+
+    expect(sendCalls).toEqual([
+      {
+        text: "first",
+        options: {
+          replyToMessageId: "msg-42",
+          mentionAuthor: true,
+        },
+      },
+    ]);
+    expect(editCalls).toEqual([
+      {
+        messageId: "bot-reply-1",
+        text: "first\nsecond",
+      },
+    ]);
+
+    await history.close();
+  });
+
+  it("sends a new Discord followup when reply edit debounce is disabled", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    const sendCalls: Array<{ text: string; options?: { replyToMessageId?: string; mentionAuthor?: boolean } }> = [];
+
+    const monitor = new DiscordRoomMonitor({
+      roomConfig: { enabled: true, reply_edit_debounce_seconds: 0 },
+      history,
+      sender: {
+        sendMessage: async (_channelId, text, options) => {
+          sendCalls.push({ text, options });
+          return {
+            messageId: sendCalls.length === 1 ? "bot-reply-1" : "bot-reply-2",
+          };
+        },
+        editMessage: async () => {
+          throw new Error("editMessage should not be called when debounce is disabled");
+        },
+      },
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async (_message, options) => {
+          await options.sendResponse?.("first");
+          await options.sendResponse?.("second");
+          return { response: "second" };
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      guildId: "123456789",
+      channelId: "chan-1",
+      messageId: "msg-42",
+      username: "alice",
+      content: "muaddib: hello",
+      mynick: "muaddib",
+      mentionsBot: true,
+    });
+
+    expect(sendCalls).toEqual([
+      {
+        text: "first",
+        options: {
+          replyToMessageId: "msg-42",
+          mentionAuthor: true,
+        },
+      },
+      {
+        text: "second",
+        options: {
+          replyToMessageId: "bot-reply-1",
+          mentionAuthor: false,
+        },
+      },
+    ]);
+
+    await history.close();
+  });
+
   it("updates edited Discord message content by platform id", async () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();
@@ -546,6 +669,127 @@ describe("DiscordRoomMonitor", () => {
     expect(processed).toEqual(["second session"]);
     expect(connectCalls).toBe(2);
     expect(disconnectCalls).toBe(2);
+
+    await history.close();
+  });
+
+  it("stops gracefully on null Discord events even when reconnect is enabled", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    let connectCalls = 0;
+    let disconnectCalls = 0;
+
+    const monitor = new DiscordRoomMonitor({
+      roomConfig: {
+        enabled: true,
+        reconnect: {
+          enabled: true,
+          delay_ms: 0,
+          max_attempts: 3,
+        },
+      },
+      history,
+      eventSource: {
+        connect: async () => {
+          connectCalls += 1;
+        },
+        disconnect: async () => {
+          disconnectCalls += 1;
+        },
+        receiveEvent: async () => null,
+      },
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async () => null,
+      },
+    });
+
+    await expect(monitor.run()).resolves.toBeUndefined();
+    expect(connectCalls).toBe(1);
+    expect(disconnectCalls).toBe(1);
+
+    await history.close();
+  });
+
+  it("fails after Discord reconnect max_attempts is exhausted", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    let connectCalls = 0;
+    let disconnectCalls = 0;
+
+    const monitor = new DiscordRoomMonitor({
+      roomConfig: {
+        enabled: true,
+        reconnect: {
+          enabled: true,
+          delay_ms: 0,
+          max_attempts: 2,
+        },
+      },
+      history,
+      eventSource: {
+        connect: async () => {
+          connectCalls += 1;
+        },
+        disconnect: async () => {
+          disconnectCalls += 1;
+        },
+        receiveEvent: async () => {
+          throw new Error("socket disconnected");
+        },
+      },
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async () => null,
+      },
+    });
+
+    await expect(monitor.run()).rejects.toThrow("socket disconnected");
+    expect(connectCalls).toBe(3);
+    expect(disconnectCalls).toBe(3);
+
+    await history.close();
+  });
+
+  it("does not reconnect Discord monitor when reconnect policy is disabled", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    let connectCalls = 0;
+    let disconnectCalls = 0;
+
+    const monitor = new DiscordRoomMonitor({
+      roomConfig: {
+        enabled: true,
+        reconnect: {
+          enabled: false,
+          delay_ms: 0,
+          max_attempts: 2,
+        },
+      },
+      history,
+      eventSource: {
+        connect: async () => {
+          connectCalls += 1;
+        },
+        disconnect: async () => {
+          disconnectCalls += 1;
+        },
+        receiveEvent: async () => {
+          throw new Error("socket disconnected");
+        },
+      },
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async () => null,
+      },
+    });
+
+    await expect(monitor.run()).rejects.toThrow("socket disconnected");
+    expect(connectCalls).toBe(1);
+    expect(disconnectCalls).toBe(1);
 
     await history.close();
   });

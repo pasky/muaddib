@@ -176,6 +176,68 @@ describe("RoomCommandHandlerTs", () => {
     await history.close();
   });
 
+  it("applies context reducer when mode enables auto_reduce_context", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    await history.addMessage({
+      ...makeMessage("previous context"),
+      nick: "bob",
+    });
+
+    const incoming = makeMessage("!s reduce context please");
+    await history.addMessage(incoming);
+
+    const contextReducer = {
+      isConfigured: true,
+      reduce: vi.fn(async () => [
+        {
+          role: "user",
+          content: "[10:00] <summary> reduced context",
+        },
+      ]),
+    };
+
+    let runnerPrompt = "";
+    let runnerContextContents: string[] = [];
+
+    const handler = new RoomCommandHandlerTs({
+      roomConfig: {
+        ...roomConfig,
+        command: {
+          ...roomConfig.command,
+          modes: {
+            ...roomConfig.command.modes,
+            serious: {
+              ...roomConfig.command.modes.serious,
+              auto_reduce_context: true,
+            },
+          },
+        },
+      } as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      contextReducer,
+      runnerFactory: () => ({
+        runSingleTurn: async (prompt, options) => {
+          runnerPrompt = prompt;
+          runnerContextContents = (options?.contextMessages ?? []).map((entry) => entry.content);
+          return makeRunnerResult("done");
+        },
+      }),
+    });
+
+    const result = await handler.execute(incoming);
+
+    expect(result.response).toBe("done");
+    expect(contextReducer.reduce).toHaveBeenCalledTimes(1);
+    expect(runnerPrompt).toBe("reduce context please");
+    expect(runnerContextContents).toEqual(["[10:00] <summary> reduced context"]);
+    expect(runnerContextContents.some((entry) => entry.includes("previous context"))).toBe(false);
+
+    await history.close();
+  });
+
   it("filters baseline tools via allowed_tools including chronicler/quest tool names", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();

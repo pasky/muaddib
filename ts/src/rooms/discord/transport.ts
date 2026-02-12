@@ -14,6 +14,7 @@ import type {
   DiscordMessageEditEvent,
   DiscordMessageEvent,
   DiscordSendOptions,
+  DiscordSendResult,
   DiscordSender,
 } from "./monitor.js";
 
@@ -131,7 +132,11 @@ export class DiscordGatewayTransport implements DiscordEventSource, DiscordSende
     return next;
   }
 
-  async sendMessage(channelId: string, message: string, options?: DiscordSendOptions): Promise<void> {
+  async sendMessage(
+    channelId: string,
+    message: string,
+    options?: DiscordSendOptions,
+  ): Promise<DiscordSendResult> {
     const channel = await this.client.channels.fetch(channelId);
     if (!channel || !channel.isTextBased()) {
       throw new Error(`Discord channel '${channelId}' is not text-based.`);
@@ -154,7 +159,35 @@ export class DiscordGatewayTransport implements DiscordEventSource, DiscordSende
         }
       : message;
 
-    await channel.send(payload as any);
+    const sent = await channel.send(payload as any);
+
+    return {
+      messageId: typeof sent?.id === "string" ? sent.id : undefined,
+      content: typeof sent?.content === "string" ? sent.content : message,
+    };
+  }
+
+  async editMessage(channelId: string, messageId: string, message: string): Promise<DiscordSendResult> {
+    const channel = await this.client.channels.fetch(channelId);
+    if (!channel || !channel.isTextBased()) {
+      throw new Error(`Discord channel '${channelId}' is not text-based.`);
+    }
+
+    if (!("messages" in channel) || typeof channel.messages?.fetch !== "function") {
+      throw new Error(`Discord channel '${channelId}' does not support message edits.`);
+    }
+
+    const targetMessage = await channel.messages.fetch(messageId);
+    if (!targetMessage || typeof (targetMessage as Message).edit !== "function") {
+      throw new Error(`Discord message '${messageId}' could not be loaded for edit.`);
+    }
+
+    const edited = await targetMessage.edit({ content: message });
+
+    return {
+      messageId: typeof edited?.id === "string" ? edited.id : messageId,
+      content: typeof edited?.content === "string" ? edited.content : message,
+    };
   }
 
   private mapMessage(message: Message): DiscordMessageEvent | null {

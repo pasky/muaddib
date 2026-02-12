@@ -26,6 +26,7 @@ export interface SlackMonitorRoomConfig {
     channel?: boolean;
     dm?: boolean;
   };
+  reply_edit_debounce_seconds?: number;
   reconnect?: SlackReconnectConfig;
 }
 
@@ -86,10 +87,27 @@ export interface SlackSendOptions {
   threadTs?: string;
 }
 
+export interface SlackSendResult {
+  messageTs?: string;
+  text?: string;
+}
+
 export interface SlackSender {
   connect?(): Promise<void>;
   disconnect?(): Promise<void>;
-  sendMessage(channelId: string, message: string, options?: SlackSendOptions): Promise<void>;
+  sendMessage(
+    channelId: string,
+    message: string,
+    options?: SlackSendOptions,
+  ): Promise<SlackSendResult | void>;
+  updateMessage?(
+    channelId: string,
+    messageTs: string,
+    message: string,
+  ): Promise<SlackSendResult | void>;
+  formatOutgoingMentions?(message: string): Promise<string>;
+  setTypingIndicator?(channelId: string, threadTs: string): Promise<boolean>;
+  clearTypingIndicator?(channelId: string, threadTs: string): Promise<void>;
 }
 
 export interface SlackRoomMonitorOptions {
@@ -141,6 +159,9 @@ export class SlackRoomMonitor {
           while (true) {
             const event = await this.options.eventSource.receiveEvent();
             if (!event) {
+              this.logger.info(
+                "Slack monitor received null event (graceful shutdown signal); stopping without reconnect.",
+              );
               return;
             }
 
@@ -244,24 +265,64 @@ export class SlackRoomMonitor {
     };
 
     const sender = this.options.sender;
+    const replyEditDebounceSeconds = resolveReplyEditDebounceSeconds(
+      this.options.roomConfig.reply_edit_debounce_seconds,
+    );
+    let lastReplyTs: string | undefined;
+    let lastReplyText: string | undefined;
+    let lastReplyAtSeconds: number | undefined;
+    let typingIndicatorThreadTs: string | undefined;
 
     const handleIncoming = async (): Promise<void> => {
       await this.options.commandHandler.handleIncomingMessage(message, {
         isDirect,
         sendResponse: sender
           ? async (text) => {
-              await sendWithRateLimitRetry(
-                async () => {
-                  await sender.sendMessage(event.channelId, text, {
-                    threadTs: responseThreadId,
-                  });
-                },
-                {
-                  platform: "slack",
-                  destination: event.channelId,
-                  onEvent: this.options.onSendRetryEvent,
-                },
-              );
+              const formattedText = sender.formatOutgoingMentions
+                ? await sender.formatOutgoingMentions(text)
+                : text;
+              const nowSeconds = nowMonotonicSeconds();
+
+              if (
+                sender.updateMessage &&
+                lastReplyTs &&
+                lastReplyAtSeconds !== undefined &&
+                nowSeconds - lastReplyAtSeconds < replyEditDebounceSeconds
+              ) {
+                const combined = lastReplyText ? `${lastReplyText}\n${formattedText}` : formattedText;
+                const targetMessageTs = lastReplyTs;
+
+                const updateResult = await sendWithSlackRetryResult<SlackSendResult>(
+                  event.channelId,
+                  this.options.onSendRetryEvent,
+                  async () => await sender.updateMessage!(event.channelId, targetMessageTs, combined),
+                );
+
+                if (updateResult?.messageTs) {
+                  lastReplyTs = updateResult.messageTs;
+                }
+                lastReplyText = combined;
+                lastReplyAtSeconds = nowSeconds;
+              } else {
+                const sendResult = await sendWithSlackRetryResult<SlackSendResult>(
+                  event.channelId,
+                  this.options.onSendRetryEvent,
+                  async () =>
+                    await sender.sendMessage(event.channelId, formattedText, {
+                      threadTs: responseThreadId,
+                    }),
+                );
+
+                if (sendResult?.messageTs) {
+                  lastReplyTs = sendResult.messageTs;
+                }
+                lastReplyText = formattedText;
+                lastReplyAtSeconds = nowSeconds;
+              }
+
+              if (typingIndicatorThreadTs && sender.setTypingIndicator) {
+                await sender.setTypingIndicator(event.channelId, typingIndicatorThreadTs);
+              }
             }
           : undefined,
       });
@@ -273,6 +334,16 @@ export class SlackRoomMonitor {
     }
 
     const arc = `${message.serverTag}#${message.channelName}`;
+    const typingThreadTs = message.threadId ?? event.messageTs;
+    let typingIndicatorSet = false;
+
+    if (sender?.setTypingIndicator && typingThreadTs) {
+      typingIndicatorSet = await sender.setTypingIndicator(event.channelId, typingThreadTs);
+      if (typingIndicatorSet) {
+        typingIndicatorThreadTs = typingThreadTs;
+      }
+    }
+
     await this.logger.withMessageContext(
       {
         arc,
@@ -281,7 +352,13 @@ export class SlackRoomMonitor {
       },
       async () => {
         this.logger.debug("Processing direct Slack message", `arc=${arc}`, `nick=${message.nick}`);
-        await handleIncoming();
+        try {
+          await handleIncoming();
+        } finally {
+          if (typingIndicatorSet && typingThreadTs && sender?.clearTypingIndicator) {
+            await sender.clearTypingIndicator(event.channelId, typingThreadTs);
+          }
+        }
       },
     );
   }
@@ -443,6 +520,43 @@ function resolveReconnectPolicy(config: SlackReconnectConfig | undefined): {
     delayMs,
     maxAttempts,
   };
+}
+
+function resolveReplyEditDebounceSeconds(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 15;
+  }
+
+  return parsed;
+}
+
+function nowMonotonicSeconds(): number {
+  return Date.now() / 1_000;
+}
+
+async function sendWithSlackRetryResult<T>(
+  destination: string,
+  onEvent: ((event: SendRetryEvent) => void) | undefined,
+  send: () => Promise<T | void>,
+): Promise<T | undefined> {
+  let result: T | undefined;
+
+  await sendWithRateLimitRetry(
+    async () => {
+      const next = await send();
+      if (next !== undefined) {
+        result = next;
+      }
+    },
+    {
+      platform: "slack",
+      destination,
+      onEvent,
+    },
+  );
+
+  return result;
 }
 
 async function sleep(ms: number): Promise<void> {

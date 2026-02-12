@@ -47,6 +47,7 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
   const roomConfig = getRoomConfig(config, roomName) as any;
   const commandConfig = roomConfig.command;
   const actorConfig = asRecord(config.actor);
+  const contextReducerConfig = asRecord(config.context_reducer);
   const toolsConfig = asRecord(config.tools);
   const artifactsConfig = asRecord(toolsConfig?.artifacts);
   const oracleConfig = asRecord(toolsConfig?.oracle);
@@ -59,6 +60,8 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
 
   const maxIterations = numberOrUndefined(actorConfig?.max_iterations);
   const maxCompletionRetries = numberOrUndefined(actorConfig?.max_completion_retries);
+  const contextReducerModel = stringOrUndefined(contextReducerConfig?.model);
+  const contextReducerPrompt = stringOrUndefined(contextReducerConfig?.prompt);
   const jinaApiKey = stringOrUndefined(asRecord(toolsConfig?.jina)?.api_key);
   const artifactsPathRaw = stringOrUndefined(artifactsConfig?.path);
   const artifactsPath = artifactsPathRaw
@@ -102,6 +105,10 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
     getApiKey,
     refusalFallbackModel,
     persistenceSummaryModel,
+    contextReducerConfig: {
+      model: contextReducerModel,
+      prompt: contextReducerPrompt,
+    },
     runnerFactory: options.runnerFactory ?? defaultRunnerFactory,
     agentLoop: {
       maxIterations,

@@ -26,6 +26,7 @@ export interface RuntimeSettings {
   reasoningEffort: string;
   allowedTools: string[] | null;
   steering: boolean;
+  autoReduceContext: boolean;
   model: string | null;
   historySize: number;
 }
@@ -36,6 +37,7 @@ export interface ModeConfig {
   reasoning_effort?: string;
   allowed_tools?: string[];
   steering?: boolean;
+  auto_reduce_context?: boolean;
   prompt?: string;
   triggers: Record<string, Record<string, unknown>>;
 }
@@ -192,6 +194,10 @@ export class CommandResolver {
         allowedTools:
           (overrides.allowed_tools as string[] | undefined) ?? modeConfig.allowed_tools ?? null,
         steering: (overrides.steering as boolean | undefined) ?? modeConfig.steering ?? true,
+        autoReduceContext:
+          (overrides.auto_reduce_context as boolean | undefined) ??
+          modeConfig.auto_reduce_context ??
+          false,
         model: (overrides.model as string | undefined) ?? null,
         historySize: Number(modeConfig.history_size ?? this.commandConfig.history_size),
       },

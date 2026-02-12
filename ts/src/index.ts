@@ -6,6 +6,7 @@ export * from "./rooms/message.js";
 export * from "./rooms/command/config.js";
 export * from "./rooms/command/resolver.js";
 export * from "./rooms/command/classifier.js";
+export * from "./rooms/command/context-reducer.js";
 export * from "./rooms/command/command-handler.js";
 export * from "./rooms/irc/varlink.js";
 export * from "./rooms/irc/monitor.js";

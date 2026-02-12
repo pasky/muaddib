@@ -15,6 +15,11 @@ import { createDefaultToolExecutors } from "../../agent/tools/core-executors.js"
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { parseModelSpec } from "../../models/model-spec.js";
 import { RateLimiter } from "./rate-limiter.js";
+import {
+  ContextReducerTs,
+  type ContextReducer,
+  type ContextReducerConfig,
+} from "./context-reducer.js";
 import type { RoomMessage } from "../message.js";
 import {
   SteeringQueue,
@@ -65,6 +70,8 @@ export interface CommandHandlerOptions {
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   refusalFallbackModel?: string;
   persistenceSummaryModel?: string;
+  contextReducer?: ContextReducer;
+  contextReducerConfig?: ContextReducerConfig;
   responseCleaner?: (text: string, nick: string) => string;
   helpToken?: string;
   flagTokens?: string[];
@@ -107,6 +114,7 @@ export class RoomCommandHandlerTs {
   private readonly refusalFallbackModel: string | null;
   private readonly responseMaxBytes: number;
   private readonly shareArtifact: (content: string) => Promise<string>;
+  private readonly contextReducer: ContextReducer;
 
   constructor(private readonly options: CommandHandlerOptions) {
     this.commandConfig = options.roomConfig.command;
@@ -139,6 +147,12 @@ export class RoomCommandHandlerTs {
     const defaultExecutors = createDefaultToolExecutors(options.toolOptions ?? {});
     this.shareArtifact =
       options.toolOptions?.executors?.shareArtifact ?? defaultExecutors.shareArtifact;
+    this.contextReducer =
+      options.contextReducer ??
+      new ContextReducerTs({
+        config: options.contextReducerConfig,
+        getApiKey: options.getApiKey,
+      });
 
     this.rateLimiter =
       options.rateLimiter ??
@@ -261,9 +275,28 @@ export class RoomCommandHandlerTs {
         ? this.steeringQueue.drainSteeringContextMessages(steeringKey)
         : [];
 
-    const selectedContext = (resolvedWithFollowups.noContext ? context.slice(-1) : context).slice(
+    const systemPrompt = this.buildSystemPrompt(
+      resolvedWithFollowups.modeKey,
+      message.mynick,
+      resolvedWithFollowups.modelOverride ?? undefined,
+    );
+
+    let selectedContext = (resolvedWithFollowups.noContext ? context.slice(-1) : context).slice(
       -resolvedWithFollowups.runtime.historySize,
     );
+
+    if (
+      !resolvedWithFollowups.noContext &&
+      resolvedWithFollowups.runtime.autoReduceContext &&
+      this.contextReducer.isConfigured &&
+      selectedContext.length > 1
+    ) {
+      const reducedContext = await this.contextReducer.reduce(selectedContext, systemPrompt);
+      selectedContext = [
+        ...reducedContext,
+        selectedContext[selectedContext.length - 1],
+      ];
+    }
 
     // The trigger message will be sent as the new prompt for this turn.
     // Keep only prior context from history here to avoid sending the trigger twice.
@@ -271,12 +304,6 @@ export class RoomCommandHandlerTs {
       ...selectedContext.slice(0, -1),
       ...steeringMessages,
     ].map(toRunnerContextMessage);
-
-    const systemPrompt = this.buildSystemPrompt(
-      resolvedWithFollowups.modeKey,
-      message.mynick,
-      resolvedWithFollowups.modelOverride ?? undefined,
-    );
 
     const tools = this.selectTools(message, resolvedWithFollowups.runtime.allowedTools);
 

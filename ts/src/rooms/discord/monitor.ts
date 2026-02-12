@@ -23,6 +23,7 @@ export interface DiscordReconnectConfig {
 export interface DiscordMonitorRoomConfig {
   enabled?: boolean;
   bot_name?: string;
+  reply_edit_debounce_seconds?: number;
   reconnect?: DiscordReconnectConfig;
 }
 
@@ -76,10 +77,24 @@ export interface DiscordSendOptions {
   mentionAuthor?: boolean;
 }
 
+export interface DiscordSendResult {
+  messageId?: string;
+  content?: string;
+}
+
 export interface DiscordSender {
   connect?(): Promise<void>;
   disconnect?(): Promise<void>;
-  sendMessage(channelId: string, message: string, options?: DiscordSendOptions): Promise<void>;
+  sendMessage(
+    channelId: string,
+    message: string,
+    options?: DiscordSendOptions,
+  ): Promise<DiscordSendResult | void>;
+  editMessage?(
+    channelId: string,
+    messageId: string,
+    message: string,
+  ): Promise<DiscordSendResult | void>;
 }
 
 export interface DiscordRoomMonitorOptions {
@@ -131,6 +146,9 @@ export class DiscordRoomMonitor {
           while (true) {
             const event = await this.options.eventSource.receiveEvent();
             if (!event) {
+              this.logger.info(
+                "Discord monitor received null event (graceful shutdown signal); stopping without reconnect.",
+              );
               return;
             }
 
@@ -232,25 +250,60 @@ export class DiscordRoomMonitor {
     };
 
     const sender = this.options.sender;
+    const replyEditDebounceSeconds = resolveReplyEditDebounceSeconds(
+      this.options.roomConfig.reply_edit_debounce_seconds,
+    );
+    let lastReplyMessageId: string | undefined;
+    let lastReplyText: string | undefined;
+    let lastReplyAtSeconds: number | undefined;
 
     const handleIncoming = async (): Promise<void> => {
       await this.options.commandHandler.handleIncomingMessage(message, {
         isDirect,
         sendResponse: sender
           ? async (text) => {
-              await sendWithRateLimitRetry(
-                async () => {
+              const nowSeconds = nowMonotonicSeconds();
+
+              if (
+                sender.editMessage &&
+                lastReplyMessageId &&
+                lastReplyAtSeconds !== undefined &&
+                nowSeconds - lastReplyAtSeconds < replyEditDebounceSeconds
+              ) {
+                const combined = lastReplyText ? `${lastReplyText}\n${text}` : text;
+                const targetMessageId = lastReplyMessageId;
+
+                const editResult = await sendWithDiscordRetryResult<DiscordSendResult>(
+                  event.channelId,
+                  this.options.onSendRetryEvent,
+                  async () => await sender.editMessage!(event.channelId, targetMessageId, combined),
+                );
+
+                if (editResult?.messageId) {
+                  lastReplyMessageId = editResult.messageId;
+                }
+                lastReplyText = combined;
+                lastReplyAtSeconds = nowSeconds;
+                return;
+              }
+
+              const replyToMessageId = lastReplyMessageId ?? event.messageId;
+
+              const sendResult = await sendWithDiscordRetryResult<DiscordSendResult>(
+                event.channelId,
+                this.options.onSendRetryEvent,
+                async () =>
                   await sender.sendMessage(event.channelId, text, {
-                    replyToMessageId: event.messageId,
-                    mentionAuthor: true,
-                  });
-                },
-                {
-                  platform: "discord",
-                  destination: event.channelId,
-                  onEvent: this.options.onSendRetryEvent,
-                },
+                    replyToMessageId,
+                    mentionAuthor: Boolean(replyToMessageId && !lastReplyMessageId),
+                  }),
               );
+
+              if (sendResult?.messageId) {
+                lastReplyMessageId = sendResult.messageId;
+              }
+              lastReplyText = text;
+              lastReplyAtSeconds = nowSeconds;
             }
           : undefined,
       });
@@ -403,6 +456,43 @@ function resolveReconnectPolicy(config: DiscordReconnectConfig | undefined): {
     delayMs,
     maxAttempts,
   };
+}
+
+function resolveReplyEditDebounceSeconds(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 15;
+  }
+
+  return parsed;
+}
+
+function nowMonotonicSeconds(): number {
+  return Date.now() / 1_000;
+}
+
+async function sendWithDiscordRetryResult<T>(
+  destination: string,
+  onEvent: ((event: SendRetryEvent) => void) | undefined,
+  send: () => Promise<T | void>,
+): Promise<T | undefined> {
+  let result: T | undefined;
+
+  await sendWithRateLimitRetry(
+    async () => {
+      const next = await send();
+      if (next !== undefined) {
+        result = next;
+      }
+    },
+    {
+      platform: "discord",
+      destination,
+      onEvent,
+    },
+  );
+
+  return result;
 }
 
 async function sleep(ms: number): Promise<void> {
