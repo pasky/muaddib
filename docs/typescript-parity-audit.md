@@ -54,6 +54,11 @@ The intent is to separate:
   - Added/extended TS tests:
     - baseline tool wiring tests for `oracle` + `generate_image` in `ts/tests/baseline-tools.test.ts`,
     - focused oracle/image executor success + validation/error coverage in `ts/tests/core-executors.test.ts`.
+- 2026-02-12 (cluster: command refusal-fallback parity step):
+  - Added TS refusal-fallback policy in command execution flow with deterministic trigger patterns for explicit refusal/error signals.
+  - Wired fail-fast config validation + runtime plumbing for `router.refusal_fallback_model` (`provider:model` required, unsupported provider/model rejected) in app + CLI paths.
+  - Added command-handler tests covering fallback activation (refusal text + safety error) and non-activation paths, including persisted LLM-call/provider-model assertions when fallback is used.
+  - Added CLI config-validation tests for malformed/unsupported `router.refusal_fallback_model` values.
 
 ---
 
@@ -116,7 +121,7 @@ Legend: ✅ implemented, ◐ partial, ❌ missing, ⚠ intentional deferred
 | Tool-call execution loop with tool results fed back to model | ✅ | ✅ | Python `run_agent`; TS runner now relies on `Agent` loop semantics and validates tool-result continuation in `ts/tests/muaddib-agent-runner.test.ts` |
 | Broad tool surface (web_search, visit_webpage, execute_code, oracle, artifacts, image gen, quest/chronicler tools) | ✅ | ◐ | TS now includes `web_search`/`visit_webpage`/`execute_code`, artifact tools (`share_artifact`/`edit_artifact`), and advanced tools (`oracle`, `generate_image`); quest/chronicler tools remain pending |
 | Progress callback + persistence summary callback | ✅ | ◐ | Python supports both; TS supports progress callback, still no persistence-summary callback flow |
-| Refusal fallback model stickiness | ✅ | ❌ | Python `providers/ModelRouter.call_raw_with_model`; TS path has no equivalent fallback policy wiring |
+| Refusal fallback model stickiness | ✅ | ✅ | Python `providers/ModelRouter.call_raw_with_model`; TS command path now retries explicit refusal/error outcomes with `router.refusal_fallback_model` and logs usage against the effective fallback model |
 | Vision fallback when image tool output appears | ✅ | ❌ | Python `AgenticLLMActor.run_agent`; TS no equivalent |
 
 ### E. Logging / observability
@@ -161,7 +166,7 @@ Legend: ✅ implemented, ◐ partial, ❌ missing, ⚠ intentional deferred
 
 ### Accidental / not-yet-implemented parity gaps
 
-Next priority gap after advanced tool step 3 is now **refusal fallback behavior plus remaining chronicler/quest tool-surface and persistence-summary callback parity** (P1).
+Next priority gap after advanced tool step 3 + refusal-fallback closure is now **remaining chronicler/quest tool-surface and persistence-summary callback parity** (P1).
 
 | Gap | Severity | User/operator impact | Evidence |
 |---|---:|---|---|
@@ -172,7 +177,7 @@ Next priority gap after advanced tool step 3 is now **refusal fallback behavior 
 | Artifact tool parity in TS (`share_artifact`, `edit_artifact`) | ✅ closed (2026-02-12) | TS command path now supports core artifact sharing/edit workflows with configured artifact storage path/URL wiring. | Python `agentic_actor/tools.py::ShareArtifactExecutor`, `EditArtifactExecutor`; TS `baseline-tools.ts`, `core-executors.ts`, `app/main.ts`, `cli/message-mode.ts`, `ts/tests/core-executors.test.ts` |
 | Advanced tool parity step 3 in TS (`oracle`, `generate_image`) | ✅ closed (2026-02-12) | TS command path now includes oracle and image-generation tool wiring/executors with validation/error coverage. | Python `agentic_actor/tools.py::TOOLS`; TS `baseline-tools.ts`, `core-executors.ts`, `app/main.ts`, `cli/message-mode.ts`, `ts/tests/baseline-tools.test.ts`, `ts/tests/core-executors.test.ts` |
 | Remaining chronicler/quest tools + persistence-summary callback parity | P1 | Long-horizon chronicler/quest workflows and persistence-summary callback behavior remain narrower in TS vs Python. | Python `agentic_actor/tools.py::TOOLS` + actor persistence callbacks; TS tool surface still omits chronicler/quest tool executors and persistence-summary callback flow |
-| No refusal fallback model behavior in TS app path | P1 | Safety refusal recovery behavior differs; higher user-visible refusal rate in certain prompts. | Python `providers/__init__.py::ModelRouter.call_raw_with_model` |
+| Refusal fallback model behavior in TS command/app path | ✅ closed (2026-02-12) | TS now retries on deterministic explicit refusal/error markers using `router.refusal_fallback_model`, appends fallback suffix, and persists/logs usage under the effective fallback model. | Python `providers/__init__.py::ModelRouter.call_raw_with_model`; TS `ts/src/rooms/command/command-handler.ts` + `ts/src/app/refusal-fallback.ts` |
 | No response_max_bytes + artifact fallback in TS command path | P2 | Long answers risk truncation (especially IRC two-message bound), without artifact link recovery path. | Python `RoomCommandHandler._run_actor/_long_response_to_artifact` |
 | Discord attachments not injected into prompt context in TS | P1 | Users sending files/images lose context; assistant misses key inputs. | Python `rooms/discord/monitor.py::process_message_event` attachment block |
 | Discord reply-edit debounce missing in TS | P2 | Bot emits multiple messages instead of compact edits, noisier UX. | Python `reply_edit_debounce_seconds` logic |
@@ -247,7 +252,7 @@ Tests (red/green):
    - ✅ step 1: `web_search`, `visit_webpage`, `execute_code`,
    - ✅ step 2: `share_artifact`, `edit_artifact`,
    - ✅ step 3: `oracle`, `generate_image`.
-7. **Add refusal fallback policy** equivalent to Python router behavior (or document explicit replacement contract if pi-ai-native policy differs).
+7. ✅ **Add refusal fallback policy** equivalent to Python router behavior in TS command path with deterministic explicit refusal/error trigger policy and `router.refusal_fallback_model` validation/wiring. *(Completed 2026-02-12)*
 
 Tests (red/green):
 - ✅ Extended TS runner tests for:
@@ -256,7 +261,7 @@ Tests (red/green):
   - tool-result continuation,
   - non-empty completion retry behavior.
 - ✅ Extended baseline tool tests for core + artifact + advanced wiring (`web_search`, `visit_webpage`, `execute_code`, `share_artifact`, `edit_artifact`, `oracle`, `generate_image`) and focused executor tests.
-- Remaining: refusal-fallback behavior, chronicler/quest tool surface, and persistence-summary callback parity coverage.
+- Remaining: chronicler/quest tool surface and persistence-summary callback parity coverage.
 
 ## Phase 3 — adapter UX/completeness parity
 

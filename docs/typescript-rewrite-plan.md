@@ -26,6 +26,10 @@ Latest update:
   - Baseline/executor support added for `oracle` and `generate_image` (`ts/src/agent/tools/baseline-tools.ts`, `ts/src/agent/tools/core-executors.ts`).
   - Executor config wiring now reads `tools.oracle.*`, `tools.image_gen.model`, and OpenRouter base URL + API-key resolution in app + CLI command paths (`ts/src/app/main.ts`, `ts/src/cli/message-mode.ts`).
   - Added baseline wiring + focused oracle/image executor coverage (`ts/tests/baseline-tools.test.ts`, `ts/tests/core-executors.test.ts`).
+- 2026-02-12: Closed refusal-fallback parity slice in TS command path:
+  - Added deterministic refusal/error trigger policy and fallback rerun behavior using `router.refusal_fallback_model`.
+  - Added fail-fast config validation for malformed/unsupported fallback model specs (`provider:model` required, unknown provider/model rejected).
+  - Added command-handler + CLI tests covering fallback activation/non-activation and fallback persistence/logging assertions.
 
 ---
 
@@ -164,8 +168,8 @@ Python rollback path must remain available until soak/parity/SLO gates are fully
 ## Remaining gaps / next parity work
 
 1. **Advanced tool-surface parity after core loop closure (current accidental gap)**
-   - TS now covers multi-turn tool loop semantics + core tools (`web_search`, `visit_webpage`, `execute_code`), artifact tools (`share_artifact`, `edit_artifact`), and advanced tools (`oracle`, `generate_image`).
-   - Remaining parity work in this lane: persistence-summary callback behavior, refusal-fallback policy parity, and chronicler/quest tool-surface follow-up.
+   - TS now covers multi-turn tool loop semantics + core tools (`web_search`, `visit_webpage`, `execute_code`), artifact tools (`share_artifact`, `edit_artifact`), advanced tools (`oracle`, `generate_image`), and command-path refusal-fallback behavior.
+   - Remaining parity work in this lane: persistence-summary callback behavior and chronicler/quest tool-surface follow-up.
 
 2. **OAuth/session credential refresh support**
    - Still deferred; blocked on stable upstream provider refresh contract.
@@ -187,4 +191,4 @@ Python rollback path must remain available until soak/parity/SLO gates are fully
 Use the authoritative parity audit as the execution backlog:
 - `docs/typescript-parity-audit.md`
 
-Immediate priority from the parity audit is advancing beyond closed advanced-tool parity into refusal-fallback behavior, persistence-summary callback parity, and remaining chronicler/quest tool-surface gaps.
+Immediate priority from the parity audit is advancing beyond closed advanced-tool + refusal-fallback parity into persistence-summary callback parity and remaining chronicler/quest tool-surface gaps.

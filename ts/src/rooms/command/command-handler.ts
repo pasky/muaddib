@@ -57,6 +57,7 @@ export interface CommandHandlerOptions {
   runnerFactory?: CommandRunnerFactory;
   rateLimiter?: CommandRateLimiter;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+  refusalFallbackModel?: string;
   responseCleaner?: (text: string, nick: string) => string;
   helpToken?: string;
   flagTokens?: string[];
@@ -81,6 +82,12 @@ export interface HandleIncomingMessageOptions {
   sendResponse?: (text: string) => Promise<void>;
 }
 
+interface RunWithFallbackResult {
+  agentResult: SingleTurnResult;
+  modelSpec: string;
+  fallbackModelSpec: string | null;
+}
+
 /**
  * Shared TS command execution path (without proactive handling).
  */
@@ -90,6 +97,7 @@ export class RoomCommandHandlerTs {
   private readonly runnerFactory: CommandRunnerFactory;
   private readonly rateLimiter: CommandRateLimiter;
   private readonly steeringQueue: SteeringQueue;
+  private readonly refusalFallbackModel: string | null;
 
   constructor(private readonly options: CommandHandlerOptions) {
     this.commandConfig = options.roomConfig.command;
@@ -114,6 +122,10 @@ export class RoomCommandHandlerTs {
           maxCompletionRetries: options.agentLoop?.maxCompletionRetries,
           emptyCompletionRetryPrompt: options.agentLoop?.emptyCompletionRetryPrompt,
         } as MuaddibAgentRunnerOptions));
+
+    this.refusalFallbackModel = options.refusalFallbackModel
+      ? normalizeModelSpec(options.refusalFallbackModel)
+      : null;
 
     this.rateLimiter =
       options.rateLimiter ??
@@ -254,24 +266,115 @@ export class RoomCommandHandlerTs {
     );
 
     const tools = this.selectTools(resolvedWithFollowups.runtime.allowedTools);
-    const runner = this.runnerFactory({
-      model: modelSpec,
-      systemPrompt,
-      tools,
-    });
 
-    const agentResult = await runner.runSingleTurn(resolvedWithFollowups.queryText, {
-      contextMessages: runnerContext,
-      thinkingLevel: normalizeThinkingLevel(resolvedWithFollowups.runtime.reasoningEffort),
-    });
+    const runResult = await this.runWithRefusalFallback(
+      modelSpec,
+      {
+        prompt: resolvedWithFollowups.queryText,
+        contextMessages: runnerContext,
+        thinkingLevel: normalizeThinkingLevel(resolvedWithFollowups.runtime.reasoningEffort),
+      },
+      {
+        systemPrompt,
+        tools,
+      },
+    );
 
-    const cleaned = this.cleanResponseText(agentResult.text, message.nick);
+    let cleaned = this.cleanResponseText(runResult.agentResult.text, message.nick);
+    if (runResult.fallbackModelSpec) {
+      const fallbackSpec = parseModelSpec(runResult.fallbackModelSpec);
+      cleaned = `${cleaned} [refusal fallback to ${fallbackSpec.modelId}]`.trim();
+    }
 
     return {
       response: cleaned || null,
       resolved: resolvedWithFollowups,
-      model: modelSpec,
-      usage: agentResult.usage,
+      model: runResult.modelSpec,
+      usage: runResult.agentResult.usage,
+    };
+  }
+
+  private async runWithRefusalFallback(
+    primaryModelSpec: string,
+    runInput: {
+      prompt: string;
+      contextMessages: RunnerContextMessage[];
+      thinkingLevel: ThinkingLevel;
+    },
+    runnerInput: {
+      systemPrompt: string;
+      tools: AgentTool<any>[];
+    },
+  ): Promise<RunWithFallbackResult> {
+    const primaryRunner = this.runnerFactory({
+      model: primaryModelSpec,
+      systemPrompt: runnerInput.systemPrompt,
+      tools: runnerInput.tools,
+    });
+
+    let primaryResult: SingleTurnResult;
+
+    try {
+      primaryResult = await primaryRunner.runSingleTurn(runInput.prompt, {
+        contextMessages: runInput.contextMessages,
+        thinkingLevel: runInput.thinkingLevel,
+      });
+    } catch (error) {
+      const refusalSignal = detectRefusalFallbackSignal(stringifyError(error));
+      if (!refusalSignal || !this.refusalFallbackModel) {
+        throw error;
+      }
+
+      const fallbackResult = await this.runFallbackModelTurn(this.refusalFallbackModel, runInput, runnerInput);
+      return {
+        ...fallbackResult,
+        fallbackModelSpec: this.refusalFallbackModel,
+      };
+    }
+
+    const refusalSignal = detectRefusalFallbackSignal(primaryResult.text);
+    if (!refusalSignal || !this.refusalFallbackModel) {
+      return {
+        agentResult: primaryResult,
+        modelSpec: primaryModelSpec,
+        fallbackModelSpec: null,
+      };
+    }
+
+    const fallbackResult = await this.runFallbackModelTurn(this.refusalFallbackModel, runInput, runnerInput);
+    return {
+      ...fallbackResult,
+      fallbackModelSpec: this.refusalFallbackModel,
+    };
+  }
+
+  private async runFallbackModelTurn(
+    fallbackModelSpec: string,
+    runInput: {
+      prompt: string;
+      contextMessages: RunnerContextMessage[];
+      thinkingLevel: ThinkingLevel;
+    },
+    runnerInput: {
+      systemPrompt: string;
+      tools: AgentTool<any>[];
+    },
+  ): Promise<RunWithFallbackResult> {
+    const fallbackRunner = this.runnerFactory({
+      model: fallbackModelSpec,
+      systemPrompt: runnerInput.systemPrompt,
+      tools: runnerInput.tools,
+    });
+
+    const fallbackResult = await fallbackRunner.runSingleTurn(runInput.prompt, {
+      contextMessages: runInput.contextMessages,
+      thinkingLevel: runInput.thinkingLevel,
+    });
+
+    return {
+      agentResult: fallbackResult,
+      modelSpec: fallbackModelSpec,
+      fallbackModelSpec: null,
     };
   }
 
@@ -513,6 +616,55 @@ export class RoomCommandHandlerTs {
     const allowed = new Set(allowedTools);
     return baseline.filter((tool) => allowed.has(tool.name));
   }
+}
+
+const REFUSAL_FALLBACK_SIGNAL_PATTERNS: ReadonlyArray<{
+  label: string;
+  pattern: RegExp;
+}> = [
+  {
+    label: "structured_refusal",
+    pattern: /["']is_refusal["']\s*:\s*true/iu,
+  },
+  {
+    label: "python_refusal_message",
+    pattern: /the ai refused to respond to this request/iu,
+  },
+  {
+    label: "openai_invalid_prompt_safety",
+    pattern: /invalid_prompt[\s\S]{0,160}safety reasons/iu,
+  },
+  {
+    label: "content_safety_refusal",
+    pattern: /content safety refusal/iu,
+  },
+];
+
+function detectRefusalFallbackSignal(text: string): string | null {
+  const candidate = text.trim();
+  if (!candidate) {
+    return null;
+  }
+
+  for (const signal of REFUSAL_FALLBACK_SIGNAL_PATTERNS) {
+    if (signal.pattern.test(candidate)) {
+      return signal.label;
+    }
+  }
+
+  return null;
+}
+
+function normalizeModelSpec(model: string): string {
+  const spec = parseModelSpec(model);
+  return `${spec.provider}:${spec.modelId}`;
+}
+
+function stringifyError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
 }
 
 function numberWithDefault(value: unknown, fallback: number): number {

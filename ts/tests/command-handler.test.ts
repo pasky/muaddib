@@ -394,6 +394,120 @@ describe("RoomCommandHandlerTs", () => {
     await history.close();
   });
 
+  it("retries on explicit refusal text with router.refusal_fallback_model and persists fallback model usage", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const incoming = makeMessage("!s refusal fallback");
+    const runnerModels: string[] = [];
+
+    const handler = new RoomCommandHandlerTs({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      refusalFallbackModel: "anthropic:claude-3-5-haiku",
+      runnerFactory: (input) => {
+        runnerModels.push(input.model);
+        if (input.model === "openai:gpt-4o-mini") {
+          return {
+            runSingleTurn: async () => makeRunnerResult("The AI refused to respond to this request"),
+          };
+        }
+
+        return {
+          runSingleTurn: async () => makeRunnerResult("fallback answer"),
+        };
+      },
+    });
+
+    const result = await handler.handleIncomingMessage(incoming, { isDirect: true });
+
+    expect(result?.response).toBe("fallback answer [refusal fallback to claude-3-5-haiku]");
+    expect(result?.model).toBe("anthropic:claude-3-5-haiku");
+    expect(runnerModels).toEqual(["openai:gpt-4o-mini", "anthropic:claude-3-5-haiku"]);
+
+    const llmCalls = await history.getLlmCalls();
+    expect(llmCalls).toHaveLength(1);
+    expect(llmCalls[0].provider).toBe("anthropic");
+    expect(llmCalls[0].model).toBe("claude-3-5-haiku");
+
+    const rows = await history.getFullHistory("libera", "#test");
+    expect(rows[1]?.message).toContain("[refusal fallback to claude-3-5-haiku]");
+
+    await history.close();
+  });
+
+  it("retries with fallback model when primary runner throws explicit safety-refusal error", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const incoming = makeMessage("!s safety fallback");
+    const runnerModels: string[] = [];
+
+    const handler = new RoomCommandHandlerTs({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      refusalFallbackModel: "anthropic:claude-3-5-haiku",
+      runnerFactory: (input) => {
+        runnerModels.push(input.model);
+        if (input.model === "openai:gpt-4o-mini") {
+          return {
+            runSingleTurn: async () => {
+              throw new Error("Agent run failed: invalid_prompt blocked for safety reasons.");
+            },
+          };
+        }
+
+        return {
+          runSingleTurn: async () => makeRunnerResult("fallback after error"),
+        };
+      },
+    });
+
+    const result = await handler.handleIncomingMessage(incoming, { isDirect: true });
+
+    expect(result?.response).toBe("fallback after error [refusal fallback to claude-3-5-haiku]");
+    expect(result?.model).toBe("anthropic:claude-3-5-haiku");
+    expect(runnerModels).toEqual(["openai:gpt-4o-mini", "anthropic:claude-3-5-haiku"]);
+
+    await history.close();
+  });
+
+  it("does not trigger fallback when response lacks explicit refusal/error markers", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const incoming = makeMessage("!s no fallback");
+    const runnerModels: string[] = [];
+
+    const handler = new RoomCommandHandlerTs({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      refusalFallbackModel: "anthropic:claude-3-5-haiku",
+      runnerFactory: (input) => {
+        runnerModels.push(input.model);
+        return {
+          runSingleTurn: async () => makeRunnerResult("normal answer"),
+        };
+      },
+    });
+
+    const result = await handler.handleIncomingMessage(incoming, { isDirect: true });
+
+    expect(result?.response).toBe("normal answer");
+    expect(result?.model).toBe("openai:gpt-4o-mini");
+    expect(runnerModels).toEqual(["openai:gpt-4o-mini"]);
+
+    const llmCalls = await history.getLlmCalls();
+    expect(llmCalls).toHaveLength(1);
+    expect(llmCalls[0].provider).toBe("openai");
+    expect(llmCalls[0].model).toBe("gpt-4o-mini");
+
+    await history.close();
+  });
+
   it("collapses queued followup commands into one followup runner turn", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { createConfigApiKeyResolver } from "../app/api-keys.js";
 import { assertNoDeferredFeatureConfig } from "../app/deferred-features.js";
 import { getMuaddibHome, resolveMuaddibPath } from "../app/bootstrap.js";
+import { resolveRefusalFallbackModel } from "../app/refusal-fallback.js";
 import { MuaddibAgentRunner } from "../agent/muaddib-agent-runner.js";
 import { ChatHistoryStore } from "../history/chat-history-store.js";
 import { createModeClassifier } from "../rooms/command/classifier.js";
@@ -51,6 +52,7 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
   const imageGenConfig = asRecord(toolsConfig?.image_gen);
   const providersConfig = asRecord(config.providers);
   const openRouterProviderConfig = asRecord(providersConfig?.openrouter);
+  const refusalFallbackModel = resolveRefusalFallbackModel(config);
   const getApiKey = createConfigApiKeyResolver(config);
 
   const maxIterations = numberOrUndefined(actorConfig?.max_iterations);
@@ -96,6 +98,7 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
     history,
     classifyMode: createModeClassifier(commandConfig, { getApiKey }),
     getApiKey,
+    refusalFallbackModel,
     runnerFactory: options.runnerFactory ?? defaultRunnerFactory,
     agentLoop: {
       maxIterations,
