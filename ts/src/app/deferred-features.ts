@@ -6,41 +6,86 @@ function hasOwn(obj: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
-export function collectDeferredFeatureConfigPaths(config: Record<string, unknown>): string[] {
-  const paths: string[] = [];
+function isExplicitlyEnabled(value: unknown): boolean {
+  if (value === true) {
+    return true;
+  }
+
+  if (isObject(value) && value.enabled === true) {
+    return true;
+  }
+
+  return false;
+}
+
+interface DeferredFeatureConfigPaths {
+  blockingPaths: string[];
+  ignoredPaths: string[];
+}
+
+export function collectDeferredFeatureConfigPaths(config: Record<string, unknown>): DeferredFeatureConfigPaths {
+  const blockingPaths: string[] = [];
+  const ignoredPaths: string[] = [];
 
   if (hasOwn(config, "chronicler")) {
-    paths.push("chronicler");
-
     const chroniclerConfig = config.chronicler;
+    if (isExplicitlyEnabled(chroniclerConfig)) {
+      blockingPaths.push("chronicler");
+    } else {
+      ignoredPaths.push("chronicler");
+    }
+
     if (isObject(chroniclerConfig) && hasOwn(chroniclerConfig, "quests")) {
-      paths.push("chronicler.quests");
+      if (isExplicitlyEnabled(chroniclerConfig) || isExplicitlyEnabled(chroniclerConfig.quests)) {
+        blockingPaths.push("chronicler.quests");
+      } else {
+        ignoredPaths.push("chronicler.quests");
+      }
     }
   }
 
   if (hasOwn(config, "quests")) {
-    paths.push("quests");
+    if (isExplicitlyEnabled(config.quests)) {
+      blockingPaths.push("quests");
+    } else {
+      ignoredPaths.push("quests");
+    }
   }
 
   const rooms = config.rooms;
   if (isObject(rooms)) {
     for (const [roomName, roomConfig] of Object.entries(rooms)) {
       if (isObject(roomConfig) && hasOwn(roomConfig, "proactive")) {
-        paths.push(`rooms.${roomName}.proactive`);
+        const path = `rooms.${roomName}.proactive`;
+        if (isExplicitlyEnabled(roomConfig.proactive)) {
+          blockingPaths.push(path);
+        } else {
+          ignoredPaths.push(path);
+        }
       }
     }
   }
 
-  return [...new Set(paths)].sort((a, b) => a.localeCompare(b));
+  return {
+    blockingPaths: [...new Set(blockingPaths)].sort((a, b) => a.localeCompare(b)),
+    ignoredPaths: [...new Set(ignoredPaths)].sort((a, b) => a.localeCompare(b)),
+  };
 }
 
 export function assertNoDeferredFeatureConfig(config: Record<string, unknown>): void {
-  const unsupportedPaths = collectDeferredFeatureConfigPaths(config);
-  if (unsupportedPaths.length === 0) {
+  const { blockingPaths, ignoredPaths } = collectDeferredFeatureConfigPaths(config);
+
+  if (ignoredPaths.length > 0) {
+    console.warn(
+      `Deferred features are not supported in the TypeScript runtime and will be ignored unless explicitly enabled: ${ignoredPaths.join(", ")}.`,
+    );
+  }
+
+  if (blockingPaths.length === 0) {
     return;
   }
 
   throw new Error(
-    `Deferred features are not supported in the TypeScript runtime. Remove unsupported config keys: ${unsupportedPaths.join(", ")}.`,
+    `Deferred features are not supported in the TypeScript runtime. Disable or remove unsupported config keys: ${blockingPaths.join(", ")}.`,
   );
 }

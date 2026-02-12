@@ -617,15 +617,38 @@ At end of each milestone:
     - `MUADDIB_HOME=. uv run muaddib --message "milestone 7l ts parity hardening smoke test"`
     - `pre-commit run --all-files`
 
-### Remaining gaps (post-7L checkpoint 10)
-1. OAuth/session-backed token refresh plumbing remains explicitly deferred pending a stable provider/session refresh contract in `@mariozechner/pi-ai` (TS fail-fast rejects unsupported config with concrete operator guidance).
+- 2026-02-11: Milestone 7L checkpoint 11 complete (startup usability hardening for deferred config presence).
+  - Reproduced real-profile startup crash with `MUADDIB_HOME=/home/pasky/.muaddib-profiles/MuaddibLLM npm run start` and confirmed deferred keys present in operator config (`chronicler`, `chronicler.quests`, `quests`, `rooms.*.proactive`).
+  - Added red tests first for updated deferred-feature contract:
+    - inactive deferred sections are tolerated + warned (startup + CLI)
+    - explicitly enabled deferred sections (`enabled: true`) remain fail-fast rejected
+    - updated tests: `ts/tests/app-main.test.ts`, `ts/tests/cli-message-mode.test.ts`
+  - Implemented minimal deterministic runtime fix in `ts/src/app/deferred-features.ts`:
+    - classify deferred paths into `ignored` vs `blocking`
+    - warn once when inactive deferred config is present
+    - throw only for explicitly enabled deferred sections
+  - Updated operator docs and guardrails for exact semantics:
+    - `docs/typescript-runtime-rollout.md`
+    - `docs/typescript-runtime-runbook.md`
+    - `AGENTS.md`
+  - Validation passed:
+    - `cd ts && npm run typecheck`
+    - `cd ts && npm test`
+    - `uv run pytest`
+    - `MUADDIB_HOME=. uv run muaddib --message "milestone 7l ts parity hardening smoke test"`
+    - `pre-commit run --all-files`
+
+### Remaining gaps (post-7L checkpoint 11)
+1. OAuth/session-backed token refresh plumbing remains explicitly deferred pending a stable provider/session refresh contract in `@mariozechner/pi-ai` (TS fail-fast rejects unsupported credential config with concrete operator guidance).
 2. Continue post-cutover soak hardening for additional live-room edge cases that emerge beyond currently-covered Slack/Discord/IRC reconnect and send-path behavior.
 3. Continue daily/post-deploy evidence capture with complete live telemetry + parity references until the final 7-day gate is fully green.
 4. Complete Python runtime deprecation only after rollback-window criteria are actually met in production soak; rollback path stays enabled until then.
 
 ### Compatibility notes (intentional Python vs TS divergences)
-- TS runtime currently **fails fast** if deferred Python-only config keys are present, instead of silently ignoring them.
-  - rejected keys: `chronicler`, `chronicler.quests`, `quests`, and `rooms.*.proactive`
+- TS runtime treats deferred Python-only config keys as follows:
+  - keys: `chronicler`, `chronicler.quests`, `quests`, and `rooms.*.proactive`
+  - present but inactive (no explicit `enabled: true`): tolerated and ignored with an operator warning
+  - explicitly enabled (`enabled: true`): fail-fast rejected
 - TS runtime also **fails fast** on unsupported non-static provider credential config, instead of silently falling through:
   - rejected credential keys: `providers.*.key` (non-string values), `providers.*.oauth`, `providers.*.session`
   - supported TS contract today: static `providers.*.key` string or provider SDK env-var fallback

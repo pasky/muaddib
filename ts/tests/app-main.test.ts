@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { resolveMuaddibPath } from "../src/app/bootstrap.js";
 import {
@@ -234,7 +234,9 @@ describe("runMuaddibMain", () => {
     ).rejects.toThrow("IRC room is enabled but rooms.irc.varlink.socket_path is missing.");
   });
 
-  it("throws when deferred proactive/chronicler/quests config knobs are present", async () => {
+  it("ignores deferred proactive/chronicler/quests config knobs when not explicitly enabled", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
     await expect(
       runWithConfig({
         history: {
@@ -247,6 +249,9 @@ describe("runMuaddibMain", () => {
           quests: {
             arcs: ["libera##muaddib"],
           },
+        },
+        quests: {
+          arcs: ["libera##muaddib"],
         },
         rooms: {
           common: {
@@ -269,8 +274,51 @@ describe("runMuaddibMain", () => {
           },
         },
       }),
+    ).rejects.toThrow("No room monitors enabled.");
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0]?.[0]).toContain(
+      "Deferred features are not supported in the TypeScript runtime and will be ignored",
+    );
+    expect(warnSpy.mock.calls[0]?.[0]).toContain("chronicler");
+    expect(warnSpy.mock.calls[0]?.[0]).toContain("rooms.common.proactive");
+
+    warnSpy.mockRestore();
+  });
+
+  it("throws when deferred config knobs are explicitly enabled", async () => {
+    await expect(
+      runWithConfig({
+        history: {
+          database: {
+            path: "/tmp/muaddib-test-history.db",
+          },
+        },
+        chronicler: {
+          enabled: true,
+          model: "openai:gpt-4o-mini",
+        },
+        rooms: {
+          common: {
+            command: baseCommandConfig(),
+            proactive: {
+              enabled: true,
+              interjecting: ["libera##muaddib"],
+            },
+          },
+          irc: {
+            enabled: false,
+          },
+          discord: {
+            enabled: false,
+          },
+          slack: {
+            enabled: false,
+          },
+        },
+      }),
     ).rejects.toThrow(
-      "Deferred features are not supported in the TypeScript runtime. Remove unsupported config keys: chronicler, chronicler.quests, rooms.common.proactive, rooms.irc.proactive.",
+      "Deferred features are not supported in the TypeScript runtime. Disable or remove unsupported config keys: chronicler, rooms.common.proactive.",
     );
   });
 

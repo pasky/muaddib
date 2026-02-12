@@ -30,6 +30,13 @@ npm run build
 npm run start -- --config /path/to/config.json
 ```
 
+## Deferred-feature config contract (TS runtime)
+
+- Deferred Python-only sections may remain in config: `chronicler`, `chronicler.quests`, `quests`, `rooms.*.proactive`.
+- TS runtime ignores these sections when they are present but not explicitly enabled.
+- TS runtime fail-fast rejects explicitly enabled deferred sections (`enabled: true`) under those keys.
+- When inactive deferred sections are present, startup/CLI emits an operator warning that they are being ignored.
+
 ## Operational checks after deploy
 
 1. Bot connects to enabled rooms.
