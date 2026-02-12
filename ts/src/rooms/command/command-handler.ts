@@ -34,7 +34,12 @@ export interface CommandHandlerRoomConfig {
 export interface CommandRunner {
   runSingleTurn(
     prompt: string,
-    options?: { contextMessages?: RunnerContextMessage[]; thinkingLevel?: ThinkingLevel },
+    options?: {
+      contextMessages?: RunnerContextMessage[];
+      thinkingLevel?: ThinkingLevel;
+      persistenceSummaryModel?: string;
+      onPersistenceSummary?: (text: string) => void | Promise<void>;
+    },
   ): Promise<SingleTurnResult>;
 }
 
@@ -58,6 +63,7 @@ export interface CommandHandlerOptions {
   rateLimiter?: CommandRateLimiter;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   refusalFallbackModel?: string;
+  persistenceSummaryModel?: string;
   responseCleaner?: (text: string, nick: string) => string;
   helpToken?: string;
   flagTokens?: string[];
@@ -267,12 +273,29 @@ export class RoomCommandHandlerTs {
 
     const tools = this.selectTools(resolvedWithFollowups.runtime.allowedTools);
 
+    const persistenceSummaryCallback = this.options.persistenceSummaryModel
+      ? async (text: string) => {
+          await this.options.history.addMessage(
+            {
+              ...message,
+              nick: message.mynick,
+              content: text,
+            },
+            {
+              contentTemplate: "[internal monologue] {message}",
+            },
+          );
+        }
+      : undefined;
+
     const runResult = await this.runWithRefusalFallback(
       modelSpec,
       {
         prompt: resolvedWithFollowups.queryText,
         contextMessages: runnerContext,
         thinkingLevel: normalizeThinkingLevel(resolvedWithFollowups.runtime.reasoningEffort),
+        persistenceSummaryModel: this.options.persistenceSummaryModel,
+        onPersistenceSummary: persistenceSummaryCallback,
       },
       {
         systemPrompt,
@@ -300,6 +323,8 @@ export class RoomCommandHandlerTs {
       prompt: string;
       contextMessages: RunnerContextMessage[];
       thinkingLevel: ThinkingLevel;
+      persistenceSummaryModel?: string;
+      onPersistenceSummary?: (text: string) => void | Promise<void>;
     },
     runnerInput: {
       systemPrompt: string;
@@ -312,20 +337,37 @@ export class RoomCommandHandlerTs {
       tools: runnerInput.tools,
     });
 
+    const primarySummaryBuffer: string[] = [];
+    const onPrimaryPersistenceSummary = runInput.onPersistenceSummary
+      ? async (text: string) => {
+          const trimmed = text.trim();
+          if (trimmed) {
+            primarySummaryBuffer.push(trimmed);
+          }
+        }
+      : undefined;
+
     let primaryResult: SingleTurnResult;
 
     try {
       primaryResult = await primaryRunner.runSingleTurn(runInput.prompt, {
         contextMessages: runInput.contextMessages,
         thinkingLevel: runInput.thinkingLevel,
+        persistenceSummaryModel: runInput.persistenceSummaryModel,
+        onPersistenceSummary: onPrimaryPersistenceSummary,
       });
     } catch (error) {
       const refusalSignal = detectRefusalFallbackSignal(stringifyError(error));
       if (!refusalSignal || !this.refusalFallbackModel) {
+        await this.flushPersistenceSummaryBuffer(runInput.onPersistenceSummary, primarySummaryBuffer);
         throw error;
       }
 
-      const fallbackResult = await this.runFallbackModelTurn(this.refusalFallbackModel, runInput, runnerInput);
+      const fallbackResult = await this.runFallbackModelTurn(
+        this.refusalFallbackModel,
+        runInput,
+        runnerInput,
+      );
       return {
         ...fallbackResult,
         fallbackModelSpec: this.refusalFallbackModel,
@@ -334,6 +376,7 @@ export class RoomCommandHandlerTs {
 
     const refusalSignal = detectRefusalFallbackSignal(primaryResult.text);
     if (!refusalSignal || !this.refusalFallbackModel) {
+      await this.flushPersistenceSummaryBuffer(runInput.onPersistenceSummary, primarySummaryBuffer);
       return {
         agentResult: primaryResult,
         modelSpec: primaryModelSpec,
@@ -354,6 +397,8 @@ export class RoomCommandHandlerTs {
       prompt: string;
       contextMessages: RunnerContextMessage[];
       thinkingLevel: ThinkingLevel;
+      persistenceSummaryModel?: string;
+      onPersistenceSummary?: (text: string) => void | Promise<void>;
     },
     runnerInput: {
       systemPrompt: string;
@@ -366,16 +411,48 @@ export class RoomCommandHandlerTs {
       tools: runnerInput.tools,
     });
 
-    const fallbackResult = await fallbackRunner.runSingleTurn(runInput.prompt, {
-      contextMessages: runInput.contextMessages,
-      thinkingLevel: runInput.thinkingLevel,
-    });
+    const fallbackSummaryBuffer: string[] = [];
+    const onFallbackPersistenceSummary = runInput.onPersistenceSummary
+      ? async (text: string) => {
+          const trimmed = text.trim();
+          if (trimmed) {
+            fallbackSummaryBuffer.push(trimmed);
+          }
+        }
+      : undefined;
 
-    return {
-      agentResult: fallbackResult,
-      modelSpec: fallbackModelSpec,
-      fallbackModelSpec: null,
-    };
+    try {
+      const fallbackResult = await fallbackRunner.runSingleTurn(runInput.prompt, {
+        contextMessages: runInput.contextMessages,
+        thinkingLevel: runInput.thinkingLevel,
+        persistenceSummaryModel: runInput.persistenceSummaryModel,
+        onPersistenceSummary: onFallbackPersistenceSummary,
+      });
+
+      await this.flushPersistenceSummaryBuffer(runInput.onPersistenceSummary, fallbackSummaryBuffer);
+
+      return {
+        agentResult: fallbackResult,
+        modelSpec: fallbackModelSpec,
+        fallbackModelSpec: null,
+      };
+    } catch (error) {
+      await this.flushPersistenceSummaryBuffer(runInput.onPersistenceSummary, fallbackSummaryBuffer);
+      throw error;
+    }
+  }
+
+  private async flushPersistenceSummaryBuffer(
+    callback: ((text: string) => void | Promise<void>) | undefined,
+    summaries: string[],
+  ): Promise<void> {
+    if (!callback || summaries.length === 0) {
+      return;
+    }
+
+    for (const summary of summaries) {
+      await callback(summary);
+    }
   }
 
   private async executeAndPersist(

@@ -7,6 +7,7 @@ import {
   type ThinkingLevel,
 } from "@mariozechner/pi-agent-core";
 import {
+  completeSimple,
   createAssistantMessageEventStream,
   type AssistantMessage,
   type ImageContent,
@@ -23,6 +24,37 @@ const DEFAULT_MAX_COMPLETION_RETRIES = 1;
 const DEFAULT_EMPTY_COMPLETION_RETRY_PROMPT =
   "<meta>Your previous completion was empty. Provide a non-empty final response now.</meta>";
 const ITERATION_LIMIT_ERROR_PREFIX = "agent_iteration_limit:";
+const PERSISTENCE_SUMMARY_SYSTEM_PROMPT =
+  "As an AI agent, you need to remember in the future what tools you used when generating a response, and what the tools told you. Summarize all tool uses in a single concise paragraph. If artifact links are included, include every artifact link and tie each link to the corresponding tool call.";
+
+type ToolPersistType = "summary" | "artifact";
+
+const TOOL_PERSISTENCE_POLICY: Readonly<Record<string, ToolPersistType | "none">> = {
+  web_search: "summary",
+  visit_webpage: "summary",
+  execute_code: "artifact",
+  progress_report: "none",
+  final_answer: "none",
+  make_plan: "none",
+  share_artifact: "none",
+  edit_artifact: "artifact",
+  generate_image: "artifact",
+  oracle: "none",
+};
+
+interface PersistentToolCall {
+  toolName: string;
+  input: unknown;
+  output: unknown;
+  persistType: ToolPersistType;
+  artifactUrls: string[];
+}
+
+interface RunnerLogger {
+  info(...data: unknown[]): void;
+  warn(...data: unknown[]): void;
+  error(...data: unknown[]): void;
+}
 
 export interface MuaddibAgentRunnerOptions {
   model: string;
@@ -34,6 +66,8 @@ export interface MuaddibAgentRunnerOptions {
   maxIterations?: number;
   maxCompletionRetries?: number;
   emptyCompletionRetryPrompt?: string;
+  completeSimpleFn?: typeof completeSimple;
+  logger?: RunnerLogger;
 }
 
 export type RunnerContextMessage =
@@ -65,6 +99,8 @@ export interface SingleTurnOptions {
   maxIterations?: number;
   maxCompletionRetries?: number;
   emptyCompletionRetryPrompt?: string;
+  persistenceSummaryModel?: string;
+  onPersistenceSummary?: (text: string) => void | Promise<void>;
 }
 
 export class AgentIterationLimitError extends Error {
@@ -87,10 +123,17 @@ export class MuaddibAgentRunner {
   private readonly maxIterations: number;
   private readonly maxCompletionRetries: number;
   private readonly emptyCompletionRetryPrompt: string;
+  private readonly modelAdapter: PiAiModelAdapter;
+  private readonly getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+  private readonly completeSimpleFn: typeof completeSimple;
+  private readonly logger: RunnerLogger;
 
   constructor(options: MuaddibAgentRunnerOptions) {
-    const modelAdapter = options.modelAdapter ?? new PiAiModelAdapter();
-    this.modelInfo = modelAdapter.resolve(options.model);
+    this.modelAdapter = options.modelAdapter ?? new PiAiModelAdapter();
+    this.modelInfo = this.modelAdapter.resolve(options.model);
+    this.getApiKey = options.getApiKey;
+    this.completeSimpleFn = options.completeSimpleFn ?? completeSimple;
+    this.logger = options.logger ?? console;
 
     this.maxIterations = normalizePositiveInteger(options.maxIterations, DEFAULT_MAX_ITERATIONS);
     this.maxCompletionRetries = normalizeNonNegativeInteger(
@@ -107,7 +150,7 @@ export class MuaddibAgentRunner {
         thinkingLevel: "off",
         tools: options.tools ?? [],
       },
-      getApiKey: options.getApiKey,
+      getApiKey: this.getApiKey,
       streamFn: options.streamFn,
     });
   }
@@ -169,6 +212,39 @@ export class MuaddibAgentRunner {
       return await previousStreamFn(...args);
     };
 
+    const persistentToolCalls: PersistentToolCall[] = [];
+    const toolArgsByCallId = new Map<string, unknown>();
+    const unsubscribe = this.agent.subscribe((event) => {
+      if (event.type === "tool_execution_start") {
+        toolArgsByCallId.set(event.toolCallId, event.args);
+        return;
+      }
+
+      if (event.type !== "tool_execution_end") {
+        return;
+      }
+
+      const input = toolArgsByCallId.get(event.toolCallId);
+      toolArgsByCallId.delete(event.toolCallId);
+
+      if (event.isError) {
+        return;
+      }
+
+      const persistType = getToolPersistType(event.toolName);
+      if (!persistType) {
+        return;
+      }
+
+      persistentToolCalls.push({
+        toolName: event.toolName,
+        input,
+        output: event.result,
+        persistType,
+        artifactUrls: extractArtifactUrls(event.result),
+      });
+    });
+
     let completionAttempt = 0;
 
     try {
@@ -206,8 +282,69 @@ export class MuaddibAgentRunner {
         completionAttempt += 1;
       }
     } finally {
+      unsubscribe();
       this.agent.streamFn = previousStreamFn;
+      await this.generateAndEmitPersistenceSummary(persistentToolCalls, options);
     }
+  }
+
+  private async generateAndEmitPersistenceSummary(
+    persistentToolCalls: PersistentToolCall[],
+    options: SingleTurnOptions,
+  ): Promise<void> {
+    if (
+      !options.onPersistenceSummary ||
+      !options.persistenceSummaryModel ||
+      persistentToolCalls.length === 0
+    ) {
+      return;
+    }
+
+    try {
+      const summaryModel = this.modelAdapter.resolve(options.persistenceSummaryModel);
+      const summaryResponse = await this.completeSimpleFn(
+        summaryModel.model,
+        {
+          systemPrompt: PERSISTENCE_SUMMARY_SYSTEM_PROMPT,
+          messages: [
+            {
+              role: "user",
+              content: buildPersistenceSummaryInput(persistentToolCalls),
+              timestamp: Date.now(),
+            },
+          ],
+        },
+        {
+          apiKey: await this.resolveApiKey(summaryModel.spec.provider),
+        },
+      );
+
+      const summaryText = summaryResponse.content
+        .filter((block) => block.type === "text")
+        .map((block) => block.text)
+        .join("\n")
+        .trim();
+
+      if (summaryText) {
+        await options.onPersistenceSummary(summaryText);
+      }
+    } catch (error) {
+      this.logger.error("Failed to generate tool persistence summary:", stringifyError(error));
+    }
+  }
+
+  private async resolveApiKey(provider: string): Promise<string | undefined> {
+    if (!this.getApiKey) {
+      return undefined;
+    }
+
+    const value = await this.getApiKey(provider);
+    if (typeof value !== "string") {
+      return undefined;
+    }
+
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
   }
 
   private throwIfAgentFailed(): void {
@@ -422,6 +559,152 @@ function convertContextToAgentMessages(
     };
     return user;
   });
+}
+
+function getToolPersistType(toolName: string): ToolPersistType | null {
+  const policy = TOOL_PERSISTENCE_POLICY[toolName];
+  if (policy === "summary" || policy === "artifact") {
+    return policy;
+  }
+  return null;
+}
+
+function buildPersistenceSummaryInput(persistentToolCalls: PersistentToolCall[]): string {
+  const lines: string[] = [
+    "The following tool calls were made during this conversation:",
+  ];
+
+  for (const call of persistentToolCalls) {
+    lines.push(`\n\n# Calling tool **${call.toolName}** (persist: ${call.persistType})`);
+    lines.push(`## **Input:**\n${renderPersistenceValue(call.input)}\n`);
+    lines.push(`## **Output:**\n${renderPersistenceValue(call.output)}\n`);
+
+    for (const artifactUrl of call.artifactUrls) {
+      lines.push(`(Tool call I/O stored as artifact: ${artifactUrl})\n`);
+    }
+  }
+
+  lines.push("\nPlease provide a concise summary of what was accomplished in these tool calls.");
+  return lines.join("\n");
+}
+
+function renderPersistenceValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  const sanitized = sanitizePersistenceValue(value);
+  if (typeof sanitized === "string") {
+    return sanitized;
+  }
+
+  try {
+    return JSON.stringify(sanitized, null, 2);
+  } catch {
+    return String(sanitized);
+  }
+}
+
+function sanitizePersistenceValue(value: unknown): unknown {
+  if (value === null || value === undefined) {
+    return value;
+  }
+
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizePersistenceValue(item));
+  }
+
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+
+    if (record.type === "image") {
+      const mimeType =
+        typeof record.mimeType === "string"
+          ? record.mimeType
+          : typeof (record.source as Record<string, unknown> | undefined)?.media_type === "string"
+            ? String((record.source as Record<string, unknown>).media_type)
+            : "image";
+      return `[image: ${mimeType}]`;
+    }
+
+    const output: Record<string, unknown> = {};
+    for (const [key, entryValue] of Object.entries(record)) {
+      if (key === "data" && typeof entryValue === "string" && entryValue.length > 128) {
+        output[key] = `${entryValue.slice(0, 64)}...`;
+        continue;
+      }
+      output[key] = sanitizePersistenceValue(entryValue);
+    }
+    return output;
+  }
+
+  return String(value);
+}
+
+function extractArtifactUrls(result: unknown): string[] {
+  const urls = new Set<string>();
+
+  if (!result || typeof result !== "object") {
+    return [];
+  }
+
+  const record = result as Record<string, unknown>;
+  const details = record.details;
+  if (details && typeof details === "object") {
+    const artifactUrls = (details as Record<string, unknown>).artifactUrls;
+    if (Array.isArray(artifactUrls)) {
+      for (const artifactUrl of artifactUrls) {
+        if (typeof artifactUrl === "string" && artifactUrl.trim().length > 0) {
+          urls.add(artifactUrl.trim());
+        }
+      }
+    }
+  }
+
+  const content = record.content;
+  if (Array.isArray(content)) {
+    for (const entry of content) {
+      if (!entry || typeof entry !== "object") {
+        continue;
+      }
+
+      const block = entry as Record<string, unknown>;
+      if (block.type !== "text") {
+        continue;
+      }
+
+      const text = block.text;
+      if (typeof text !== "string") {
+        continue;
+      }
+
+      for (const url of extractUrlsFromText(text)) {
+        urls.add(url);
+      }
+    }
+  }
+
+  return Array.from(urls);
+}
+
+function extractUrlsFromText(text: string): string[] {
+  const matches = text.match(/https?:\/\/[^\s)]+/giu);
+  if (!matches) {
+    return [];
+  }
+
+  return matches.map((entry) => entry.replace(/[.,;:!?]+$/u, ""));
+}
+
+function stringifyError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
 }
 
 function normalizePositiveInteger(value: unknown, fallback: number): number {

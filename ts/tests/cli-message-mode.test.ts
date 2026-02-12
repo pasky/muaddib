@@ -367,4 +367,100 @@ describe("runCliMessageMode", () => {
       }),
     ).rejects.toThrow("Unsupported router.refusal_fallback_model 'unknown:model': Unknown provider 'unknown'");
   });
+
+  it("fails fast when tools.summary.model is malformed", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "muaddib-cli-"));
+    tempDirs.push(dir);
+
+    const configPath = join(dir, "config.json");
+    const config = {
+      tools: {
+        summary: {
+          model: "gpt-4o-mini",
+        },
+      },
+      rooms: {
+        common: {
+          command: {
+            history_size: 40,
+            default_mode: "classifier:serious",
+            modes: {
+              serious: {
+                model: "openai:gpt-4o-mini",
+                prompt: "You are {mynick}",
+                triggers: {
+                  "!s": {},
+                },
+              },
+            },
+            mode_classifier: {
+              model: "openai:gpt-4o-mini",
+              labels: {
+                EASY_SERIOUS: "!s",
+              },
+              fallback_label: "EASY_SERIOUS",
+            },
+          },
+        },
+      },
+    };
+
+    await writeFile(configPath, JSON.stringify(config), "utf-8");
+
+    await expect(
+      runCliMessageMode({
+        configPath,
+        message: "!s hi",
+      }),
+    ).rejects.toThrow(
+      "Invalid tools.summary.model 'gpt-4o-mini': Model 'gpt-4o-mini' must be fully qualified as provider:model.",
+    );
+  });
+
+  it("fails fast when tools.summary.model points to unsupported provider/model", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "muaddib-cli-"));
+    tempDirs.push(dir);
+
+    const configPath = join(dir, "config.json");
+    const config = {
+      tools: {
+        summary: {
+          model: "unknown:model",
+        },
+      },
+      rooms: {
+        common: {
+          command: {
+            history_size: 40,
+            default_mode: "classifier:serious",
+            modes: {
+              serious: {
+                model: "openai:gpt-4o-mini",
+                prompt: "You are {mynick}",
+                triggers: {
+                  "!s": {},
+                },
+              },
+            },
+            mode_classifier: {
+              model: "openai:gpt-4o-mini",
+              labels: {
+                EASY_SERIOUS: "!s",
+              },
+              fallback_label: "EASY_SERIOUS",
+            },
+          },
+        },
+      },
+    };
+
+    await writeFile(configPath, JSON.stringify(config), "utf-8");
+
+    await expect(
+      runCliMessageMode({
+        configPath,
+        message: "!s hi",
+      }),
+    ).rejects.toThrow("Unsupported tools.summary.model 'unknown:model': Unknown provider 'unknown'");
+  });
 });

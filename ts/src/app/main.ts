@@ -5,6 +5,7 @@ import { createConfigApiKeyResolver } from "./api-keys.js";
 import { assertNoDeferredFeatureConfig } from "./deferred-features.js";
 import { RuntimeLogWriter } from "./logging.js";
 import { resolveRefusalFallbackModel } from "./refusal-fallback.js";
+import { resolvePersistenceSummaryModel } from "./persistence-summary.js";
 import { ChatHistoryStore } from "../history/chat-history-store.js";
 import { getRoomConfig } from "../rooms/command/config.js";
 import { RoomCommandHandlerTs } from "../rooms/command/command-handler.js";
@@ -230,6 +231,7 @@ function createRoomCommandHandler(
   const providersConfig = asRecord(runtimeConfig?.providers);
   const openRouterProviderConfig = asRecord(providersConfig?.openrouter);
   const refusalFallbackModel = resolveRefusalFallbackModel(runtimeConfig ?? {});
+  const persistenceSummaryModel = resolvePersistenceSummaryModel(runtimeConfig ?? {});
 
   const maxIterations = numberOrUndefined(actorConfig?.max_iterations);
   const maxCompletionRetries = numberOrUndefined(actorConfig?.max_completion_retries);
@@ -251,6 +253,7 @@ function createRoomCommandHandler(
     getApiKey,
     responseCleaner,
     refusalFallbackModel,
+    persistenceSummaryModel,
     agentLoop: {
       maxIterations,
       maxCompletionRetries,

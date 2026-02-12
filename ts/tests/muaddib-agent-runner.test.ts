@@ -6,7 +6,7 @@ import {
   type Context,
   type Message,
 } from "@mariozechner/pi-ai";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   AgentIterationLimitError,
@@ -238,6 +238,147 @@ describe("MuaddibAgentRunner", () => {
               .join("\n");
       expect(retryText).toContain("previous completion was empty");
     }
+  });
+
+  it("generates persistence summary for persistent tool calls", async () => {
+    let streamCallIndex = 0;
+
+    const streamFn: StreamFn = async () => {
+      streamCallIndex += 1;
+
+      if (streamCallIndex === 1) {
+        return streamWithMessage(
+          makeAssistantMessage([
+            { type: "toolCall", id: "tool-1", name: "web_search", arguments: { query: "muaddib" } },
+          ], "toolUse"),
+        );
+      }
+
+      return streamWithMessage(makeAssistantMessage([{ type: "text", text: "done" }], "stop"));
+    };
+
+    const persistenceCalls: string[] = [];
+    const completeSimpleFn = vi.fn(async () =>
+      makeAssistantMessage(
+        [{ type: "text", text: "Summary: Searched for muaddib references." }],
+        "stop",
+      ),
+    );
+
+    const runner = new MuaddibAgentRunner({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "summary test",
+      streamFn,
+      completeSimpleFn,
+      tools: [
+        {
+          name: "web_search",
+          label: "Web Search",
+          description: "search",
+          parameters: Type.Object({
+            query: Type.String(),
+          }),
+          execute: async () => ({
+            content: [{ type: "text", text: "Found docs at https://example.com/docs" }],
+            details: {},
+          }),
+        },
+      ],
+    });
+
+    const result = await runner.runSingleTurn("search", {
+      persistenceSummaryModel: "openai:gpt-4o-mini",
+      onPersistenceSummary: async (text) => {
+        persistenceCalls.push(text);
+      },
+    });
+
+    expect(result.text).toBe("done");
+    expect(completeSimpleFn).toHaveBeenCalledTimes(1);
+    expect(persistenceCalls).toEqual(["Summary: Searched for muaddib references."]);
+  });
+
+  it("does not invoke persistence summary callback when no persistent tools were used", async () => {
+    const completeSimpleFn = vi.fn();
+    const onPersistenceSummary = vi.fn();
+
+    const runner = new MuaddibAgentRunner({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "summary test",
+      streamFn: async () =>
+        streamWithMessage(makeAssistantMessage([{ type: "text", text: "plain response" }], "stop")),
+      completeSimpleFn: completeSimpleFn as any,
+    });
+
+    const result = await runner.runSingleTurn("hello", {
+      persistenceSummaryModel: "openai:gpt-4o-mini",
+      onPersistenceSummary,
+    });
+
+    expect(result.text).toBe("plain response");
+    expect(completeSimpleFn).not.toHaveBeenCalled();
+    expect(onPersistenceSummary).not.toHaveBeenCalled();
+  });
+
+  it("logs persistence-summary generation errors and keeps final response", async () => {
+    let streamCallIndex = 0;
+
+    const streamFn: StreamFn = async () => {
+      streamCallIndex += 1;
+
+      if (streamCallIndex === 1) {
+        return streamWithMessage(
+          makeAssistantMessage([
+            { type: "toolCall", id: "tool-1", name: "web_search", arguments: { query: "muaddib" } },
+          ], "toolUse"),
+        );
+      }
+
+      return streamWithMessage(makeAssistantMessage([{ type: "text", text: "done" }], "stop"));
+    };
+
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    const runner = new MuaddibAgentRunner({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "summary test",
+      streamFn,
+      completeSimpleFn: vi.fn(async () => {
+        throw new Error("summary model unavailable");
+      }),
+      logger,
+      tools: [
+        {
+          name: "web_search",
+          label: "Web Search",
+          description: "search",
+          parameters: Type.Object({
+            query: Type.String(),
+          }),
+          execute: async () => ({
+            content: [{ type: "text", text: "Found docs" }],
+            details: {},
+          }),
+        },
+      ],
+    });
+
+    const result = await runner.runSingleTurn("search", {
+      persistenceSummaryModel: "openai:gpt-4o-mini",
+      onPersistenceSummary: async () => {
+        throw new Error("should not be called");
+      },
+    });
+
+    expect(result.text).toBe("done");
+    expect(logger.error).toHaveBeenCalledWith(
+      "Failed to generate tool persistence summary:",
+      "summary model unavailable",
+    );
   });
 });
 

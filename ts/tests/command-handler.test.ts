@@ -331,6 +331,46 @@ describe("RoomCommandHandlerTs", () => {
     await history.close();
   });
 
+  it("persists persistence-summary callback output as internal monologue before final response", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const incoming = makeMessage("!s summarize tools");
+
+    const handler = new RoomCommandHandlerTs({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      persistenceSummaryModel: "openai:gpt-4o-mini",
+      runnerFactory: () => ({
+        runSingleTurn: async (_prompt, options) => {
+          if (options?.onPersistenceSummary) {
+            await options.onPersistenceSummary("Tool calls: web_search completed successfully.");
+          }
+          return makeRunnerResult("final response");
+        },
+      }),
+    });
+
+    const result = await handler.handleIncomingMessage(incoming, { isDirect: true });
+
+    expect(result?.response).toBe("final response");
+
+    const rows = await history.getFullHistory("libera", "#test");
+    expect(rows).toHaveLength(3);
+    expect(rows[0].role).toBe("user");
+    expect(rows[1].role).toBe("assistant");
+    expect(rows[1].message).toBe("[internal monologue] Tool calls: web_search completed successfully.");
+    expect(rows[2].role).toBe("assistant");
+    expect(rows[2].message).toContain("final response");
+
+    const llmCalls = await history.getLlmCalls();
+    expect(llmCalls).toHaveLength(1);
+    expect(llmCalls[0].responseMessageId).toBe(rows[2].id);
+
+    await history.close();
+  });
+
   it("handleIncomingMessage persists user + assistant with selected trigger mode", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();
