@@ -95,6 +95,8 @@ export interface DiscordSender {
     messageId: string,
     message: string,
   ): Promise<DiscordSendResult | void>;
+  setTypingIndicator?(channelId: string): Promise<void>;
+  clearTypingIndicator?(channelId: string): Promise<void>;
 }
 
 export interface DiscordRoomMonitorOptions {
@@ -323,9 +325,38 @@ export class DiscordRoomMonitor {
       },
       async () => {
         this.logger.debug("Processing direct Discord message", `arc=${arc}`, `nick=${message.nick}`);
-        await handleIncoming();
+        await this.withTypingIndicator(event.channelId, async () => {
+          await handleIncoming();
+        });
       },
     );
+  }
+
+  private async withTypingIndicator(
+    channelId: string,
+    run: () => Promise<void>,
+  ): Promise<void> {
+    const sender = this.options.sender;
+    if (!sender?.setTypingIndicator) {
+      await run();
+      return;
+    }
+
+    await sender.setTypingIndicator(channelId);
+    const refreshTimer = setInterval(() => {
+      void sender.setTypingIndicator?.(channelId).catch((error) => {
+        this.logger.warn("Discord typing indicator refresh failed", error);
+      });
+    }, 7_000);
+
+    try {
+      await run();
+    } finally {
+      clearInterval(refreshTimer);
+      if (sender.clearTypingIndicator) {
+        await sender.clearTypingIndicator(channelId);
+      }
+    }
   }
 
   async processMessageEditEvent(event: DiscordMessageEditEvent): Promise<void> {

@@ -29,6 +29,7 @@ export interface RuntimeSettings {
   autoReduceContext: boolean;
   includeChapterSummary: boolean;
   model: string | null;
+  visionModel: string | null;
   historySize: number;
 }
 
@@ -40,6 +41,7 @@ export interface ModeConfig {
   steering?: boolean;
   auto_reduce_context?: boolean;
   include_chapter_summary?: boolean;
+  vision_model?: string;
   prompt?: string;
   triggers: Record<string, Record<string, unknown>>;
 }
@@ -205,6 +207,8 @@ export class CommandResolver {
           modeConfig.include_chapter_summary ??
           true,
         model: (overrides.model as string | undefined) ?? null,
+        visionModel:
+          (overrides.vision_model as string | undefined) ?? modeConfig.vision_model ?? null,
         historySize: Number(modeConfig.history_size ?? this.commandConfig.history_size),
       },
     ];

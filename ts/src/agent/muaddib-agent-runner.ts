@@ -95,6 +95,7 @@ export interface SingleTurnResult {
   usage: Usage;
   iterations?: number;
   completionAttempts?: number;
+  toolCallsCount?: number;
 }
 
 export interface SingleTurnOptions {
@@ -106,6 +107,7 @@ export interface SingleTurnOptions {
   emptyCompletionRetryPrompt?: string;
   persistenceSummaryModel?: string;
   onPersistenceSummary?: (text: string) => void | Promise<void>;
+  visionFallbackModel?: string;
 }
 
 export class AgentIterationLimitError extends Error {
@@ -207,20 +209,37 @@ export class MuaddibAgentRunner {
     const emptyCompletionRetryPrompt =
       options.emptyCompletionRetryPrompt ?? this.emptyCompletionRetryPrompt;
 
+    const visionFallbackModel = resolveVisionFallbackModel(
+      this.modelAdapter,
+      options.visionFallbackModel,
+      this.modelInfo.spec.provider,
+      this.modelInfo.spec.modelId,
+    );
+
+    let visionFallbackInUse = false;
+    let visionFallbackActivated = false;
     const previousStreamFn = this.agent.streamFn;
     let iterationCount = 0;
-    this.agent.streamFn = async (...args) => {
+    this.agent.streamFn = async (...args: Parameters<StreamFn>) => {
       iterationCount += 1;
       if (iterationCount > maxIterations) {
         return createIterationLimitErrorStream(this.modelInfo, maxIterations);
       }
+
+      if (visionFallbackInUse && visionFallbackModel) {
+        const overriddenArgs = [visionFallbackModel.model, ...args.slice(1)] as Parameters<StreamFn>;
+        return await previousStreamFn(...overriddenArgs);
+      }
+
       return await previousStreamFn(...args);
     };
 
     const persistentToolCalls: PersistentToolCall[] = [];
     const toolArgsByCallId = new Map<string, unknown>();
+    let toolCallsCount = 0;
     const unsubscribe = this.agent.subscribe((event) => {
       if (event.type === "tool_execution_start") {
+        toolCallsCount += 1;
         toolArgsByCallId.set(event.toolCallId, event.args);
         return;
       }
@@ -234,6 +253,11 @@ export class MuaddibAgentRunner {
 
       if (event.isError) {
         return;
+      }
+
+      if (!visionFallbackInUse && visionFallbackModel && hasImageToolOutput(event.result)) {
+        visionFallbackInUse = true;
+        visionFallbackActivated = true;
       }
 
       const persistType = getToolPersistType(event.toolName);
@@ -268,13 +292,19 @@ export class MuaddibAgentRunner {
 
         const completionText = extractCompletionText(runMessages);
         if (completionText) {
+          const finalText =
+            visionFallbackActivated && visionFallbackModel
+              ? `${completionText} [image fallback to ${modelSlug(visionFallbackModel.spec.modelId)}]`
+              : completionText;
+
           return {
             assistantMessage,
-            text: completionText,
+            text: finalText,
             stopReason: assistantMessage.stopReason,
             usage: sumAssistantUsage(runMessages),
             iterations: iterationCount,
             completionAttempts: completionAttempt + 1,
+            toolCallsCount,
           };
         }
 
@@ -648,6 +678,68 @@ function sanitizePersistenceValue(value: unknown): unknown {
   }
 
   return String(value);
+}
+
+function resolveVisionFallbackModel(
+  modelAdapter: PiAiModelAdapter,
+  visionFallbackModel: string | undefined,
+  primaryProvider: string,
+  primaryModelId: string,
+): ResolvedPiAiModel | null {
+  const candidate = visionFallbackModel?.trim();
+  if (!candidate) {
+    return null;
+  }
+
+  const resolved = modelAdapter.resolve(candidate);
+  if (resolved.spec.provider === primaryProvider && resolved.spec.modelId === primaryModelId) {
+    return null;
+  }
+
+  return resolved;
+}
+
+function hasImageToolOutput(value: unknown): boolean {
+  const stack: unknown[] = [value];
+  const seen = new Set<unknown>();
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (current === null || current === undefined) {
+      continue;
+    }
+
+    if (typeof current !== "object") {
+      continue;
+    }
+
+    if (seen.has(current)) {
+      continue;
+    }
+    seen.add(current);
+
+    if (Array.isArray(current)) {
+      for (const entry of current) {
+        stack.push(entry);
+      }
+      continue;
+    }
+
+    const record = current as Record<string, unknown>;
+    if (record.type === "image" || record.kind === "image") {
+      return true;
+    }
+
+    for (const entry of Object.values(record)) {
+      stack.push(entry);
+    }
+  }
+
+  return false;
+}
+
+function modelSlug(modelId: string): string {
+  return modelId.replace(/(?:.*\/)?([^#/]+)(?:#.*)?/u, "$1");
 }
 
 function extractArtifactUrls(result: unknown): string[] {

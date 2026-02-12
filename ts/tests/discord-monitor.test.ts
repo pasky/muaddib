@@ -53,6 +53,49 @@ describe("DiscordRoomMonitor", () => {
     await history.close();
   });
 
+  it("sets and clears Discord typing indicator around direct command handling", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    const typingSetCalls: string[] = [];
+    const typingClearCalls: string[] = [];
+
+    const monitor = new DiscordRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      sender: {
+        setTypingIndicator: async (channelId) => {
+          typingSetCalls.push(channelId);
+        },
+        clearTypingIndicator: async (channelId) => {
+          typingClearCalls.push(channelId);
+        },
+        sendMessage: async () => {},
+      },
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async (_message, options) => {
+          await options.sendResponse?.("ok");
+          return { response: "ok" };
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      guildId: "guild-1",
+      channelId: "chan-typing",
+      username: "alice",
+      content: "muaddib: hello",
+      mynick: "muaddib",
+      mentionsBot: true,
+    });
+
+    expect(typingSetCalls).toEqual(["chan-typing"]);
+    expect(typingClearCalls).toEqual(["chan-typing"]);
+
+    await history.close();
+  });
+
   it("includes attachment metadata block in command content", async () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();

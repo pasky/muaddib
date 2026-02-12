@@ -47,6 +47,7 @@ export interface CommandRunner {
       thinkingLevel?: ThinkingLevel;
       persistenceSummaryModel?: string;
       onPersistenceSummary?: (text: string) => void | Promise<void>;
+      visionFallbackModel?: string;
     },
   ): Promise<SingleTurnResult>;
 }
@@ -93,6 +94,7 @@ export interface CommandExecutionResult {
   resolved: ResolvedCommand;
   model: string | null;
   usage: Usage | null;
+  toolCallsCount: number;
 }
 
 export interface HandleIncomingMessageOptions {
@@ -237,6 +239,7 @@ export class RoomCommandHandlerTs {
         resolved: resolvedWithFollowups,
         model: null,
         usage: null,
+        toolCallsCount: 0,
       };
     }
 
@@ -246,6 +249,7 @@ export class RoomCommandHandlerTs {
         resolved: resolvedWithFollowups,
         model: null,
         usage: null,
+        toolCallsCount: 0,
       };
     }
 
@@ -259,6 +263,7 @@ export class RoomCommandHandlerTs {
         resolved: resolvedWithFollowups,
         model: null,
         usage: null,
+        toolCallsCount: 0,
       };
     }
 
@@ -275,6 +280,7 @@ export class RoomCommandHandlerTs {
         resolved: resolvedWithFollowups,
         model: null,
         usage: null,
+        toolCallsCount: 0,
       };
     }
 
@@ -352,6 +358,7 @@ export class RoomCommandHandlerTs {
         thinkingLevel: normalizeThinkingLevel(resolvedWithFollowups.runtime.reasoningEffort),
         persistenceSummaryModel: this.options.persistenceSummaryModel,
         onPersistenceSummary: persistenceSummaryCallback,
+        visionFallbackModel: resolvedWithFollowups.runtime.visionModel ?? undefined,
       },
       {
         systemPrompt,
@@ -373,6 +380,7 @@ export class RoomCommandHandlerTs {
       resolved: resolvedWithFollowups,
       model: runResult.modelSpec,
       usage: runResult.agentResult.usage,
+      toolCallsCount: runResult.agentResult.toolCallsCount ?? 0,
     };
   }
 
@@ -384,6 +392,7 @@ export class RoomCommandHandlerTs {
       thinkingLevel: ThinkingLevel;
       persistenceSummaryModel?: string;
       onPersistenceSummary?: (text: string) => void | Promise<void>;
+      visionFallbackModel?: string;
     },
     runnerInput: {
       systemPrompt: string;
@@ -414,6 +423,7 @@ export class RoomCommandHandlerTs {
         thinkingLevel: runInput.thinkingLevel,
         persistenceSummaryModel: runInput.persistenceSummaryModel,
         onPersistenceSummary: onPrimaryPersistenceSummary,
+        visionFallbackModel: runInput.visionFallbackModel,
       });
     } catch (error) {
       const refusalSignal = detectRefusalFallbackSignal(stringifyError(error));
@@ -458,6 +468,7 @@ export class RoomCommandHandlerTs {
       thinkingLevel: ThinkingLevel;
       persistenceSummaryModel?: string;
       onPersistenceSummary?: (text: string) => void | Promise<void>;
+      visionFallbackModel?: string;
     },
     runnerInput: {
       systemPrompt: string;
@@ -486,6 +497,7 @@ export class RoomCommandHandlerTs {
         thinkingLevel: runInput.thinkingLevel,
         persistenceSummaryModel: runInput.persistenceSummaryModel,
         onPersistenceSummary: onFallbackPersistenceSummary,
+        visionFallbackModel: runInput.visionFallbackModel,
       });
 
       await this.flushPersistenceSummaryBuffer(runInput.onPersistenceSummary, fallbackSummaryBuffer);
@@ -540,6 +552,8 @@ export class RoomCommandHandlerTs {
       return;
     }
 
+    const arcName = `${message.serverTag}#${message.channelName}`;
+
     let llmCallId: number | null = null;
     if (result.model && result.usage) {
       const spec = parseModelSpec(result.model);
@@ -550,7 +564,7 @@ export class RoomCommandHandlerTs {
         outputTokens: result.usage.output,
         cost: result.usage.cost.total,
         callType: "agent_run",
-        arcName: `${message.serverTag}#${message.channelName}`,
+        arcName,
         triggerMessageId,
       });
     }
@@ -574,6 +588,56 @@ export class RoomCommandHandlerTs {
     if (llmCallId) {
       await this.options.history.updateLlmCallResponse(llmCallId, responseMessageId);
     }
+
+    await this.emitCostFollowups(message, result, arcName, sendResponse);
+  }
+
+  private async emitCostFollowups(
+    message: RoomMessage,
+    result: CommandExecutionResult,
+    arcName: string,
+    sendResponse: ((text: string) => Promise<void>) | undefined,
+  ): Promise<void> {
+    if (!sendResponse || !result.usage) {
+      return;
+    }
+
+    const totalCost = result.usage.cost.total;
+    if (!(totalCost > 0)) {
+      return;
+    }
+
+    if (totalCost > 0.2) {
+      const costMessage = `(${[
+        `this message used ${result.toolCallsCount} tool calls`,
+        `${result.usage.input} in / ${result.usage.output} out tokens`,
+        `and cost $${totalCost.toFixed(4)}`,
+      ].join(", ")})`;
+
+      await sendResponse(costMessage);
+      await this.options.history.addMessage({
+        ...message,
+        nick: message.mynick,
+        content: costMessage,
+      });
+    }
+
+    const totalToday = await this.options.history.getArcCostToday(arcName);
+    const costBefore = totalToday - totalCost;
+    const dollarsBefore = Math.trunc(costBefore);
+    const dollarsAfter = Math.trunc(totalToday);
+    if (dollarsAfter <= dollarsBefore) {
+      return;
+    }
+
+    const milestoneMessage =
+      `(fun fact: my messages in this channel have already cost $${totalToday.toFixed(4)} today)`;
+    await sendResponse(milestoneMessage);
+    await this.options.history.addMessage({
+      ...message,
+      nick: message.mynick,
+      content: milestoneMessage,
+    });
   }
 
   private async runOrQueueCommand(
@@ -746,6 +810,7 @@ export class RoomCommandHandlerTs {
       },
       model: null,
       usage: null,
+      toolCallsCount: 0,
     };
   }
 

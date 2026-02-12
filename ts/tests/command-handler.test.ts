@@ -52,7 +52,19 @@ function makeMessage(content: string): RoomMessage {
   };
 }
 
-function makeRunnerResult(text: string) {
+function makeRunnerResult(
+  text: string,
+  options: {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalCost?: number;
+    toolCallsCount?: number;
+  } = {},
+) {
+  const inputTokens = options.inputTokens ?? 1;
+  const outputTokens = options.outputTokens ?? 1;
+  const totalCost = options.totalCost ?? 0;
+
   return {
     assistantMessage: {
       role: "assistant" as const,
@@ -61,12 +73,12 @@ function makeRunnerResult(text: string) {
       provider: "openai",
       model: "gpt-4o-mini",
       usage: {
-        input: 1,
-        output: 1,
+        input: inputTokens,
+        output: outputTokens,
         cacheRead: 0,
         cacheWrite: 0,
-        totalTokens: 2,
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        totalTokens: inputTokens + outputTokens,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: totalCost },
       },
       stopReason: "stop" as const,
       timestamp: Date.now(),
@@ -74,13 +86,14 @@ function makeRunnerResult(text: string) {
     text,
     stopReason: "stop" as const,
     usage: {
-      input: 1,
-      output: 1,
+      input: inputTokens,
+      output: outputTokens,
       cacheRead: 0,
       cacheWrite: 0,
-      totalTokens: 2,
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      totalTokens: inputTokens + outputTokens,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: totalCost },
     },
+    toolCallsCount: options.toolCallsCount,
   };
 }
 
@@ -665,6 +678,61 @@ describe("RoomCommandHandlerTs", () => {
     expect(llmCalls[0].model).toBe("gpt-4o-mini");
     expect(llmCalls[0].triggerMessageId).toBeGreaterThan(0);
     expect(llmCalls[0].responseMessageId).toBeGreaterThan(0);
+
+    await history.close();
+  });
+
+  it("emits cost followup + daily milestone messages when command usage crosses thresholds", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    await history.logLlmCall({
+      provider: "openai",
+      model: "gpt-4o-mini",
+      inputTokens: 10,
+      outputTokens: 10,
+      cost: 0.9,
+      callType: "agent_run",
+      arcName: "libera##test",
+    });
+
+    const incoming = makeMessage("!s expensive response");
+    const sent: string[] = [];
+
+    const handler = new RoomCommandHandlerTs({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: () => ({
+        runSingleTurn: async () =>
+          makeRunnerResult("primary response", {
+            inputTokens: 123,
+            outputTokens: 45,
+            totalCost: 0.35,
+            toolCallsCount: 2,
+          }),
+      }),
+    });
+
+    const result = await handler.handleIncomingMessage(incoming, {
+      isDirect: true,
+      sendResponse: async (text) => {
+        sent.push(text);
+      },
+    });
+
+    expect(result?.response).toBe("primary response");
+    expect(result?.toolCallsCount).toBe(2);
+    expect(sent).toEqual([
+      "primary response",
+      "(this message used 2 tool calls, 123 in / 45 out tokens, and cost $0.3500)",
+      "(fun fact: my messages in this channel have already cost $1.2500 today)",
+    ]);
+
+    const rows = await history.getFullHistory("libera", "#test");
+    expect(rows).toHaveLength(4);
+    expect(rows[2].message).toContain("this message used 2 tool calls");
+    expect(rows[3].message).toContain("already cost $1.2500 today");
 
     await history.close();
   });

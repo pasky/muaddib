@@ -240,6 +240,94 @@ describe("MuaddibAgentRunner", () => {
     }
   });
 
+  it("switches to vision fallback model when tool output includes image content", async () => {
+    const streamModels: string[] = [];
+    let streamCallIndex = 0;
+
+    const streamFn: StreamFn = async (model) => {
+      streamModels.push(String((model as { id?: string }).id ?? "unknown"));
+      streamCallIndex += 1;
+
+      if (streamCallIndex === 1) {
+        return streamWithMessage(
+          makeAssistantMessage([
+            {
+              type: "toolCall",
+              id: "tool-image",
+              name: "visit_webpage",
+              arguments: { url: "https://example.com/image.png" },
+            },
+          ], "toolUse"),
+        );
+      }
+
+      return streamWithMessage(makeAssistantMessage([{ type: "text", text: "vision answer" }], "stop"));
+    };
+
+    const modelAdapter = {
+      resolve: (modelSpec: string) => {
+        if (modelSpec === "openai:primary") {
+          return {
+            spec: {
+              raw: modelSpec,
+              provider: "openai",
+              modelId: "primary",
+            },
+            model: { id: "primary", api: "openai-completions" },
+          };
+        }
+
+        if (modelSpec === "openai:vision") {
+          return {
+            spec: {
+              raw: modelSpec,
+              provider: "openai",
+              modelId: "vision",
+            },
+            model: { id: "vision", api: "openai-completions" },
+          };
+        }
+
+        throw new Error(`Unexpected model: ${modelSpec}`);
+      },
+    };
+
+    const runner = new MuaddibAgentRunner({
+      model: "openai:primary",
+      systemPrompt: "vision fallback test",
+      streamFn,
+      modelAdapter: modelAdapter as any,
+      tools: [
+        {
+          name: "visit_webpage",
+          label: "Visit Webpage",
+          description: "visit",
+          parameters: Type.Object({
+            url: Type.String(),
+          }),
+          execute: async () => ({
+            content: [
+              {
+                type: "image",
+                data: "QUJD",
+                mimeType: "image/png",
+              },
+            ],
+            details: {},
+          }),
+        },
+      ],
+    });
+
+    const result = await runner.runSingleTurn("inspect image", {
+      visionFallbackModel: "openai:vision",
+    });
+
+    expect(streamModels).toEqual(["primary", "vision"]);
+    expect(result.toolCallsCount).toBe(1);
+    expect(result.text).toBe("vision answer [image fallback to vision]");
+  });
+
   it("generates persistence summary for persistent tool calls", async () => {
     let streamCallIndex = 0;
 

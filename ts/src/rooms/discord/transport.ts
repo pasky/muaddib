@@ -190,6 +190,23 @@ export class DiscordGatewayTransport implements DiscordEventSource, DiscordSende
     };
   }
 
+  async setTypingIndicator(channelId: string): Promise<void> {
+    const channel = await this.client.channels.fetch(channelId);
+    if (!channel || !channel.isTextBased()) {
+      throw new Error(`Discord channel '${channelId}' is not text-based.`);
+    }
+
+    if (!("sendTyping" in channel) || typeof channel.sendTyping !== "function") {
+      throw new Error(`Discord channel '${channelId}' does not support typing indicators.`);
+    }
+
+    await channel.sendTyping();
+  }
+
+  async clearTypingIndicator(_channelId: string): Promise<void> {
+    // Discord typing indicators are ephemeral and expire automatically.
+  }
+
   private mapMessage(message: Message): DiscordMessageEvent | null {
     if (message.author.bot) {
       return null;

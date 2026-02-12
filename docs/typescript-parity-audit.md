@@ -111,6 +111,11 @@ The intent is to separate:
     - lifecycle integration hook and unresolved-quest carryover on chapter rollover.
   - Closed IRC per-event throughput gap by dispatching event handlers concurrently in monitor run loop while preserving per-event error isolation.
   - Added/extended tests for chapter-context prepending behavior, quest lifecycle/heartbeat internals, unresolved quest carryover on chapter rollover, and concurrent IRC event dispatch semantics.
+- 2026-02-12 (cluster: final accidental parity stretch — cost milestones, Discord typing, vision fallback):
+  - Added TS command-path cost follow-up + daily arc-cost milestone messaging parity (`RoomCommandHandlerTs.persistExecutionResult`).
+  - Added Discord typing-indicator lifecycle parity during direct command handling (`DiscordRoomMonitor` + `DiscordGatewayTransport`).
+  - Added TS runner-side vision fallback model switch when image-producing tool output appears (`MuaddibAgentRunner.runSingleTurn`) with fallback suffix emission.
+  - Added/extended regression tests for cost milestone messaging, Discord typing lifecycle, and runner vision fallback behavior.
 
 ---
 
@@ -131,7 +136,7 @@ Legend: ✅ implemented, ◐ partial, ❌ missing, ⚠ intentional deferred
 | Context reduction integration | ✅ | ✅ | Python `MuaddibAgent.run_actor` + `ContextReducer`; TS now mirrors `auto_reduce_context` + root `context_reducer` config via `ContextReducerTs` in shared command path |
 | Chapter context prepending (`include_chapter_summary`) | ✅ | ✅ | Python `MuaddibAgent.run_actor` prepends chapter context by default; TS `RoomCommandHandlerTs` now mirrors this with `include_chapter_summary` + `!c` no-context behavior |
 | Response length policy (artifact fallback) | ✅ | ✅ | Python `_run_actor` + `_long_response_to_artifact`; TS `RoomCommandHandlerTs` now enforces `response_max_bytes` + artifact-link fallback semantics |
-| Cost follow-up/operator cost milestones | ✅ | ❌ | Python `_route_command`; TS does not emit cost followups |
+| Cost follow-up/operator cost milestones | ✅ | ✅ | Python `_route_command`; TS `RoomCommandHandlerTs` now emits cost follow-up + daily arc-cost milestone messages |
 
 ### B. Room monitors / transports (IRC, Discord, Slack)
 
@@ -144,7 +149,7 @@ Legend: ✅ implemented, ◐ partial, ❌ missing, ⚠ intentional deferred
 | Discord message edit persistence by platform id | ✅ | ✅ | `process_message_edit` vs `processMessageEditEvent` |
 | Discord attachment block injection into message content | ✅ | ✅ | Python `process_message_event` attachment handling; TS Discord transport+monitor now inject `[Attachments]` blocks |
 | Discord reply-edit debounce (edit previous bot response) | ✅ | ✅ | Python `reply_edit_debounce_seconds` logic; TS monitor now edits prior bot response inside debounce window |
-| Discord typing indicator while generating response | ✅ | ❌ | Python `async with message.channel.typing()`; TS none |
+| Discord typing indicator while generating response | ✅ | ✅ | Python `async with message.channel.typing()`; TS monitor+transport now set/refresh typing indicator during direct command handling |
 | Slack message edit persistence by platform id | ✅ | ✅ | Python `_handle_message_edit`; TS `processMessageEditEvent` |
 | Slack attachment block + private-file auth secrets propagation | ✅ | ✅ | Python `_build_attachment_block` + `secrets`; TS Slack transport+monitor now build attachment blocks and propagate `http_header_prefixes` secrets |
 | Slack reply-edit debounce (`chat_update`) | ✅ | ✅ | Python `reply_edit_debounce_seconds`; TS monitor now debounces followups via `chat.update` sender path |
@@ -175,7 +180,7 @@ Legend: ✅ implemented, ◐ partial, ❌ missing, ⚠ intentional deferred
 | Broad tool surface (web_search, visit_webpage, execute_code, oracle, artifacts, image gen, quest/chronicler tools) | ✅ | ✅ | TS now includes `web_search`/`visit_webpage`/`execute_code`, artifact tools (`share_artifact`/`edit_artifact`), advanced tools (`oracle`, `generate_image`), and chronicler/quest tool names (`chronicle_read`, `chronicle_append`, `quest_start`, `subquest_start`, `quest_snooze`) with deferred-runtime quest guardrails preserved. |
 | Progress callback + persistence summary callback | ✅ | ✅ | TS runner now emits persistence-summary callbacks for persistent tool calls (`tools.summary.model`) and command path persists callback text as internal monologue history rows. |
 | Refusal fallback model stickiness | ✅ | ✅ | Python `providers/ModelRouter.call_raw_with_model`; TS command path now retries explicit refusal/error outcomes with `router.refusal_fallback_model` and logs usage against the effective fallback model |
-| Vision fallback when image tool output appears | ✅ | ❌ | Python `AgenticLLMActor.run_agent`; TS no equivalent |
+| Vision fallback when image tool output appears | ✅ | ✅ | Python `AgenticLLMActor.run_agent`; TS runner now switches to mode `vision_model` after image-producing tool output and appends image-fallback suffix |
 
 ### E. Logging / observability
 
@@ -219,7 +224,7 @@ Legend: ✅ implemented, ◐ partial, ❌ missing, ⚠ intentional deferred
 
 ### Accidental / not-yet-implemented parity gaps
 
-After closing `response_max_bytes`, transport UX parity, reconnect boundary semantics, context reduction parity, chronicle lifecycle automation, chapter-context prepending parity, quest-runtime internals, and IRC per-event concurrency, remaining accidental gaps are now concentrated in lower-priority lanes (for example cost follow-up messages and vision fallback handling).
+After closing `response_max_bytes`, transport UX parity, reconnect boundary semantics, context reduction parity, chronicle lifecycle automation, chapter-context prepending parity, quest-runtime internals, IRC per-event concurrency, cost follow-up milestones, Discord typing indicators, and vision fallback behavior, there are no known accidental parity gaps left in parity-v1 scope (excluding explicitly deferred quest/proactive operator enablement policy).
 
 | Gap | Severity | User/operator impact | Evidence |
 |---|---:|---|---|
@@ -242,6 +247,9 @@ After closing `response_max_bytes`, transport UX parity, reconnect boundary sema
 | Quest tables + quest lifecycle/heartbeat runtime missing in TS | ✅ closed (2026-02-12) | TS now includes quest schema/method parity (`ChronicleStore`) and a quest paragraph-hook + heartbeat runtime (`QuestRuntimeTs`) integrated with lifecycle hooks; operator config enablement remains deferred per policy. | `ts/src/chronicle/chronicle-store.ts`, `ts/src/chronicle/quest-runtime.ts`, `ts/src/chronicle/lifecycle.ts` |
 | Discord/Slack null-event supervision policy not explicit in TS docs/tests | ✅ closed (2026-02-12) | TS now codifies/tests policy: receive errors reconnect under policy; `null` events are graceful shutdown signals without reconnect. | `ts/src/rooms/discord/monitor.ts::run`, `ts/src/rooms/slack/monitor.ts::run`, monitor test boundary cases |
 | IRC monitor processes events serially (no per-event task spawn) | ✅ closed (2026-02-12) | TS now dispatches per-event handlers concurrently from the receive loop, removing serial head-of-line blocking behavior. | `ts/src/rooms/irc/monitor.ts` |
+| Cost follow-up/operator cost milestone messaging missing in TS | ✅ closed (2026-02-12) | TS command path now mirrors Python `_route_command` cost follow-up and daily arc-cost milestone replies. | `ts/src/rooms/command/command-handler.ts`, `ts/tests/command-handler.test.ts` |
+| Discord typing indicator lifecycle missing in TS | ✅ closed (2026-02-12) | TS Discord monitor/transport now set/refresh typing indicator around direct command handling. | `ts/src/rooms/discord/monitor.ts`, `ts/src/rooms/discord/transport.ts`, `ts/tests/discord-monitor.test.ts` |
+| Vision fallback on image-producing tool output missing in TS runner | ✅ closed (2026-02-12) | TS runner now switches to configured `vision_model` after image tool results and appends image fallback suffix. | `ts/src/agent/muaddib-agent-runner.ts`, `ts/tests/muaddib-agent-runner.test.ts` |
 
 ---
 
@@ -318,7 +326,7 @@ Tests (red/green):
   - tool-result continuation,
   - non-empty completion retry behavior.
 - ✅ Extended baseline/executor/runner/command tests for core + artifact + advanced + chronicler/quest tool wiring (`web_search`, `visit_webpage`, `execute_code`, `share_artifact`, `edit_artifact`, `oracle`, `generate_image`, `chronicle_read`, `chronicle_append`, `quest_start`, `subquest_start`, `quest_snooze`) and focused persistence-summary semantics.
-- Remaining in this lane: lower-priority tool/runtime deltas (for example vision fallback behavior and cost follow-up messaging parity), plus deferred-policy decisions for quest/proactive operator enablement.
+- Accidental runtime deltas in this lane are now closed for parity-v1 scope; deferred-policy decisions for quest/proactive operator enablement remain intentionally out of scope.
 
 ## Phase 3 — adapter UX/completeness parity
 

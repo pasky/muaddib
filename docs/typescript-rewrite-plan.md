@@ -62,6 +62,11 @@ Latest update:
   - Added TS chronicle quest internals (`ChronicleStore` quest schema/methods + `QuestRuntimeTs` paragraph hook/heartbeat runtime + unresolved quest carryover during chapter rollover).
   - Closed IRC per-event concurrency throughput delta by dispatching event handlers concurrently in `IrcRoomMonitor.run`.
   - Added regression tests for chapter-context prepending, quest lifecycle/heartbeat internals, unresolved quest chapter rollover carryover, and IRC concurrent event dispatch behavior.
+- 2026-02-12: Closed final accidental parity stretch for parity-v1 scope:
+  - Added command-path cost follow-up + daily arc-cost milestone messaging parity in `RoomCommandHandlerTs`.
+  - Added Discord typing indicator lifecycle parity around direct command handling in monitor+transport.
+  - Added runner-side vision fallback parity: switch to configured `vision_model` when image-producing tool output appears, with fallback suffix in final response.
+  - Added targeted tests in `ts/tests/command-handler.test.ts`, `ts/tests/discord-monitor.test.ts`, and `ts/tests/muaddib-agent-runner.test.ts`.
 
 ---
 
@@ -203,8 +208,8 @@ Python rollback path must remain available until soak/parity/SLO gates are fully
 ## Remaining gaps / next parity work
 
 1. **Post-tooling parity follow-up gaps (current accidental backlog)**
-   - TS now covers multi-turn tool loop semantics + core tools (`web_search`, `visit_webpage`, `execute_code`), artifact tools (`share_artifact`, `edit_artifact`), advanced tools (`oracle`, `generate_image`), chronicler/quest tool-surface names, command-path refusal-fallback behavior, persistence-summary callback flow (`tools.summary.model`), `response_max_bytes` long-response artifact fallback, transport UX parity (reply-edit debounce + Slack mention formatting/typing lifecycle), reconnect boundary semantics, command-path context reduction, chapter-context prepending (`include_chapter_summary`), chronicle lifecycle automation + autochronicler triggers, quest persistence/heartbeat internals, and IRC per-event concurrency.
-   - Remaining accidental parity work is now mostly lower-priority command/actor deltas (for example cost follow-up messaging and vision fallback handling).
+   - TS now covers multi-turn tool loop semantics + core tools (`web_search`, `visit_webpage`, `execute_code`), artifact tools (`share_artifact`, `edit_artifact`), advanced tools (`oracle`, `generate_image`), chronicler/quest tool-surface names, command-path refusal-fallback behavior, persistence-summary callback flow (`tools.summary.model`), `response_max_bytes` long-response artifact fallback, transport UX parity (reply-edit debounce + Slack mention formatting/typing lifecycle + Discord typing indicator lifecycle), reconnect boundary semantics, command-path context reduction, chapter-context prepending (`include_chapter_summary`), chronicle lifecycle automation + autochronicler triggers, quest persistence/heartbeat internals, IRC per-event concurrency, command-path cost follow-up milestones, and runner vision fallback behavior.
+   - No known accidental parity gaps remain in parity-v1 scope at this time; remaining work is policy/deployment oriented (deferred quest/proactive enablement, credential refresh contract, soak evidence).
 
 2. **OAuth/session credential refresh support**
    - Still deferred; blocked on stable upstream provider refresh contract.
@@ -225,4 +230,4 @@ Python rollback path must remain available until soak/parity/SLO gates are fully
 Use the authoritative parity audit as the execution backlog:
 - `docs/typescript-parity-audit.md`
 
-Immediate priority from the parity audit is clearing remaining lower-priority runtime deltas and maintaining soak evidence/docs parity while proactive runtime stays deferred by policy.
+Immediate priority from the parity audit is maintaining soak evidence/docs parity and rollback-window guardrails while deferred proactive/quest operator enablement remains out of scope by policy.
