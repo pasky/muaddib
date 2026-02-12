@@ -6,9 +6,18 @@ import { assertNoDeferredFeatureConfig } from "./deferred-features.js";
 import { RuntimeLogWriter } from "./logging.js";
 import { resolveRefusalFallbackModel } from "./refusal-fallback.js";
 import { resolvePersistenceSummaryModel } from "./persistence-summary.js";
+import { ChronicleStore } from "../chronicle/chronicle-store.js";
+import {
+  ChronicleLifecycleTs,
+  type ChronicleLifecycleConfig,
+} from "../chronicle/lifecycle.js";
 import { ChatHistoryStore } from "../history/chat-history-store.js";
 import { getRoomConfig } from "../rooms/command/config.js";
 import { RoomCommandHandlerTs } from "../rooms/command/command-handler.js";
+import {
+  AutoChroniclerTs,
+  type AutoChronicler,
+} from "../rooms/autochronicler.js";
 import { createModeClassifier } from "../rooms/command/classifier.js";
 import { DiscordRoomMonitor } from "../rooms/discord/monitor.js";
 import { DiscordGatewayTransport } from "../rooms/discord/transport.js";
@@ -25,6 +34,12 @@ import {
 
 interface RunnableMonitor {
   run(): Promise<void>;
+}
+
+interface ChroniclerRuntime {
+  chronicleStore?: ChronicleStore;
+  lifecycle?: ChronicleLifecycleTs;
+  autoChronicler?: AutoChronicler;
 }
 
 export async function runMuaddibMain(argv: string[] = process.argv.slice(2)): Promise<void> {
@@ -53,9 +68,15 @@ export async function runMuaddibMain(argv: string[] = process.argv.slice(2)): Pr
   await history.initialize();
 
   const apiKeyResolver = createConfigApiKeyResolver(config);
+  const chroniclerRuntime = await initializeChroniclerRuntime(
+    config,
+    history,
+    apiKeyResolver,
+    runtimeLogger,
+  );
 
   try {
-    const monitors = createMonitors(config, history, apiKeyResolver, runtimeLogger);
+    const monitors = createMonitors(config, history, apiKeyResolver, runtimeLogger, chroniclerRuntime);
     if (monitors.length === 0) {
       logger.error("No room monitors enabled.");
       throw new Error("No room monitors enabled.");
@@ -66,6 +87,7 @@ export async function runMuaddibMain(argv: string[] = process.argv.slice(2)): Pr
   } finally {
     logger.info("Shutting down history storage");
     await history.close();
+    await chroniclerRuntime.chronicleStore?.close();
   }
 }
 
@@ -74,6 +96,7 @@ function createMonitors(
   history: ChatHistoryStore,
   getApiKey: (provider: string) => Promise<string | undefined> | string | undefined,
   runtimeLogger: RuntimeLogWriter,
+  chroniclerRuntime: ChroniclerRuntime,
 ): RunnableMonitor[] {
   const monitors: RunnableMonitor[] = [];
   const logger = runtimeLogger.getLogger("muaddib.app.main");
@@ -91,6 +114,7 @@ function createMonitors(
       getApiKey,
       (text) => text.replace(/\n/g, "; ").trim(),
       config,
+      chroniclerRuntime,
     );
 
     logger.info("Enabling IRC room monitor", `socket_path=${socketPath}`);
@@ -112,7 +136,14 @@ function createMonitors(
 
   const discordRoomConfig = getRoomConfig(config, "discord") as any;
   if (isRoomEnabled(discordRoomConfig, false)) {
-    const commandHandler = createRoomCommandHandler(discordRoomConfig, history, getApiKey, undefined, config);
+    const commandHandler = createRoomCommandHandler(
+      discordRoomConfig,
+      history,
+      getApiKey,
+      undefined,
+      config,
+      chroniclerRuntime,
+    );
     const discordToken = requireNonEmptyString(
       discordRoomConfig?.token,
       "Discord room is enabled but rooms.discord.token is missing.",
@@ -139,7 +170,14 @@ function createMonitors(
 
   const slackRoomConfig = getRoomConfig(config, "slack") as any;
   if (isRoomEnabled(slackRoomConfig, false)) {
-    const commandHandler = createRoomCommandHandler(slackRoomConfig, history, getApiKey, undefined, config);
+    const commandHandler = createRoomCommandHandler(
+      slackRoomConfig,
+      history,
+      getApiKey,
+      undefined,
+      config,
+      chroniclerRuntime,
+    );
     const slackAppToken = requireNonEmptyString(
       slackRoomConfig?.app_token,
       "Slack room is enabled but rooms.slack.app_token is missing.",
@@ -183,6 +221,64 @@ function createMonitors(
   return monitors;
 }
 
+async function initializeChroniclerRuntime(
+  config: Record<string, unknown>,
+  history: ChatHistoryStore,
+  getApiKey: (provider: string) => Promise<string | undefined> | string | undefined,
+  runtimeLogger: RuntimeLogWriter,
+): Promise<ChroniclerRuntime> {
+  const logger = runtimeLogger.getLogger("muaddib.app.main");
+  const chroniclerConfig = asRecord(config.chronicler);
+  const chroniclerModel = stringOrUndefined(chroniclerConfig?.model);
+
+  if (!chroniclerConfig || !chroniclerModel) {
+    if (chroniclerConfig && !chroniclerModel) {
+      logger.warn("Chronicler config is present without chronicler.model; chronicler runtime disabled.");
+    }
+    return {};
+  }
+
+  const chronicleDbPath = resolveMuaddibPath(
+    stringOrUndefined(asRecord(chroniclerConfig.database)?.path),
+    join(getMuaddibHome(), "chronicle.db"),
+  );
+
+  logger.info("Initializing chronicle storage", `path=${chronicleDbPath}`);
+
+  const chronicleStore = new ChronicleStore(chronicleDbPath);
+  await chronicleStore.initialize();
+
+  const lifecycleConfig: ChronicleLifecycleConfig = {
+    model: chroniclerModel,
+    arc_models: toStringRecord(chroniclerConfig.arc_models),
+    paragraphs_per_chapter: numberOrUndefined(chroniclerConfig.paragraphs_per_chapter),
+  };
+
+  const lifecycle = new ChronicleLifecycleTs({
+    chronicleStore,
+    config: lifecycleConfig,
+    getApiKey,
+  });
+
+  const autoChronicler = new AutoChroniclerTs({
+    history,
+    chronicleStore,
+    lifecycle,
+    config: {
+      model: chroniclerModel,
+      arc_models: toStringRecord(chroniclerConfig.arc_models),
+    },
+    getApiKey,
+    logger: runtimeLogger.getLogger("muaddib.rooms.autochronicler"),
+  });
+
+  return {
+    chronicleStore,
+    lifecycle,
+    autoChronicler,
+  };
+}
+
 function requireNonEmptyString(value: unknown, message: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new Error(message);
@@ -214,12 +310,32 @@ function stringOrUndefined(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function toStringRecord(value: unknown): Record<string, string> | undefined {
+  const record = asRecord(value);
+  if (!record) {
+    return undefined;
+  }
+
+  const result: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(record)) {
+    const normalized = stringOrUndefined(entry);
+    if (!normalized) {
+      continue;
+    }
+
+    result[key] = normalized;
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
 function createRoomCommandHandler(
   roomConfig: any,
   history: ChatHistoryStore,
   getApiKey: (provider: string) => Promise<string | undefined> | string | undefined,
   responseCleaner?: (text: string, nick: string) => string,
   runtimeConfig?: Record<string, unknown>,
+  chroniclerRuntime: ChroniclerRuntime = {},
 ): RoomCommandHandlerTs {
   const commandConfig = roomConfig?.command ?? {};
 
@@ -261,6 +377,7 @@ function createRoomCommandHandler(
       model: contextReducerModel,
       prompt: contextReducerPrompt,
     },
+    autoChronicler: chroniclerRuntime.autoChronicler,
     agentLoop: {
       maxIterations,
       maxCompletionRetries,
@@ -274,6 +391,8 @@ function createRoomCommandHandler(
       oraclePrompt,
       imageGenModel,
       openRouterBaseUrl,
+      chronicleStore: chroniclerRuntime.chronicleStore,
+      chronicleLifecycle: chroniclerRuntime.lifecycle,
     },
   });
 }

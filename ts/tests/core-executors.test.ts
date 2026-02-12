@@ -287,6 +287,31 @@ describe("core tool executors chronicler/quest support", () => {
     await chronicleStore.close();
   });
 
+  it("chronicle_append uses lifecycle automation when lifecycle hook is provided", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "muaddib-ts-chronicle-"));
+    tempDirs.push(dir);
+
+    const chronicleStore = new ChronicleStore(join(dir, "chronicle.db"));
+    await chronicleStore.initialize();
+
+    const appendParagraph = vi.fn(async () => ({ id: 1 }));
+
+    const executors = createDefaultToolExecutors({
+      chronicleStore,
+      chronicleArc: "libera##test",
+      chronicleLifecycle: {
+        appendParagraph,
+      },
+    });
+
+    const appendResult = await executors.chronicleAppend({ text: "Lifecycle append." });
+
+    expect(appendResult).toBe("OK");
+    expect(appendParagraph).toHaveBeenCalledWith("libera##test", "Lifecycle append.");
+
+    await chronicleStore.close();
+  });
+
   it("chronicle tools return deferred guidance when store context is missing", async () => {
     const executors = createDefaultToolExecutors();
 

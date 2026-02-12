@@ -60,7 +60,7 @@
 - Primary migration plan and design decisions are documented in `docs/typescript-rewrite-plan.md`.
 - The target is full TS rewrite with `@mariozechner/pi-ai` + `@mariozechner/pi-agent-core` (agent package), replacing custom provider clients and custom actor loop.
 - Quests and proactive interjections are intentionally out of scope for TS parity v1.
-- TS runtime tolerates deferred config knobs (`chronicler`, `chronicler.quests`, `quests`, `rooms.*.proactive`) when they are present but not explicitly enabled, and logs an "ignored" warning; it fail-fast rejects these knobs when explicitly enabled (`enabled: true`).
+- TS runtime now supports core `chronicler` runtime behavior (chapter lifecycle automation + autochronicler triggers) but still treats quests/proactive surfaces as deferred: `chronicler.quests`, `quests`, and `rooms.*.proactive` are tolerated when present-but-inactive (with "ignored" warning) and fail-fast rejected when explicitly enabled (`enabled: true`).
 - TS runtime fail-fast enforces provider credential contract: only static `providers.*.key` strings (or provider SDK env vars) are supported; non-static `providers.*.key` values and `providers.*.{oauth,session}` are rejected.
 - OAuth/session refresh plumbing is explicitly deferred until a stable `@mariozechner/pi-ai` provider refresh contract is available; errors must include concrete operator guidance (remove unsupported keys and use static key/env-var contract).
 - TS service runtime cutover uses TS-first entrypoint with explicit rollback window controls (`MUADDIB_RUNTIME=python`, `MUADDIB_TS_ROLLBACK_UNTIL`) during soak; do not remove rollback path before soak criteria are met.

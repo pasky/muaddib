@@ -29,14 +29,8 @@ export function collectDeferredFeatureConfigPaths(config: Record<string, unknown
 
   if (hasOwn(config, "chronicler")) {
     const chroniclerConfig = config.chronicler;
-    if (isExplicitlyEnabled(chroniclerConfig)) {
-      blockingPaths.push("chronicler");
-    } else {
-      ignoredPaths.push("chronicler");
-    }
-
     if (isObject(chroniclerConfig) && hasOwn(chroniclerConfig, "quests")) {
-      if (isExplicitlyEnabled(chroniclerConfig) || isExplicitlyEnabled(chroniclerConfig.quests)) {
+      if (isExplicitlyEnabled(chroniclerConfig.quests)) {
         blockingPaths.push("chronicler.quests");
       } else {
         ignoredPaths.push("chronicler.quests");

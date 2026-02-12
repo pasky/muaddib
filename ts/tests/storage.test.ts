@@ -2,10 +2,32 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ChronicleStore } from "../src/chronicle/chronicle-store.js";
+import { ChronicleLifecycleTs } from "../src/chronicle/lifecycle.js";
 import { ChatHistoryStore } from "../src/history/chat-history-store.js";
+import { AutoChroniclerTs } from "../src/rooms/autochronicler.js";
+
+function makeAssistantText(text: string) {
+  return {
+    role: "assistant" as const,
+    content: [{ type: "text" as const, text }],
+    api: "openai-completions" as const,
+    provider: "openai" as const,
+    model: "gpt-4o-mini",
+    usage: {
+      input: 1,
+      output: 1,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 2,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: "stop" as const,
+    timestamp: Date.now(),
+  };
+}
 
 describe("ChatHistoryStore", () => {
   it("stores messages and returns chronological context with assistant mode prefix", async () => {
@@ -191,5 +213,160 @@ describe("ChronicleStore", () => {
     expect(relativeRendered).toContain("Important update");
 
     await store.close();
+  });
+
+  it("rolls chapters at threshold and inserts recap paragraph via lifecycle automation", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "muaddib-chronicle-"));
+    createdDirs.push(dir);
+
+    const chronicleStore = new ChronicleStore(join(dir, "chronicle.db"));
+    await chronicleStore.initialize();
+
+    const completeFn = vi.fn(async () => makeAssistantText("Chapter summary paragraph."));
+
+    const lifecycle = new ChronicleLifecycleTs({
+      chronicleStore,
+      config: {
+        model: "openai:gpt-4o-mini",
+        paragraphs_per_chapter: 2,
+      },
+      completeFn,
+    });
+
+    await lifecycle.appendParagraph("libera##test", "First operational note.");
+    const chapterBefore = await chronicleStore.getOrOpenCurrentChapter("libera##test");
+
+    await lifecycle.appendParagraph("libera##test", "Second operational note.");
+    const chapterAfter = await chronicleStore.getOrOpenCurrentChapter("libera##test");
+
+    expect(chapterAfter.id).toBeGreaterThan(chapterBefore.id);
+    expect(completeFn).toHaveBeenCalledTimes(1);
+
+    const currentChapter = await chronicleStore.renderChapterRelative("libera##test", 0);
+    expect(currentChapter).toContain("Previous chapter recap: Chapter summary paragraph.");
+    expect(currentChapter).toContain("Second operational note.");
+
+    const previousChapter = await chronicleStore.renderChapterRelative("libera##test", -1);
+    expect(previousChapter).toContain("First operational note.");
+
+    await chronicleStore.close();
+  });
+});
+
+describe("AutoChroniclerTs", () => {
+  it("returns false without chronicling when unchronicled message count is below threshold", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    await history.addMessage({
+      serverTag: "libera",
+      channelName: "#test",
+      nick: "alice",
+      mynick: "muaddib",
+      content: "only one",
+    });
+
+    const dir = await mkdtemp(join(tmpdir(), "muaddib-chronicle-"));
+    const chronicleStore = new ChronicleStore(join(dir, "chronicle.db"));
+    await chronicleStore.initialize();
+
+    const lifecycle = new ChronicleLifecycleTs({
+      chronicleStore,
+      config: {
+        model: "openai:gpt-4o-mini",
+      },
+      completeFn: vi.fn(async () => makeAssistantText("summary")),
+    });
+
+    const completeFn = vi.fn(async () => makeAssistantText("should not be called"));
+
+    const autoChronicler = new AutoChroniclerTs({
+      history,
+      chronicleStore,
+      lifecycle,
+      config: {
+        model: "openai:gpt-4o-mini",
+      },
+      completeFn,
+      logger: {
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+      },
+    });
+
+    const triggered = await autoChronicler.checkAndChronicle("muaddib", "libera", "#test", 2);
+
+    expect(triggered).toBe(false);
+    expect(completeFn).not.toHaveBeenCalled();
+
+    await history.close();
+    await chronicleStore.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("triggers chronicling at threshold, appends chronicle paragraph, and marks messages chronicled", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    await history.addMessage({
+      serverTag: "libera",
+      channelName: "#test",
+      nick: "alice",
+      mynick: "muaddib",
+      content: "one",
+    });
+    await history.addMessage({
+      serverTag: "libera",
+      channelName: "#test",
+      nick: "bob",
+      mynick: "muaddib",
+      content: "two",
+    });
+
+    const dir = await mkdtemp(join(tmpdir(), "muaddib-chronicle-"));
+    const chronicleStore = new ChronicleStore(join(dir, "chronicle.db"));
+    await chronicleStore.initialize();
+
+    const lifecycle = new ChronicleLifecycleTs({
+      chronicleStore,
+      config: {
+        model: "openai:gpt-4o-mini",
+        paragraphs_per_chapter: 5,
+      },
+      completeFn: vi.fn(async () => makeAssistantText("Chapter summary paragraph.")),
+    });
+
+    const completeFn = vi.fn(async () => makeAssistantText("Auto chronicled paragraph."));
+
+    const autoChronicler = new AutoChroniclerTs({
+      history,
+      chronicleStore,
+      lifecycle,
+      config: {
+        model: "openai:gpt-4o-mini",
+      },
+      completeFn,
+      logger: {
+        debug: () => {},
+        info: () => {},
+        warn: () => {},
+        error: () => {},
+      },
+    });
+
+    const triggered = await autoChronicler.checkAndChronicle("muaddib", "libera", "#test", 2);
+
+    expect(triggered).toBe(true);
+    expect(completeFn).toHaveBeenCalledTimes(1);
+    expect(await history.countRecentUnchronicled("libera", "#test", 7)).toBe(0);
+
+    const currentChapter = await chronicleStore.renderChapter("libera##test");
+    expect(currentChapter).toContain("Auto chronicled paragraph.");
+
+    await history.close();
+    await chronicleStore.close();
+    await rm(dir, { recursive: true, force: true });
   });
 });

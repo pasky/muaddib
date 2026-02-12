@@ -432,6 +432,69 @@ describe("RoomCommandHandlerTs", () => {
     await history.close();
   });
 
+  it("triggers auto-chronicler for direct + passive paths and skips it when rate-limited", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const autoChronicler = {
+      checkAndChronicle: vi.fn(async () => false),
+    };
+
+    const handler = new RoomCommandHandlerTs({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      autoChronicler,
+      runnerFactory: () => ({
+        runSingleTurn: async () => makeRunnerResult("done"),
+      }),
+    });
+
+    await handler.handleIncomingMessage(makeMessage("!s trigger chronicler"), { isDirect: true });
+    await handler.handleIncomingMessage(makeMessage("ambient channel line"), { isDirect: false });
+
+    expect(autoChronicler.checkAndChronicle).toHaveBeenCalledTimes(2);
+    expect(autoChronicler.checkAndChronicle).toHaveBeenNthCalledWith(
+      1,
+      "muaddib",
+      "libera",
+      "#test",
+      40,
+    );
+    expect(autoChronicler.checkAndChronicle).toHaveBeenNthCalledWith(
+      2,
+      "muaddib",
+      "libera",
+      "#test",
+      40,
+    );
+
+    const rateLimitedAutoChronicler = {
+      checkAndChronicle: vi.fn(async () => false),
+    };
+
+    const rateLimitedHandler = new RoomCommandHandlerTs({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      autoChronicler: rateLimitedAutoChronicler,
+      rateLimiter: {
+        checkLimit: vi.fn().mockReturnValue(false),
+      },
+      runnerFactory: () => {
+        throw new Error("runner should not run when rate-limited");
+      },
+    });
+
+    await rateLimitedHandler.handleIncomingMessage(makeMessage("!s should skip autochronicler"), {
+      isDirect: true,
+    });
+
+    expect(rateLimitedAutoChronicler.checkAndChronicle).not.toHaveBeenCalled();
+
+    await history.close();
+  });
+
   it("persists persistence-summary callback output as internal monologue before final response", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();

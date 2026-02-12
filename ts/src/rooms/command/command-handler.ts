@@ -14,6 +14,7 @@ import {
 import { createDefaultToolExecutors } from "../../agent/tools/core-executors.js";
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { parseModelSpec } from "../../models/model-spec.js";
+import type { AutoChronicler } from "../autochronicler.js";
 import { RateLimiter } from "./rate-limiter.js";
 import {
   ContextReducerTs,
@@ -72,6 +73,7 @@ export interface CommandHandlerOptions {
   persistenceSummaryModel?: string;
   contextReducer?: ContextReducer;
   contextReducerConfig?: ContextReducerConfig;
+  autoChronicler?: AutoChronicler;
   responseCleaner?: (text: string, nick: string) => string;
   helpToken?: string;
   flagTokens?: string[];
@@ -115,6 +117,7 @@ export class RoomCommandHandlerTs {
   private readonly responseMaxBytes: number;
   private readonly shareArtifact: (content: string) => Promise<string>;
   private readonly contextReducer: ContextReducer;
+  private readonly autoChronicler: AutoChronicler | null;
 
   constructor(private readonly options: CommandHandlerOptions) {
     this.commandConfig = options.roomConfig.command;
@@ -153,6 +156,7 @@ export class RoomCommandHandlerTs {
         config: options.contextReducerConfig,
         getApiKey: options.getApiKey,
       });
+    this.autoChronicler = options.autoChronicler ?? null;
 
     this.rateLimiter =
       options.rateLimiter ??
@@ -500,6 +504,11 @@ export class RoomCommandHandlerTs {
   ): Promise<CommandExecutionResult> {
     const result = await this.executeWithSteering(message, steeringKey);
     await this.persistExecutionResult(message, triggerMessageId, result, sendResponse);
+
+    if (!this.isRateLimitedResult(result)) {
+      await this.triggerAutoChronicler(message, this.commandConfig.history_size);
+    }
+
     return result;
   }
 
@@ -620,10 +629,23 @@ export class RoomCommandHandlerTs {
   }
 
   private async handlePassiveMessageCore(
-    _message: RoomMessage,
+    message: RoomMessage,
     _sendResponse: ((text: string) => Promise<void>) | undefined,
   ): Promise<void> {
-    // Proactive/chronicling passive handling stays out of scope in TS parity v1.
+    await this.triggerAutoChronicler(message, this.commandConfig.history_size);
+  }
+
+  private async triggerAutoChronicler(message: RoomMessage, maxSize: number): Promise<void> {
+    if (!this.autoChronicler) {
+      return;
+    }
+
+    await this.autoChronicler.checkAndChronicle(
+      message.mynick,
+      message.serverTag,
+      message.channelName,
+      maxSize,
+    );
   }
 
   buildSystemPrompt(mode: string, mynick: string, modelOverride?: string): string {
@@ -707,6 +729,10 @@ export class RoomCommandHandlerTs {
       model: null,
       usage: null,
     };
+  }
+
+  private isRateLimitedResult(result: CommandExecutionResult): boolean {
+    return Boolean(result.response?.includes("(rate limiting)")) && !result.model;
   }
 
   private cleanResponseText(text: string, nick: string): string {

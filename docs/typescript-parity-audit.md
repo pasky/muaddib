@@ -94,6 +94,15 @@ The intent is to separate:
     - wired `auto_reduce_context` mode behavior into resolver runtime + command execution flow,
     - updated app + CLI command paths to pass root `context_reducer` config through to the shared handler,
     - added command-handler integration coverage proving reduced context is used when enabled.
+- 2026-02-12 (cluster: chronicle lifecycle automation + autochronicler wiring):
+  - Added TS chronicle lifecycle automation via `ChronicleLifecycleTs`:
+    - chapter rollover at `chronicler.paragraphs_per_chapter`,
+    - chapter-close summary generation using `chronicler.model` / `chronicler.arc_models`,
+    - recap paragraph insertion into newly opened chapter.
+  - Added TS `AutoChroniclerTs` with Python-aligned trigger semantics (`history_size` threshold, lookback, overlap, per-arc locking) and wired it into shared command handler direct+passive paths.
+  - Wired app + CLI runtime chronicler initialization (`chronicle.db`, lifecycle, autochronicler, tool executor context) while keeping quest/proactive deferred policy unchanged.
+  - Updated chronicler tool executor path so `chronicle_append` uses lifecycle automation when runtime lifecycle hook is available.
+  - Added/extended tests for lifecycle boundaries, autochronicler trigger+marking behavior, command-path autochronicler hooks, core-executor lifecycle hook wiring, and deferred-policy regression expectations.
 
 ---
 
@@ -143,8 +152,8 @@ Legend: ✅ implemented, ◐ partial, ❌ missing, ⚠ intentional deferred
 | Platform-id update for edits | ✅ | ✅ | `update_message_by_platform_id` in both stores |
 | LLM call linkage (trigger + response IDs) | ✅ | ✅ | `log_llm_call` / `logLlmCall`, `update_llm_call_response` |
 | Chronicle base storage (arcs/chapters/paragraphs) | ✅ | ✅ | `muaddib/chronicler/chronicle.py`, `ts/src/chronicle/chronicle-store.ts` |
-| Chapter rollover + summary + recap paragraph | ✅ | ❌ | Python `chronicler/chapters.py::chapter_append_paragraph`; no TS equivalent |
-| Auto-chronicling trigger from chat history thresholds | ✅ | ❌ | Python `rooms/autochronicler.py`; TS runtime does not invoke chronicle automation |
+| Chapter rollover + summary + recap paragraph | ✅ | ✅ | Python `chronicler/chapters.py::chapter_append_paragraph`; TS `chronicle/lifecycle.ts::ChronicleLifecycleTs.appendParagraph` |
+| Auto-chronicling trigger from chat history thresholds | ✅ | ✅ | Python `rooms/autochronicler.py`; TS `rooms/autochronicler.ts::AutoChroniclerTs.checkAndChronicle` wired via `RoomCommandHandlerTs` |
 | Quest tables + quest lifecycle + heartbeat | ✅ | ❌ | Python `chronicler/chronicle.py` quests methods + `chronicler/quests.py`; TS chronicle schema has no quests |
 | Proactive interjection -> chronicler side effects | ✅ | ⚠ | Python in `RoomCommandHandler`; TS intentionally deferred via `assertNoDeferredFeatureConfig` |
 
@@ -195,13 +204,13 @@ Legend: ✅ implemented, ◐ partial, ❌ missing, ⚠ intentional deferred
 
 | Gap | Severity | Impact |
 |---|---:|---|
-| Deferred runtime features: chronicler automation, quests, proactive interjections | P1 (accepted) | TS ignores inactive knobs and rejects explicit enablement. Operators cannot enable these Python automations in TS yet. |
+| Deferred runtime features: quests + proactive interjections | P1 (accepted) | TS ignores inactive deferred knobs (`chronicler.quests`, `quests`, `rooms.*.proactive`) and rejects explicit enablement. |
 | Credential contract narrowed to static `providers.*.key` or env var fallback; OAuth/session rejected | P1 (accepted) | Existing dynamic credential refresh configs must be removed before TS startup. |
 | Message log writer no LRU file-handle cache | P2 (accepted) | Slightly different I/O behavior; functional parity is retained. |
 
 ### Accidental / not-yet-implemented parity gaps
 
-After closing `response_max_bytes`, transport UX parity, reconnect boundary semantics, and context reduction parity, the highest-priority remaining accidental gap is chronicle lifecycle automation (chapter rollover/summary/recap) alongside broader deferred-runtime surfaces.
+After closing `response_max_bytes`, transport UX parity, reconnect boundary semantics, context reduction parity, and chronicle lifecycle automation, the highest-priority remaining accidental gaps are now quest runtime persistence/heartbeat continuity and lower-priority adapter/runtime throughput deltas.
 
 | Gap | Severity | User/operator impact | Evidence |
 |---|---:|---|---|
@@ -221,7 +230,7 @@ After closing `response_max_bytes`, transport UX parity, reconnect boundary sema
 | Slack mention-formatting for outgoing replies missing in TS | ✅ closed (2026-02-12) | TS Slack sender now formats `@DisplayName` mentions to `<@USER_ID>` when cached mapping is available. | Python `_format_mentions_for_slack` |
 | Slack typing indicator lifecycle missing in TS | ✅ closed (2026-02-12) | TS Slack monitor/transport now set, refresh, and clear typing status around direct command handling. | Python `_set_typing_indicator` / `_clear_typing_indicator` |
 | Context reducer parity in TS command path | ✅ closed (2026-02-12) | TS command path now supports root `context_reducer` config + mode `auto_reduce_context` behavior through `ContextReducerTs`. | Python `ContextReducer` + `RoomCommandHandler._run_actor` |
-| Chronicle chapter rollover/summary/recap and quest tables missing in TS | P1 | Chronicle persistence exists but lifecycle intelligence and quest continuity are absent. | Python `chronicler/chapters.py`, `chronicler/chronicle.py` quests schema/methods |
+| Quest tables + quest lifecycle/heartbeat runtime missing in TS | P1 | Chronicle lifecycle automation now exists, but quest persistence/continuity runtime remains deferred in parity v1. | Python `chronicler/chronicle.py` quests schema/methods, `chronicler/quests.py` |
 | Discord/Slack null-event supervision policy not explicit in TS docs/tests | ✅ closed (2026-02-12) | TS now codifies/tests policy: receive errors reconnect under policy; `null` events are graceful shutdown signals without reconnect. | `ts/src/rooms/discord/monitor.ts::run`, `ts/src/rooms/slack/monitor.ts::run`, monitor test boundary cases |
 | IRC monitor processes events serially (no per-event task spawn) | P2 | Head-of-line blocking during long command turns; throughput degradation under load. | Python `muaddib.spawn(self.process_message_event(event))` vs TS `await this.processMessageEvent(event)` |
 
@@ -300,7 +309,7 @@ Tests (red/green):
   - tool-result continuation,
   - non-empty completion retry behavior.
 - ✅ Extended baseline/executor/runner/command tests for core + artifact + advanced + chronicler/quest tool wiring (`web_search`, `visit_webpage`, `execute_code`, `share_artifact`, `edit_artifact`, `oracle`, `generate_image`, `chronicle_read`, `chronicle_append`, `quest_start`, `subquest_start`, `quest_snooze`) and focused persistence-summary semantics.
-- Remaining in this lane: chronicle lifecycle automation (chapter rollover/summary/recap) and broader deferred-runtime surfaces.
+- Remaining in this lane: quest runtime persistence/heartbeat surfaces and broader deferred-runtime behavior.
 
 ## Phase 3 — adapter UX/completeness parity
 
@@ -312,7 +321,7 @@ Tests (red/green):
 
 ## Phase 4 — deferred feature re-entry (policy-gated)
 
-11. When product scope allows, re-enable chronicler automation / quests / proactive in TS behind explicit parity gates.
+11. When product scope allows, re-enable deferred quest runtime + proactive interjections in TS behind explicit parity gates.
 
 Tests (red/green):
 - Port Python chronicler/proactive behavior tests (`tests/rooms/irc/test_autochronicler.py`, `tests/chronicler/*`, `tests/rooms/test_proactive.py`) in staged slices.

@@ -121,6 +121,9 @@ export interface DefaultToolExecutorOptions {
   openRouterBaseUrl?: string;
   imageGenTimeoutMs?: number;
   chronicleStore?: ChronicleStore;
+  chronicleLifecycle?: {
+    appendParagraph: (arc: string, text: string) => Promise<unknown>;
+  };
   chronicleArc?: string;
   currentQuestId?: string | null;
 }
@@ -585,10 +588,16 @@ function createDefaultChronicleAppendExecutor(
     }
 
     const chronicleStore = options.chronicleStore;
+    const chronicleLifecycle = options.chronicleLifecycle;
     const arc = toConfiguredString(options.chronicleArc);
 
     if (!chronicleStore || !arc) {
       return "Error: chronicle_append is unavailable because chronicler runtime is deferred in the TypeScript runtime.";
+    }
+
+    if (chronicleLifecycle) {
+      await chronicleLifecycle.appendParagraph(arc, text);
+      return "OK";
     }
 
     await chronicleStore.appendParagraph(arc, text);

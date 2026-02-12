@@ -122,6 +122,27 @@ export class ChronicleStore {
     return row;
   }
 
+  async countParagraphsInChapter(chapterId: number): Promise<number> {
+    const db = this.requireDb();
+    const row = await db.get<{ count: number }>(
+      "SELECT COUNT(*) as count FROM paragraphs WHERE chapter_id = ?",
+      chapterId,
+    );
+
+    return Number(row?.count ?? 0);
+  }
+
+  async closeChapterWithSummary(chapterId: number, summary: string): Promise<void> {
+    const db = this.requireDb();
+    const metaJson = JSON.stringify({ summary });
+
+    await db.run(
+      "UPDATE chapters SET closed_at = CURRENT_TIMESTAMP, meta_json = ? WHERE id = ?",
+      metaJson,
+      chapterId,
+    );
+  }
+
   async readChapter(chapterId: number): Promise<string[]> {
     const db = this.requireDb();
     const rows = await db.all<Array<{ content: string }>>(

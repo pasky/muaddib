@@ -36,7 +36,7 @@ npm run start -- --config /path/to/config.json
 
 ## Deferred-feature config contract (TS runtime)
 
-- Deferred Python-only sections may remain in config: `chronicler`, `chronicler.quests`, `quests`, `rooms.*.proactive`.
+- Deferred Python-only sections may remain in config: `chronicler.quests`, `quests`, `rooms.*.proactive` (`chronicler` core runtime is now supported).
 - TS runtime ignores these sections when they are present but not explicitly enabled.
 - TS runtime fail-fast rejects explicitly enabled deferred sections (`enabled: true`) under those keys.
 - When inactive deferred sections are present, startup/CLI emits an operator warning that they are being ignored.

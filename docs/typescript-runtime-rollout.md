@@ -16,7 +16,7 @@ This checklist governs the cutover from the Python service runtime to the TypeSc
 1. **Build artifacts available**
    - `cd ts && npm ci && npm run build`
 2. **Config contract sanity**
-   - deferred Python-only sections may remain in config (`chronicler`, `chronicler.quests`, `quests`, `rooms.*.proactive`) but are ignored by TS unless explicitly enabled
+   - deferred Python-only sections may remain in config (`chronicler.quests`, `quests`, `rooms.*.proactive`) but are ignored by TS unless explicitly enabled (`chronicler` core runtime is now supported)
    - TS fail-fast rejects explicitly enabled deferred sections (`enabled: true`) for those keys
    - startup/CLI logs include an ignored-warning line when deferred sections are present but inactive
 3. **Provider credential contract sanity**
