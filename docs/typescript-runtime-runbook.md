@@ -43,17 +43,32 @@ npm run start -- --config /path/to/config.json
 
 ## TS logging contract (parity-critical)
 
+Python parity reference: `muaddib/message_logging.py`.
+
 1. Console emits operator-visible runtime lines at INFO+ (including warnings/errors) in Python-style format:
    - `YYYY-MM-DD HH:MM:SS,mmm - <logger-name> - <LEVEL> - <message>`
 2. TS runtime writes system logs under:
    - `$MUADDIB_HOME/logs/YYYY-MM-DD/system.log`
-3. Startup must always emit at least:
+3. Message-scoped context routing is enabled for direct/highlight message handling paths in IRC/Discord/Slack monitors.
+   - context fields: `arc`, `nick`, `message` preview
+   - arc shard path: `$MUADDIB_HOME/logs/YYYY-MM-DD/<arc-safe>/`
+   - per-message filename: `HH-MM-SS-<nick>-<preview>.log`
+   - `<arc-safe>` sanitization mirrors Python: only `/` and `\\` become `_`
+   - `<preview>` sanitization mirrors Python: first 50 chars, non-alnum -> `_`, collapse `_`, trim `_`, lowercase, fallback `msg`
+4. Message lifecycle markers are written to `system.log`:
+   - `Starting message log: <path>`
+   - `Finished message log: <path>`
+5. Startup must always emit at least:
    - runtime start line (`muaddib.app.main`)
    - enabled monitor lines (`Enabling ... room monitor`)
    - monitor run start lines (`muaddib.rooms.*.monitor`)
-4. Send retry/failure instrumentation remains operator-visible in both stdout and system log:
+6. Send retry/failure instrumentation remains operator-visible in both stdout and system log:
    - `[muaddib][send-retry]`
    - `[muaddib][metric]`
+
+Deferred detail (intentional):
+- Python `MessageContextHandler` keeps an LRU cache of open file handles.
+- TS runtime intentionally does append-per-write without an open-handle LRU cache for deterministic behavior and simpler failure surface.
 
 ## Operational checks after deploy
 
@@ -65,6 +80,12 @@ npm run start -- --config /path/to/config.json
    - `[muaddib][send-retry]` structured event lines (warn on retry, error on terminal failure)
    - `[muaddib][metric]` structured counter lines per retry/failure event
 6. `$MUADDIB_HOME/logs/YYYY-MM-DD/system.log` is created/updated by TS runtime startup.
+7. Per-message logs are being generated during direct/highlight handling:
+   - expected location: `$MUADDIB_HOME/logs/$(date +%F)/<arc-safe>/HH-MM-SS-<nick>-<preview>.log`
+   - quick checks:
+     - `find "$MUADDIB_HOME/logs/$(date +%F)" -mindepth 2 -maxdepth 2 -name "*.log" | head`
+     - `rg -n "Starting message log:|Finished message log:" "$MUADDIB_HOME/logs/$(date +%F)/system.log"`
+     - `rg -n "Processing direct (IRC|Discord|Slack) message" "$MUADDIB_HOME/logs/$(date +%F)"/*/*.log`
 
 ## Soak SLO checks (during rollback window)
 

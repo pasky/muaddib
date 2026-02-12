@@ -1,5 +1,10 @@
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
+import { RuntimeLogWriter } from "../src/app/logging.js";
 import { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { DiscordRoomMonitor } from "../src/rooms/discord/monitor.js";
 
@@ -45,6 +50,59 @@ describe("DiscordRoomMonitor", () => {
     expect(seenMessage).toBe("hello");
     expect(sent).toEqual(["ok"]);
 
+    await history.close();
+  });
+
+  it("writes direct-message logs to Discord arc-sharded files", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    const logsHome = await mkdtemp(join(tmpdir(), "muaddib-discord-message-logs-"));
+    const fixedNow = new Date(2026, 1, 12, 14, 15, 16, 321);
+    const runtimeLogs = new RuntimeLogWriter({
+      muaddibHome: logsHome,
+      nowProvider: () => fixedNow,
+      stdout: {
+        write: () => true,
+      } as unknown as NodeJS.WriteStream,
+    });
+
+    const monitor = new DiscordRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      logger: runtimeLogs.getLogger("muaddib.rooms.discord.monitor"),
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async () => {
+          runtimeLogs.getLogger("muaddib.tests.command").debug("inside discord direct handler");
+          return null;
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      guildId: "guild-1",
+      guildName: "Rossum",
+      channelId: "chan-1",
+      channelName: "general",
+      username: "alice",
+      content: "muaddib: check / parity",
+      mynick: "muaddib",
+      mentionsBot: true,
+    });
+
+    const datePath = fixedNow.toISOString().slice(0, 10);
+    const arcDir = join(logsHome, "logs", datePath, "discord:Rossum#general");
+    const arcFiles = await readdir(arcDir);
+
+    expect(arcFiles).toHaveLength(1);
+    expect(arcFiles[0]).toBe("14-15-16-alice-muaddib_check_parity.log");
+
+    const messageLog = await readFile(join(arcDir, arcFiles[0]), "utf-8");
+    expect(messageLog).toContain("inside discord direct handler");
+    expect(messageLog).toContain("Processing direct Discord message");
+
+    await rm(logsHome, { recursive: true, force: true });
     await history.close();
   });
 

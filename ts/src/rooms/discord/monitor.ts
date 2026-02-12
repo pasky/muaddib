@@ -189,26 +189,46 @@ export class DiscordRoomMonitor {
 
     const sender = this.options.sender;
 
-    await this.options.commandHandler.handleIncomingMessage(message, {
-      isDirect,
-      sendResponse: sender
-        ? async (text) => {
-            await sendWithRateLimitRetry(
-              async () => {
-                await sender.sendMessage(event.channelId, text, {
-                  replyToMessageId: event.messageId,
-                  mentionAuthor: true,
-                });
-              },
-              {
-                platform: "discord",
-                destination: event.channelId,
-                onEvent: this.options.onSendRetryEvent,
-              },
-            );
-          }
-        : undefined,
-    });
+    const handleIncoming = async (): Promise<void> => {
+      await this.options.commandHandler.handleIncomingMessage(message, {
+        isDirect,
+        sendResponse: sender
+          ? async (text) => {
+              await sendWithRateLimitRetry(
+                async () => {
+                  await sender.sendMessage(event.channelId, text, {
+                    replyToMessageId: event.messageId,
+                    mentionAuthor: true,
+                  });
+                },
+                {
+                  platform: "discord",
+                  destination: event.channelId,
+                  onEvent: this.options.onSendRetryEvent,
+                },
+              );
+            }
+          : undefined,
+      });
+    };
+
+    if (!isDirect) {
+      await handleIncoming();
+      return;
+    }
+
+    const arc = `${message.serverTag}#${message.channelName}`;
+    await this.logger.withMessageContext(
+      {
+        arc,
+        nick: message.nick,
+        message: event.content,
+      },
+      async () => {
+        this.logger.debug("Processing direct Discord message", `arc=${arc}`, `nick=${message.nick}`);
+        await handleIncoming();
+      },
+    );
   }
 
   async processMessageEditEvent(event: DiscordMessageEditEvent): Promise<void> {

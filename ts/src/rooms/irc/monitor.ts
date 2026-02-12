@@ -158,13 +158,33 @@ export class IrcRoomMonitor {
       content: isDirect ? cleanedMessage : normalizedMessage,
     };
 
-    await this.options.commandHandler.handleIncomingMessage(roomMessage, {
-      isDirect,
-      sendResponse: async (text) => {
-        const responseText = this.responseCleaner(text, roomMessage.nick);
-        await this.varlinkSender.sendMessage(channelName, responseText, server);
+    const handleIncoming = async (): Promise<void> => {
+      await this.options.commandHandler.handleIncomingMessage(roomMessage, {
+        isDirect,
+        sendResponse: async (text) => {
+          const responseText = this.responseCleaner(text, roomMessage.nick);
+          await this.varlinkSender.sendMessage(channelName, responseText, server);
+        },
+      });
+    };
+
+    if (!isDirect) {
+      await handleIncoming();
+      return;
+    }
+
+    const arc = `${server}#${channelName}`;
+    await this.logger.withMessageContext(
+      {
+        arc,
+        nick: effectiveNick,
+        message: normalizedMessage,
       },
-    });
+      async () => {
+        this.logger.debug("Processing direct IRC message", `arc=${arc}`, `nick=${effectiveNick}`);
+        await handleIncoming();
+      },
+    );
   }
 
   private async connectWithRetry(maxRetries = 5): Promise<boolean> {

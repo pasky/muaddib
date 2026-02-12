@@ -655,6 +655,8 @@ At end of each milestone:
   - fail-fast errors include concrete per-provider operator guidance (remove unsupported keys and use static key/env-var contract)
 - TS Discord/Slack adapters now include bounded retry behavior for outbound 429/rate-limit failures; non-rate-limit send errors remain fail-fast.
 - TS Discord/Slack monitor parity now includes message edit persistence (`platform_id` updates), thread/reply mapping semantics, and richer mention/identity normalization across transport/monitor boundaries.
+- TS runtime now includes Python-style per-message context-sharded logging for direct/highlight message handling (`logs/YYYY-MM-DD/<arc-safe>/HH-MM-SS-<nick>-<preview>.log`) with system-log lifecycle markers.
+- TS intentionally does append-per-write message log routing without Python's open-file LRU handle cache.
 - Python supports proactive interjections and chronicler/quests automation; TS parity target v1 intentionally does not.
 - TS still keeps storage-layer primitives (history + chronicle DB semantics) for migration continuity, but runtime automation for chronicling/proactive/quests remains deferred.
 
@@ -951,6 +953,23 @@ Completed in checkpoint 10:
   - Updated operator docs:
     - `docs/typescript-runtime-runbook.md`
     - `docs/typescript-runtime-rollout.md`
+
+- 2026-02-12: Milestone 7L checkpoint 12 complete (per-message context-sharded logging parity hardening).
+  - Added Python-parity TS message logging context routing in `ts/src/app/logging.ts`:
+    - per-message shard path: `$MUADDIB_HOME/logs/YYYY-MM-DD/<arc-safe>/HH-MM-SS-<nick>-<preview>.log`
+    - message lifecycle markers (`Starting message log` / `Finished message log`) in `system.log`
+    - fallback to `system.log` whenever no message context is active
+  - Wired direct/highlight message context around command handling in:
+    - `ts/src/rooms/irc/monitor.ts`
+    - `ts/src/rooms/discord/monitor.ts`
+    - `ts/src/rooms/slack/monitor.ts`
+  - Added failing-first parity tests for message-sharded logging and sanitization:
+    - `ts/tests/irc-monitor.test.ts`
+    - `ts/tests/discord-monitor.test.ts`
+  - Updated operator docs with explicit per-message log verification commands:
+    - `docs/typescript-runtime-runbook.md`
+    - `docs/typescript-runtime-rollout.md`
+  - Intentional deferred detail: TS keeps append-per-write behavior (no Python-style open-file LRU handle cache).
 
 Next steps:
 1. Continue live-soak regression intake; for any newly observed Slack/Discord/IRC runtime regression, add failing tests first then apply minimal deterministic fixes.

@@ -1,8 +1,15 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { inspect } from "node:util";
 
 type LogLevel = "DEBUG" | "INFO" | "WARNING" | "ERROR";
+
+export interface MessageLogContextInput {
+  arc: string;
+  nick: string;
+  message: string;
+}
 
 export interface RuntimeLogger {
   debug(message: string, ...data: unknown[]): void;
@@ -10,6 +17,7 @@ export interface RuntimeLogger {
   warn(message: string, ...data: unknown[]): void;
   error(message: string, ...data: unknown[]): void;
   child(name: string): RuntimeLogger;
+  withMessageContext<T>(context: MessageLogContextInput, run: () => Promise<T> | T): Promise<T>;
 }
 
 interface RuntimeLogWriterOptions {
@@ -17,6 +25,16 @@ interface RuntimeLogWriterOptions {
   nowProvider?: () => Date;
   stdout?: NodeJS.WriteStream;
 }
+
+interface RuntimeMessageContext {
+  arc: string;
+  nick: string;
+  messagePreview: string;
+  timestamp: Date;
+  logPath: string;
+}
+
+const messageContextStorage = new AsyncLocalStorage<RuntimeMessageContext | null>();
 
 export class RuntimeLogWriter {
   private readonly nowProvider: () => Date;
@@ -40,9 +58,22 @@ export class RuntimeLogWriter {
       this.stdout.write(line);
     }
 
-    const path = this.getSystemLogPath(now);
+    const context = messageContextStorage.getStore();
+    const path = context?.logPath ?? this.getSystemLogPath(now);
     mkdirSync(dirname(path), { recursive: true });
     appendFileSync(path, line, { encoding: "utf-8" });
+  }
+
+  async withMessageContext<T>(context: MessageLogContextInput, run: () => Promise<T> | T): Promise<T> {
+    const runtimeContext = createRuntimeMessageContext(context, this.options.muaddibHome, this.nowProvider());
+    this.write("INFO", "muaddib.message_logging", `Starting message log: ${runtimeContext.logPath}`, []);
+
+    try {
+      const result = await messageContextStorage.run(runtimeContext, async () => await run());
+      return result;
+    } finally {
+      this.write("INFO", "muaddib.message_logging", `Finished message log: ${runtimeContext.logPath}`, []);
+    }
   }
 
   getSystemLogPath(now: Date = this.nowProvider()): string {
@@ -79,6 +110,10 @@ class StructuredRuntimeLogger implements RuntimeLogger {
     }
     return new StructuredRuntimeLogger(`${this.name}.${name}`, this.writer);
   }
+
+  async withMessageContext<T>(context: MessageLogContextInput, run: () => Promise<T> | T): Promise<T> {
+    return await this.writer.withMessageContext(context, run);
+  }
 }
 
 export function createConsoleLogger(name: string): RuntimeLogger {
@@ -96,7 +131,42 @@ export function createConsoleLogger(name: string): RuntimeLogger {
       console.error(`${name} - ${message}`, ...data);
     },
     child: (childName: string) => createConsoleLogger(`${name}.${childName}`),
+    withMessageContext: async <T>(_context: MessageLogContextInput, run: () => Promise<T> | T): Promise<T> => {
+      return await run();
+    },
   };
+}
+
+function createRuntimeMessageContext(
+  input: MessageLogContextInput,
+  muaddibHome: string,
+  now: Date,
+): RuntimeMessageContext {
+  const date = now.toISOString().slice(0, 10);
+  const time = `${pad(now.getHours(), 2)}-${pad(now.getMinutes(), 2)}-${pad(now.getSeconds(), 2)}`;
+  const preview = sanitizeMessagePreview(input.message);
+  const arcSafe = input.arc.replaceAll("/", "_").replaceAll("\\", "_");
+
+  const filename = `${time}-${input.nick}-${preview}.log`;
+  const logPath = join(muaddibHome, "logs", date, arcSafe, filename);
+
+  return {
+    arc: input.arc,
+    nick: input.nick,
+    messagePreview: preview,
+    timestamp: now,
+    logPath,
+  };
+}
+
+function sanitizeMessagePreview(message: string): string {
+  const preview = message.slice(0, 50)
+    .replace(/[^a-zA-Z0-9]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toLowerCase();
+
+  return preview || "msg";
 }
 
 function renderMessage(message: string, data: unknown[]): string {

@@ -192,25 +192,45 @@ export class SlackRoomMonitor {
 
     const sender = this.options.sender;
 
-    await this.options.commandHandler.handleIncomingMessage(message, {
-      isDirect,
-      sendResponse: sender
-        ? async (text) => {
-            await sendWithRateLimitRetry(
-              async () => {
-                await sender.sendMessage(event.channelId, text, {
-                  threadTs: responseThreadId,
-                });
-              },
-              {
-                platform: "slack",
-                destination: event.channelId,
-                onEvent: this.options.onSendRetryEvent,
-              },
-            );
-          }
-        : undefined,
-    });
+    const handleIncoming = async (): Promise<void> => {
+      await this.options.commandHandler.handleIncomingMessage(message, {
+        isDirect,
+        sendResponse: sender
+          ? async (text) => {
+              await sendWithRateLimitRetry(
+                async () => {
+                  await sender.sendMessage(event.channelId, text, {
+                    threadTs: responseThreadId,
+                  });
+                },
+                {
+                  platform: "slack",
+                  destination: event.channelId,
+                  onEvent: this.options.onSendRetryEvent,
+                },
+              );
+            }
+          : undefined,
+      });
+    };
+
+    if (!isDirect) {
+      await handleIncoming();
+      return;
+    }
+
+    const arc = `${message.serverTag}#${message.channelName}`;
+    await this.logger.withMessageContext(
+      {
+        arc,
+        nick: message.nick,
+        message: message.content,
+      },
+      async () => {
+        this.logger.debug("Processing direct Slack message", `arc=${arc}`, `nick=${message.nick}`);
+        await handleIncoming();
+      },
+    );
   }
 
   async processMessageEditEvent(event: SlackMessageEditEvent): Promise<void> {

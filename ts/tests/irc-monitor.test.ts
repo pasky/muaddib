@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -380,6 +380,72 @@ describe("IrcRoomMonitor", () => {
     const systemLogPath = join(logsHome, "logs", datePath, "system.log");
     const systemLog = await readFile(systemLogPath, "utf-8");
     expect(systemLog).toContain("Connection attempt 1 failed");
+
+    await rm(logsHome, { recursive: true, force: true });
+    await history.close();
+  });
+
+  it("writes direct-message logs to arc-sharded files and keeps non-message logs in system.log", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    const logsHome = await mkdtemp(join(tmpdir(), "muaddib-irc-message-logs-"));
+    const fixedNow = new Date(2026, 1, 12, 13, 14, 15, 123);
+    const runtimeLogs = new RuntimeLogWriter({
+      muaddibHome: logsHome,
+      nowProvider: () => fixedNow,
+      stdout: {
+        write: () => true,
+      } as unknown as NodeJS.WriteStream,
+    });
+
+    runtimeLogs.getLogger("muaddib.tests.system").info("outside context marker");
+
+    const monitor = new IrcRoomMonitor({
+      roomConfig: {
+        varlink: {
+          socket_path: "/tmp/varlink.sock",
+        },
+      },
+      history,
+      logger: runtimeLogs.getLogger("muaddib.rooms.irc.monitor"),
+      commandHandler: {
+        shouldIgnoreUser: () => false,
+        handleIncomingMessage: async () => {
+          runtimeLogs.getLogger("muaddib.tests.command").debug("inside direct handler marker");
+          return null;
+        },
+      },
+      varlinkEvents: new FakeEventsClient(),
+      varlinkSender: new FakeSender(),
+    });
+
+    await monitor.processMessageEvent({
+      type: "message",
+      subtype: "public",
+      server: "libera/main",
+      target: "#ops\\room",
+      nick: "alice",
+      message: "muaddib: Hello THERE!!! / test",
+    });
+
+    const datePath = fixedNow.toISOString().slice(0, 10);
+    const arcDir = join(logsHome, "logs", datePath, "libera_main##ops_room");
+    const arcFiles = await readdir(arcDir);
+
+    expect(arcFiles).toHaveLength(1);
+    expect(arcFiles[0]).toBe("13-14-15-alice-muaddib_hello_there_test.log");
+
+    const messageLog = await readFile(join(arcDir, arcFiles[0]), "utf-8");
+    expect(messageLog).toContain("inside direct handler marker");
+    expect(messageLog).toContain("Processing direct IRC message");
+
+    const systemLogPath = join(logsHome, "logs", datePath, "system.log");
+    const systemLog = await readFile(systemLogPath, "utf-8");
+    expect(systemLog).toContain("outside context marker");
+    expect(systemLog).toContain("Starting message log:");
+    expect(systemLog).toContain("Finished message log:");
+    expect(systemLog).not.toContain("inside direct handler marker");
 
     await rm(logsHome, { recursive: true, force: true });
     await history.close();

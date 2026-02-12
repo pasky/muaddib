@@ -39,6 +39,10 @@ This checklist governs the cutover from the Python service runtime to the TypeSc
 - Logging parity hardened for operator observability:
   - stdout emits INFO+ lifecycle lines with Python-style formatting (`timestamp - logger - LEVEL - message`)
   - TS writes daily system logs to `$MUADDIB_HOME/logs/YYYY-MM-DD/system.log`
+  - TS routes direct/highlight message handling logs into Python-style message-sharded files:
+    - `$MUADDIB_HOME/logs/YYYY-MM-DD/<arc-safe>/HH-MM-SS-<nick>-<preview>.log`
+    - lifecycle markers (`Starting message log`, `Finished message log`) remain in `system.log`
+  - parity reference semantics are mirrored from `muaddib/message_logging.py` (including preview/arc sanitization); TS intentionally does append-per-write without Python's file-handle LRU cache
 
 ## Deployment sequence
 
@@ -53,6 +57,11 @@ This checklist governs the cutover from the Python service runtime to the TypeSc
    - retry/failure events: `[muaddib][send-retry]`
    - operator metric lines: `[muaddib][metric]`
    - startup/monitor lifecycle lines in stdout and `$MUADDIB_HOME/logs/YYYY-MM-DD/system.log`
+   - per-message shard files produced for direct/highlight messages under:
+     - `$MUADDIB_HOME/logs/YYYY-MM-DD/<arc-safe>/HH-MM-SS-<nick>-<preview>.log`
+   - quick verification commands:
+     - `find "$MUADDIB_HOME/logs/$(date +%F)" -mindepth 2 -maxdepth 2 -name "*.log" | head`
+     - `rg -n "Starting message log:|Finished message log:" "$MUADDIB_HOME/logs/$(date +%F)/system.log"`
 6. Expand to full deployment.
 
 ## Soak SLO guardrails (required during rollback window)
