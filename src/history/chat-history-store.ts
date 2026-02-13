@@ -427,7 +427,7 @@ export class ChatHistoryStore {
       `
       SELECT COALESCE(SUM(cost), 0) as total FROM llm_calls
       WHERE arc_name = ?
-      AND timestamp >= date('now', 'localtime')
+      AND timestamp >= date('now')
       `,
       arcName,
     );
