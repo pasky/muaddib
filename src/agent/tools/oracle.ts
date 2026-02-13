@@ -7,6 +7,7 @@ import type {
   BaselineToolExecutors,
   DefaultToolExecutorOptions,
   OracleInput,
+  ToolExecutorLogger,
 } from "./types.js";
 
 const DEFAULT_ORACLE_SYSTEM_PROMPT =
@@ -23,6 +24,8 @@ export const ORACLE_EXCLUDED_TOOLS = new Set([
   "subquest_start",
   "quest_snooze",
 ]);
+
+const ORACLE_LOG_SEPARATOR = "----------------------------------------------";
 
 export function createOracleTool(executors: Pick<BaselineToolExecutors, "oracle">): AgentTool<any> {
   return {
@@ -55,6 +58,7 @@ export function createDefaultOracleExecutor(
   options: DefaultToolExecutorOptions,
 ): BaselineToolExecutors["oracle"] {
   const modelAdapter = options.modelAdapter ?? new PiAiModelAdapter();
+  const logger: ToolExecutorLogger = options.logger ?? console;
 
   return async (input: OracleInput): Promise<string> => {
     const query = input.query.trim();
@@ -83,18 +87,23 @@ export function createDefaultOracleExecutor(
       maxIterations: options.oracleMaxIterations,
     });
 
+    logger.info(`${ORACLE_LOG_SEPARATOR} CONSULTING ORACLE: ${query.slice(0, 500)}...`);
+
     try {
       const result = await runner.prompt(query, {
         contextMessages: options.oracleConversationContext,
         thinkingLevel: "high",
       });
+      logger.info(`${ORACLE_LOG_SEPARATOR} Oracle response: ${result.text.slice(0, 500)}...`);
       return result.text;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes("iteration") || message.includes("max")) {
+        logger.info(`${ORACLE_LOG_SEPARATOR} Oracle exhausted: ${message}...`);
         return `Oracle exhausted iterations: ${message}`;
       }
-      throw error;
+      logger.info(`${ORACLE_LOG_SEPARATOR} Oracle failed: ${message}`);
+      return `Oracle error: ${message}`;
     }
   };
 }
