@@ -416,6 +416,7 @@ function createRoomCommandHandler(
       artifactsPath,
       artifactsUrl,
       getApiKey,
+      logger,
       oracleModel,
       oraclePrompt,
       imageGenModel,

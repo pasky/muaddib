@@ -89,10 +89,15 @@ export interface BaselineToolExecutors {
   questSnooze: (input: QuestSnoozeInput) => Promise<string>;
 }
 
+export interface ToolExecutorLogger {
+  info(...data: unknown[]): void;
+}
+
 export interface DefaultToolExecutorOptions {
   fetchImpl?: typeof fetch;
   jinaApiKey?: string;
   secrets?: Record<string, unknown>;
+  logger?: ToolExecutorLogger;
   maxWebContentLength?: number;
   maxImageBytes?: number;
   executeCodeTimeoutMs?: number;

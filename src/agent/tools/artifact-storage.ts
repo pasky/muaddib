@@ -49,6 +49,7 @@ export async function writeArtifactText(
   const filePath = join(artifactsPath, filename);
 
   await writeFile(filePath, content, "utf-8");
+  options.logger?.info(`Created artifact file: ${filePath}`);
 
   return toArtifactViewerUrl(artifactsUrl, filename);
 }
@@ -73,6 +74,7 @@ export async function writeArtifactBytes(
   const filePath = join(artifactsPath, filename);
 
   await writeFile(filePath, data);
+  options.logger?.info(`Created artifact file: ${filePath}`);
 
   return toArtifactViewerUrl(artifactsUrl, filename);
 }

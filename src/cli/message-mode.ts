@@ -186,6 +186,7 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
         artifactsPath,
         artifactsUrl,
         getApiKey,
+        logger: runtimeLogger.getLogger("muaddib.agent.tools"),
         oracleModel,
         oraclePrompt,
         imageGenModel,

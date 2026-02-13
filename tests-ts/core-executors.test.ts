@@ -62,10 +62,12 @@ function assistantTextMessage(text: string) {
 describe("core tool executors artifact support", () => {
   it("share_artifact writes text artifact and returns viewer URL", async () => {
     const { artifactsPath } = await makeArtifactsDir();
+    const logger = { info: vi.fn() };
 
     const executors = createDefaultToolExecutors({
       artifactsPath,
       artifactsUrl: "https://example.com/artifacts",
+      logger,
     });
 
     const result = await executors.shareArtifact("hello from ts");
@@ -81,6 +83,7 @@ describe("core tool executors artifact support", () => {
     const indexHtml = await readFile(join(artifactsPath, "index.html"), "utf-8");
     expect(indexHtml).toContain("<title>Artifact Viewer</title>");
     expect(indexHtml).toContain("Download raw file");
+    expect(logger.info).toHaveBeenCalledWith(expect.stringMatching(/^Created artifact file: /));
   });
 
   it("edit_artifact edits local artifact and preserves extension in derived artifact", async () => {

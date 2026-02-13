@@ -105,9 +105,9 @@ export class SessionRunner {
 
       if (event.type === "tool_execution_end") {
         if (event.isError) {
-          this.logger.warn(`Tool ${event.toolName} failed`);
+          this.logger.warn(`Tool ${event.toolName} failed: ${summarizeToolPayload(event.result, this.llmDebugMaxChars)}`);
         } else {
-          this.logger.info(`Tool ${event.toolName} executed`);
+          this.logger.info(`Tool ${event.toolName} executed: ${summarizeToolPayload(event.result, this.llmDebugMaxChars)}`);
         }
         if (this.llmDebugIo) {
           this.logger.debug(
@@ -363,6 +363,27 @@ function renderContentForDebug(content: unknown, maxChars: number): unknown {
 
     return block;
   });
+}
+
+function summarizeToolPayload(value: unknown, maxChars: number): string {
+  if (typeof value === "string") {
+    return truncateForDebug(value, maxChars);
+  }
+
+  if (Array.isArray(value)) {
+    const textItems = value
+      .filter((entry): entry is { type?: unknown; text?: unknown } => Boolean(entry) && typeof entry === "object")
+      .filter((entry) => entry.type === "text")
+      .map((entry) => String(entry.text ?? ""))
+      .join("\n")
+      .trim();
+
+    if (textItems.length > 0) {
+      return truncateForDebug(textItems, maxChars);
+    }
+  }
+
+  return safeJson(value, maxChars);
 }
 
 function safeJson(value: unknown, maxChars: number): string {
