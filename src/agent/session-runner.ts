@@ -80,6 +80,8 @@ export class SessionRunner {
     });
 
     const { session, agent } = sessionCtx;
+    const primaryProvider = this.modelAdapter.resolve(this.model).spec.provider;
+    await sessionCtx.ensureProviderKey(primaryProvider);
     let iterations = 0;
     let toolCallsCount = 0;
 
@@ -105,7 +107,13 @@ export class SessionRunner {
     });
 
     try {
-      await this.promptWithRefusalFallback(session, agent, prompt, options.refusalFallbackModel);
+      await this.promptWithRefusalFallback(
+        session,
+        agent,
+        prompt,
+        options.refusalFallbackModel,
+        sessionCtx.ensureProviderKey,
+      );
 
       let text = extractLastAssistantText(session.messages);
       for (let i = 0; i < 3 && !text; i += 1) {
@@ -139,7 +147,8 @@ export class SessionRunner {
     session: AgentSession,
     agent: Agent,
     prompt: string,
-    refusalFallbackModel?: string,
+    refusalFallbackModel: string | undefined,
+    ensureProviderKey: (provider: string) => Promise<void>,
   ): Promise<void> {
     try {
       await session.prompt(prompt);
@@ -149,6 +158,7 @@ export class SessionRunner {
       }
 
       const fallbackModel = this.modelAdapter.resolve(refusalFallbackModel);
+      await ensureProviderKey(fallbackModel.spec.provider);
       agent.setModel(fallbackModel.model);
       await session.prompt(prompt);
       return;
@@ -160,6 +170,7 @@ export class SessionRunner {
     }
 
     const fallbackModel = this.modelAdapter.resolve(refusalFallbackModel);
+    await ensureProviderKey(fallbackModel.spec.provider);
     agent.setModel(fallbackModel.model);
     await session.prompt(prompt);
   }

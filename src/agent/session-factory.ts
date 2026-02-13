@@ -43,6 +43,7 @@ export interface CreateAgentSessionInput {
 export interface CreateAgentSessionResult {
   session: AgentSession;
   agent: Agent;
+  ensureProviderKey: (provider: string) => Promise<void>;
   getVisionFallbackActivated: () => boolean;
   dispose: () => void;
 }
@@ -70,14 +71,8 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
   };
 
   const authStorage = new AuthStorage();
-  authStorage.setFallbackResolver((provider) => {
-    const value = input.getApiKey?.(provider);
-    if (typeof value === "string") {
-      const trimmed = value.trim();
-      return trimmed.length > 0 ? trimmed : undefined;
-    }
-    return undefined;
-  });
+  const authBridge = new MuaddibConfigBackedAuthBridge(input.getApiKey);
+  authStorage.setFallbackResolver((provider) => authBridge.resolveSync(provider));
   const modelRegistry = new ModelRegistry(authStorage);
 
   const agent = new Agent({
@@ -152,12 +147,71 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
   return {
     session,
     agent,
+    ensureProviderKey: async (provider: string) => {
+      const key = await authBridge.resolveAsync(provider);
+      if (!key) {
+        return;
+      }
+      authStorage.set(provider, { type: "api_key", key });
+    },
     getVisionFallbackActivated: () => visionFallbackActivated,
     dispose: () => {
       unsubscribe();
       session.dispose();
     },
   };
+}
+
+class MuaddibConfigBackedAuthBridge {
+  private readonly cache = new Map<string, string>();
+
+  constructor(
+    private readonly getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined,
+  ) {}
+
+  resolveSync(provider: string): string | undefined {
+    const cached = this.cache.get(provider);
+    if (cached) {
+      return cached;
+    }
+
+    const value = this.getApiKey?.(provider);
+    if (typeof value !== "string") {
+      return undefined;
+    }
+
+    const normalized = normalizeApiKey(value);
+    if (!normalized) {
+      return undefined;
+    }
+
+    this.cache.set(provider, normalized);
+    return normalized;
+  }
+
+  async resolveAsync(provider: string): Promise<string | undefined> {
+    const cached = this.cache.get(provider);
+    if (cached) {
+      return cached;
+    }
+
+    if (!this.getApiKey) {
+      return undefined;
+    }
+
+    const value = await this.getApiKey(provider);
+    if (typeof value !== "string") {
+      return undefined;
+    }
+
+    const normalized = normalizeApiKey(value);
+    if (!normalized) {
+      return undefined;
+    }
+
+    this.cache.set(provider, normalized);
+    return normalized;
+  }
 }
 
 function applySystemPromptOverrideToSession(session: AgentSession, override: string): void {
@@ -272,6 +326,11 @@ function hasImageToolOutput(value: unknown): boolean {
   }
 
   return false;
+}
+
+function normalizeApiKey(value: string): string | undefined {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 function normalizePositiveInteger(value: unknown, fallback: number): number {
