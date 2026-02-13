@@ -258,6 +258,10 @@ export class MuaddibAgentRunner {
     const persistentToolCalls: PersistentToolCall[] = [];
     const toolArgsByCallId = new Map<string, unknown>();
     let toolCallsCount = 0;
+    const turnState: { latestAcceptedFinalAnswer: FinalAnswerEvaluation | null } = {
+      latestAcceptedFinalAnswer: null,
+    };
+
     const unsubscribe = this.agent.subscribe((event) => {
       if (event.type === "tool_execution_start") {
         toolCallsCount += 1;
@@ -265,43 +269,65 @@ export class MuaddibAgentRunner {
         return;
       }
 
-      if (event.type !== "tool_execution_end") {
+      if (event.type === "tool_execution_end") {
+        const input = toolArgsByCallId.get(event.toolCallId);
+        toolArgsByCallId.delete(event.toolCallId);
+
+        if (event.isError) {
+          this.logger.warn(`Tool ${event.toolName} failed: ${formatToolResultPreviewForInfo(event.result)}`);
+          this.logger.debug(
+            `Tool ${event.toolName} error details: ${renderToolResultDetailsForLog(event.result)}`,
+          );
+          return;
+        }
+
+        this.logger.info(`Tool ${event.toolName} executed: ${formatToolResultPreviewForInfo(event.result)}`);
+        this.logger.debug(
+          `Tool ${event.toolName} result details: ${renderToolResultDetailsForLog(event.result)}`,
+        );
+
+        if (!visionFallbackInUse && visionFallbackModel && hasImageToolOutput(event.result)) {
+          visionFallbackInUse = true;
+          visionFallbackActivated = true;
+        }
+
+        const persistType = getToolPersistType(event.toolName);
+        if (!persistType) {
+          return;
+        }
+
+        persistentToolCalls.push({
+          toolName: event.toolName,
+          input,
+          output: event.result,
+          persistType,
+          artifactUrls: extractArtifactUrls(event.result),
+        });
         return;
       }
 
-      const input = toolArgsByCallId.get(event.toolCallId);
-      toolArgsByCallId.delete(event.toolCallId);
+      if (event.type !== "turn_end" || event.message.role !== "assistant") {
+        return;
+      }
 
-      if (event.isError) {
-        this.logger.warn(`Tool ${event.toolName} failed: ${formatToolResultPreviewForInfo(event.result)}`);
-        this.logger.debug(
-          `Tool ${event.toolName} error details: ${renderToolResultDetailsForLog(event.result)}`,
+      const finalAnswerEvaluation = evaluateFinalAnswerToolResultForTurn(
+        event.message as AssistantMessage,
+        event.toolResults,
+      );
+      if (!finalAnswerEvaluation) {
+        return;
+      }
+
+      if (!finalAnswerEvaluation.accepted) {
+        this.logger.warn(
+          "Rejecting final_answer as terminal response",
+          `reason=${finalAnswerEvaluation.rejectionReason ?? "invalid_final_answer_turn"}`,
+          `tools=${finalAnswerEvaluation.toolNamesInTurn.join(",")}`,
         );
         return;
       }
 
-      this.logger.info(`Tool ${event.toolName} executed: ${formatToolResultPreviewForInfo(event.result)}`);
-      this.logger.debug(
-        `Tool ${event.toolName} result details: ${renderToolResultDetailsForLog(event.result)}`,
-      );
-
-      if (!visionFallbackInUse && visionFallbackModel && hasImageToolOutput(event.result)) {
-        visionFallbackInUse = true;
-        visionFallbackActivated = true;
-      }
-
-      const persistType = getToolPersistType(event.toolName);
-      if (!persistType) {
-        return;
-      }
-
-      persistentToolCalls.push({
-        toolName: event.toolName,
-        input,
-        output: event.result,
-        persistType,
-        artifactUrls: extractArtifactUrls(event.result),
-      });
+      turnState.latestAcceptedFinalAnswer = finalAnswerEvaluation;
     });
 
     let completionAttempt = 0;
@@ -311,6 +337,7 @@ export class MuaddibAgentRunner {
         const promptText = completionAttempt === 0 ? prompt : emptyCompletionRetryPrompt;
         const images = completionAttempt === 0 ? (options.images ?? []) : [];
 
+        resetLatestAcceptedFinalAnswer(turnState);
         await this.agent.prompt(promptText, images);
 
         const runMessages = this.agent.state.messages.slice(runStartIndex);
@@ -319,18 +346,10 @@ export class MuaddibAgentRunner {
           throw new Error("No assistant response produced by agent.");
         }
 
-        const finalAnswerEvaluation = evaluateLatestFinalAnswerToolResult(runMessages);
-        if (finalAnswerEvaluation && !finalAnswerEvaluation.accepted) {
-          this.logger.warn(
-            "Rejecting final_answer as terminal response",
-            `reason=${finalAnswerEvaluation.rejectionReason ?? "invalid_final_answer_turn"}`,
-            `tools=${finalAnswerEvaluation.toolNamesInTurn.join(",")}`,
-          );
-        }
-
+        const acceptedFinalAnswer: FinalAnswerEvaluation | null = turnState.latestAcceptedFinalAnswer;
         const agentError = this.agent.state.error?.trim();
         if (agentError) {
-          if (finalAnswerEvaluation?.accepted) {
+          if (acceptedFinalAnswer) {
             this.logger.warn(
               "Agent run ended with stream error after accepted final_answer; returning final_answer result.",
               `error=${agentError}`,
@@ -338,13 +357,13 @@ export class MuaddibAgentRunner {
 
             const finalText =
               visionFallbackActivated && visionFallbackModel
-                ? `${finalAnswerEvaluation.text} [image fallback to ${modelSlug(visionFallbackModel.spec.modelId)}]`
-                : finalAnswerEvaluation.text;
+                ? `${acceptedFinalAnswer.text} [image fallback to ${modelSlug(visionFallbackModel.spec.modelId)}]`
+                : acceptedFinalAnswer.text;
 
             return {
-              assistantMessage: finalAnswerEvaluation.assistantMessage,
+              assistantMessage: acceptedFinalAnswer.assistantMessage,
               text: finalText,
-              stopReason: finalAnswerEvaluation.assistantMessage.stopReason,
+              stopReason: acceptedFinalAnswer.assistantMessage.stopReason,
               usage: sumAssistantUsage(runMessages),
               iterations: iterationCount,
               completionAttempts: completionAttempt + 1,
@@ -356,14 +375,13 @@ export class MuaddibAgentRunner {
         }
 
         const assistantCompletionText = findLastNonEmptyAssistantText(runMessages);
-        const completionText =
-          assistantCompletionText || (finalAnswerEvaluation?.accepted ? finalAnswerEvaluation.text : "");
+        const completionText = assistantCompletionText || (acceptedFinalAnswer?.text ?? "");
 
         if (completionText) {
           const responseAssistantMessage =
             assistantCompletionText
               ? assistantMessage
-              : (finalAnswerEvaluation?.assistantMessage ?? assistantMessage);
+              : (acceptedFinalAnswer?.assistantMessage ?? assistantMessage);
 
           const finalText =
             visionFallbackActivated && visionFallbackModel
@@ -536,94 +554,64 @@ function findLastNonEmptyAssistantText(messages: AgentMessage[]): string {
   return "";
 }
 
-function evaluateLatestFinalAnswerToolResult(messages: AgentMessage[]): FinalAnswerEvaluation | null {
-  const toolCallTurns = new Map<
-    string,
-    {
-      assistantMessage: AssistantMessage;
-      toolNamesInTurn: Set<string>;
-    }
-  >();
-
-  for (const message of messages) {
-    if (message.role !== "assistant") {
-      continue;
-    }
-
-    const assistantMessage = message as AssistantMessage;
-    const toolCalls = assistantMessage.content.filter((content) => content.type === "toolCall");
-    if (toolCalls.length === 0) {
-      continue;
-    }
-
-    const toolNamesInTurn = new Set(toolCalls.map((toolCall) => toolCall.name));
-    for (const toolCall of toolCalls) {
-      toolCallTurns.set(toolCall.id, {
-        assistantMessage,
-        toolNamesInTurn,
-      });
-    }
+function evaluateFinalAnswerToolResultForTurn(
+  assistantMessage: AssistantMessage,
+  toolResults: ToolResultMessage[],
+): FinalAnswerEvaluation | null {
+  const finalAnswerToolResult = [...toolResults]
+    .reverse()
+    .find((toolResult) => toolResult.toolName === "final_answer" && !toolResult.isError);
+  if (!finalAnswerToolResult) {
+    return null;
   }
 
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i];
-    if (message.role !== "toolResult") {
-      continue;
-    }
+  const text = finalAnswerToolResult.content
+    .filter((content) => content.type === "text")
+    .map((content) => content.text)
+    .join("\n")
+    .trim();
+  const cleaned = stripThinkingTags(text);
+  if (!cleaned || cleaned === "...") {
+    return null;
+  }
 
-    const toolResult = message as ToolResultMessage;
-    if (toolResult.toolName !== "final_answer" || toolResult.isError) {
-      continue;
-    }
+  const toolNamesInTurn = Array.from(
+    new Set(
+      assistantMessage.content
+        .filter((content) => content.type === "toolCall")
+        .map((toolCall) => toolCall.name),
+    ),
+  );
 
-    const text = toolResult.content
-      .filter((content) => content.type === "text")
-      .map((content) => content.text)
-      .join("\n")
-      .trim();
-    const cleaned = stripThinkingTags(text);
-    if (!cleaned || cleaned === "...") {
-      return null;
-    }
-
-    const turn = toolCallTurns.get(toolResult.toolCallId);
-    if (!turn) {
-      return null;
-    }
-
-    const toolNamesInTurn = Array.from(turn.toolNamesInTurn);
-    const disallowedTools = toolNamesInTurn.filter((toolName) => !FINAL_ANSWER_ALLOWED_WITH.has(toolName));
-    if (disallowedTools.length > 0) {
-      return {
-        accepted: false,
-        text: cleaned,
-        assistantMessage: turn.assistantMessage,
-        toolNamesInTurn,
-        rejectionReason: "disallowed_tool_combo",
-      };
-    }
-
-    const hasQuestTool = toolNamesInTurn.some((toolName) => FINAL_ANSWER_QUEST_TOOLS.has(toolName));
-    const hasMakePlan = toolNamesInTurn.includes("make_plan");
-    if (hasMakePlan && !hasQuestTool) {
-      return {
-        accepted: false,
-        text: cleaned,
-        assistantMessage: turn.assistantMessage,
-        toolNamesInTurn,
-        rejectionReason: "make_plan_without_quest_tool",
-      };
-    }
-
+  const disallowedTools = toolNamesInTurn.filter((toolName) => !FINAL_ANSWER_ALLOWED_WITH.has(toolName));
+  if (disallowedTools.length > 0) {
     return {
-      accepted: true,
+      accepted: false,
       text: cleaned,
-      assistantMessage: turn.assistantMessage,
+      assistantMessage,
       toolNamesInTurn,
+      rejectionReason: "disallowed_tool_combo",
     };
   }
 
-  return null;
+  const hasQuestTool = toolNamesInTurn.some((toolName) => FINAL_ANSWER_QUEST_TOOLS.has(toolName));
+  const hasMakePlan = toolNamesInTurn.includes("make_plan");
+  if (hasMakePlan && !hasQuestTool) {
+    return {
+      accepted: false,
+      text: cleaned,
+      assistantMessage,
+      toolNamesInTurn,
+      rejectionReason: "make_plan_without_quest_tool",
+    };
+  }
+
+  return {
+    accepted: true,
+    text: cleaned,
+    assistantMessage,
+    toolNamesInTurn,
+  };
 }
 
 function stripThinkingTags(text: string): string {
@@ -1010,4 +998,8 @@ function normalizeNonNegativeInteger(value: unknown, fallback: number): number {
     return fallback;
   }
   return Math.floor(parsed);
+}
+
+function resetLatestAcceptedFinalAnswer(state: { latestAcceptedFinalAnswer: FinalAnswerEvaluation | null }): void {
+  state.latestAcceptedFinalAnswer = null;
 }
