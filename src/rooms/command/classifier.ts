@@ -59,7 +59,7 @@ export function createModeClassifier(
           callType: "mode_classifier",
           logger,
           getApiKey: options.getApiKey,
-          streamOptions: { maxTokens: 16 },
+          streamOptions: { reasoning: "minimal" },
         },
       );
 
