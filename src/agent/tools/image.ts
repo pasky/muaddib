@@ -1,7 +1,7 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 
-import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
+import { parseModelSpec } from "../../models/model-spec.js";
 import type {
   BaselineToolExecutors,
   DefaultToolExecutorOptions,
@@ -64,7 +64,6 @@ export function createDefaultGenerateImageExecutor(
   options: DefaultToolExecutorOptions,
 ): BaselineToolExecutors["generateImage"] {
   const fetchImpl = getFetch(options);
-  const modelAdapter = options.modelAdapter ?? new PiAiModelAdapter();
   const openRouterBaseUrl = (toConfiguredString(options.openRouterBaseUrl) ?? DEFAULT_OPENROUTER_BASE_URL).replace(/\/+$/, "");
   const maxImageBytes = options.maxImageBytes ?? DEFAULT_IMAGE_LIMIT;
   const timeoutMs = options.imageGenTimeoutMs ?? DEFAULT_IMAGE_GEN_TIMEOUT_MS;
@@ -80,12 +79,12 @@ export function createDefaultGenerateImageExecutor(
       throw new Error("generate_image tool requires tools.image_gen.model configuration.");
     }
 
-    const resolvedModel = modelAdapter.resolve(configuredModel);
-    if (resolvedModel.spec.provider !== "openrouter") {
-      throw new Error(`tools.image_gen.model must use openrouter provider, got: ${resolvedModel.spec.provider}`);
+    const modelSpec = parseModelSpec(configuredModel);
+    if (modelSpec.provider !== "openrouter") {
+      throw new Error(`tools.image_gen.model must use openrouter provider, got: ${modelSpec.provider}`);
     }
 
-    const apiKey = await resolveApiKeyForProvider(options, String(resolvedModel.model.provider));
+    const apiKey = await resolveOpenRouterApiKey(options);
     if (!apiKey) {
       throw new Error(
         "generate_image requires OpenRouter API key via providers.openrouter.key or OPENROUTER_API_KEY.",
@@ -113,7 +112,7 @@ export function createDefaultGenerateImageExecutor(
     const responsePayload = await callOpenRouterImageGeneration(fetchImpl, {
       baseUrl: openRouterBaseUrl,
       apiKey,
-      modelId: resolvedModel.model.id,
+      modelId: modelSpec.modelId,
       timeoutMs,
       contentBlocks,
     });
@@ -366,20 +365,13 @@ async function resolveProviderApiKey(
   return toConfiguredString(key);
 }
 
-async function resolveApiKeyForProvider(
-  options: DefaultToolExecutorOptions,
-  provider: string,
-): Promise<string | undefined> {
-  const fromConfig = await resolveProviderApiKey(options, provider);
+async function resolveOpenRouterApiKey(options: DefaultToolExecutorOptions): Promise<string | undefined> {
+  const fromConfig = await resolveProviderApiKey(options, "openrouter");
   if (fromConfig) {
     return fromConfig;
   }
 
-  if (provider === "openrouter") {
-    return toConfiguredString(process.env.OPENROUTER_API_KEY);
-  }
-
-  return undefined;
+  return toConfiguredString(process.env.OPENROUTER_API_KEY);
 }
 
 function toConfiguredString(value: unknown): string | undefined {
