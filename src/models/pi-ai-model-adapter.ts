@@ -106,20 +106,6 @@ export class PiAiModelAdapter {
     const logger = options.logger;
     const maxChars = Math.max(500, Math.floor(options.maxChars ?? 120_000));
 
-    logger?.debug(
-      `llm_io request ${callType}`,
-      safeJson(
-        {
-          model: resolved.spec.raw,
-          provider: resolved.spec.provider,
-          modelId: resolved.spec.modelId,
-          context,
-          options: options.streamOptions ?? {},
-        },
-        maxChars,
-      ),
-    );
-
     try {
       const response = await completeSimple(
         resolved.model,
