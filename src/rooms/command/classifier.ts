@@ -1,5 +1,4 @@
 import {
-  completeSimple,
   type AssistantMessage,
   type Model,
   type SimpleStreamOptions,
@@ -34,7 +33,7 @@ export function createModeClassifier(
   options: ModeClassifierOptions = {},
 ): (context: Array<{ role: string; content: string }>) => Promise<string> {
   const adapter = options.modelAdapter ?? new PiAiModelAdapter();
-  const completeFn = options.completeFn ?? completeSimple;
+  const completeFn = options.completeFn;
   const logger = options.logger ?? noopModeClassifierLogger();
 
   return async (context: Array<{ role: string; content: string }>): Promise<string> => {
@@ -48,7 +47,7 @@ export function createModeClassifier(
     }
 
     try {
-      const classifierModel = adapter.resolve(commandConfig.mode_classifier.model).model;
+      const classifierModelSpec = commandConfig.mode_classifier.model;
       const llmMessages = context.map<UserMessage>((entry) => ({
         role: "user",
         content:
@@ -64,17 +63,35 @@ export function createModeClassifier(
 
       const prompt = classifierPrompt.replace("{message}", currentMessage);
 
-      const response = await completeFn(
-        classifierModel,
-        {
-          messages: llmMessages,
-          systemPrompt: `${prompt}\n\nReturn exactly one classifier label token. No explanation. If uncertain, pick the best label.`,
-        },
-        {
-          apiKey: options.getApiKey ? await options.getApiKey(classifierModel.provider) : undefined,
-          maxTokens: 16,
-        },
-      );
+      const response = completeFn
+        ? await completeFn(
+            adapter.resolve(classifierModelSpec).model,
+            {
+              messages: llmMessages,
+              systemPrompt: `${prompt}\n\nReturn exactly one classifier label token. No explanation. If uncertain, pick the best label.`,
+            },
+            {
+              apiKey: options.getApiKey
+                ? await options.getApiKey(adapter.resolve(classifierModelSpec).spec.provider)
+                : undefined,
+              maxTokens: 16,
+            },
+          )
+        : await adapter.completeSimple(
+            classifierModelSpec,
+            {
+              messages: llmMessages,
+              systemPrompt: `${prompt}\n\nReturn exactly one classifier label token. No explanation. If uncertain, pick the best label.`,
+            },
+            {
+              callType: "mode_classifier",
+              logger,
+              getApiKey: options.getApiKey,
+              streamOptions: {
+                maxTokens: 16,
+              },
+            },
+          );
 
       const responseText = response.content
         .filter((block) => block.type === "text")

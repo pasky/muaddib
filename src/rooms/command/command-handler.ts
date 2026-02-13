@@ -1,5 +1,5 @@
 import type { AgentMessage, AgentTool, ThinkingLevel } from "@mariozechner/pi-agent-core";
-import { completeSimple, type Usage } from "@mariozechner/pi-ai";
+import { type Usage } from "@mariozechner/pi-ai";
 
 import {
   SessionRunner,
@@ -94,7 +94,6 @@ export interface CommandHandlerOptions {
     maxIterations?: number;
     maxCompletionRetries?: number;
     emptyCompletionRetryPrompt?: string;
-    llmDebugIo?: boolean;
     llmDebugMaxChars?: number;
   };
 }
@@ -161,7 +160,6 @@ export class RoomCommandHandlerTs {
           getApiKey: options.getApiKey,
           maxIterations: options.agentLoop?.maxIterations,
           emptyCompletionRetryPrompt: options.agentLoop?.emptyCompletionRetryPrompt,
-          llmDebugIo: options.agentLoop?.llmDebugIo,
           llmDebugMaxChars: options.agentLoop?.llmDebugMaxChars,
           logger: input.logger,
         }));
@@ -179,6 +177,7 @@ export class RoomCommandHandlerTs {
         config: options.contextReducerConfig,
         modelAdapter: this.modelAdapter,
         getApiKey: options.getApiKey,
+        logger: this.logger,
       });
     this.autoChronicler = options.autoChronicler ?? null;
     this.chronicleStore = options.chronicleStore ?? null;
@@ -895,9 +894,8 @@ export class RoomCommandHandlerTs {
     }
 
     try {
-      const summaryModel = this.modelAdapter.resolve(this.options.persistenceSummaryModel);
-      const summaryResponse = await completeSimple(
-        summaryModel.model,
+      const summaryResponse = await this.modelAdapter.completeSimple(
+        this.options.persistenceSummaryModel,
         {
           systemPrompt: PERSISTENCE_SUMMARY_SYSTEM_PROMPT,
           messages: [
@@ -909,9 +907,9 @@ export class RoomCommandHandlerTs {
           ],
         },
         {
-          apiKey: this.options.getApiKey
-            ? await this.options.getApiKey(summaryModel.spec.provider)
-            : undefined,
+          callType: "tool_persistence_summary",
+          logger: this.logger,
+          getApiKey: this.options.getApiKey,
         },
       );
 

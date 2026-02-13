@@ -20,7 +20,6 @@ export interface SessionRunnerOptions {
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   maxIterations?: number;
   emptyCompletionRetryPrompt?: string;
-  llmDebugIo?: boolean;
   llmDebugMaxChars?: number;
   logger?: RunnerLogger;
 }
@@ -54,7 +53,6 @@ export class SessionRunner {
   private readonly maxIterations?: number;
   private readonly logger: RunnerLogger;
   private readonly emptyCompletionRetryPrompt: string;
-  private readonly llmDebugIo: boolean;
   private readonly llmDebugMaxChars: number;
 
   constructor(options: SessionRunnerOptions) {
@@ -67,7 +65,6 @@ export class SessionRunner {
     this.logger = options.logger ?? console;
     this.emptyCompletionRetryPrompt =
       options.emptyCompletionRetryPrompt ?? DEFAULT_EMPTY_COMPLETION_RETRY_PROMPT;
-    this.llmDebugIo = true;
     this.llmDebugMaxChars = Math.max(500, Math.floor(options.llmDebugMaxChars ?? 12_000));
   }
 
@@ -109,16 +106,14 @@ export class SessionRunner {
         } else {
           this.logger.info(`Tool ${event.toolName} executed: ${summarizeToolPayload(event.result, this.llmDebugMaxChars)}`);
         }
-        if (this.llmDebugIo) {
-          this.logger.debug(
-            "tool_execution_end details",
-            safeJson({
-              toolName: event.toolName,
-              isError: event.isError,
-              result: event.result,
-            }, this.llmDebugMaxChars),
-          );
-        }
+        this.logger.debug(
+          "tool_execution_end details",
+          safeJson({
+            toolName: event.toolName,
+            isError: event.isError,
+            result: event.result,
+          }, this.llmDebugMaxChars),
+        );
       }
     });
 
@@ -166,10 +161,6 @@ export class SessionRunner {
   }
 
   private logLlmIo(stage: string, messages: readonly unknown[]): void {
-    if (!this.llmDebugIo) {
-      return;
-    }
-
     const rendered = messages.map((message) => renderMessageForDebug(message, this.llmDebugMaxChars));
     this.logger.debug(`llm_io ${stage}`, safeJson(rendered, this.llmDebugMaxChars));
   }
@@ -388,7 +379,7 @@ function summarizeToolPayload(value: unknown, maxChars: number): string {
 
 function safeJson(value: unknown, maxChars: number): string {
   try {
-    return truncateForDebug(JSON.stringify(value), maxChars);
+    return truncateForDebug(JSON.stringify(value, null, 2), maxChars);
   } catch {
     return "[unserializable payload]";
   }

@@ -73,7 +73,6 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
 
   const maxIterations = numberOrUndefined(actorConfig?.max_iterations);
   const maxCompletionRetries = numberOrUndefined(actorConfig?.max_completion_retries);
-  const llmDebugIo = actorConfig?.llm_debug_io === true;
   const llmDebugMaxChars = numberOrUndefined(actorConfig?.llm_debug_max_chars);
   const contextReducerModel = stringOrUndefined(contextReducerConfig?.model);
   const contextReducerPrompt = stringOrUndefined(contextReducerConfig?.prompt);
@@ -124,6 +123,7 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
         config: lifecycleConfig,
         modelAdapter,
         getApiKey,
+        logger: runtimeLogger.getLogger("muaddib.chronicle.lifecycle"),
       });
 
       autoChronicler = new AutoChroniclerTs({
@@ -155,7 +155,6 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
         modelAdapter,
         getApiKey,
         maxIterations,
-        llmDebugIo,
         llmDebugMaxChars,
         logger: input.logger,
       });
@@ -163,7 +162,11 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
     const commandHandler = new RoomCommandHandlerTs({
       roomConfig,
       history,
-      classifyMode: createModeClassifier(commandConfig, { getApiKey, modelAdapter }),
+      classifyMode: createModeClassifier(commandConfig, {
+        getApiKey,
+        modelAdapter,
+        logger: runtimeLogger.getLogger("muaddib.rooms.command"),
+      }),
       getApiKey,
       modelAdapter,
       refusalFallbackModel,
@@ -178,7 +181,6 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
       agentLoop: {
         maxIterations,
         maxCompletionRetries,
-        llmDebugIo,
         llmDebugMaxChars,
       },
       toolOptions: {
