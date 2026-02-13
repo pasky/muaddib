@@ -86,7 +86,8 @@ describe("ContextReducerTs", () => {
     ]);
 
     // Verify the formatted context sent to the LLM
-    const sentMessages = completeFn.mock.calls[0][1].messages;
+    const firstCall = completeFn.mock.calls[0] as any[];
+    const sentMessages = firstCall[1].messages;
     expect(sentMessages[0].content).toContain("## AGENT SYSTEM PROMPT");
     expect(sentMessages[0].content).toContain("agent system prompt");
     expect(sentMessages[0].content).toContain("[USER]: long question");
@@ -95,8 +96,8 @@ describe("ContextReducerTs", () => {
     expect(sentMessages[0].content).toContain("follow up");
 
     // Verify system prompt and options
-    expect(completeFn.mock.calls[0][1].systemPrompt).toBe("Condense the conversation");
-    expect(completeFn.mock.calls[0][2]).toMatchObject({ maxTokens: 2048 });
+    expect(firstCall[1].systemPrompt).toBe("Condense the conversation");
+    expect(firstCall[2]).toMatchObject({ maxTokens: 2048 });
   });
 
   it("reduce wraps plain text response in context_summary tag", async () => {
@@ -183,7 +184,8 @@ describe("ContextReducerTs", () => {
     );
 
     expect(getApiKey).toHaveBeenCalledWith("openai");
-    expect(completeFn.mock.calls[0][2]).toMatchObject({ apiKey: "sk-test" });
+    const firstCall = completeFn.mock.calls[0] as any[];
+    expect(firstCall[2]).toMatchObject({ apiKey: "sk-test" });
   });
 
   it("reduce handles multi-turn parsed response correctly", async () => {

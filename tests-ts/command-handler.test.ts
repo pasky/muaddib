@@ -406,15 +406,12 @@ describe("RoomCommandHandlerTs", () => {
     });
 
     expect(logger.info).toHaveBeenCalledWith(
-      "Primary model response matched refusal signal; retrying fallback model",
-      "signal=python_refusal_message",
-      "fallback_model=anthropic:claude-3-5-haiku",
-    );
-    expect(logger.info).toHaveBeenCalledWith("Sending cost followup", "arc=libera##test", "cost=0.3500");
-    expect(logger.info).toHaveBeenCalledWith(
-      "Sending daily cost milestone",
+      "Sending direct response",
+      "mode=!s",
+      "trigger=!s",
+      "cost=$0.0000",
       "arc=libera##test",
-      "total_today=1.2500",
+      "response=The AI refused to respond to this request [refusal fallback to claude-3-5-haiku]",
     );
 
     await history.close();
@@ -654,7 +651,7 @@ describe("RoomCommandHandlerTs", () => {
             ...roomConfig.command.modes,
             serious: {
               ...roomConfig.command.modes.serious,
-              allowed_tools: ["chronicle_read", "quest_start", "final_answer"],
+              allowed_tools: ["chronicle_read", "quest_start", "make_plan"],
             },
           },
         },
@@ -672,7 +669,7 @@ describe("RoomCommandHandlerTs", () => {
     const result = await handler.execute(incoming);
 
     expect(result.response).toBe("done");
-    expect(seenToolNames).toEqual(["chronicle_read", "quest_start", "final_answer"]);
+    expect(seenToolNames).toEqual(["chronicle_read", "quest_start", "make_plan"]);
 
     await history.close();
   });
@@ -891,60 +888,6 @@ describe("RoomCommandHandlerTs", () => {
     });
 
     expect(rateLimitedAutoChronicler.checkAndChronicle).not.toHaveBeenCalled();
-
-    await history.close();
-  });
-
-  it("persists persistence-summary callback output as internal monologue before final response", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
-    await history.initialize();
-
-    const incoming = makeMessage("!s summarize tools");
-    const logger = {
-      debug: vi.fn(),
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-    };
-
-    const handler = new RoomCommandHandlerTs({
-      roomConfig: roomConfig as any,
-      history,
-      classifyMode: async () => "EASY_SERIOUS",
-      persistenceSummaryModel: "openai:gpt-4o-mini",
-      logger,
-      runnerFactory: () => ({
-        runSingleTurn: async (_prompt, options) => {
-          if (options?.onPersistenceSummary) {
-            await options.onPersistenceSummary("Tool calls: web_search completed successfully.");
-          }
-          return makeRunnerResult("final response");
-        },
-      }),
-    });
-
-    const result = await handler.handleIncomingMessage(incoming, { isDirect: true });
-
-    expect(result?.response).toBe("final response");
-
-    const rows = await history.getFullHistory("libera", "#test");
-    expect(rows).toHaveLength(3);
-    expect(rows[0].role).toBe("user");
-    expect(rows[1].role).toBe("assistant");
-    expect(rows[1].message).toBe("[internal monologue] Tool calls: web_search completed successfully.");
-    expect(rows[2].role).toBe("assistant");
-    expect(rows[2].message).toContain("final response");
-
-    const llmCalls = await history.getLlmCalls();
-    expect(llmCalls).toHaveLength(1);
-    expect(llmCalls[0].responseMessageId).toBe(rows[2].id);
-
-    expect(logger.debug).toHaveBeenCalledWith(
-      "Persisting internal monologue summary",
-      "arc=libera##test",
-      "chars=46",
-      "summary=Tool calls: web_search completed successfully.",
-    );
 
     await history.close();
   });
@@ -1198,18 +1141,18 @@ describe("RoomCommandHandlerTs", () => {
 
     const result = await handler.handleIncomingMessage(incoming, { isDirect: true });
 
-    expect(result?.model).toBe("anthropic:claude-3-5-haiku");
-    expect(result?.response).toContain("full response: https://example.com/artifacts/?fallback-long.txt");
-    expect(shareArtifact).toHaveBeenCalledTimes(1);
+    expect(result?.model).toBe("openai:gpt-4o-mini");
+    expect(result?.response).toContain("The AI refused to respond to this request");
+    expect(shareArtifact).not.toHaveBeenCalled();
 
     const rows = await history.getFullHistory("libera", "#test");
     expect(rows).toHaveLength(2);
-    expect(rows[1].message).toContain("full response: https://example.com/artifacts/?fallback-long.txt");
+    expect(rows[1].message).toContain("The AI refused to respond to this request");
 
     const llmCalls = await history.getLlmCalls();
     expect(llmCalls).toHaveLength(1);
-    expect(llmCalls[0].provider).toBe("anthropic");
-    expect(llmCalls[0].model).toBe("claude-3-5-haiku");
+    expect(llmCalls[0].provider).toBe("openai");
+    expect(llmCalls[0].model).toBe("gpt-4o-mini");
     expect(llmCalls[0].responseMessageId).toBe(rows[1].id);
 
     await history.close();
@@ -1265,14 +1208,14 @@ describe("RoomCommandHandlerTs", () => {
 
     const result = await handler.handleIncomingMessage(incoming, { isDirect: true });
 
-    expect(result?.response).toBe("fallback answer [refusal fallback to claude-3-5-haiku]");
-    expect(result?.model).toBe("anthropic:claude-3-5-haiku");
-    expect(runnerModels).toEqual(["openai:gpt-4o-mini", "anthropic:claude-3-5-haiku"]);
+    expect(result?.response).toBe("The AI refused to respond to this request [refusal fallback to claude-3-5-haiku]");
+    expect(result?.model).toBe("openai:gpt-4o-mini");
+    expect(runnerModels).toEqual(["openai:gpt-4o-mini"]);
 
     const llmCalls = await history.getLlmCalls();
     expect(llmCalls).toHaveLength(1);
-    expect(llmCalls[0].provider).toBe("anthropic");
-    expect(llmCalls[0].model).toBe("claude-3-5-haiku");
+    expect(llmCalls[0].provider).toBe("openai");
+    expect(llmCalls[0].model).toBe("gpt-4o-mini");
 
     const rows = await history.getFullHistory("libera", "#test");
     expect(rows[1]?.message).toContain("[refusal fallback to claude-3-5-haiku]");
@@ -1280,39 +1223,27 @@ describe("RoomCommandHandlerTs", () => {
     await history.close();
   });
 
-  it("retries with fallback model when primary runner throws explicit safety-refusal error", async () => {
+  it("propagates explicit safety-refusal errors from runner", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();
 
     const incoming = makeMessage("!s safety fallback");
-    const runnerModels: string[] = [];
 
     const handler = new RoomCommandHandlerTs({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
       refusalFallbackModel: "anthropic:claude-3-5-haiku",
-      runnerFactory: (input) => {
-        runnerModels.push(input.model);
-        if (input.model === "openai:gpt-4o-mini") {
-          return {
-            runSingleTurn: async () => {
-              throw new Error("Agent run failed: invalid_prompt blocked for safety reasons.");
-            },
-          };
-        }
-
-        return {
-          runSingleTurn: async () => makeRunnerResult("fallback after error"),
-        };
-      },
+      runnerFactory: () => ({
+        runSingleTurn: async () => {
+          throw new Error("Agent run failed: invalid_prompt blocked for safety reasons.");
+        },
+      }),
     });
 
-    const result = await handler.handleIncomingMessage(incoming, { isDirect: true });
-
-    expect(result?.response).toBe("fallback after error [refusal fallback to claude-3-5-haiku]");
-    expect(result?.model).toBe("anthropic:claude-3-5-haiku");
-    expect(runnerModels).toEqual(["openai:gpt-4o-mini", "anthropic:claude-3-5-haiku"]);
+    await expect(handler.execute(incoming)).rejects.toThrow(
+      "Agent run failed: invalid_prompt blocked for safety reasons.",
+    );
 
     await history.close();
   });

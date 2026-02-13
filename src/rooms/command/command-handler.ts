@@ -1,12 +1,12 @@
-import type { AgentTool, ThinkingLevel } from "@mariozechner/pi-agent-core";
-import type { Usage } from "@mariozechner/pi-ai";
+import type { AgentMessage, AgentTool, ThinkingLevel } from "@mariozechner/pi-agent-core";
+import { completeSimple, type Usage } from "@mariozechner/pi-ai";
 
 import {
-  MuaddibAgentRunner,
-  type MuaddibAgentRunnerOptions,
-  type RunnerContextMessage,
+  SessionRunner,
+  type SingleTurnOptions,
   type SingleTurnResult,
-} from "../../agent/muaddib-agent-runner.js";
+} from "../../agent/session-runner.js";
+import type { SessionFactoryContextMessage } from "../../agent/session-factory.js";
 import type { ChronicleStore } from "../../chronicle/chronicle-store.js";
 import {
   createBaselineAgentTools,
@@ -42,16 +42,7 @@ export interface CommandHandlerRoomConfig {
 }
 
 export interface CommandRunner {
-  runSingleTurn(
-    prompt: string,
-    options?: {
-      contextMessages?: RunnerContextMessage[];
-      thinkingLevel?: ThinkingLevel;
-      persistenceSummaryModel?: string;
-      onPersistenceSummary?: (text: string) => void | Promise<void>;
-      visionFallbackModel?: string;
-    },
-  ): Promise<SingleTurnResult>;
+  runSingleTurn(prompt: string, options?: SingleTurnOptions): Promise<SingleTurnResult>;
 }
 
 export interface CommandRunnerFactoryInput {
@@ -160,17 +151,16 @@ export class RoomCommandHandlerTs {
     this.runnerFactory =
       options.runnerFactory ??
       ((input) =>
-        new MuaddibAgentRunner({
+        new SessionRunner({
           model: input.model,
           systemPrompt: input.systemPrompt,
           tools: input.tools,
           modelAdapter: this.modelAdapter,
           getApiKey: options.getApiKey,
           maxIterations: options.agentLoop?.maxIterations,
-          maxCompletionRetries: options.agentLoop?.maxCompletionRetries,
           emptyCompletionRetryPrompt: options.agentLoop?.emptyCompletionRetryPrompt,
           logger: input.logger,
-        } as MuaddibAgentRunnerOptions));
+        }));
 
     this.refusalFallbackModel = options.refusalFallbackModel
       ? normalizeModelSpec(options.refusalFallbackModel)
@@ -424,34 +414,6 @@ export class RoomCommandHandlerTs {
 
     const tools = this.selectTools(message, resolvedWithFollowups.runtime.allowedTools);
 
-    const persistenceSummaryCallback = this.options.persistenceSummaryModel
-      ? async (text: string) => {
-          const summary = text.trim();
-          if (!summary) {
-            return;
-          }
-
-          const arc = `${message.serverTag}#${message.channelName}`;
-          this.logger.debug(
-            "Persisting internal monologue summary",
-            `arc=${arc}`,
-            `chars=${summary.length}`,
-            `summary=${formatLogPreview(summary)}`,
-          );
-
-          await this.options.history.addMessage(
-            {
-              ...message,
-              nick: message.mynick,
-              content: summary,
-            },
-            {
-              contentTemplate: "[internal monologue] {message}",
-            },
-          );
-        }
-      : undefined;
-
     let runResult: RunWithFallbackResult;
     try {
       runResult = await this.runWithRefusalFallback(
@@ -460,8 +422,6 @@ export class RoomCommandHandlerTs {
           prompt: resolvedWithFollowups.queryText,
           contextMessages: runnerContext,
           thinkingLevel: normalizeThinkingLevel(resolvedWithFollowups.runtime.reasoningEffort),
-          persistenceSummaryModel: this.options.persistenceSummaryModel,
-          onPersistenceSummary: persistenceSummaryCallback,
           visionFallbackModel: resolvedWithFollowups.runtime.visionModel ?? undefined,
         },
         {
@@ -469,6 +429,9 @@ export class RoomCommandHandlerTs {
           tools,
         },
       );
+
+      await this.persistToolSummaryFromSession(message, runResult.agentResult);
+      runResult.agentResult.session?.dispose();
     } catch (error) {
       this.logger.error("Error during agent execution", error);
       throw error;
@@ -505,10 +468,8 @@ export class RoomCommandHandlerTs {
     primaryModelSpec: string,
     runInput: {
       prompt: string;
-      contextMessages: RunnerContextMessage[];
+      contextMessages: SessionFactoryContextMessage[];
       thinkingLevel: ThinkingLevel;
-      persistenceSummaryModel?: string;
-      onPersistenceSummary?: (text: string) => void | Promise<void>;
       visionFallbackModel?: string;
     },
     runnerInput: {
@@ -523,138 +484,22 @@ export class RoomCommandHandlerTs {
       logger: this.logger,
     });
 
-    const primarySummaryBuffer: string[] = [];
-    const onPrimaryPersistenceSummary = runInput.onPersistenceSummary
-      ? async (text: string) => {
-          const trimmed = text.trim();
-          if (trimmed) {
-            primarySummaryBuffer.push(trimmed);
-          }
-        }
-      : undefined;
-
-    let primaryResult: SingleTurnResult;
-
-    try {
-      primaryResult = await primaryRunner.runSingleTurn(runInput.prompt, {
-        contextMessages: runInput.contextMessages,
-        thinkingLevel: runInput.thinkingLevel,
-        persistenceSummaryModel: runInput.persistenceSummaryModel,
-        onPersistenceSummary: onPrimaryPersistenceSummary,
-        visionFallbackModel: runInput.visionFallbackModel,
-      });
-    } catch (error) {
-      const refusalSignal = detectRefusalFallbackSignal(stringifyError(error));
-      if (!refusalSignal || !this.refusalFallbackModel) {
-        await this.flushPersistenceSummaryBuffer(runInput.onPersistenceSummary, primarySummaryBuffer);
-        throw error;
-      }
-
-      this.logger.info(
-        "Primary model failed with refusal signal; retrying fallback model",
-        `signal=${refusalSignal}`,
-        `fallback_model=${this.refusalFallbackModel}`,
-      );
-
-      const fallbackResult = await this.runFallbackModelTurn(
-        this.refusalFallbackModel,
-        runInput,
-        runnerInput,
-      );
-      return {
-        ...fallbackResult,
-        fallbackModelSpec: this.refusalFallbackModel,
-      };
-    }
-
-    const refusalSignal = detectRefusalFallbackSignal(primaryResult.text);
-    if (!refusalSignal || !this.refusalFallbackModel) {
-      await this.flushPersistenceSummaryBuffer(runInput.onPersistenceSummary, primarySummaryBuffer);
-      return {
-        agentResult: primaryResult,
-        modelSpec: primaryModelSpec,
-        fallbackModelSpec: null,
-      };
-    }
-
-    this.logger.info(
-      "Primary model response matched refusal signal; retrying fallback model",
-      `signal=${refusalSignal}`,
-      `fallback_model=${this.refusalFallbackModel}`,
-    );
-
-    const fallbackResult = await this.runFallbackModelTurn(this.refusalFallbackModel, runInput, runnerInput);
-    return {
-      ...fallbackResult,
-      fallbackModelSpec: this.refusalFallbackModel,
-    };
-  }
-
-  private async runFallbackModelTurn(
-    fallbackModelSpec: string,
-    runInput: {
-      prompt: string;
-      contextMessages: RunnerContextMessage[];
-      thinkingLevel: ThinkingLevel;
-      persistenceSummaryModel?: string;
-      onPersistenceSummary?: (text: string) => void | Promise<void>;
-      visionFallbackModel?: string;
-    },
-    runnerInput: {
-      systemPrompt: string;
-      tools: AgentTool<any>[];
-    },
-  ): Promise<RunWithFallbackResult> {
-    const fallbackRunner = this.runnerFactory({
-      model: fallbackModelSpec,
-      systemPrompt: runnerInput.systemPrompt,
-      tools: runnerInput.tools,
-      logger: this.logger,
+    const primaryResult = await primaryRunner.runSingleTurn(runInput.prompt, {
+      contextMessages: runInput.contextMessages,
+      thinkingLevel: runInput.thinkingLevel,
+      visionFallbackModel: runInput.visionFallbackModel,
+      refusalFallbackModel: this.refusalFallbackModel ?? undefined,
     });
 
-    const fallbackSummaryBuffer: string[] = [];
-    const onFallbackPersistenceSummary = runInput.onPersistenceSummary
-      ? async (text: string) => {
-          const trimmed = text.trim();
-          if (trimmed) {
-            fallbackSummaryBuffer.push(trimmed);
-          }
-        }
-      : undefined;
+    const fallbackModelSpec = detectRefusalFallbackSignal(primaryResult.text) && this.refusalFallbackModel
+      ? this.refusalFallbackModel
+      : null;
 
-    try {
-      const fallbackResult = await fallbackRunner.runSingleTurn(runInput.prompt, {
-        contextMessages: runInput.contextMessages,
-        thinkingLevel: runInput.thinkingLevel,
-        persistenceSummaryModel: runInput.persistenceSummaryModel,
-        onPersistenceSummary: onFallbackPersistenceSummary,
-        visionFallbackModel: runInput.visionFallbackModel,
-      });
-
-      await this.flushPersistenceSummaryBuffer(runInput.onPersistenceSummary, fallbackSummaryBuffer);
-
-      return {
-        agentResult: fallbackResult,
-        modelSpec: fallbackModelSpec,
-        fallbackModelSpec: null,
-      };
-    } catch (error) {
-      await this.flushPersistenceSummaryBuffer(runInput.onPersistenceSummary, fallbackSummaryBuffer);
-      throw error;
-    }
-  }
-
-  private async flushPersistenceSummaryBuffer(
-    callback: ((text: string) => void | Promise<void>) | undefined,
-    summaries: string[],
-  ): Promise<void> {
-    if (!callback || summaries.length === 0) {
-      return;
-    }
-
-    for (const summary of summaries) {
-      await callback(summary);
-    }
+    return {
+      agentResult: primaryResult,
+      modelSpec: primaryModelSpec,
+      fallbackModelSpec,
+    };
   }
 
   private async executeAndPersist(
@@ -1028,6 +873,77 @@ export class RoomCommandHandlerTs {
     return `${trimmed}... full response: ${artifactUrl}`;
   }
 
+  private async persistToolSummaryFromSession(
+    message: RoomMessage,
+    result: SingleTurnResult,
+  ): Promise<void> {
+    if (!this.options.persistenceSummaryModel) {
+      return;
+    }
+
+    if (!result.session) {
+      return;
+    }
+
+    const calls = collectPersistentToolCalls(result.session.messages);
+    if (calls.length === 0) {
+      return;
+    }
+
+    try {
+      const summaryModel = this.modelAdapter.resolve(this.options.persistenceSummaryModel);
+      const summaryResponse = await completeSimple(
+        summaryModel.model,
+        {
+          systemPrompt: PERSISTENCE_SUMMARY_SYSTEM_PROMPT,
+          messages: [
+            {
+              role: "user",
+              content: buildPersistenceSummaryInput(calls),
+              timestamp: Date.now(),
+            },
+          ],
+        },
+        {
+          apiKey: this.options.getApiKey
+            ? await this.options.getApiKey(summaryModel.spec.provider)
+            : undefined,
+        },
+      );
+
+      const summaryText = summaryResponse.content
+        .filter((block) => block.type === "text")
+        .map((block) => block.text)
+        .join("\n")
+        .trim();
+
+      if (!summaryText) {
+        return;
+      }
+
+      const arc = `${message.serverTag}#${message.channelName}`;
+      this.logger.debug(
+        "Persisting internal monologue summary",
+        `arc=${arc}`,
+        `chars=${summaryText.length}`,
+        `summary=${formatLogPreview(summaryText)}`,
+      );
+
+      await this.options.history.addMessage(
+        {
+          ...message,
+          nick: message.mynick,
+          content: summaryText,
+        },
+        {
+          contentTemplate: "[internal monologue] {message}",
+        },
+      );
+    } catch (error) {
+      this.logger.error("Failed to generate tool persistence summary", error);
+    }
+  }
+
   private selectTools(message: RoomMessage, allowedTools: string[] | null): AgentTool<any>[] {
     const baseline = createBaselineAgentTools({
       ...this.options.toolOptions,
@@ -1044,6 +960,28 @@ export class RoomCommandHandlerTs {
     return baseline.filter((tool) => allowed.has(tool.name));
   }
 }
+
+const PERSISTENCE_SUMMARY_SYSTEM_PROMPT =
+  "As an AI agent, you need to remember in the future what tools you used when generating a response, and what the tools told you. Summarize all tool uses in a single concise paragraph. If artifact links are included, include every artifact link and tie each link to the corresponding tool call.";
+
+type ToolPersistType = "summary" | "artifact";
+
+const TOOL_PERSISTENCE_POLICY: Readonly<Record<string, ToolPersistType | "none">> = {
+  web_search: "summary",
+  visit_webpage: "summary",
+  execute_code: "artifact",
+  progress_report: "none",
+  make_plan: "none",
+  share_artifact: "none",
+  edit_artifact: "artifact",
+  generate_image: "artifact",
+  oracle: "none",
+  chronicle_read: "summary",
+  chronicle_append: "summary",
+  quest_start: "summary",
+  subquest_start: "summary",
+  quest_snooze: "summary",
+};
 
 const REFUSAL_FALLBACK_SIGNAL_PATTERNS: ReadonlyArray<{
   label: string;
@@ -1066,6 +1004,91 @@ const REFUSAL_FALLBACK_SIGNAL_PATTERNS: ReadonlyArray<{
     pattern: /content safety refusal/iu,
   },
 ];
+
+interface PersistentToolCall {
+  toolName: string;
+  input: unknown;
+  output: unknown;
+  persistType: ToolPersistType;
+  artifactUrls: string[];
+}
+
+function collectPersistentToolCalls(messages: AgentMessage[]): PersistentToolCall[] {
+  return messages
+    .filter((message) => message.role === "toolResult")
+    .flatMap((message) => {
+      const toolResult = message as AgentMessage & {
+        toolName: string;
+        details?: Record<string, unknown>;
+        isError?: boolean;
+      };
+      if (toolResult.isError) {
+        return [];
+      }
+      const policy = TOOL_PERSISTENCE_POLICY[toolResult.toolName];
+      if (policy !== "summary" && policy !== "artifact") {
+        return [];
+      }
+
+      return [{
+        toolName: toolResult.toolName,
+        input: toolResult.details?.input,
+        output: toolResult,
+        persistType: policy,
+        artifactUrls: extractArtifactUrls(toolResult),
+      }];
+    });
+}
+
+function buildPersistenceSummaryInput(persistentToolCalls: PersistentToolCall[]): string {
+  const lines: string[] = ["The following tool calls were made during this conversation:"];
+
+  for (const call of persistentToolCalls) {
+    lines.push(`\n\n# Calling tool **${call.toolName}** (persist: ${call.persistType})`);
+    lines.push(`## **Input:**\n${renderPersistenceValue(call.input)}\n`);
+    lines.push(`## **Output:**\n${renderPersistenceValue(call.output)}\n`);
+
+    for (const artifactUrl of call.artifactUrls) {
+      lines.push(`(Tool call I/O stored as artifact: ${artifactUrl})\n`);
+    }
+  }
+
+  lines.push("\nPlease provide a concise summary of what was accomplished in these tool calls.");
+  return lines.join("\n");
+}
+
+function renderPersistenceValue(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function extractArtifactUrls(result: unknown): string[] {
+  const urls = new Set<string>();
+
+  if (!result || typeof result !== "object") {
+    return [];
+  }
+
+  const record = result as Record<string, unknown>;
+  const details = record.details as Record<string, unknown> | undefined;
+  const artifactUrls = details?.artifactUrls;
+  if (Array.isArray(artifactUrls)) {
+    for (const artifactUrl of artifactUrls) {
+      if (typeof artifactUrl === "string" && artifactUrl.trim().length > 0) {
+        urls.add(artifactUrl.trim());
+      }
+    }
+  }
+
+  return Array.from(urls);
+}
 
 function detectRefusalFallbackSignal(text: string): string | null {
   const candidate = text.trim();
@@ -1138,7 +1161,7 @@ function pickModeModel(model: string | string[] | undefined): string | null {
   return model;
 }
 
-function toRunnerContextMessage(message: { role: string; content: string }): RunnerContextMessage {
+function toRunnerContextMessage(message: { role: string; content: string }): SessionFactoryContextMessage {
   return {
     role: message.role === "assistant" ? "assistant" : "user",
     content: message.content,

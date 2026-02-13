@@ -51,7 +51,6 @@ describe("baseline agent tools", () => {
       "quest_snooze",
       "progress_report",
       "make_plan",
-      "final_answer",
     ]);
   });
 

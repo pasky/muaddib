@@ -50,24 +50,3 @@ export function createMakePlanTool(): AgentTool<any> {
     },
   };
 }
-
-export function createFinalAnswerTool(): AgentTool<any> {
-  return {
-    name: "final_answer",
-    label: "Final Answer",
-    description: "Provide the final user-facing answer.",
-    parameters: Type.Object({
-      answer: Type.String({
-        description: "Final answer text.",
-      }),
-    }),
-    execute: async (_toolCallId, params) => {
-      return {
-        content: [{ type: "text", text: params.answer }],
-        details: {
-          answer: params.answer,
-        },
-      };
-    },
-  };
-}

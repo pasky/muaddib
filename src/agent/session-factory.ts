@@ -1,0 +1,283 @@
+import { Agent, type AgentMessage, type AgentTool, type ThinkingLevel } from "@mariozechner/pi-agent-core";
+import type { AssistantMessage, ToolResultMessage, Usage, UserMessage } from "@mariozechner/pi-ai";
+import {
+  AgentSession,
+  AuthStorage,
+  ModelRegistry,
+  SessionManager,
+  SettingsManager,
+  convertToLlm,
+  createExtensionRuntime,
+  type ResourceLoader,
+} from "@mariozechner/pi-coding-agent";
+
+import { PiAiModelAdapter, type ResolvedPiAiModel } from "../models/pi-ai-model-adapter.js";
+
+const DEFAULT_MAX_ITERATIONS = 25;
+
+export interface RunnerLogger {
+  debug(...data: unknown[]): void;
+  info(...data: unknown[]): void;
+  warn(...data: unknown[]): void;
+  error(...data: unknown[]): void;
+}
+
+export interface SessionFactoryContextMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface CreateAgentSessionInput {
+  model: string;
+  systemPrompt: string;
+  tools: AgentTool<any>[];
+  getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+  modelAdapter: PiAiModelAdapter;
+  contextMessages?: SessionFactoryContextMessage[];
+  thinkingLevel?: ThinkingLevel;
+  maxIterations?: number;
+  visionFallbackModel?: string;
+  logger?: RunnerLogger;
+}
+
+export interface CreateAgentSessionResult {
+  session: AgentSession;
+  agent: Agent;
+  getVisionFallbackActivated: () => boolean;
+  dispose: () => void;
+}
+
+export function createAgentSessionForInvocation(input: CreateAgentSessionInput): CreateAgentSessionResult {
+  const logger = input.logger ?? console;
+  const resolvedModel = input.modelAdapter.resolve(input.model);
+  const sessionManager = SessionManager.inMemory();
+  const settingsManager = SettingsManager.inMemory({
+    compaction: { enabled: true },
+    retry: { enabled: true, maxRetries: 3 },
+  });
+
+  const resourceLoader: ResourceLoader = {
+    getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }),
+    getSkills: () => ({ skills: [], diagnostics: [] }),
+    getPrompts: () => ({ prompts: [], diagnostics: [] }),
+    getThemes: () => ({ themes: [], diagnostics: [] }),
+    getAgentsFiles: () => ({ agentsFiles: [] }),
+    getSystemPrompt: () => input.systemPrompt,
+    getAppendSystemPrompt: () => [],
+    getPathMetadata: () => new Map(),
+    extendResources: () => {},
+    reload: async () => {},
+  };
+
+  const authStorage = new AuthStorage();
+  authStorage.setFallbackResolver((provider) => {
+    const value = input.getApiKey?.(provider);
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      return trimmed.length > 0 ? trimmed : undefined;
+    }
+    return undefined;
+  });
+  const modelRegistry = new ModelRegistry(authStorage);
+
+  const agent = new Agent({
+    initialState: {
+      systemPrompt: input.systemPrompt,
+      model: resolvedModel.model,
+      thinkingLevel: input.thinkingLevel ?? "off",
+      tools: input.tools,
+    },
+    convertToLlm,
+    getApiKey: input.getApiKey,
+  });
+
+  if (input.contextMessages) {
+    agent.replaceMessages(convertContextToAgentMessages(input.contextMessages, resolvedModel));
+  }
+
+  const session = new AgentSession({
+    agent,
+    sessionManager,
+    settingsManager,
+    cwd: process.cwd(),
+    resourceLoader,
+    modelRegistry,
+    baseToolsOverride: Object.fromEntries(input.tools.map((tool) => [tool.name, tool])),
+  });
+
+  applySystemPromptOverrideToSession(session, input.systemPrompt);
+
+  const maxIterations = normalizePositiveInteger(input.maxIterations, DEFAULT_MAX_ITERATIONS);
+  const visionFallbackModel = resolveVisionFallbackModel(
+    input.modelAdapter,
+    input.visionFallbackModel,
+    resolvedModel.spec.provider,
+    resolvedModel.spec.modelId,
+  );
+
+  let turnCount = 0;
+  let visionFallbackActivated = false;
+
+  const unsubscribe = session.subscribe((event) => {
+    if (event.type === "turn_end") {
+      turnCount += 1;
+      if (turnCount >= maxIterations) {
+        agent.steer({
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text:
+                "<meta>You have reached your iteration limit. Provide your final text response now. Do not use any more tools.</meta>",
+            },
+          ],
+          timestamp: Date.now(),
+        });
+      }
+      if (turnCount >= maxIterations + 2) {
+        logger.warn("Exceeding max iterations, aborting session prompt loop.");
+        void session.abort();
+      }
+      return;
+    }
+
+    if (event.type === "tool_execution_end" && !event.isError) {
+      if (!visionFallbackActivated && visionFallbackModel && hasImageToolOutput(event.result)) {
+        agent.setModel(visionFallbackModel.model);
+        visionFallbackActivated = true;
+      }
+    }
+  });
+
+  return {
+    session,
+    agent,
+    getVisionFallbackActivated: () => visionFallbackActivated,
+    dispose: () => {
+      unsubscribe();
+      session.dispose();
+    },
+  };
+}
+
+function applySystemPromptOverrideToSession(session: AgentSession, override: string): void {
+  session.agent.setSystemPrompt(override);
+  const state = session as unknown as {
+    _baseSystemPrompt: string;
+    _rebuildSystemPrompt: () => string;
+  };
+  state._baseSystemPrompt = override;
+  state._rebuildSystemPrompt = () => override;
+}
+
+function emptyUsage(): Usage {
+  return {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      total: 0,
+    },
+  };
+}
+
+function convertContextToAgentMessages(
+  contextMessages: SessionFactoryContextMessage[],
+  resolvedModel: ResolvedPiAiModel,
+): AgentMessage[] {
+  const now = Date.now();
+
+  return contextMessages.map((message, index): AgentMessage => {
+    const timestamp = now + index;
+
+    if (message.role === "assistant") {
+      const assistant: AssistantMessage = {
+        role: "assistant",
+        content: [{ type: "text", text: message.content }],
+        api: resolvedModel.model.api,
+        provider: resolvedModel.spec.provider,
+        model: resolvedModel.spec.modelId,
+        usage: emptyUsage(),
+        stopReason: "stop",
+        timestamp,
+      };
+      return assistant;
+    }
+
+    const user: UserMessage = {
+      role: "user",
+      content: [{ type: "text", text: message.content }],
+      timestamp,
+    };
+
+    return user;
+  });
+}
+
+function resolveVisionFallbackModel(
+  modelAdapter: PiAiModelAdapter,
+  visionFallbackModel: string | undefined,
+  primaryProvider: string,
+  primaryModelId: string,
+): ResolvedPiAiModel | null {
+  const candidate = visionFallbackModel?.trim();
+  if (!candidate) {
+    return null;
+  }
+
+  const resolved = modelAdapter.resolve(candidate);
+  if (resolved.spec.provider === primaryProvider && resolved.spec.modelId === primaryModelId) {
+    return null;
+  }
+
+  return resolved;
+}
+
+function hasImageToolOutput(value: unknown): boolean {
+  const stack: unknown[] = [value];
+  const seen = new Set<unknown>();
+
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (!current || typeof current !== "object") {
+      continue;
+    }
+
+    if (seen.has(current)) {
+      continue;
+    }
+    seen.add(current);
+
+    if (Array.isArray(current)) {
+      for (const entry of current) {
+        stack.push(entry);
+      }
+      continue;
+    }
+
+    const record = current as Record<string, unknown>;
+    if (record.type === "image" || record.kind === "image") {
+      return true;
+    }
+
+    for (const entry of Object.values(record)) {
+      stack.push(entry);
+    }
+  }
+
+  return false;
+}
+
+function normalizePositiveInteger(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return fallback;
+  }
+  return Math.floor(parsed);
+}

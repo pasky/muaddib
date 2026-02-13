@@ -1,6 +1,6 @@
 export * from "./models/model-spec.js";
 export * from "./models/pi-ai-model-adapter.js";
-export * from "./agent/muaddib-agent-runner.js";
+export * from "./agent/session-runner.js";
 export * from "./agent/tools/baseline-tools.js";
 export * from "./rooms/message.js";
 export * from "./rooms/command/config.js";

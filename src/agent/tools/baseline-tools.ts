@@ -1,10 +1,6 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 
-import {
-  createFinalAnswerTool,
-  createMakePlanTool,
-  createProgressReportTool,
-} from "./control.js";
+import { createMakePlanTool, createProgressReportTool } from "./control.js";
 import {
   createChronicleAppendTool,
   createChronicleReadTool,
@@ -71,7 +67,6 @@ export {
   createChronicleReadTool,
   createEditArtifactTool,
   createExecuteCodeTool,
-  createFinalAnswerTool,
   createGenerateImageTool,
   createMakePlanTool,
   createOracleTool,
@@ -182,6 +177,5 @@ export function createBaselineAgentTools(options: BaselineToolOptions = {}): Age
     ...executorBackedTools,
     createProgressReportTool(options),
     createMakePlanTool(),
-    createFinalAnswerTool(),
   ];
 }

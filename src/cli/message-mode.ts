@@ -7,7 +7,7 @@ import { getMuaddibHome, resolveMuaddibPath } from "../app/bootstrap.js";
 import { resolveRefusalFallbackModel } from "../app/refusal-fallback.js";
 import { resolvePersistenceSummaryModel } from "../app/persistence-summary.js";
 import { RuntimeLogWriter } from "../app/logging.js";
-import { MuaddibAgentRunner } from "../agent/muaddib-agent-runner.js";
+import { SessionRunner } from "../agent/session-runner.js";
 import { createPiAiModelAdapterFromConfig } from "../models/pi-ai-model-adapter.js";
 import { ChronicleStore } from "../chronicle/chronicle-store.js";
 import {
@@ -146,14 +146,13 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
     };
 
     const defaultRunnerFactory: CommandRunnerFactory = (input) =>
-      new MuaddibAgentRunner({
+      new SessionRunner({
         model: input.model,
         systemPrompt: input.systemPrompt,
         tools: input.tools,
         modelAdapter,
         getApiKey,
         maxIterations,
-        maxCompletionRetries,
         logger: input.logger,
       });
 
