@@ -189,6 +189,52 @@ describe("RoomCommandHandlerTs", () => {
     await history.close();
   });
 
+  it("strips echoed IRC context prefixes from generated response text", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const incoming = makeMessage("!s ping");
+
+    const handler = new RoomCommandHandlerTs({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: () => ({
+        runSingleTurn: async () =>
+          makeRunnerResult("[02:32] <MuaddibLLM> pasky: Pong! S latenci nizsi nez moje chut."),
+      }),
+    });
+
+    const result = await handler.execute(incoming);
+
+    expect(result.response).toBe("pasky: Pong! S latenci nizsi nez moje chut.");
+
+    await history.close();
+  });
+
+  it("keeps <quest> payloads while stripping non-quest IRC echo prefixes", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const incoming = makeMessage("!s quest update");
+
+    const handler = new RoomCommandHandlerTs({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: () => ({
+        runSingleTurn: async () =>
+          makeRunnerResult("[serious] [02:32] <MuaddibLLM> <quest id=\"q1\">Done.</quest>"),
+      }),
+    });
+
+    const result = await handler.execute(incoming);
+
+    expect(result.response).toBe("<quest id=\"q1\">Done.</quest>");
+
+    await history.close();
+  });
+
   it("applies context reducer when mode enables auto_reduce_context", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();

@@ -819,7 +819,7 @@ export class RoomCommandHandlerTs {
   }
 
   private cleanResponseText(text: string, nick: string): string {
-    const cleaned = text.trim();
+    const cleaned = stripLeadingIrcContextEchoPrefixes(text.trim());
     if (!this.options.responseCleaner) {
       return cleaned;
     }
@@ -908,6 +908,12 @@ function detectRefusalFallbackSignal(text: string): string | null {
   }
 
   return null;
+}
+
+const LEADING_IRC_CONTEXT_ECHO_PREFIX_RE = /^(?:\s*(?:\[[^\]]+\]\s*)?(?:![A-Za-z][\w-]*\s+)?(?:\[?\d{1,2}:\d{2}\]?\s*)?(?:<(?!\/?quest(?:_finished)?\b)[^>]+>))*\s*/iu;
+
+function stripLeadingIrcContextEchoPrefixes(text: string): string {
+  return text.replace(LEADING_IRC_CONTEXT_ECHO_PREFIX_RE, "");
 }
 
 function normalizeModelSpec(model: string): string {
