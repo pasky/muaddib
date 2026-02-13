@@ -67,7 +67,7 @@ export class SessionRunner {
     this.logger = options.logger ?? console;
     this.emptyCompletionRetryPrompt =
       options.emptyCompletionRetryPrompt ?? DEFAULT_EMPTY_COMPLETION_RETRY_PROMPT;
-    this.llmDebugIo = options.llmDebugIo ?? false;
+    this.llmDebugIo = true;
     this.llmDebugMaxChars = Math.max(500, Math.floor(options.llmDebugMaxChars ?? 12_000));
   }
 
