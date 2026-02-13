@@ -1,17 +1,6 @@
-import {
-  type AssistantMessage,
-  type Model,
-  type SimpleStreamOptions,
-  type UserMessage,
-} from "@mariozechner/pi-ai";
+import { type UserMessage } from "@mariozechner/pi-ai";
 
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
-
-type CompleteSimpleFn = (
-  model: Model<any>,
-  context: { messages: UserMessage[]; systemPrompt?: string },
-  options?: SimpleStreamOptions,
-) => Promise<AssistantMessage>;
 
 export interface ContextReducerConfig {
   model?: string;
@@ -34,7 +23,6 @@ interface ContextReducerLogger {
 export interface ContextReducerTsOptions {
   config?: ContextReducerConfig;
   modelAdapter?: PiAiModelAdapter;
-  completeFn?: CompleteSimpleFn;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   logger?: ContextReducerLogger;
 }
@@ -42,12 +30,9 @@ export interface ContextReducerTsOptions {
 export class ContextReducerTs implements ContextReducer {
   private readonly config: ContextReducerConfig;
   private readonly modelAdapter: PiAiModelAdapter;
-  private readonly completeFn?: CompleteSimpleFn;
-
   constructor(private readonly options: ContextReducerTsOptions = {}) {
     this.config = options.config ?? {};
     this.modelAdapter = options.modelAdapter ?? new PiAiModelAdapter();
-    this.completeFn = options.completeFn;
   }
 
   get isConfigured(): boolean {
@@ -72,47 +57,25 @@ export class ContextReducerTs implements ContextReducer {
     const formattedContext = this.formatContextForReduction(context, agentSystemPrompt);
 
     try {
-      const response = this.completeFn
-        ? await this.completeFn(
-            this.modelAdapter.resolve(reducerModelSpec).model,
+      const response = await this.modelAdapter.completeSimple(
+        reducerModelSpec,
+        {
+          messages: [
             {
-              messages: [
-                {
-                  role: "user",
-                  content: formattedContext,
-                  timestamp: Date.now(),
-                },
-              ],
-              systemPrompt: this.config.prompt,
+              role: "user",
+              content: formattedContext,
+              timestamp: Date.now(),
             },
-            {
-              apiKey: this.options.getApiKey
-                ? await this.options.getApiKey(this.modelAdapter.resolve(reducerModelSpec).spec.provider)
-                : undefined,
-              maxTokens: 2_048,
-            },
-          )
-        : await this.modelAdapter.completeSimple(
-            reducerModelSpec,
-            {
-              messages: [
-                {
-                  role: "user",
-                  content: formattedContext,
-                  timestamp: Date.now(),
-                },
-              ],
-              systemPrompt: this.config.prompt,
-            },
-            {
-              callType: "context_reducer",
-              logger: this.options.logger,
-              getApiKey: this.options.getApiKey,
-              streamOptions: {
-                maxTokens: 2_048,
-              },
-            },
-          );
+          ],
+          systemPrompt: this.config.prompt,
+        },
+        {
+          callType: "context_reducer",
+          logger: this.options.logger,
+          getApiKey: this.options.getApiKey,
+          streamOptions: { maxTokens: 2_048 },
+        },
+      );
 
       const reducedText = response.content
         .filter((entry) => entry.type === "text")

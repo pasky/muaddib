@@ -25,8 +25,8 @@ const commandConfig = {
 
 describe("createModeClassifier", () => {
   it("returns best label based on completion text", async () => {
-    const classifier = createModeClassifier(commandConfig as any, {
-      completeFn: async () => ({
+    const modelAdapter = {
+      completeSimple: vi.fn(async () => ({
         role: "assistant",
         content: [{ type: "text", text: "SARCASTIC" }],
         api: "openai-completions",
@@ -42,7 +42,11 @@ describe("createModeClassifier", () => {
         },
         stopReason: "stop",
         timestamp: Date.now(),
-      }),
+      })),
+    } as any;
+
+    const classifier = createModeClassifier(commandConfig as any, {
+      modelAdapter,
     });
 
     const label = await classifier([{ role: "user", content: "<nick> tell joke" }]);
@@ -52,8 +56,8 @@ describe("createModeClassifier", () => {
   it("uses configured classifier prompt with message substitution", async () => {
     let seenSystemPrompt = "";
 
-    const classifier = createModeClassifier(commandConfig as any, {
-      completeFn: async (_model, context) => {
+    const modelAdapter = {
+      completeSimple: vi.fn(async (_modelSpec: string, context: { systemPrompt?: string }) => {
         seenSystemPrompt = context.systemPrompt ?? "";
         return {
           role: "assistant",
@@ -72,7 +76,11 @@ describe("createModeClassifier", () => {
           stopReason: "stop",
           timestamp: Date.now(),
         };
-      },
+      }),
+    } as any;
+
+    const classifier = createModeClassifier(commandConfig as any, {
+      modelAdapter,
     });
 
     await classifier([{ role: "user", content: "<nick> tell joke" }]);
@@ -89,9 +97,8 @@ describe("createModeClassifier", () => {
       error: vi.fn(),
     };
 
-    const classifier = createModeClassifier(commandConfig as any, {
-      logger,
-      completeFn: async () => ({
+    const modelAdapter = {
+      completeSimple: vi.fn(async () => ({
         role: "assistant",
         content: [{ type: "text", text: "not-a-label" }],
         api: "openai-completions",
@@ -107,7 +114,12 @@ describe("createModeClassifier", () => {
         },
         stopReason: "stop",
         timestamp: Date.now(),
-      }),
+      })),
+    } as any;
+
+    const classifier = createModeClassifier(commandConfig as any, {
+      logger,
+      modelAdapter,
     });
 
     const label = await classifier([{ role: "user", content: "hello" }]);
@@ -127,11 +139,15 @@ describe("createModeClassifier", () => {
       error: vi.fn(),
     };
 
+    const modelAdapter = {
+      completeSimple: vi.fn(async () => {
+        throw new Error("failure");
+      }),
+    } as any;
+
     const classifier = createModeClassifier(commandConfig as any, {
       logger,
-      completeFn: async () => {
-        throw new Error("failure");
-      },
+      modelAdapter,
     });
 
     const label = await classifier([{ role: "user", content: "hello" }]);

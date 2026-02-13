@@ -1,18 +1,7 @@
-import {
-  type AssistantMessage,
-  type Model,
-  type SimpleStreamOptions,
-  type UserMessage,
-} from "@mariozechner/pi-ai";
+import { type UserMessage } from "@mariozechner/pi-ai";
 
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import type { CommandConfig } from "./resolver.js";
-
-type CompleteSimpleFn = (
-  model: Model<any>,
-  context: { messages: UserMessage[]; systemPrompt?: string },
-  options?: SimpleStreamOptions,
-) => Promise<AssistantMessage>;
 
 interface ModeClassifierLogger {
   debug(message: string, ...data: unknown[]): void;
@@ -24,7 +13,6 @@ interface ModeClassifierLogger {
 export interface ModeClassifierOptions {
   modelAdapter?: PiAiModelAdapter;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
-  completeFn?: CompleteSimpleFn;
   logger?: ModeClassifierLogger;
 }
 
@@ -33,7 +21,6 @@ export function createModeClassifier(
   options: ModeClassifierOptions = {},
 ): (context: Array<{ role: string; content: string }>) => Promise<string> {
   const adapter = options.modelAdapter ?? new PiAiModelAdapter();
-  const completeFn = options.completeFn;
   const logger = options.logger ?? noopModeClassifierLogger();
 
   return async (context: Array<{ role: string; content: string }>): Promise<string> => {
@@ -47,7 +34,6 @@ export function createModeClassifier(
     }
 
     try {
-      const classifierModelSpec = commandConfig.mode_classifier.model;
       const llmMessages = context.map<UserMessage>((entry) => ({
         role: "user",
         content:
@@ -63,35 +49,19 @@ export function createModeClassifier(
 
       const prompt = classifierPrompt.replace("{message}", currentMessage);
 
-      const response = completeFn
-        ? await completeFn(
-            adapter.resolve(classifierModelSpec).model,
-            {
-              messages: llmMessages,
-              systemPrompt: `${prompt}\n\nReturn exactly one classifier label token. No explanation. If uncertain, pick the best label.`,
-            },
-            {
-              apiKey: options.getApiKey
-                ? await options.getApiKey(adapter.resolve(classifierModelSpec).spec.provider)
-                : undefined,
-              maxTokens: 16,
-            },
-          )
-        : await adapter.completeSimple(
-            classifierModelSpec,
-            {
-              messages: llmMessages,
-              systemPrompt: `${prompt}\n\nReturn exactly one classifier label token. No explanation. If uncertain, pick the best label.`,
-            },
-            {
-              callType: "mode_classifier",
-              logger,
-              getApiKey: options.getApiKey,
-              streamOptions: {
-                maxTokens: 16,
-              },
-            },
-          );
+      const response = await adapter.completeSimple(
+        commandConfig.mode_classifier.model,
+        {
+          messages: llmMessages,
+          systemPrompt: `${prompt}\n\nReturn exactly one classifier label token. No explanation. If uncertain, pick the best label.`,
+        },
+        {
+          callType: "mode_classifier",
+          logger,
+          getApiKey: options.getApiKey,
+          streamOptions: { maxTokens: 16 },
+        },
+      );
 
       const responseText = response.content
         .filter((block) => block.type === "text")

@@ -52,25 +52,25 @@ describe("ContextReducerTs", () => {
   });
 
   it("reduce returns empty array when context has no messages to reduce", async () => {
-    const completeFn = vi.fn();
+    const modelAdapter = { completeSimple: vi.fn() } as any;
     const reducer = new ContextReducerTs({
       config: { model: "openai:gpt-4o-mini", prompt: "Reduce" },
-      completeFn,
+      modelAdapter,
     });
 
     const result = await reducer.reduce([{ role: "user", content: "only message" }], "sys");
     expect(result).toEqual([]);
-    expect(completeFn).not.toHaveBeenCalled();
+    expect(modelAdapter.completeSimple).not.toHaveBeenCalled();
   });
 
   it("reduce parses [USER]/[ASSISTANT] formatted LLM response", async () => {
-    const completeFn = vi.fn(async () =>
-      assistantTextMessage("[USER]: summarized question\n[ASSISTANT]: summarized answer"),
-    );
+    const modelAdapter = {
+      completeSimple: vi.fn(async () => assistantTextMessage("[USER]: summarized question\n[ASSISTANT]: summarized answer")),
+    } as any;
 
     const reducer = new ContextReducerTs({
       config: { model: "openai:gpt-4o-mini", prompt: "Condense the conversation" },
-      completeFn,
+      modelAdapter,
     });
 
     const context = [
@@ -85,8 +85,7 @@ describe("ContextReducerTs", () => {
       { role: "assistant", content: "summarized answer" },
     ]);
 
-    // Verify the formatted context sent to the LLM
-    const firstCall = completeFn.mock.calls[0] as any[];
+    const firstCall = modelAdapter.completeSimple.mock.calls[0] as any[];
     const sentMessages = firstCall[1].messages;
     expect(sentMessages[0].content).toContain("## AGENT SYSTEM PROMPT");
     expect(sentMessages[0].content).toContain("agent system prompt");
@@ -95,19 +94,19 @@ describe("ContextReducerTs", () => {
     expect(sentMessages[0].content).toContain("## TRIGGERING INPUT");
     expect(sentMessages[0].content).toContain("follow up");
 
-    // Verify system prompt and options
     expect(firstCall[1].systemPrompt).toBe("Condense the conversation");
-    expect(firstCall[2]).toMatchObject({ maxTokens: 2048 });
+    expect(firstCall[2]).toMatchObject({ streamOptions: { maxTokens: 2048 } });
   });
 
   it("reduce wraps plain text response in context_summary tag", async () => {
-    const completeFn = vi.fn(async () =>
-      assistantTextMessage("The user asked about cats and the assistant explained feline behavior."),
-    );
+    const modelAdapter = {
+      completeSimple: vi.fn(async () =>
+        assistantTextMessage("The user asked about cats and the assistant explained feline behavior.")),
+    } as any;
 
     const reducer = new ContextReducerTs({
       config: { model: "openai:gpt-4o-mini", prompt: "Summarize" },
-      completeFn,
+      modelAdapter,
     });
 
     const context = [
@@ -126,11 +125,11 @@ describe("ContextReducerTs", () => {
   });
 
   it("reduce falls back to sliced context when LLM returns empty response", async () => {
-    const completeFn = vi.fn(async () => assistantTextMessage(""));
+    const modelAdapter = { completeSimple: vi.fn(async () => assistantTextMessage("")) } as any;
 
     const reducer = new ContextReducerTs({
       config: { model: "openai:gpt-4o-mini", prompt: "Reduce" },
-      completeFn,
+      modelAdapter,
     });
 
     const context = [
@@ -147,13 +146,15 @@ describe("ContextReducerTs", () => {
   });
 
   it("reduce falls back to sliced context when LLM call throws", async () => {
-    const completeFn = vi.fn(async () => {
-      throw new Error("API error");
-    });
+    const modelAdapter = {
+      completeSimple: vi.fn(async () => {
+        throw new Error("API error");
+      }),
+    } as any;
 
     const reducer = new ContextReducerTs({
       config: { model: "openai:gpt-4o-mini", prompt: "Reduce" },
-      completeFn,
+      modelAdapter,
     });
 
     const context = [
@@ -167,11 +168,11 @@ describe("ContextReducerTs", () => {
 
   it("reduce resolves API key via getApiKey callback", async () => {
     const getApiKey = vi.fn(async (provider: string) => (provider === "openai" ? "sk-test" : undefined));
-    const completeFn = vi.fn(async () => assistantTextMessage("[USER]: hi"));
+    const modelAdapter = { completeSimple: vi.fn(async () => assistantTextMessage("[USER]: hi")) } as any;
 
     const reducer = new ContextReducerTs({
       config: { model: "openai:gpt-4o-mini", prompt: "Reduce" },
-      completeFn,
+      modelAdapter,
       getApiKey,
     });
 
@@ -183,19 +184,19 @@ describe("ContextReducerTs", () => {
       "sys",
     );
 
-    expect(getApiKey).toHaveBeenCalledWith("openai");
-    const firstCall = completeFn.mock.calls[0] as any[];
-    expect(firstCall[2]).toMatchObject({ apiKey: "sk-test" });
+    const firstCall = modelAdapter.completeSimple.mock.calls[0] as any[];
+    expect(firstCall[2]).toMatchObject({ getApiKey });
   });
 
   it("reduce handles multi-turn parsed response correctly", async () => {
-    const completeFn = vi.fn(async () =>
-      assistantTextMessage("[USER]: question one\n[ASSISTANT]: answer one\n[USER]: question two"),
-    );
+    const modelAdapter = {
+      completeSimple: vi.fn(async () =>
+        assistantTextMessage("[USER]: question one\n[ASSISTANT]: answer one\n[USER]: question two")),
+    } as any;
 
     const reducer = new ContextReducerTs({
       config: { model: "openai:gpt-4o-mini", prompt: "Reduce" },
-      completeFn,
+      modelAdapter,
     });
 
     const result = await reducer.reduce(
@@ -217,13 +218,13 @@ describe("ContextReducerTs", () => {
   });
 
   it("reduce skips empty entries when LLM omits content for a role", async () => {
-    const completeFn = vi.fn(async () =>
-      assistantTextMessage("[USER]: \n[ASSISTANT]: actual content"),
-    );
+    const modelAdapter = {
+      completeSimple: vi.fn(async () => assistantTextMessage("[USER]: \n[ASSISTANT]: actual content")),
+    } as any;
 
     const reducer = new ContextReducerTs({
       config: { model: "openai:gpt-4o-mini", prompt: "Reduce" },
-      completeFn,
+      modelAdapter,
     });
 
     const result = await reducer.reduce(
