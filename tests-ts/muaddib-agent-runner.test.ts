@@ -232,6 +232,251 @@ describe("MuaddibAgentRunner", () => {
     expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining("Tool web_search error details:"));
   });
 
+  it("returns accepted final_answer even when provider stream errors afterward", async () => {
+    let streamCallIndex = 0;
+
+    const streamFn: StreamFn = async () => {
+      streamCallIndex += 1;
+
+      if (streamCallIndex === 1) {
+        return streamWithMessage(
+          makeAssistantMessage(
+            [
+              {
+                type: "toolCall",
+                id: "fa-accepted-1",
+                name: "final_answer",
+                arguments: { answer: "terminal answer" },
+              },
+            ],
+            "toolUse",
+          ),
+        );
+      }
+
+      return streamWithErrorMessage(
+        makeAssistantMessage(
+          [{ type: "text", text: "" }],
+          "error",
+          undefined,
+          "JSON error injected into SSE stream",
+        ),
+      );
+    };
+
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    const runner = new MuaddibAgentRunner({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "terminal final answer",
+      streamFn,
+      logger,
+      tools: [
+        {
+          name: "final_answer",
+          label: "Final Answer",
+          description: "final",
+          parameters: Type.Object({
+            answer: Type.String(),
+          }),
+          execute: async (_toolCallId, params) => ({
+            content: [{ type: "text", text: params.answer }],
+            details: {},
+          }),
+        },
+      ],
+    });
+
+    const result = await runner.runSingleTurn("test final answer terminality");
+
+    expect(result.text).toBe("terminal answer");
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Agent run ended with stream error after accepted final_answer; returning final_answer result.",
+      "error=JSON error injected into SSE stream",
+    );
+  });
+
+  it("rejects final_answer terminality when combined with disallowed tools", async () => {
+    let streamCallIndex = 0;
+
+    const streamFn: StreamFn = async () => {
+      streamCallIndex += 1;
+
+      if (streamCallIndex === 1) {
+        return streamWithMessage(
+          makeAssistantMessage(
+            [
+              {
+                type: "toolCall",
+                id: "fa-rejected-1",
+                name: "final_answer",
+                arguments: { answer: "should not be accepted" },
+              },
+              {
+                type: "toolCall",
+                id: "search-1",
+                name: "web_search",
+                arguments: { query: "extra" },
+              },
+            ],
+            "toolUse",
+          ),
+        );
+      }
+
+      return streamWithErrorMessage(
+        makeAssistantMessage(
+          [{ type: "text", text: "" }],
+          "error",
+          undefined,
+          "JSON error injected into SSE stream",
+        ),
+      );
+    };
+
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    const runner = new MuaddibAgentRunner({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "terminal final answer",
+      streamFn,
+      logger,
+      tools: [
+        {
+          name: "final_answer",
+          label: "Final Answer",
+          description: "final",
+          parameters: Type.Object({
+            answer: Type.String(),
+          }),
+          execute: async (_toolCallId, params) => ({
+            content: [{ type: "text", text: params.answer }],
+            details: {},
+          }),
+        },
+        {
+          name: "web_search",
+          label: "Web Search",
+          description: "search",
+          parameters: Type.Object({
+            query: Type.String(),
+          }),
+          execute: async () => ({
+            content: [{ type: "text", text: "search result" }],
+            details: {},
+          }),
+        },
+      ],
+    });
+
+    await expect(runner.runSingleTurn("test final answer rejection")).rejects.toThrow(
+      "Agent run failed: JSON error injected into SSE stream",
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Rejecting final_answer as terminal response",
+      "reason=disallowed_tool_combo",
+      "tools=final_answer,web_search",
+    );
+  });
+
+  it("rejects final_answer when make_plan is present without quest tools", async () => {
+    let streamCallIndex = 0;
+
+    const streamFn: StreamFn = async () => {
+      streamCallIndex += 1;
+
+      if (streamCallIndex === 1) {
+        return streamWithMessage(
+          makeAssistantMessage(
+            [
+              {
+                type: "toolCall",
+                id: "fa-rejected-2",
+                name: "final_answer",
+                arguments: { answer: "should not be accepted" },
+              },
+              {
+                type: "toolCall",
+                id: "plan-1",
+                name: "make_plan",
+                arguments: { plan: "do steps" },
+              },
+            ],
+            "toolUse",
+          ),
+        );
+      }
+
+      return streamWithErrorMessage(
+        makeAssistantMessage(
+          [{ type: "text", text: "" }],
+          "error",
+          undefined,
+          "JSON error injected into SSE stream",
+        ),
+      );
+    };
+
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    const runner = new MuaddibAgentRunner({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "terminal final answer",
+      streamFn,
+      logger,
+      tools: [
+        {
+          name: "final_answer",
+          label: "Final Answer",
+          description: "final",
+          parameters: Type.Object({
+            answer: Type.String(),
+          }),
+          execute: async (_toolCallId, params) => ({
+            content: [{ type: "text", text: params.answer }],
+            details: {},
+          }),
+        },
+        {
+          name: "make_plan",
+          label: "Make Plan",
+          description: "plan",
+          parameters: Type.Object({
+            plan: Type.String(),
+          }),
+          execute: async (_toolCallId, params) => ({
+            content: [{ type: "text", text: params.plan }],
+            details: {},
+          }),
+        },
+      ],
+    });
+
+    await expect(runner.runSingleTurn("test final answer rejection")).rejects.toThrow(
+      "Agent run failed: JSON error injected into SSE stream",
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Rejecting final_answer as terminal response",
+      "reason=make_plan_without_quest_tool",
+      "tools=final_answer,make_plan",
+    );
+  });
+
   it("retries when completion is empty and returns non-empty follow-up completion", async () => {
     const callContexts: Message[][] = [];
     let streamCallIndex = 0;
@@ -656,10 +901,23 @@ function streamWithMessage(message: AssistantMessage) {
   return stream;
 }
 
+function streamWithErrorMessage(message: AssistantMessage) {
+  const stream = createAssistantMessageEventStream();
+  queueMicrotask(() => {
+    stream.push({
+      type: "error",
+      reason: "error",
+      error: message,
+    });
+  });
+  return stream;
+}
+
 function makeAssistantMessage(
   content: AssistantMessage["content"],
   stopReason: AssistantMessage["stopReason"],
   usage?: Partial<Pick<AssistantMessage["usage"], "input" | "output">>,
+  errorMessage?: string,
 ): AssistantMessage {
   return {
     role: "assistant",
@@ -682,6 +940,7 @@ function makeAssistantMessage(
       },
     },
     stopReason,
+    ...(errorMessage ? { errorMessage } : {}),
     timestamp: Date.now(),
   };
 }

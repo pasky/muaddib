@@ -47,12 +47,28 @@ const TOOL_PERSISTENCE_POLICY: Readonly<Record<string, ToolPersistType | "none">
   quest_snooze: "summary",
 };
 
+const FINAL_ANSWER_QUEST_TOOLS = new Set(["quest_start", "subquest_start", "quest_snooze"]);
+const FINAL_ANSWER_ALLOWED_WITH = new Set([
+  "final_answer",
+  "progress_report",
+  "make_plan",
+  ...FINAL_ANSWER_QUEST_TOOLS,
+]);
+
 interface PersistentToolCall {
   toolName: string;
   input: unknown;
   output: unknown;
   persistType: ToolPersistType;
   artifactUrls: string[];
+}
+
+interface FinalAnswerEvaluation {
+  accepted: boolean;
+  text: string;
+  assistantMessage: AssistantMessage;
+  toolNamesInTurn: string[];
+  rejectionReason?: string;
 }
 
 interface RunnerLogger {
@@ -296,7 +312,6 @@ export class MuaddibAgentRunner {
         const images = completionAttempt === 0 ? (options.images ?? []) : [];
 
         await this.agent.prompt(promptText, images);
-        this.throwIfAgentFailed();
 
         const runMessages = this.agent.state.messages.slice(runStartIndex);
         const assistantMessage = findLastAssistantMessage(runMessages);
@@ -304,17 +319,61 @@ export class MuaddibAgentRunner {
           throw new Error("No assistant response produced by agent.");
         }
 
-        const completionText = extractCompletionText(runMessages);
+        const finalAnswerEvaluation = evaluateLatestFinalAnswerToolResult(runMessages);
+        if (finalAnswerEvaluation && !finalAnswerEvaluation.accepted) {
+          this.logger.warn(
+            "Rejecting final_answer as terminal response",
+            `reason=${finalAnswerEvaluation.rejectionReason ?? "invalid_final_answer_turn"}`,
+            `tools=${finalAnswerEvaluation.toolNamesInTurn.join(",")}`,
+          );
+        }
+
+        const agentError = this.agent.state.error?.trim();
+        if (agentError) {
+          if (finalAnswerEvaluation?.accepted) {
+            this.logger.warn(
+              "Agent run ended with stream error after accepted final_answer; returning final_answer result.",
+              `error=${agentError}`,
+            );
+
+            const finalText =
+              visionFallbackActivated && visionFallbackModel
+                ? `${finalAnswerEvaluation.text} [image fallback to ${modelSlug(visionFallbackModel.spec.modelId)}]`
+                : finalAnswerEvaluation.text;
+
+            return {
+              assistantMessage: finalAnswerEvaluation.assistantMessage,
+              text: finalText,
+              stopReason: finalAnswerEvaluation.assistantMessage.stopReason,
+              usage: sumAssistantUsage(runMessages),
+              iterations: iterationCount,
+              completionAttempts: completionAttempt + 1,
+              toolCallsCount,
+            };
+          }
+
+          this.throwIfAgentFailed();
+        }
+
+        const assistantCompletionText = findLastNonEmptyAssistantText(runMessages);
+        const completionText =
+          assistantCompletionText || (finalAnswerEvaluation?.accepted ? finalAnswerEvaluation.text : "");
+
         if (completionText) {
+          const responseAssistantMessage =
+            assistantCompletionText
+              ? assistantMessage
+              : (finalAnswerEvaluation?.assistantMessage ?? assistantMessage);
+
           const finalText =
             visionFallbackActivated && visionFallbackModel
               ? `${completionText} [image fallback to ${modelSlug(visionFallbackModel.spec.modelId)}]`
               : completionText;
 
           return {
-            assistantMessage,
+            assistantMessage: responseAssistantMessage,
             text: finalText,
-            stopReason: assistantMessage.stopReason,
+            stopReason: responseAssistantMessage.stopReason,
             usage: sumAssistantUsage(runMessages),
             iterations: iterationCount,
             completionAttempts: completionAttempt + 1,
@@ -456,20 +515,6 @@ function findLastAssistantMessage(messages: AgentMessage[]): AssistantMessage | 
   return null;
 }
 
-function extractCompletionText(messages: AgentMessage[]): string {
-  const assistantText = findLastNonEmptyAssistantText(messages);
-  if (assistantText) {
-    return assistantText;
-  }
-
-  const finalAnswerText = findLastFinalAnswerToolResultText(messages);
-  if (finalAnswerText) {
-    return finalAnswerText;
-  }
-
-  return "";
-}
-
 function findLastNonEmptyAssistantText(messages: AgentMessage[]): string {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i];
@@ -491,7 +536,35 @@ function findLastNonEmptyAssistantText(messages: AgentMessage[]): string {
   return "";
 }
 
-function findLastFinalAnswerToolResultText(messages: AgentMessage[]): string {
+function evaluateLatestFinalAnswerToolResult(messages: AgentMessage[]): FinalAnswerEvaluation | null {
+  const toolCallTurns = new Map<
+    string,
+    {
+      assistantMessage: AssistantMessage;
+      toolNamesInTurn: Set<string>;
+    }
+  >();
+
+  for (const message of messages) {
+    if (message.role !== "assistant") {
+      continue;
+    }
+
+    const assistantMessage = message as AssistantMessage;
+    const toolCalls = assistantMessage.content.filter((content) => content.type === "toolCall");
+    if (toolCalls.length === 0) {
+      continue;
+    }
+
+    const toolNamesInTurn = new Set(toolCalls.map((toolCall) => toolCall.name));
+    for (const toolCall of toolCalls) {
+      toolCallTurns.set(toolCall.id, {
+        assistantMessage,
+        toolNamesInTurn,
+      });
+    }
+  }
+
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const message = messages[i];
     if (message.role !== "toolResult") {
@@ -508,18 +581,49 @@ function findLastFinalAnswerToolResultText(messages: AgentMessage[]): string {
       .map((content) => content.text)
       .join("\n")
       .trim();
-
-    if (!text) {
-      continue;
-    }
-
     const cleaned = stripThinkingTags(text);
-    if (cleaned && cleaned !== "...") {
-      return cleaned;
+    if (!cleaned || cleaned === "...") {
+      return null;
     }
+
+    const turn = toolCallTurns.get(toolResult.toolCallId);
+    if (!turn) {
+      return null;
+    }
+
+    const toolNamesInTurn = Array.from(turn.toolNamesInTurn);
+    const disallowedTools = toolNamesInTurn.filter((toolName) => !FINAL_ANSWER_ALLOWED_WITH.has(toolName));
+    if (disallowedTools.length > 0) {
+      return {
+        accepted: false,
+        text: cleaned,
+        assistantMessage: turn.assistantMessage,
+        toolNamesInTurn,
+        rejectionReason: "disallowed_tool_combo",
+      };
+    }
+
+    const hasQuestTool = toolNamesInTurn.some((toolName) => FINAL_ANSWER_QUEST_TOOLS.has(toolName));
+    const hasMakePlan = toolNamesInTurn.includes("make_plan");
+    if (hasMakePlan && !hasQuestTool) {
+      return {
+        accepted: false,
+        text: cleaned,
+        assistantMessage: turn.assistantMessage,
+        toolNamesInTurn,
+        rejectionReason: "make_plan_without_quest_tool",
+      };
+    }
+
+    return {
+      accepted: true,
+      text: cleaned,
+      assistantMessage: turn.assistantMessage,
+      toolNamesInTurn,
+    };
   }
 
-  return "";
+  return null;
 }
 
 function stripThinkingTags(text: string): string {
