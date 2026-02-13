@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { createConfigApiKeyResolver } from "./api-keys.js";
 import { assertNoDeferredFeatureConfig } from "./deferred-features.js";
-import { RuntimeLogWriter } from "./logging.js";
+import { RuntimeLogWriter, type RuntimeLogger } from "./logging.js";
 import { resolveRefusalFallbackModel } from "./refusal-fallback.js";
 import { resolvePersistenceSummaryModel } from "./persistence-summary.js";
 import { ChronicleStore } from "../chronicle/chronicle-store.js";
@@ -123,6 +123,7 @@ function createMonitors(
       config,
       chroniclerRuntime,
       modelAdapter,
+      runtimeLogger.getLogger("muaddib.rooms.command.irc"),
     );
 
     logger.info("Enabling IRC room monitor", `socket_path=${socketPath}`);
@@ -152,6 +153,7 @@ function createMonitors(
       config,
       chroniclerRuntime,
       modelAdapter,
+      runtimeLogger.getLogger("muaddib.rooms.command.discord"),
     );
     const discordToken = requireNonEmptyString(
       discordRoomConfig?.token,
@@ -187,6 +189,7 @@ function createMonitors(
       config,
       chroniclerRuntime,
       modelAdapter,
+      runtimeLogger.getLogger("muaddib.rooms.command.slack"),
     );
     const slackAppToken = requireNonEmptyString(
       slackRoomConfig?.app_token,
@@ -350,6 +353,7 @@ function createRoomCommandHandler(
   runtimeConfig?: Record<string, unknown>,
   chroniclerRuntime: ChroniclerRuntime = {},
   modelAdapter: PiAiModelAdapter = createPiAiModelAdapterFromConfig(runtimeConfig ?? {}),
+  logger?: RuntimeLogger,
 ): RoomCommandHandlerTs {
   const commandConfig = roomConfig?.command ?? {};
 
@@ -386,6 +390,7 @@ function createRoomCommandHandler(
     getApiKey,
     modelAdapter,
     responseCleaner,
+    logger,
     refusalFallbackModel,
     persistenceSummaryModel,
     contextReducerConfig: {

@@ -34,6 +34,7 @@ import {
   type CommandConfig,
   type ResolvedCommand,
 } from "./resolver.js";
+import { createConsoleLogger } from "../../app/logging.js";
 
 export interface CommandHandlerRoomConfig {
   command: CommandConfig;
@@ -65,6 +66,13 @@ export interface CommandRateLimiter {
   checkLimit(): boolean;
 }
 
+interface CommandHandlerLogger {
+  debug(message: string, ...data: unknown[]): void;
+  info(message: string, ...data: unknown[]): void;
+  warn(message: string, ...data: unknown[]): void;
+  error(message: string, ...data: unknown[]): void;
+}
+
 export interface CommandHandlerOptions {
   roomConfig: CommandHandlerRoomConfig;
   history: ChatHistoryStore;
@@ -84,6 +92,7 @@ export interface CommandHandlerOptions {
   flagTokens?: string[];
   onProgressReport?: (text: string) => void | Promise<void>;
   toolOptions?: Omit<BaselineToolOptions, "onProgressReport">;
+  logger?: CommandHandlerLogger;
   agentLoop?: {
     maxIterations?: number;
     maxCompletionRetries?: number;
@@ -126,6 +135,7 @@ export class RoomCommandHandlerTs {
   private readonly contextReducer: ContextReducer;
   private readonly autoChronicler: AutoChronicler | null;
   private readonly chronicleStore: Pick<ChronicleStore, "getChapterContextMessages"> | null;
+  private readonly logger: CommandHandlerLogger;
 
   constructor(private readonly options: CommandHandlerOptions) {
     this.commandConfig = options.roomConfig.command;
@@ -178,6 +188,7 @@ export class RoomCommandHandlerTs {
         numberWithDefault(this.commandConfig.rate_period, 900),
       );
     this.steeringQueue = new SteeringQueue();
+    this.logger = options.logger ?? createConsoleLogger("muaddib.rooms.command");
   }
 
   shouldIgnoreUser(nick: string): boolean {
@@ -192,9 +203,20 @@ export class RoomCommandHandlerTs {
     const triggerMessageId = await this.options.history.addMessage(message);
 
     if (!options.isDirect) {
+      this.logger.debug(
+        "Handling passive message",
+        `arc=${message.serverTag}#${message.channelName}`,
+        `nick=${message.nick}`,
+      );
       await this.handlePassiveMessage(message, options.sendResponse);
       return null;
     }
+
+    this.logger.info(
+      "Handling direct command",
+      `arc=${message.serverTag}#${message.channelName}`,
+      `nick=${message.nick}`,
+    );
 
     if (this.resolver.shouldBypassSteeringQueue(message)) {
       return this.executeAndPersist(
@@ -223,6 +245,7 @@ export class RoomCommandHandlerTs {
     );
 
     if (!this.rateLimiter.checkLimit()) {
+      this.logger.warn("Rate limit triggered", `arc=${message.serverTag}#${message.channelName}`, `nick=${message.nick}`);
       return this.rateLimitedResult(message);
     }
 
@@ -290,6 +313,15 @@ export class RoomCommandHandlerTs {
         toolCallsCount: 0,
       };
     }
+
+    this.logger.info(
+      "Resolved direct command",
+      `arc=${message.serverTag}#${message.channelName}`,
+      `mode=${resolvedWithFollowups.modeKey}`,
+      `trigger=${resolvedWithFollowups.selectedTrigger}`,
+      `model=${modelSpec}`,
+      `context_disabled=${resolvedWithFollowups.noContext}`,
+    );
 
     const steeringMessages =
       resolvedWithFollowups.runtime.steering && !resolvedWithFollowups.noContext
@@ -439,6 +471,12 @@ export class RoomCommandHandlerTs {
         throw error;
       }
 
+      this.logger.warn(
+        "Primary model failed with refusal signal; retrying fallback model",
+        `signal=${refusalSignal}`,
+        `fallback_model=${this.refusalFallbackModel}`,
+      );
+
       const fallbackResult = await this.runFallbackModelTurn(
         this.refusalFallbackModel,
         runInput,
@@ -459,6 +497,12 @@ export class RoomCommandHandlerTs {
         fallbackModelSpec: null,
       };
     }
+
+    this.logger.warn(
+      "Primary model response matched refusal signal; retrying fallback model",
+      `signal=${refusalSignal}`,
+      `fallback_model=${this.refusalFallbackModel}`,
+    );
 
     const fallbackResult = await this.runFallbackModelTurn(this.refusalFallbackModel, runInput, runnerInput);
     return {
@@ -576,6 +620,14 @@ export class RoomCommandHandlerTs {
       });
     }
 
+    this.logger.info(
+      "Persisting direct command response",
+      `arc=${arcName}`,
+      `model=${result.model ?? "n/a"}`,
+      `tool_calls=${result.toolCallsCount}`,
+      `llm_call_id=${llmCallId ?? "n/a"}`,
+    );
+
     if (sendResponse) {
       await sendResponse(result.response);
     }
@@ -595,6 +647,12 @@ export class RoomCommandHandlerTs {
     if (llmCallId) {
       await this.options.history.updateLlmCallResponse(llmCallId, responseMessageId);
     }
+
+    this.logger.info(
+      "Direct command response stored",
+      `arc=${arcName}`,
+      `response_message_id=${responseMessageId}`,
+    );
 
     await this.emitCostFollowups(message, result, arcName, sendResponse);
   }
@@ -621,6 +679,7 @@ export class RoomCommandHandlerTs {
         `and cost $${totalCost.toFixed(4)}`,
       ].join(", ")})`;
 
+      this.logger.info("Sending cost followup", `arc=${arcName}`, `cost=${totalCost.toFixed(4)}`);
       await sendResponse(costMessage);
       await this.options.history.addMessage({
         ...message,
@@ -639,6 +698,7 @@ export class RoomCommandHandlerTs {
 
     const milestoneMessage =
       `(fun fact: my messages in this channel have already cost $${totalToday.toFixed(4)} today)`;
+    this.logger.info("Sending daily cost milestone", `arc=${arcName}`, `total_today=${totalToday.toFixed(4)}`);
     await sendResponse(milestoneMessage);
     await this.options.history.addMessage({
       ...message,

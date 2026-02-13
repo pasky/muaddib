@@ -235,6 +235,59 @@ describe("RoomCommandHandlerTs", () => {
     await history.close();
   });
 
+  it("logs direct command lifecycle to injected logger", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const incoming = makeMessage("!s ping");
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    const handler = new RoomCommandHandlerTs({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      logger,
+      runnerFactory: () => ({
+        runSingleTurn: async () => makeRunnerResult("pong"),
+      }),
+    });
+
+    await handler.handleIncomingMessage(incoming, { isDirect: true });
+
+    expect(logger.info).toHaveBeenCalledWith(
+      "Handling direct command",
+      "arc=libera##test",
+      "nick=alice",
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      "Resolved direct command",
+      "arc=libera##test",
+      "mode=serious",
+      "trigger=!s",
+      "model=openai:gpt-4o-mini",
+      "context_disabled=false",
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      "Persisting direct command response",
+      "arc=libera##test",
+      "model=openai:gpt-4o-mini",
+      "tool_calls=0",
+      "llm_call_id=1",
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      "Direct command response stored",
+      "arc=libera##test",
+      "response_message_id=2",
+    );
+
+    await history.close();
+  });
+
   it("applies context reducer when mode enables auto_reduce_context", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();

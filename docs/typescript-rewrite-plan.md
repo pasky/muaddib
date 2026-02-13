@@ -12,6 +12,7 @@ Historical milestone-by-milestone notes were intentionally removed; use git hist
 Latest update:
 - 2026-02-13: Added TS DeepSeek provider parity bridge for Anthropic-compatible `deepseek:*` model specs across command/classifier/context-reducer/chronicler paths by extending `PiAiModelAdapter` + shared adapter wiring in app/CLI startup, with regression coverage in `ts/tests/pi-ai-model-adapter.test.ts` and `ts/tests/cli-message-mode.test.ts`.
 - 2026-02-13: Closed TS response-cleaning parity gap for echoed IRC prefixes (strip leading `[model]` / `!mode` / `[HH:MM]` / non-quest `<nick>` wrappers while preserving `<quest>` and `<quest_finished>` payloads) in `RoomCommandHandlerTs`, with regression coverage in `ts/tests/command-handler.test.ts`.
+- 2026-02-13: Improved TS per-message command observability by wiring runtime logger into `RoomCommandHandlerTs` and emitting direct-command lifecycle entries (handle/resolution/persist), ensuring message-sharded logs contain more than monitor-only lines.
 - 2026-02-12: Switched TS parity-fix stream validation to TS-only (`cd ts && npm run typecheck && npm test`) and started closing parity-audit backlog incrementally.
 - 2026-02-12: Added `docs/typescript-parity-audit.md` with a code-referenced Python-vs-TS matrix, severity-ranked gaps, architecture risks, and remediation plan.
 - 2026-02-12: Closed TS command debounce/followup merge parity gap (`command.debounce` + thread-aware followup coalescing in command path).
