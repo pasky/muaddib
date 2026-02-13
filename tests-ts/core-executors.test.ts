@@ -415,6 +415,343 @@ describe("core tool executors oracle support", () => {
   });
 });
 
+describe("core tool executors web_search support", () => {
+  it("web_search returns formatted search results", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      expect(url).toContain("s.jina.ai");
+      expect(url).toContain("cats");
+      return new Response("Title: Cats\nURL: https://example.com\nSnippet: All about cats", { status: 200 });
+    }) as typeof fetch;
+
+    const executors = createDefaultToolExecutors({ fetchImpl });
+    const result = await executors.webSearch("cats");
+    expect(result).toContain("## Search Results");
+    expect(result).toContain("All about cats");
+  });
+
+  it("web_search returns friendly message for no results (422)", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response("No search results available for query", { status: 422 }),
+    ) as typeof fetch;
+
+    const executors = createDefaultToolExecutors({ fetchImpl });
+    const result = await executors.webSearch("xyznonexistent");
+    expect(result).toBe("No search results found. Try a different query.");
+  });
+
+  it("web_search returns friendly message for empty body", async () => {
+    const fetchImpl = vi.fn(async () => new Response("", { status: 200 })) as typeof fetch;
+    const executors = createDefaultToolExecutors({ fetchImpl });
+    const result = await executors.webSearch("something");
+    expect(result).toBe("No search results found. Try a different query.");
+  });
+
+  it("web_search throws on non-422 error", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response("Server error", { status: 500 }),
+    ) as typeof fetch;
+
+    const executors = createDefaultToolExecutors({ fetchImpl });
+    await expect(executors.webSearch("test")).rejects.toThrow("Search failed: Jina HTTP 500");
+  });
+
+  it("web_search validates non-empty query", async () => {
+    const executors = createDefaultToolExecutors({ fetchImpl: vi.fn() as typeof fetch });
+    await expect(executors.webSearch("   ")).rejects.toThrow("web_search.query must be non-empty");
+  });
+
+  it("web_search passes Jina API key as Bearer token when configured", async () => {
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      expect(headers.Authorization).toBe("Bearer jina-key-123");
+      return new Response("results", { status: 200 });
+    }) as typeof fetch;
+
+    const executors = createDefaultToolExecutors({ fetchImpl, jinaApiKey: "jina-key-123" });
+    await executors.webSearch("test");
+  });
+});
+
+describe("core tool executors visit_webpage support", () => {
+  it("visit_webpage fetches page content via Jina reader", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "HEAD") {
+        return new Response("", { status: 200, headers: { "content-type": "text/html" } });
+      }
+      if (url.startsWith("https://r.jina.ai/")) {
+        return new Response("# Page Title\nSome content", { status: 200 });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    }) as typeof fetch;
+
+    const executors = createDefaultToolExecutors({ fetchImpl });
+    const result = await executors.visitWebpage("https://example.com/page");
+    expect(result).toContain("## Content from https://example.com/page");
+    expect(result).toContain("Some content");
+  });
+
+  it("visit_webpage downloads images and returns binary result", async () => {
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "HEAD") {
+        return new Response("", { status: 200, headers: { "content-type": "image/png" } });
+      }
+      return new Response(Uint8Array.from([137, 80, 78, 71]), {
+        status: 200,
+        headers: { "content-type": "image/png" },
+      });
+    }) as typeof fetch;
+
+    const executors = createDefaultToolExecutors({ fetchImpl });
+    const result = await executors.visitWebpage("https://example.com/img.png");
+    expect(typeof result).toBe("object");
+    expect((result as any).kind).toBe("image");
+    expect((result as any).mimeType).toBe("image/png");
+  });
+
+  it("visit_webpage rejects non-http URLs", async () => {
+    const executors = createDefaultToolExecutors({ fetchImpl: vi.fn() as typeof fetch });
+    await expect(executors.visitWebpage("ftp://example.com/file")).rejects.toThrow("Invalid URL");
+  });
+
+  it("visit_webpage truncates long content", async () => {
+    const longContent = "x".repeat(50000);
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "HEAD") {
+        return new Response("", { status: 200, headers: { "content-type": "text/html" } });
+      }
+      return new Response(longContent, { status: 200 });
+    }) as typeof fetch;
+
+    const executors = createDefaultToolExecutors({ fetchImpl, maxWebContentLength: 1000 });
+    const result = await executors.visitWebpage("https://example.com");
+    expect(result).toContain("..._Content truncated_...");
+    expect((result as string).length).toBeLessThan(5000);
+  });
+
+  it("visit_webpage returns empty response marker for empty body", async () => {
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "HEAD") {
+        return new Response("", { status: 200, headers: { "content-type": "text/html" } });
+      }
+      return new Response("", { status: 200 });
+    }) as typeof fetch;
+
+    const executors = createDefaultToolExecutors({ fetchImpl });
+    const result = await executors.visitWebpage("https://example.com");
+    expect(result).toContain("(Empty response)");
+  });
+
+  it("visit_webpage rejects oversized images", async () => {
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "HEAD") {
+        return new Response("", { status: 200, headers: { "content-type": "image/png" } });
+      }
+      return new Response(new Uint8Array(5000), {
+        status: 200,
+        headers: { "content-type": "image/png" },
+      });
+    }) as typeof fetch;
+
+    const executors = createDefaultToolExecutors({ fetchImpl, maxImageBytes: 1000 });
+    await expect(executors.visitWebpage("https://example.com/big.png")).rejects.toThrow("Image too large");
+  });
+});
+
+describe("core tool executors execute_code support", () => {
+  it("execute_code runs python code and captures output", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "muaddib-ts-exec-"));
+    tempDirs.push(dir);
+
+    const executors = createDefaultToolExecutors({
+      executeCodeWorkingDirectory: join(dir, "work"),
+    });
+
+    const result = await executors.executeCode({
+      code: 'print("hello from python")',
+      language: "python",
+    });
+
+    expect(result).toContain("hello from python");
+    expect(result).toContain("Code saved to");
+  });
+
+  it("execute_code runs bash code", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "muaddib-ts-exec-"));
+    tempDirs.push(dir);
+
+    const executors = createDefaultToolExecutors({
+      executeCodeWorkingDirectory: join(dir, "work"),
+    });
+
+    const result = await executors.executeCode({
+      code: 'echo "bash works"',
+      language: "bash",
+    });
+
+    expect(result).toContain("bash works");
+  });
+
+  it("execute_code reports errors with exit code", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "muaddib-ts-exec-"));
+    tempDirs.push(dir);
+
+    const executors = createDefaultToolExecutors({
+      executeCodeWorkingDirectory: join(dir, "work"),
+    });
+
+    const result = await executors.executeCode({
+      code: "exit 42",
+      language: "bash",
+    });
+
+    expect(result).toContain("Execution error");
+    expect(result).toContain("42");
+  });
+
+  it("execute_code rejects unsupported language", async () => {
+    const executors = createDefaultToolExecutors();
+    await expect(
+      executors.executeCode({ code: "code", language: "ruby" as any }),
+    ).rejects.toThrow("Unsupported execute_code language");
+  });
+
+  it("execute_code rejects empty code", async () => {
+    const executors = createDefaultToolExecutors();
+    await expect(executors.executeCode({ code: "   " })).rejects.toThrow("execute_code.code must be non-empty");
+  });
+
+  it("execute_code warns about unsupported input/output artifacts", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "muaddib-ts-exec-"));
+    tempDirs.push(dir);
+
+    const executors = createDefaultToolExecutors({
+      executeCodeWorkingDirectory: join(dir, "work"),
+    });
+
+    const result = await executors.executeCode({
+      code: 'echo "ok"',
+      language: "bash",
+      input_artifacts: ["file.txt"],
+      output_files: ["out.txt"],
+    });
+
+    expect(result).toContain("input_artifacts are not yet supported");
+    expect(result).toContain("output_files are not yet supported");
+  });
+
+  it("execute_code handles timeout", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "muaddib-ts-exec-"));
+    tempDirs.push(dir);
+
+    const executors = createDefaultToolExecutors({
+      executeCodeWorkingDirectory: join(dir, "work"),
+      executeCodeTimeoutMs: 200,
+    });
+
+    // Use a bash busy-wait that responds to SIGKILL immediately
+    const result = await executors.executeCode({
+      code: "while true; do :; done",
+      language: "bash",
+    });
+
+    expect(result).toContain("Timed out");
+  }, 10_000);
+
+  it("execute_code captures stderr warnings on success", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "muaddib-ts-exec-"));
+    tempDirs.push(dir);
+
+    const executors = createDefaultToolExecutors({
+      executeCodeWorkingDirectory: join(dir, "work"),
+    });
+
+    const result = await executors.executeCode({
+      code: 'echo "out" && echo "warn" >&2',
+      language: "bash",
+    });
+
+    expect(result).toContain("out");
+    expect(result).toContain("**Warnings:**");
+    expect(result).toContain("warn");
+  });
+
+  it("execute_code reports no output message for silent success", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "muaddib-ts-exec-"));
+    tempDirs.push(dir);
+
+    const executors = createDefaultToolExecutors({
+      executeCodeWorkingDirectory: join(dir, "work"),
+    });
+
+    const result = await executors.executeCode({
+      code: "true",
+      language: "bash",
+    });
+
+    expect(result).toContain("Code executed successfully with no output");
+  });
+});
+
+describe("core tool executors quest validation with active quest", () => {
+  it("subquest_start returns deferred message with active quest context", async () => {
+    const executors = createDefaultToolExecutors({ currentQuestId: "active-quest" });
+
+    const result = await executors.subquestStart({
+      id: "sub-1",
+      goal: "Do sub thing",
+      success_criteria: "Done",
+    });
+
+    expect(result).toContain("REJECTED");
+  });
+
+  it("subquest_start validates input with active quest context", async () => {
+    const executors = createDefaultToolExecutors({ currentQuestId: "active-quest" });
+
+    await expect(
+      executors.subquestStart({ id: " ", goal: "g", success_criteria: "s" }),
+    ).rejects.toThrow("subquest_start.id must be non-empty");
+
+    await expect(
+      executors.subquestStart({ id: "x", goal: " ", success_criteria: "s" }),
+    ).rejects.toThrow("subquest_start.goal must be non-empty");
+
+    await expect(
+      executors.subquestStart({ id: "x", goal: "g", success_criteria: " " }),
+    ).rejects.toThrow("subquest_start.success_criteria must be non-empty");
+  });
+
+  it("quest_snooze validates time format with active quest context", async () => {
+    const executors = createDefaultToolExecutors({ currentQuestId: "active-quest" });
+
+    const result = await executors.questSnooze({ until: "14:30" });
+    expect(result).toContain("REJECTED");
+
+    const badFormat = await executors.questSnooze({ until: "tomorrow" });
+    expect(badFormat).toContain("Invalid time format");
+
+    const badHour = await executors.questSnooze({ until: "25:00" });
+    expect(badHour).toContain("Invalid time");
+
+    const badMinute = await executors.questSnooze({ until: "12:60" });
+    expect(badMinute).toContain("Invalid time");
+  });
+
+  it("quest_start validates all required fields", async () => {
+    const executors = createDefaultToolExecutors();
+
+    await expect(
+      executors.questStart({ id: "x", goal: " ", success_criteria: "s" }),
+    ).rejects.toThrow("quest_start.goal must be non-empty");
+
+    await expect(
+      executors.questStart({ id: "x", goal: "g", success_criteria: " " }),
+    ).rejects.toThrow("quest_start.success_criteria must be non-empty");
+  });
+});
+
 describe("core tool executors generate_image support", () => {
   it("generate_image calls OpenRouter, writes artifact image, and returns image payload", async () => {
     const { artifactsPath } = await makeArtifactsDir();
