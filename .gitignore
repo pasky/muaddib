@@ -9,5 +9,5 @@ logs/
 irssi-data
 artifacts
 
-ts/node_modules/
-ts/dist/
+node_modules/
+dist/

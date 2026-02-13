@@ -15,7 +15,7 @@
 
 3. **Start services:**
    ```bash
-   docker-compose up -d
+   docker compose up -d
    ```
 
 4. **Connect to irssi:**
@@ -29,19 +29,19 @@
 ### Restart muaddib during development:
 ```bash
 # Quick restart (preserves irssi session)
-docker-compose restart muaddib
+docker compose restart muaddib
 
 # Or rebuild and restart if you changed dependencies
-docker-compose up --build -d muaddib
+docker compose up --build -d muaddib
 
 # View logs
-docker-compose logs -f muaddib
+docker compose logs -f muaddib
 ```
 
 ### Full restart:
 ```bash
-docker-compose down
-docker-compose up -d
+docker compose down
+docker compose up -d
 ```
 
 ## Configuration
@@ -57,33 +57,17 @@ For Docker, mount a local directory as the muaddib home:
   - `artifacts/` - Shared artifacts directory (auto-created)
   - `logs/` - Per-message log files (auto-created)
 - **Irssi data:** `./irssi-data/` (bind-mounted to `/home/irssi/.irssi/`)
-- **Source code:** `./` (mounted for development)
 
 Note: Relative paths in `config.json` (like `"path": "chronicle.db"` or `"path": "artifacts"`) are resolved against `$MUADDIB_HOME`.
 
-The default `docker-compose.yml` already sets this up (TS runtime default with explicit rollback window):
+The default `docker-compose.yml` runs the TypeScript service runtime:
 ```yaml
 environment:
   - MUADDIB_HOME=/data
-  - MUADDIB_RUNTIME=${MUADDIB_RUNTIME:-ts}
-  - MUADDIB_TS_ROLLBACK_UNTIL=2026-03-31T23:59:59Z
-volumes:
-  - ./muaddib-data:/data
-```
-
-Validate runtime selection before bringing up services:
-```bash
-MUADDIB_RUNTIME=ts docker compose config | rg MUADDIB_RUNTIME
-```
-
-To force rollback runtime during the cutover window:
-```bash
-MUADDIB_RUNTIME=python docker compose config | rg MUADDIB_RUNTIME
-MUADDIB_RUNTIME=python docker compose up -d muaddib
 ```
 
 ## Troubleshooting
 
 - Check varlink socket: `ls -la ./irssi-data/varlink.sock`
-- View muaddib logs: `docker-compose logs muaddib`
+- View muaddib logs: `docker compose logs muaddib`
 - Connect to muaddib container: `docker exec -it muaddib bash`

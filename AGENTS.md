@@ -1,78 +1,47 @@
 # muaddib Agent Guide
 
 ## Build/Test Commands
-- Install dependencies: `uv sync --dev`
+- Install dependencies: `npm ci`
+- Typecheck: `npm run typecheck`
+- Tests: `npm test`
+- Build runtime: `npm run build`
 - Any change should be accompanied with tests update. (Always prefer updating existing unit tests over adding new ones.)
-- Any change where viable should be tested by actually running the CLI e2e test: `MUADDIB_HOME=. uv run muaddib --message "your message here"`
-- Run linting, typecheck etc. via pre-commit.
-- TS parity-fix stream validation is TS-only: `cd ts && npm run typecheck && npm test`.
-- Do not run Python runtime/tests for TS parity-fix milestones unless explicitly requested.
+- Any change where viable should be tested by actually running the CLI e2e test: `MUADDIB_HOME=. npm run cli:message -- --message "your message here"`
+- Run linting/typecheck/etc. via pre-commit where configured.
+- Python runtime/tests are deprecated and auxiliary; do not use them as the primary validation path.
 - You must test and commit your work once finished. Never respond with "Tests not run (not requested)."
 - NEVER use `git add -A` blindly, there may be untracked files that must not be committed; use `git add -u` instead
 
 ## Architecture
-- **Main Service**: `muaddib/main.py` - Core application coordinator managing shared resources (config, history, model router)
-- **Room Isolation**: IRC-specific functionality isolated in `rooms/irc/monitor.py` (IRCRoomMonitor class)
-- **Modular Structure**: Clean separation between platform-agnostic core and IRC-specific implementation
-- **Varlink Protocol**: Dual async socket architecture (events + sender) over UNIX socket at `~/.irssi/varlink.sock`
-- **APIs**: Anthropic Claude (sarcastic/serious modes with automatic classification using claude-3-5-haiku), Sprites sandbox for Python/Bash code execution
-- **Config & Data**: All files live in `$MUADDIB_HOME` (defaults to `~/.muaddib/`):
-  - `config.json` - JSON configuration (copy from `config.json.example`)
-  - `chat_history.db` - SQLite persistent chat history
-  - `chronicle.db` - Chronicle database
-  - `artifacts/` - Shared artifacts directory
-  - `logs/` - Per-message log files (DEBUG+)
-  - Relative paths in config (e.g., `"path": "chronicle.db"`) are resolved against `$MUADDIB_HOME`
-  - Models MUST be fully-qualified as `provider:model` (e.g., `anthropic:claude-sonnet-4`). No defaults.
-  - No backwards compatibility is kept for legacy config keys; tests are aligned to the new schema.
-  - Set `MUADDIB_HOME=.` for development to use current directory
-- **Logging**: Console output (INFO+) and `$MUADDIB_HOME/logs/` files (DEBUG+), third-party libraries suppressed from console
-- **Database**: SQLite persistent chat history with configurable inference limits (paths can be overridden in config)
-- **Continuous Chronicling**: Automatic chronicling triggered when unchronicled messages exceed `history_size` threshold. Uses `chronicler.model` to summarize conversation activity into Chronicle chapters. Messages get linked via `chapter_id` field in ChatHistory. Includes safety limits (100 message batches, 7-day lookback) and overlap for context continuity
-- **Proactive Interjecting**: Channel-based whitelist feature using claude-3-haiku to scan non-directed messages and interject in serious conversations when useful. Includes rate limiting, test mode, and channel whitelisting
-- **Key Modules**:
-  - `rooms/irc/monitor.py` - IRCRoomMonitor (main IRC message processing, command handling, mode classification)
-  - `rooms/irc/varlink.py` - VarlinkClient (events), VarlinkSender (messages)
-  - `rooms/irc/autochronicler.py` - AutoChronicler (automatic chronicling of IRC messages when threshold exceeded)
-  - `rooms/proactive.py` - ProactiveDebouncer (channel-based proactive interjecting)
-  - `history.py` - ChatHistory (persistent SQLite storage)
-- `providers/` - async API clients (anthropic, openai) and base classes
-  - `rate_limiter.py` - RateLimiter
-  - `agentic_actor/` - AgenticLLMActor multi-turn mode with tool system for web search, webpage visiting, and Python code execution
+- **Main Service**: `src/app/main.ts` - core service coordinator (config, history, rooms, chronicler lifecycle)
+- **CLI Message Mode**: `src/cli/main.ts` + `src/cli/message-mode.ts`
+- **Room Isolation**:
+  - IRC: `src/rooms/irc/monitor.ts`, `src/rooms/irc/varlink.ts`
+  - Discord: `src/rooms/discord/monitor.ts`, `src/rooms/discord/transport.ts`
+  - Slack: `src/rooms/slack/monitor.ts`, `src/rooms/slack/transport.ts`
+- **Command Handling**: `src/rooms/command/*` (resolver, classifier, handler, rate limiter, context reduction)
+- **Agent Runtime**: `src/agent/muaddib-agent-runner.ts` + `src/agent/tools/*`
+- **Persistence**:
+  - Chat history: `src/history/chat-history-store.ts`
+  - Chronicle: `src/chronicle/*`
+- **Config & Data**: all runtime state lives under `$MUADDIB_HOME` (defaults to `~/.muaddib/`), including `config.json`, `chat_history.db`, `chronicle.db`, `artifacts/`, `logs/`
+- Models MUST be fully-qualified as `provider:model` (e.g. `anthropic:claude-sonnet-4`). No defaults.
+- No backwards compatibility shims for legacy config keys.
+- Python code under `muaddib/` is deprecated and kept as auxiliary reference only.
 
 ## Code Style
-- **Language**: Python 3.11+ with modern type hints (`dict`, `list`, ...), following PEP8
-- **Async**: Full async/await support for non-blocking message processing
-- **Background Tasks**: Use `muaddib.spawn(coro)` for fire-and-forget tasks (not bare `asyncio.create_task`) to prevent GC of unreferenced tasks
-- **Imports**: Standard library first, then third-party (`aiohttp`, `aiosqlite`), local modules
-- **Naming**: snake_case for functions/variables, PascalCase for classes
-- **Docstrings**: Brief docstrings for classes and key methods
-- **Error Handling**: Write code that fails fast. No defensive try-except blocks. Only catch exceptions when there's a clear recovery strategy.
-- **Testing**: Pytest with async support for behavioral tests
+- **Language**: TypeScript (Node 20+, ESM, strict mode)
+- **Async**: async/await for non-blocking room/message flow
+- **Naming**: camelCase for variables/functions, PascalCase for classes/types
+- **Imports**: Node built-ins, then third-party, then local modules
+- **Error Handling**: fail fast; catch only where a concrete recovery strategy exists
+- **Logging**: keep stdout concise, preserve structured/runtime detail in file logs
 
-## Notes for contributors
-- Tests should avoid mocking low-level API client constructors when validating control flow. Prefer patching router calls to inject fake responses, and ensure provider configs are referenced via `providers.*`.
-- Do NOT introduce compatibility shims for legacy config fields; update tests and fixtures instead.
-- When changing tests, prefer modifying/extending existing test files and cases rather than adding new test files, unless there is a compelling reason.
-- For AI agents: When user is frustrated, stop and think why and consider whether not to append an additional behavioral instruction to this AGENTS.md file.
+## Testing
+- Vitest behavioral tests in `tests-ts/`
+- Prefer extending existing tests instead of creating new files unless justified
+- Keep room/command behavior parity covered when changing handler logic
 
-## TypeScript rewrite program (pi-ai + pi-agent)
-- Primary migration plan and design decisions are documented in `docs/typescript-rewrite-plan.md`.
-- The target is full TS rewrite with `@mariozechner/pi-ai` + `@mariozechner/pi-agent-core` (agent package), replacing custom provider clients and custom actor loop.
-- Quests and proactive interjections are intentionally out of scope for TS parity v1.
-- TS runtime now supports core `chronicler` runtime behavior (chapter lifecycle automation + autochronicler triggers) but still treats quests/proactive surfaces as deferred: `chronicler.quests`, `quests`, and `rooms.*.proactive` are tolerated when present-but-inactive (with "ignored" warning) and fail-fast rejected when explicitly enabled (`enabled: true`).
-- TS runtime fail-fast enforces provider credential contract: only static `providers.*.key` strings (or provider SDK env vars) are supported; non-static `providers.*.key` values and `providers.*.{oauth,session}` are rejected.
-- OAuth/session refresh plumbing is explicitly deferred until a stable `@mariozechner/pi-ai` provider refresh contract is available; errors must include concrete operator guidance (remove unsupported keys and use static key/env-var contract).
-- TS service runtime cutover uses TS-first entrypoint with explicit rollback window controls (`MUADDIB_RUNTIME=python`, `MUADDIB_TS_ROLLBACK_UNTIL`) during soak; do not remove rollback path before soak criteria are met.
-- Rollback-window exit criteria are authoritative in `docs/typescript-runtime-rollout.md` + `docs/typescript-runtime-runbook.md` (SLO thresholds, parity checks, rollback triggers, minimum soak duration); keep these docs in sync with runtime behavior.
-- During rollback window, operators must capture daily/post-deploy SLO+parity evidence using `docs/typescript-runtime-soak-evidence-template.md` and append entries to `docs/typescript-runtime-soak-evidence-log.md`, including explicit runtime-path proof for both `MUADDIB_RUNTIME=ts` (default) and `MUADDIB_RUNTIME=python` (rollback).
-- Missing required evidence fields for a daily/deploy window is an operational failure and must be escalated before deprecation-gate decisions.
-- During soak, Discord/Slack send retry/failure instrumentation must stay operator-visible in runtime logs via `[muaddib][send-retry]` and `[muaddib][metric]` structured lines.
-- No backwards-compatibility shims for legacy behavior/config keys during rewrite.
-
-### Mandatory per-milestone flow
-1. Update `docs/typescript-rewrite-plan.md` progress log.
-2. Update this `AGENTS.md` when process/guardrails evolve.
-3. Run TS validation (`cd ts && npm run typecheck && npm test`) for TS parity-fix milestones.
-4. Commit milestone changes.
-5. Handoff with a concrete next-session goal that repeats the original rewrite objective + current status + exact next tasks.
+## Deprecated Python Runtime (auxiliary)
+- Legacy invocation remains available temporarily via: `uv run muaddib`
+- Keep operator docs clear that TypeScript runtime is primary

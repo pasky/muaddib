@@ -20,12 +20,9 @@ services:
     working_dir: /app
     environment:
       - MUADDIB_HOME=/data
-      - MUADDIB_RUNTIME=${MUADDIB_RUNTIME:-ts}
-      - MUADDIB_TS_ROLLBACK_UNTIL=2026-03-31T23:59:59Z
     volumes:
       - ./irssi-data:/home/irssi/.irssi
       - ./muaddib-data:/data
-      - .:/app/src  # For development - mount source code
     networks:
       - irssi-net
     depends_on:

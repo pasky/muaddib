@@ -235,7 +235,7 @@ function createDefaultVisitWebpageExecutor(
     }
 
     const requestHeaders = buildVisitHeaders(options, url, {
-      "User-Agent": "muaddib-ts/1.0",
+      "User-Agent": "muaddib/1.0",
     });
 
     let contentType = "";
@@ -1141,7 +1141,7 @@ async function fetchImageAsDataUrl(
 
   const response = await fetchImpl(imageUrl, {
     headers: {
-      "User-Agent": "muaddib-ts/1.0",
+      "User-Agent": "muaddib/1.0",
     },
   });
 
@@ -1259,7 +1259,7 @@ function getFetch(options: DefaultToolExecutorOptions): typeof fetch {
 
 function buildJinaHeaders(apiKey?: string, extras: Record<string, string> = {}): Record<string, string> {
   const headers: Record<string, string> = {
-    "User-Agent": "muaddib-ts/1.0",
+    "User-Agent": "muaddib/1.0",
     Accept: "text/plain",
     ...extras,
   };

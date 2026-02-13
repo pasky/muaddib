@@ -60,8 +60,10 @@ Notes:
 
 ## 7) Run Muaddib
 ```bash
-uv run muaddib
+npm run start
 ```
+
+(Deprecated legacy runtime, auxiliary only: `uv run muaddib`.)
 
 ## 8) Test
 Mention the bot in a channel:

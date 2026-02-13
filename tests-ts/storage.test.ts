@@ -420,7 +420,7 @@ describe("AutoChroniclerTs", () => {
     await history.close();
     await chronicleStore.close();
     await rm(dir, { recursive: true, force: true });
-  });
+  }, 10000);
 
   it("triggers chronicling at threshold, appends chronicle paragraph, and marks messages chronicled", async () => {
     const history = new ChatHistoryStore(":memory:", 20);

@@ -84,26 +84,26 @@ Copy `config.json.example` to `~/.muaddib/config.json` (or `$MUADDIB_HOME/config
 
 Recommended for Discord:
 1. Follow [Discord setup instructions](docs/discord.md) to create a bot account and obtain a token. Set it in `~/.muaddib/config.json` Discord section.
-2. Install dependencies: `uv sync --dev` and `cd ts && npm ci`
-3. Build TS runtime: `cd ts && npm run build`
-4. Run the service (TS default): `cd ts && npm run start`
+2. Install dependencies: `npm ci`
+3. Build runtime: `npm run build`
+4. Run the service: `npm run start`
 
 Recommended for Slack:
 1. Follow [Slack setup instructions](docs/slack.md) to create a Slack app, enable Socket Mode, and obtain tokens.
 2. Set the Slack config block in `~/.muaddib/config.json`.
-3. Install dependencies: `uv sync --dev` and `cd ts && npm ci`
-4. Build TS runtime: `cd ts && npm run build`
-5. Run the service (TS default): `cd ts && npm run start`
+3. Install dependencies: `npm ci`
+4. Build runtime: `npm run build`
+5. Run the service: `npm run start`
 
 Recommended for an IRC bot: See [Docker instructions](docs/docker.md) for running a Muaddib service + irssi in tandem in a Docker compose setup.
 
 Manual for IRC ("bring your own irssi"):
 1. Ensure `irssi-varlink` is loaded in your irssi, and your varlink path is set up properly in `~/.muaddib/config.json` IRC section.
-2. Install dependencies: `uv sync --dev` and `cd ts && npm ci`
-3. Build TS runtime: `cd ts && npm run build`
-4. Run the service (TS default): `cd ts && npm run start`
+2. Install dependencies: `npm ci`
+3. Build runtime: `npm run build`
+4. Run the service: `npm run start`
 
-During the TS cutover rollback window (until `2026-03-31T23:59:59Z`), operators can force Python runtime in deployment environments with `MUADDIB_RUNTIME=python` (see `docs/typescript-runtime-rollout.md` and `docs/typescript-runtime-runbook.md`).
+> Python runtime note: the Python implementation is now deprecated and kept only as an auxiliary reference while we finish sunset. If you still need to invoke it manually: `uv run muaddib`.
 
 ### Commands
 
@@ -113,79 +113,45 @@ During the TS cutover rollback window (until `2026-03-31T23:59:59Z`), operators 
 ## Development
 
 ```bash
-# Install development dependencies
-uv sync --dev
+# Install dependencies
+npm ci
 
-# Run tests
-uv run pytest
+# Typecheck + tests
+npm run typecheck
+npm test
 
-# Run linting and formatting
-uv run ruff check .
-uv run ruff format .
-
-# Type checking
-uv run pyright
-
-# Install pre-commit hooks
-uv run pre-commit install
+# Build
+npm run build
 ```
 
-### CLI Testing Mode
+### CLI Testing Mode (TypeScript)
 
-You can test the bot's message handling including command parsing from the command line:
+You can test command parsing and response flow from the command line:
 
 ```bash
+npm run cli:message -- --message "!h"
+npm run cli:message -- --message "tell me a joke"
+npm run cli:message -- --message "!d tell me a joke"
+npm run cli:message -- --message "!a summarize https://python.org"
+# Or with explicit config:
+# npm run cli:message -- --message "!a summarize https://python.org" --config /path/to/config.json
+```
+
+This simulates full room command handling without running the full chat service.
+
+### Deprecated Python CLI & tooling (auxiliary)
+
+The legacy Python implementation is deprecated, but still available temporarily for compatibility and reference.
+
+```bash
+# Legacy Python CLI invocation
 uv run muaddib --message "!h"
-uv run muaddib --message "tell me a joke"
-uv run muaddib --message "!d tell me a joke"
-uv run muaddib --message "!a summarize https://python.org"
-# Or with explicit config: uv run muaddib --message "!a summarize https://python.org" --config /path/to/config.json
-```
 
-This simulates full IRC message handling including command parsing and automatic mode classification, useful for testing your configuration and API keys without setting up the full IRC bot.
-
-#### Chronicler
-
-The Chronicler maintains persistent memory across conversations using a Chronicle (arcs → chapters → paragraphs) provided via a NLI-based subagent.
-
-```bash
-# Record information
+# Legacy chronicler commands
 uv run muaddib --chronicler "Record: Completed API migration" --arc "project-x"
-
-# View current chapter
 uv run muaddib --chronicler "Show me the current chapter" --arc "project-x"
-```
 
-### Classifier Analysis
-
-Evaluate the performance of the automatic mode classifier on historical data:
-
-```bash
-# Analyze classifier performance on database history (uses $MUADDIB_HOME/chat_history.db by default)
+# Legacy analysis scripts
 uv run python analyze_classifier.py
-
-# Analyze classifier performance on IRC log files
-uv run python analyze_classifier.py --logs ~/.irssi/logs/freenode/*.log
-
-# Combine both sources with explicit paths
-uv run python analyze_classifier.py --db /path/to/chat_history.db --logs ~/.irssi/logs/ --config /path/to/config.json
-```
-
-Results are saved to `classifier_analysis.csv` with detailed metrics and misclassification analysis.
-
-### Proactive Interjecting Analysis
-
-Evaluate the performance of the proactive interjecting feature on historical data:
-
-```bash
-# Analyze proactive interjecting performance on database history
 uv run python analyze_proactive.py --limit 20
-
-# Analyze proactive interjecting on IRC log files with channel exclusions
-uv run python analyze_proactive.py --logs ~/.irssi/logs/ --limit 50 --exclude-news
-
-# Combine both sources with explicit paths
-uv run python analyze_proactive.py --db /path/to/chat_history.db --logs ~/.irssi/logs/ --config /path/to/config.json
 ```
-
-Results are saved to `proactive_analysis.csv` with detailed interjection decisions and reasoning.
