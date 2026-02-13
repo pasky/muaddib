@@ -269,7 +269,7 @@ describe("RoomCommandHandlerTs", () => {
       "arc=libera##test",
       "nick=alice",
     );
-    expect(logger.info).toHaveBeenCalledWith(
+    expect(logger.debug).toHaveBeenCalledWith(
       "Resolved direct command",
       "arc=libera##test",
       "mode=serious",
@@ -284,7 +284,7 @@ describe("RoomCommandHandlerTs", () => {
       "tool_calls=0",
       "llm_call_id=1",
     );
-    expect(logger.info).toHaveBeenCalledWith(
+    expect(logger.debug).toHaveBeenCalledWith(
       "Direct command response stored",
       "arc=libera##test",
       "response_message_id=2",
@@ -498,7 +498,7 @@ describe("RoomCommandHandlerTs", () => {
 
     const messageLog = await readFile(join(arcDir, arcFiles[0]), "utf-8");
     expect(messageLog).toContain(" - DEBUG - Handling direct command");
-    expect(messageLog).toContain(" - INFO - Resolved direct command");
+    expect(messageLog).toContain(" - DEBUG - Resolved direct command");
     expect(messageLog).toContain(" - DEBUG - Persisting direct command response");
 
     await rm(logsHome, { recursive: true, force: true });

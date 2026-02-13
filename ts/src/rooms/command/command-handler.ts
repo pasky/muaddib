@@ -364,7 +364,7 @@ export class RoomCommandHandlerTs {
       );
     }
 
-    this.logger.info(
+    this.logger.debug(
       "Resolved direct command",
       `arc=${message.serverTag}#${message.channelName}`,
       `mode=${resolvedWithFollowups.modeKey}`,
@@ -742,7 +742,7 @@ export class RoomCommandHandlerTs {
       await this.options.history.updateLlmCallResponse(llmCallId, responseMessageId);
     }
 
-    this.logger.info(
+    this.logger.debug(
       "Direct command response stored",
       `arc=${arcName}`,
       `response_message_id=${responseMessageId}`,
