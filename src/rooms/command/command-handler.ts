@@ -10,9 +10,9 @@ import {
 import type { ChronicleStore } from "../../chronicle/chronicle-store.js";
 import {
   createBaselineAgentTools,
+  createDefaultToolExecutors,
   type BaselineToolOptions,
 } from "../../agent/tools/baseline-tools.js";
-import { createDefaultToolExecutors } from "../../agent/tools/core-executors.js";
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { parseModelSpec } from "../../models/model-spec.js";

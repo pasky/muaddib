@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createDefaultToolExecutors } from "../src/agent/tools/core-executors.js";
+import { createDefaultToolExecutors } from "../src/agent/tools/baseline-tools.js";
 import { ChronicleStore } from "../src/chronicle/chronicle-store.js";
 
 const tempDirs: string[] = [];
