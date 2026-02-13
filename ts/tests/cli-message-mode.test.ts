@@ -1,23 +1,36 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runCliMessageMode } from "../src/cli/message-mode.js";
 
 const tempDirs: string[] = [];
 
+beforeEach(async () => {
+  const dir = await mkdtemp(join(tmpdir(), "muaddib-cli-home-"));
+  tempDirs.push(dir);
+  vi.stubEnv("MUADDIB_HOME", dir);
+});
+
 afterEach(async () => {
+  vi.unstubAllEnvs();
   for (const dir of tempDirs.splice(0, tempDirs.length)) {
     await rm(dir, { recursive: true, force: true });
   }
 });
 
+async function createTempHome(): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "muaddib-cli-"));
+  tempDirs.push(dir);
+  vi.stubEnv("MUADDIB_HOME", dir);
+  return dir;
+}
+
 describe("runCliMessageMode", () => {
   it("executes parse->context->runner path and returns formatted response", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "muaddib-cli-"));
-    tempDirs.push(dir);
+    const dir = await createTempHome();
 
     const configPath = join(dir, "config.json");
     const config = {
@@ -93,13 +106,15 @@ describe("runCliMessageMode", () => {
     expect(result.response).toBe("cli ok");
     expect(result.mode).toBe("serious");
     expect(result.trigger).toBe("!s");
+
+    const date = new Date().toISOString().slice(0, 10);
+    const arcLogDir = join(dir, "logs", date, "testserver##testchannel");
+    const arcLogs = await readdir(arcLogDir);
+    expect(arcLogs.length).toBeGreaterThan(0);
   });
 
   it("ignores deferred proactive config knobs when not explicitly enabled", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "muaddib-cli-"));
-    tempDirs.push(dir);
-
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dir = await createTempHome();
 
     const configPath = join(dir, "config.json");
     const config = {
@@ -171,10 +186,11 @@ describe("runCliMessageMode", () => {
     });
 
     expect(result.response).toBe("cli ok");
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy.mock.calls[0]?.[0]).toContain("rooms.common.proactive");
 
-    warnSpy.mockRestore();
+    const date = new Date().toISOString().slice(0, 10);
+    const systemLogPath = join(dir, "logs", date, "system.log");
+    const systemLog = await readFile(systemLogPath, "utf-8");
+    expect(systemLog).toContain("rooms.common.proactive");
   });
 
   it("fails fast on explicitly enabled deferred proactive config knobs", async () => {

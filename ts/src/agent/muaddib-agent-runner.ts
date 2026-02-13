@@ -257,11 +257,17 @@ export class MuaddibAgentRunner {
       toolArgsByCallId.delete(event.toolCallId);
 
       if (event.isError) {
-        this.logger.warn(`Tool ${event.toolName} failed: ${summarizeToolResultForLog(event.result)}`);
+        this.logger.warn(`Tool ${event.toolName} failed`);
+        this.logger.debug(
+          `Tool ${event.toolName} error: ${summarizeToolResultForLog(event.result)}`,
+        );
         return;
       }
 
-      this.logger.info(`Tool ${event.toolName} executed: ${summarizeToolResultForLog(event.result)}...`);
+      this.logger.info(`Tool ${event.toolName} executed`);
+      this.logger.debug(
+        `Tool ${event.toolName} result: ${summarizeToolResultForLog(event.result)}`,
+      );
 
       if (!visionFallbackInUse && visionFallbackModel && hasImageToolOutput(event.result)) {
         visionFallbackInUse = true;

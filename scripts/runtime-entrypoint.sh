@@ -25,8 +25,8 @@ ensure_ts_build
 
 if [[ "${1:-}" == "--message" ]]; then
   echo "[muaddib] Runtime=ts CLI message mode. Rollback window closes at ${rollback_until}."
-  exec npm --prefix /app/ts run cli:message -- "$@"
+  exec node /app/ts/dist/cli/main.js "$@"
 fi
 
 echo "[muaddib] Runtime=ts service mode. Rollback window closes at ${rollback_until}."
-exec npm --prefix /app/ts run start -- "$@"
+exec node /app/ts/dist/app/main.js "$@"

@@ -6,6 +6,7 @@ import { assertNoDeferredFeatureConfig } from "../app/deferred-features.js";
 import { getMuaddibHome, resolveMuaddibPath } from "../app/bootstrap.js";
 import { resolveRefusalFallbackModel } from "../app/refusal-fallback.js";
 import { resolvePersistenceSummaryModel } from "../app/persistence-summary.js";
+import { RuntimeLogWriter } from "../app/logging.js";
 import { MuaddibAgentRunner } from "../agent/muaddib-agent-runner.js";
 import { createPiAiModelAdapterFromConfig } from "../models/pi-ai-model-adapter.js";
 import { ChronicleStore } from "../chronicle/chronicle-store.js";
@@ -47,8 +48,12 @@ export interface CliMessageModeResult {
  * command parse -> context load -> runner call -> response formatting.
  */
 export async function runCliMessageMode(options: CliMessageModeOptions): Promise<CliMessageModeResult> {
+  const muaddibHome = getMuaddibHome();
+  const runtimeLogger = new RuntimeLogWriter({ muaddibHome });
+  const logger = runtimeLogger.getLogger("muaddib.cli.message");
+
   const config = JSON.parse(readFileSync(options.configPath, "utf-8")) as Record<string, unknown>;
-  assertNoDeferredFeatureConfig(config);
+  assertNoDeferredFeatureConfig(config, logger);
   const modelAdapter = createPiAiModelAdapterFromConfig(config);
 
   const roomName = options.roomName ?? "irc";
@@ -73,7 +78,7 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
   const jinaApiKey = stringOrUndefined(asRecord(toolsConfig?.jina)?.api_key);
   const artifactsPathRaw = stringOrUndefined(artifactsConfig?.path);
   const artifactsPath = artifactsPathRaw
-    ? resolveMuaddibPath(artifactsPathRaw, join(getMuaddibHome(), "artifacts"))
+    ? resolveMuaddibPath(artifactsPathRaw, join(muaddibHome, "artifacts"))
     : undefined;
   const artifactsUrl = stringOrUndefined(artifactsConfig?.url);
   const oracleModel = stringOrUndefined(oracleConfig?.model);
@@ -100,7 +105,7 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
     if (chroniclerConfig && chroniclerModel) {
       const chronicleDbPath = resolveMuaddibPath(
         stringOrUndefined(asRecord(chroniclerConfig.database)?.path),
-        join(getMuaddibHome(), "chronicle.db"),
+        join(muaddibHome, "chronicle.db"),
       );
 
       chronicleStore = new ChronicleStore(chronicleDbPath);
@@ -183,11 +188,21 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
         chronicleStore,
         chronicleLifecycle,
       },
+      logger: runtimeLogger.getLogger("muaddib.rooms.command"),
     });
 
-    const result = await commandHandler.handleIncomingMessage(message, {
-      isDirect: true,
-    });
+    const arc = `${message.serverTag}#${message.channelName}`;
+    const result = await logger.withMessageContext(
+      {
+        arc,
+        nick: message.nick,
+        message: message.content,
+      },
+      async () =>
+        await commandHandler.handleIncomingMessage(message, {
+          isDirect: true,
+        }),
+    );
 
     return {
       response: result?.response ?? null,
