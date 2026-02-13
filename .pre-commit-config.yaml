@@ -7,18 +7,22 @@ repos:
       - id: check-yaml
       - id: check-added-large-files
 
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.6
-    hooks:
-      - id: ruff
-        args: [--fix, --exit-non-zero-on-fix]
-      - id: ruff-format
-
   - repo: local
     hooks:
-      - id: pyright
-        name: pyright
-        entry: uv run pyright
+      - id: ts-typecheck
+        name: TypeScript typecheck
+        entry: npm run typecheck
         language: system
-        types: [python]
-        require_serial: false
+        pass_filenames: false
+
+      - id: ts-tests
+        name: TypeScript tests
+        entry: npm test
+        language: system
+        pass_filenames: false
+
+      - id: ts-build
+        name: TypeScript build
+        entry: npm run build
+        language: system
+        pass_filenames: false
