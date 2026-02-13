@@ -64,6 +64,8 @@ function makeRunnerResult(
     outputTokens?: number;
     totalCost?: number;
     toolCallsCount?: number;
+    refusalFallbackActivated?: boolean;
+    refusalFallbackModel?: string;
   } = {},
 ) {
   const inputTokens = options.inputTokens ?? 1;
@@ -99,6 +101,8 @@ function makeRunnerResult(
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: totalCost },
     },
     toolCallsCount: options.toolCallsCount,
+    refusalFallbackActivated: options.refusalFallbackActivated,
+    refusalFallbackModel: options.refusalFallbackModel,
   };
 }
 
@@ -142,7 +146,7 @@ describe("RoomCommandHandlerTs", () => {
       runnerFactory: (input) => {
         runnerModel = input.model;
         return {
-          runSingleTurn: async (prompt, options) => {
+          prompt: async (prompt, options) => {
             runnerPrompt = prompt;
             runnerThinkingLevel = options?.thinkingLevel;
             runnerContextContents = (options?.contextMessages ?? []).map((entry) => entry.content);
@@ -205,7 +209,7 @@ describe("RoomCommandHandlerTs", () => {
       history,
       classifyMode: async () => "EASY_SERIOUS",
       runnerFactory: () => ({
-        runSingleTurn: async () =>
+        prompt: async () =>
           makeRunnerResult("[02:32] <MuaddibLLM> pasky: Pong! S latenci nizsi nez moje chut."),
       }),
     });
@@ -228,7 +232,7 @@ describe("RoomCommandHandlerTs", () => {
       history,
       classifyMode: async () => "EASY_SERIOUS",
       runnerFactory: () => ({
-        runSingleTurn: async () =>
+        prompt: async () =>
           makeRunnerResult("[serious] [02:32] <MuaddibLLM> <quest id=\"q1\">Done.</quest>"),
       }),
     });
@@ -258,7 +262,7 @@ describe("RoomCommandHandlerTs", () => {
       classifyMode: async () => "EASY_SERIOUS",
       logger,
       runnerFactory: () => ({
-        runSingleTurn: async () => makeRunnerResult("pong"),
+        prompt: async () => makeRunnerResult("pong"),
       }),
     });
 
@@ -310,7 +314,7 @@ describe("RoomCommandHandlerTs", () => {
       classifyMode: async () => "EASY_SERIOUS",
       logger,
       runnerFactory: () => ({
-        runSingleTurn: async () => makeRunnerResult("unused"),
+        prompt: async () => makeRunnerResult("unused"),
       }),
     });
 
@@ -330,7 +334,7 @@ describe("RoomCommandHandlerTs", () => {
         checkLimit: vi.fn().mockReturnValue(false),
       },
       runnerFactory: () => ({
-        runSingleTurn: async () => makeRunnerResult("unused"),
+        prompt: async () => makeRunnerResult("unused"),
       }),
     });
 
@@ -382,22 +386,13 @@ describe("RoomCommandHandlerTs", () => {
       classifyMode: async () => "EASY_SERIOUS",
       refusalFallbackModel: "anthropic:claude-3-5-haiku",
       logger,
-      runnerFactory: (input) => {
-        if (input.model === "openai:gpt-4o-mini") {
-          return {
-            runSingleTurn: async () => makeRunnerResult("The AI refused to respond to this request"),
-          };
-        }
-        return {
-          runSingleTurn: async () =>
-            makeRunnerResult("fallback answer", {
-              inputTokens: 123,
-              outputTokens: 45,
-              totalCost: 0.35,
-              toolCallsCount: 2,
-            }),
-        };
-      },
+      runnerFactory: () => ({
+        prompt: async () =>
+          makeRunnerResult("The AI refused to respond to this request", {
+            refusalFallbackActivated: true,
+            refusalFallbackModel: "anthropic:claude-3-5-haiku",
+          }),
+      }),
     });
 
     await handler.handleIncomingMessage(makeMessage("!s expensive fallback"), {
@@ -434,7 +429,7 @@ describe("RoomCommandHandlerTs", () => {
       classifyMode: async () => "EASY_SERIOUS",
       logger,
       runnerFactory: () => ({
-        runSingleTurn: async () => {
+        prompt: async () => {
           throw new Error("runner boom");
         },
       }),
@@ -471,7 +466,7 @@ describe("RoomCommandHandlerTs", () => {
       classifyMode: async () => "EASY_SERIOUS",
       logger: runtimeLogs.getLogger("muaddib.rooms.command"),
       runnerFactory: () => ({
-        runSingleTurn: async () => makeRunnerResult("pong"),
+        prompt: async () => makeRunnerResult("pong"),
       }),
     });
 
@@ -545,7 +540,7 @@ describe("RoomCommandHandlerTs", () => {
       classifyMode: async () => "EASY_SERIOUS",
       contextReducer,
       runnerFactory: () => ({
-        runSingleTurn: async (prompt, options) => {
+        prompt: async (prompt, options) => {
           runnerPrompt = prompt;
           runnerContextContents = (options?.contextMessages ?? []).map((entry) => entry.content);
           return makeRunnerResult("done");
@@ -595,7 +590,7 @@ describe("RoomCommandHandlerTs", () => {
       classifyMode: async () => "EASY_SERIOUS",
       chronicleStore,
       runnerFactory: () => ({
-        runSingleTurn: async (_prompt, options) => {
+        prompt: async (_prompt, options) => {
           runnerContextWithSummary.push((options?.contextMessages ?? []).map((entry) => entry.content));
           return makeRunnerResult("done");
         },
@@ -625,7 +620,7 @@ describe("RoomCommandHandlerTs", () => {
       classifyMode: async () => "EASY_SERIOUS",
       chronicleStore,
       runnerFactory: () => ({
-        runSingleTurn: async () => makeRunnerResult("done"),
+        prompt: async () => makeRunnerResult("done"),
       }),
     });
 
@@ -661,7 +656,7 @@ describe("RoomCommandHandlerTs", () => {
       runnerFactory: (input) => {
         seenToolNames.push(...input.tools.map((tool) => tool.name));
         return {
-          runSingleTurn: async () => makeRunnerResult("done"),
+          prompt: async () => makeRunnerResult("done"),
         };
       },
     });
@@ -708,7 +703,7 @@ describe("RoomCommandHandlerTs", () => {
       history,
       classifyMode: async () => "EASY_SERIOUS",
       runnerFactory: () => ({
-        runSingleTurn: async (prompt, options) => {
+        prompt: async (prompt, options) => {
           runnerPrompt = prompt;
           runnerContextContents = (options?.contextMessages ?? []).map((entry) => entry.content);
           return {
@@ -843,7 +838,7 @@ describe("RoomCommandHandlerTs", () => {
       classifyMode: async () => "EASY_SERIOUS",
       autoChronicler,
       runnerFactory: () => ({
-        runSingleTurn: async () => makeRunnerResult("done"),
+        prompt: async () => makeRunnerResult("done"),
       }),
     });
 
@@ -903,7 +898,7 @@ describe("RoomCommandHandlerTs", () => {
       history,
       classifyMode: async () => "EASY_SERIOUS",
       runnerFactory: () => ({
-        runSingleTurn: async () => ({
+        prompt: async () => ({
           assistantMessage: {
             role: "assistant",
             content: [{ type: "text", text: "persisted response" }],
@@ -977,7 +972,7 @@ describe("RoomCommandHandlerTs", () => {
       history,
       classifyMode: async () => "EASY_SERIOUS",
       runnerFactory: () => ({
-        runSingleTurn: async () =>
+        prompt: async () =>
           makeRunnerResult("primary response", {
             inputTokens: 123,
             outputTokens: 45,
@@ -1037,7 +1032,7 @@ describe("RoomCommandHandlerTs", () => {
         },
       },
       runnerFactory: () => ({
-        runSingleTurn: async () => makeRunnerResult(longResponse),
+        prompt: async () => makeRunnerResult(longResponse),
       }),
     });
 
@@ -1088,7 +1083,7 @@ describe("RoomCommandHandlerTs", () => {
         },
       },
       runnerFactory: () => ({
-        runSingleTurn: async () => makeRunnerResult("short answer"),
+        prompt: async () => makeRunnerResult("short answer"),
       }),
     });
 
@@ -1126,17 +1121,13 @@ describe("RoomCommandHandlerTs", () => {
           shareArtifact,
         },
       },
-      runnerFactory: (input) => {
-        if (input.model === "openai:gpt-4o-mini") {
-          return {
-            runSingleTurn: async () => makeRunnerResult("The AI refused to respond to this request"),
-          };
-        }
-
-        return {
-          runSingleTurn: async () => makeRunnerResult(longFallbackResponse),
-        };
-      },
+      runnerFactory: () => ({
+        prompt: async () =>
+          makeRunnerResult("The AI refused to respond to this request", {
+            refusalFallbackActivated: true,
+            refusalFallbackModel: "anthropic:claude-3-5-haiku",
+          }),
+      }),
     });
 
     const result = await handler.handleIncomingMessage(incoming, { isDirect: true });
@@ -1194,14 +1185,12 @@ describe("RoomCommandHandlerTs", () => {
       refusalFallbackModel: "anthropic:claude-3-5-haiku",
       runnerFactory: (input) => {
         runnerModels.push(input.model);
-        if (input.model === "openai:gpt-4o-mini") {
-          return {
-            runSingleTurn: async () => makeRunnerResult("The AI refused to respond to this request"),
-          };
-        }
-
         return {
-          runSingleTurn: async () => makeRunnerResult("fallback answer"),
+          prompt: async () =>
+            makeRunnerResult("The AI refused to respond to this request", {
+              refusalFallbackActivated: true,
+              refusalFallbackModel: "anthropic:claude-3-5-haiku",
+            }),
         };
       },
     });
@@ -1235,7 +1224,7 @@ describe("RoomCommandHandlerTs", () => {
       classifyMode: async () => "EASY_SERIOUS",
       refusalFallbackModel: "anthropic:claude-3-5-haiku",
       runnerFactory: () => ({
-        runSingleTurn: async () => {
+        prompt: async () => {
           throw new Error("Agent run failed: invalid_prompt blocked for safety reasons.");
         },
       }),
@@ -1263,7 +1252,7 @@ describe("RoomCommandHandlerTs", () => {
       runnerFactory: (input) => {
         runnerModels.push(input.model);
         return {
-          runSingleTurn: async () => makeRunnerResult("normal answer"),
+          prompt: async () => makeRunnerResult("normal answer"),
         };
       },
     });
@@ -1299,7 +1288,7 @@ describe("RoomCommandHandlerTs", () => {
       history,
       classifyMode: async () => "EASY_SERIOUS",
       runnerFactory: () => ({
-        runSingleTurn: async (prompt, options) => {
+        prompt: async (prompt, options) => {
           runCount += 1;
           prompts.push(prompt);
           runnerContextContents.push((options?.contextMessages ?? []).map((entry) => entry.content));
@@ -1373,7 +1362,7 @@ describe("RoomCommandHandlerTs", () => {
       history,
       classifyMode: async () => "EASY_SERIOUS",
       runnerFactory: () => ({
-        runSingleTurn: async (prompt, options) => {
+        prompt: async (prompt, options) => {
           runCount += 1;
           prompts.push(prompt);
           runnerContextContents.push((options?.contextMessages ?? []).map((entry) => entry.content));
@@ -1467,7 +1456,7 @@ describe("RoomCommandHandlerTs", () => {
       history,
       classifyMode: async () => "EASY_SERIOUS",
       runnerFactory: () => ({
-        runSingleTurn: async (prompt, options) => {
+        prompt: async (prompt, options) => {
           runCount += 1;
           prompts.push(prompt);
           runnerContextContents.push((options?.contextMessages ?? []).map((entry) => entry.content));

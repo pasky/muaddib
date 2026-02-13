@@ -3,8 +3,8 @@ import { type Usage } from "@mariozechner/pi-ai";
 
 import {
   SessionRunner,
-  type SingleTurnOptions,
-  type SingleTurnResult,
+  type PromptOptions,
+  type PromptResult,
 } from "../../agent/session-runner.js";
 import type { SessionFactoryContextMessage } from "../../agent/session-factory.js";
 import type { ChronicleStore } from "../../chronicle/chronicle-store.js";
@@ -42,7 +42,7 @@ export interface CommandHandlerRoomConfig {
 }
 
 export interface CommandRunner {
-  runSingleTurn(prompt: string, options?: SingleTurnOptions): Promise<SingleTurnResult>;
+  prompt(prompt: string, options?: PromptOptions): Promise<PromptResult>;
 }
 
 export interface CommandRunnerFactoryInput {
@@ -109,12 +109,6 @@ export interface CommandExecutionResult {
 export interface HandleIncomingMessageOptions {
   isDirect: boolean;
   sendResponse?: (text: string) => Promise<void>;
-}
-
-interface RunWithFallbackResult {
-  agentResult: SingleTurnResult;
-  modelSpec: string;
-  fallbackModelSpec: string | null;
 }
 
 /**
@@ -417,32 +411,32 @@ export class RoomCommandHandlerTs {
 
     const tools = this.selectTools(message, resolvedWithFollowups.runtime.allowedTools);
 
-    let runResult: RunWithFallbackResult;
-    try {
-      runResult = await this.runWithRefusalFallback(
-        modelSpec,
-        {
-          prompt: resolvedWithFollowups.queryText,
-          contextMessages: runnerContext,
-          thinkingLevel: normalizeThinkingLevel(resolvedWithFollowups.runtime.reasoningEffort),
-          visionFallbackModel: resolvedWithFollowups.runtime.visionModel ?? undefined,
-        },
-        {
-          systemPrompt,
-          tools,
-        },
-      );
+    const runner = this.runnerFactory({
+      model: modelSpec,
+      systemPrompt,
+      tools,
+      logger: this.logger,
+    });
 
-      await this.persistToolSummaryFromSession(message, runResult.agentResult);
-      runResult.agentResult.session?.dispose();
+    let agentResult: PromptResult;
+    try {
+      agentResult = await runner.prompt(resolvedWithFollowups.queryText, {
+        contextMessages: runnerContext,
+        thinkingLevel: normalizeThinkingLevel(resolvedWithFollowups.runtime.reasoningEffort),
+        visionFallbackModel: resolvedWithFollowups.runtime.visionModel ?? undefined,
+        refusalFallbackModel: this.refusalFallbackModel ?? undefined,
+      });
+
+      await this.persistToolSummaryFromSession(message, agentResult);
+      agentResult.session?.dispose();
     } catch (error) {
       this.logger.error("Error during agent execution", error);
       throw error;
     }
 
-    let responseText = runResult.agentResult.text;
-    if (runResult.fallbackModelSpec) {
-      const fallbackSpec = parseModelSpec(runResult.fallbackModelSpec);
+    let responseText = agentResult.text;
+    if (agentResult.refusalFallbackActivated && agentResult.refusalFallbackModel) {
+      const fallbackSpec = parseModelSpec(agentResult.refusalFallbackModel);
       responseText = `${responseText} [refusal fallback to ${fallbackSpec.modelId}]`.trim();
     }
 
@@ -461,47 +455,9 @@ export class RoomCommandHandlerTs {
     return {
       response: cleaned || null,
       resolved: resolvedWithFollowups,
-      model: runResult.modelSpec,
-      usage: runResult.agentResult.usage,
-      toolCallsCount: runResult.agentResult.toolCallsCount ?? 0,
-    };
-  }
-
-  private async runWithRefusalFallback(
-    primaryModelSpec: string,
-    runInput: {
-      prompt: string;
-      contextMessages: SessionFactoryContextMessage[];
-      thinkingLevel: ThinkingLevel;
-      visionFallbackModel?: string;
-    },
-    runnerInput: {
-      systemPrompt: string;
-      tools: AgentTool<any>[];
-    },
-  ): Promise<RunWithFallbackResult> {
-    const primaryRunner = this.runnerFactory({
-      model: primaryModelSpec,
-      systemPrompt: runnerInput.systemPrompt,
-      tools: runnerInput.tools,
-      logger: this.logger,
-    });
-
-    const primaryResult = await primaryRunner.runSingleTurn(runInput.prompt, {
-      contextMessages: runInput.contextMessages,
-      thinkingLevel: runInput.thinkingLevel,
-      visionFallbackModel: runInput.visionFallbackModel,
-      refusalFallbackModel: this.refusalFallbackModel ?? undefined,
-    });
-
-    const fallbackModelSpec = detectRefusalFallbackSignal(primaryResult.text) && this.refusalFallbackModel
-      ? this.refusalFallbackModel
-      : null;
-
-    return {
-      agentResult: primaryResult,
-      modelSpec: primaryModelSpec,
-      fallbackModelSpec,
+      model: modelSpec,
+      usage: agentResult.usage,
+      toolCallsCount: agentResult.toolCallsCount ?? 0,
     };
   }
 
@@ -878,7 +834,7 @@ export class RoomCommandHandlerTs {
 
   private async persistToolSummaryFromSession(
     message: RoomMessage,
-    result: SingleTurnResult,
+    result: PromptResult,
   ): Promise<void> {
     if (!this.options.persistenceSummaryModel) {
       return;
@@ -985,27 +941,6 @@ const TOOL_PERSISTENCE_POLICY: Readonly<Record<string, ToolPersistType | "none">
   quest_snooze: "summary",
 };
 
-const REFUSAL_FALLBACK_SIGNAL_PATTERNS: ReadonlyArray<{
-  label: string;
-  pattern: RegExp;
-}> = [
-  {
-    label: "structured_refusal",
-    pattern: /["']is_refusal["']\s*:\s*true/iu,
-  },
-  {
-    label: "python_refusal_message",
-    pattern: /the ai refused to respond to this request/iu,
-  },
-  {
-    label: "openai_invalid_prompt_safety",
-    pattern: /invalid_prompt[\s\S]{0,160}safety reasons/iu,
-  },
-  {
-    label: "content_safety_refusal",
-    pattern: /content safety refusal/iu,
-  },
-];
 
 interface PersistentToolCall {
   toolName: string;
@@ -1092,20 +1027,6 @@ function extractArtifactUrls(result: unknown): string[] {
   return Array.from(urls);
 }
 
-function detectRefusalFallbackSignal(text: string): string | null {
-  const candidate = text.trim();
-  if (!candidate) {
-    return null;
-  }
-
-  for (const signal of REFUSAL_FALLBACK_SIGNAL_PATTERNS) {
-    if (signal.pattern.test(candidate)) {
-      return signal.label;
-    }
-  }
-
-  return null;
-}
 
 const LEADING_IRC_CONTEXT_ECHO_PREFIX_RE = /^(?:\s*(?:\[[^\]]+\]\s*)?(?:![A-Za-z][\w-]*\s+)?(?:\[?\d{1,2}:\d{2}\]?\s*)?(?:<(?!\/?quest(?:_finished)?\b)[^>]+>))*\s*/iu;
 

@@ -40,7 +40,7 @@ describe("room adapters share RoomCommandHandlerTs behavior", () => {
       history,
       classifyMode: async () => "EASY_SERIOUS",
       runnerFactory: () => ({
-        runSingleTurn: async () => ({
+        prompt: async () => ({
           assistantMessage: {
             role: "assistant",
             content: [{ type: "text", text: "discord-shared" }],
@@ -115,7 +115,7 @@ describe("room adapters share RoomCommandHandlerTs behavior", () => {
       history,
       classifyMode: async () => "EASY_SERIOUS",
       runnerFactory: () => ({
-        runSingleTurn: async () => ({
+        prompt: async () => ({
           assistantMessage: {
             role: "assistant",
             content: [{ type: "text", text: "slack-shared" }],

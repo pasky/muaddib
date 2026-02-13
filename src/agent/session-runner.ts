@@ -2,6 +2,7 @@ import type { Agent, AgentTool, ThinkingLevel } from "@mariozechner/pi-agent-cor
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import type { AssistantMessage, Usage } from "@mariozechner/pi-ai";
 
+import { detectRefusalSignal } from "./refusal-detection.js";
 import { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
 import {
   createAgentSessionForInvocation,
@@ -24,7 +25,7 @@ export interface SessionRunnerOptions {
   logger?: RunnerLogger;
 }
 
-export interface SingleTurnOptions {
+export interface PromptOptions {
   contextMessages?: SessionFactoryContextMessage[];
   thinkingLevel?: ThinkingLevel;
   visionFallbackModel?: string;
@@ -33,7 +34,7 @@ export interface SingleTurnOptions {
   onPersistenceSummary?: (text: string) => void | Promise<void>;
 }
 
-export interface SingleTurnResult {
+export interface PromptResult {
   text: string;
   stopReason: string;
   usage: Usage;
@@ -41,6 +42,8 @@ export interface SingleTurnResult {
   toolCallsCount?: number;
   visionFallbackActivated?: boolean;
   visionFallbackModel?: string;
+  refusalFallbackActivated?: boolean;
+  refusalFallbackModel?: string;
   session?: AgentSession;
 }
 
@@ -68,7 +71,7 @@ export class SessionRunner {
     this.llmDebugMaxChars = Math.max(500, Math.floor(options.llmDebugMaxChars ?? 120_000));
   }
 
-  async runSingleTurn(prompt: string, options: SingleTurnOptions = {}): Promise<SingleTurnResult> {
+  async prompt(prompt: string, options: PromptOptions = {}): Promise<PromptResult> {
     const sessionCtx = createAgentSessionForInvocation({
       model: this.model,
       systemPrompt: this.systemPrompt,
@@ -127,7 +130,7 @@ export class SessionRunner {
     });
 
     try {
-      await this.promptWithRefusalFallback(
+      const refusalFallbackActivated = await this.promptWithRefusalFallback(
         session,
         agent,
         prompt,
@@ -158,6 +161,10 @@ export class SessionRunner {
         visionFallbackModel: sessionCtx.getVisionFallbackActivated()
           ? options.visionFallbackModel
           : undefined,
+        refusalFallbackActivated,
+        refusalFallbackModel: refusalFallbackActivated
+          ? options.refusalFallbackModel
+          : undefined,
         session,
       };
     } finally {
@@ -170,17 +177,21 @@ export class SessionRunner {
     this.logger.debug(`llm_io ${stage}`, safeJson(rendered, this.llmDebugMaxChars));
   }
 
+  /**
+   * Prompt the session, retrying with a fallback model if a refusal is detected.
+   * Returns true if the fallback model was activated.
+   */
   private async promptWithRefusalFallback(
     session: AgentSession,
     agent: Agent,
     prompt: string,
     refusalFallbackModel: string | undefined,
     ensureProviderKey: (provider: string) => Promise<void>,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       await session.prompt(prompt);
     } catch (error) {
-      if (!refusalFallbackModel || !detectRefusalFallbackSignal(stringifyError(error))) {
+      if (!refusalFallbackModel || !detectRefusalSignal(stringifyError(error))) {
         throw error;
       }
 
@@ -188,31 +199,20 @@ export class SessionRunner {
       await ensureProviderKey(fallbackModel.spec.provider);
       agent.setModel(fallbackModel.model);
       await session.prompt(prompt);
-      return;
+      return true;
     }
 
     const text = extractLastAssistantText(session.messages);
-    if (!refusalFallbackModel || !detectRefusalFallbackSignal(text)) {
-      return;
+    if (!refusalFallbackModel || !detectRefusalSignal(text)) {
+      return false;
     }
 
     const fallbackModel = this.modelAdapter.resolve(refusalFallbackModel);
     await ensureProviderKey(fallbackModel.spec.provider);
     agent.setModel(fallbackModel.model);
     await session.prompt(prompt);
+    return true;
   }
-}
-
-const REFUSAL_FALLBACK_SIGNAL_PATTERNS: ReadonlyArray<RegExp> = [
-  /["']is_refusal["']\s*:\s*true/iu,
-  /the ai refused to respond to this request/iu,
-  /invalid_prompt[\s\S]{0,160}safety reasons/iu,
-  /content safety refusal/iu,
-];
-
-function detectRefusalFallbackSignal(text: string): boolean {
-  const candidate = text.trim();
-  return candidate.length > 0 && REFUSAL_FALLBACK_SIGNAL_PATTERNS.some((pattern) => pattern.test(candidate));
 }
 
 function extractLastAssistantText(messages: readonly unknown[]): string {

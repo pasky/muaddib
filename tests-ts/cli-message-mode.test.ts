@@ -71,7 +71,7 @@ describe("runCliMessageMode", () => {
       configPath,
       message: "!s hi",
       runnerFactory: () => ({
-        runSingleTurn: async () => ({
+        prompt: async () => ({
           assistantMessage: {
             role: "assistant",
             content: [{ type: "text", text: "cli ok" }],
@@ -153,7 +153,7 @@ describe("runCliMessageMode", () => {
       configPath,
       message: "!s hi",
       runnerFactory: () => ({
-        runSingleTurn: async () => ({
+        prompt: async () => ({
           assistantMessage: {
             role: "assistant",
             content: [{ type: "text", text: "cli ok" }],
@@ -474,7 +474,7 @@ describe("runCliMessageMode", () => {
       configPath,
       message: "!s hi",
       runnerFactory: () => ({
-        runSingleTurn: async () => ({
+        prompt: async () => ({
           assistantMessage: {
             role: "assistant",
             content: [{ type: "text", text: "cli ok" }],
