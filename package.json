@@ -10,6 +10,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && cp src/agent/tools/artifact-viewer.html dist/agent/tools/artifact-viewer.html",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint \"{src,tests-ts,scripts}/**/*.ts\"",
     "test": "vitest run --testTimeout=20000",
     "cli:message": "node ./dist/cli/main.js",
     "start": "node ./dist/app/main.js",
@@ -28,6 +29,10 @@
   "devDependencies": {
     "@types/node": "^24.3.0",
     "@vitest/coverage-v8": "^3.2.4",
+    "@eslint/js": "^9.34.0",
+    "@typescript-eslint/eslint-plugin": "^8.46.0",
+    "@typescript-eslint/parser": "^8.46.0",
+    "eslint": "^9.34.0",
     "typescript": "^5.7.3",
     "vitest": "^3.2.4"
   }
