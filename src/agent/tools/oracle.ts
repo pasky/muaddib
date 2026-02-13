@@ -3,12 +3,11 @@ import { Type } from "@sinclair/typebox";
 
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { SessionRunner } from "../session-runner.js";
-import type { SessionFactoryContextMessage } from "../session-factory.js";
+import type { RunnerLogger, SessionFactoryContextMessage } from "../session-factory.js";
 import type {
   BaselineToolExecutors,
   DefaultToolExecutorOptions,
   OracleInput,
-  ToolExecutorLogger,
 } from "./types.js";
 
 const DEFAULT_ORACLE_SYSTEM_PROMPT =
@@ -79,7 +78,9 @@ export function createDefaultOracleExecutor(
   invocation?: OracleInvocationContext,
 ): BaselineToolExecutors["oracle"] {
   const modelAdapter = options.modelAdapter ?? new PiAiModelAdapter();
-  const logger: ToolExecutorLogger = options.logger ?? console;
+  // Cast to RunnerLogger — callers (command handler, CLI) pass full loggers;
+  // the ToolExecutorLogger type is just narrower than what's actually provided.
+  const logger = (options.logger ?? console) as RunnerLogger;
 
   return async (input: OracleInput): Promise<string> => {
     const query = input.query.trim();
@@ -109,6 +110,7 @@ export function createDefaultOracleExecutor(
       modelAdapter,
       getApiKey: options.getApiKey,
       maxIterations: options.oracleMaxIterations,
+      logger,
     });
 
     logger.info(`${ORACLE_LOG_SEPARATOR} CONSULTING ORACLE: ${query.slice(0, 500)}...`);
