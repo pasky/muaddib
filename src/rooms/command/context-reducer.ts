@@ -129,7 +129,7 @@ export class ContextReducerTs implements ContextReducer {
 
   private parseReducedContext(response: string): Array<{ role: string; content: string }> {
     const messages: Array<{ role: string; content: string }> = [];
-    const pattern = /\[(USER|ASSISTANT)\]:\s*(.*?)(?=\n\[(?:USER|ASSISTANT)\]:|$)/gis;
+    const pattern = /\[(USER|ASSISTANT)\]:[ ]*(.*?)(?=\n\[(?:USER|ASSISTANT)\]:|$)/gis;
 
     for (const match of response.matchAll(pattern)) {
       const role = match[1]?.toLowerCase();

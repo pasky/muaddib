@@ -213,4 +213,26 @@ describe("ContextReducerTs", () => {
       { role: "user", content: "question two" },
     ]);
   });
+
+  it("reduce skips empty entries when LLM omits content for a role", async () => {
+    const completeFn = vi.fn(async () =>
+      assistantTextMessage("[USER]: \n[ASSISTANT]: actual content"),
+    );
+
+    const reducer = new ContextReducerTs({
+      config: { model: "openai:gpt-4o-mini", prompt: "Reduce" },
+      completeFn,
+    });
+
+    const result = await reducer.reduce(
+      [
+        { role: "user", content: "a" },
+        { role: "assistant", content: "b" },
+        { role: "user", content: "c" },
+      ],
+      "sys",
+    );
+
+    expect(result).toEqual([{ role: "assistant", content: "actual content" }]);
+  });
 });
