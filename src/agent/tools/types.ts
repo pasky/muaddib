@@ -1,9 +1,7 @@
-import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { AssistantMessage, Model, SimpleStreamOptions, UserMessage } from "@mariozechner/pi-ai";
 
 import type { ChronicleStore } from "../../chronicle/chronicle-store.js";
 import type { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
-import type { SessionFactoryContextMessage } from "../../agent/session-factory.js";
 
 export interface ExecuteCodeInput {
   code: string;
@@ -112,8 +110,6 @@ export interface DefaultToolExecutorOptions {
   oracleModel?: string;
   oraclePrompt?: string;
   oracleMaxIterations?: number;
-  oracleAgentTools?: AgentTool<any>[];
-  oracleConversationContext?: SessionFactoryContextMessage[];
   imageGenModel?: string;
   openRouterBaseUrl?: string;
   imageGenTimeoutMs?: number;

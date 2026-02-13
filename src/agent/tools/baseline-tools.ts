@@ -19,6 +19,7 @@ import {
   createDefaultOracleExecutor,
   createOracleTool,
   ORACLE_EXCLUDED_TOOLS,
+  type OracleInvocationContext,
 } from "./oracle.js";
 import {
   createDefaultQuestSnoozeExecutor,
@@ -84,6 +85,14 @@ export {
 export interface BaselineToolOptions extends DefaultToolExecutorOptions {
   onProgressReport?: (text: string) => void | Promise<void>;
   executors?: Partial<BaselineToolExecutors>;
+
+  /**
+   * Per-invocation oracle context (conversation context, tool factory).
+   * When set, the oracle executor gets a nested agentic loop with tools.
+   * When absent (e.g. inside the oracle's own nested loop), the oracle
+   * falls back to a simple toolless completion.
+   */
+  oracleInvocation?: OracleInvocationContext;
 }
 
 type ExecutorBackedToolFactory = (executors: BaselineToolExecutors) => AgentTool<any>;
@@ -133,6 +142,7 @@ const BASELINE_EXECUTOR_TOOL_GROUPS: ReadonlyArray<ReadonlyArray<ExecutorBackedT
 
 export function createDefaultToolExecutors(
   options: DefaultToolExecutorOptions = {},
+  oracleInvocation?: OracleInvocationContext,
 ): BaselineToolExecutors {
   return {
     webSearch: createDefaultWebSearchExecutor(options),
@@ -141,7 +151,7 @@ export function createDefaultToolExecutors(
     shareArtifact: createDefaultShareArtifactExecutor(options),
     editArtifact: createDefaultEditArtifactExecutor(options),
     generateImage: createDefaultGenerateImageExecutor(options),
-    oracle: createDefaultOracleExecutor(options),
+    oracle: createDefaultOracleExecutor(options, oracleInvocation),
     chronicleRead: createDefaultChronicleReadExecutor(options),
     chronicleAppend: createDefaultChronicleAppendExecutor(options),
     questStart: createDefaultQuestStartExecutor(options),
@@ -155,7 +165,7 @@ export function createDefaultToolExecutors(
  * Grouped by tool domains (web, execution, artifacts, images, oracle, chronicle, quests).
  */
 export function createBaselineAgentTools(options: BaselineToolOptions = {}): AgentTool<any>[] {
-  const defaultExecutors = createDefaultToolExecutors(options);
+  const defaultExecutors = createDefaultToolExecutors(options, options.oracleInvocation);
   const executors: BaselineToolExecutors = {
     webSearch: options.executors?.webSearch ?? defaultExecutors.webSearch,
     visitWebpage: options.executors?.visitWebpage ?? defaultExecutors.visitWebpage,

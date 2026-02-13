@@ -3,6 +3,7 @@ import { Type } from "@sinclair/typebox";
 
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { SessionRunner } from "../session-runner.js";
+import type { SessionFactoryContextMessage } from "../session-factory.js";
 import type {
   BaselineToolExecutors,
   DefaultToolExecutorOptions,
@@ -54,8 +55,28 @@ export function createOracleTool(executors: Pick<BaselineToolExecutors, "oracle"
   };
 }
 
+/**
+ * Per-invocation oracle context, mirroring Python's OracleExecutor constructor args.
+ * Created once per command invocation after conversation context is known.
+ */
+export interface OracleInvocationContext {
+  /** Conversation context at invocation time (passed to oracle's nested session). */
+  conversationContext: SessionFactoryContextMessage[];
+
+  /**
+   * Factory that builds the full baseline tool set.
+   * Injected to break the circular dependency (baseline-tools.ts → oracle.ts).
+   * The oracle filters this through ORACLE_EXCLUDED_TOOLS.
+   */
+  buildTools: (options: DefaultToolExecutorOptions) => AgentTool<any>[];
+
+  /** Tool options for building oracle's nested tools (arc, secrets, etc.). */
+  toolOptions: DefaultToolExecutorOptions;
+}
+
 export function createDefaultOracleExecutor(
   options: DefaultToolExecutorOptions,
+  invocation?: OracleInvocationContext,
 ): BaselineToolExecutors["oracle"] {
   const modelAdapter = options.modelAdapter ?? new PiAiModelAdapter();
   const logger: ToolExecutorLogger = options.logger ?? console;
@@ -73,8 +94,11 @@ export function createDefaultOracleExecutor(
 
     const systemPrompt = toConfiguredString(options.oraclePrompt) ?? DEFAULT_ORACLE_SYSTEM_PROMPT;
 
-    // Filter tools: exclude oracle itself and tools that don't belong in nested loop
-    const oracleTools = (options.oracleAgentTools ?? []).filter(
+    // Build tools independently (like Python's get_tools_for_arc + EXCLUDED_TOOLS filter)
+    const allTools = invocation
+      ? invocation.buildTools(invocation.toolOptions)
+      : [];
+    const oracleTools = allTools.filter(
       (tool) => !ORACLE_EXCLUDED_TOOLS.has(tool.name),
     );
 
@@ -91,7 +115,7 @@ export function createDefaultOracleExecutor(
 
     try {
       const result = await runner.prompt(query, {
-        contextMessages: options.oracleConversationContext,
+        contextMessages: invocation?.conversationContext,
         thinkingLevel: "high",
       });
       logger.info(`${ORACLE_LOG_SEPARATOR} Oracle response: ${result.text.slice(0, 500)}...`);

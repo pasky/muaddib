@@ -409,7 +409,7 @@ export class RoomCommandHandlerTs {
       ...steeringMessages,
     ].map(toRunnerContextMessage);
 
-    const tools = this.selectTools(message, resolvedWithFollowups.runtime.allowedTools);
+    const tools = this.selectTools(message, resolvedWithFollowups.runtime.allowedTools, runnerContext);
 
     const runner = this.runnerFactory({
       model: modelSpec,
@@ -902,12 +902,29 @@ export class RoomCommandHandlerTs {
     }
   }
 
-  private selectTools(message: RoomMessage, allowedTools: string[] | null): AgentTool<any>[] {
-    const baseline = createBaselineAgentTools({
+  private selectTools(
+    message: RoomMessage,
+    allowedTools: string[] | null,
+    conversationContext?: SessionFactoryContextMessage[],
+  ): AgentTool<any>[] {
+    // Build tool options for this invocation (arc + secrets, like Python's per-invocation setup)
+    const invocationToolOptions: BaselineToolOptions = {
       ...this.options.toolOptions,
       chronicleArc: `${message.serverTag}#${message.channelName}`,
       secrets: message.secrets,
+    };
+
+    const baseline = createBaselineAgentTools({
+      ...invocationToolOptions,
       onProgressReport: this.options.onProgressReport,
+      // Wire oracle with conversation context and a tool factory, mirroring
+      // Python's OracleExecutor which receives config + arc + context and
+      // builds its own tools via get_tools_for_arc at invocation time.
+      oracleInvocation: {
+        conversationContext: conversationContext ?? [],
+        toolOptions: invocationToolOptions,
+        buildTools: createBaselineAgentTools,
+      },
     });
 
     if (!allowedTools) {
