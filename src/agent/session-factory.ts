@@ -1,5 +1,5 @@
-import { Agent, type AgentMessage, type AgentTool, type ThinkingLevel } from "@mariozechner/pi-agent-core";
-import type { AssistantMessage, ToolResultMessage, Usage, UserMessage } from "@mariozechner/pi-ai";
+import { Agent, type AgentMessage, type AgentTool, type StreamFn, type ThinkingLevel } from "@mariozechner/pi-agent-core";
+import { streamSimple, type AssistantMessage, type ToolResultMessage, type Usage, type UserMessage } from "@mariozechner/pi-ai";
 import {
   AgentSession,
   AuthStorage,
@@ -37,6 +37,7 @@ export interface CreateAgentSessionInput {
   thinkingLevel?: ThinkingLevel;
   maxIterations?: number;
   visionFallbackModel?: string;
+  llmDebugMaxChars?: number;
   logger?: RunnerLogger;
 }
 
@@ -74,6 +75,8 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
   const authBridge = new MuaddibConfigBackedAuthBridge(input.getApiKey);
   authStorage.setFallbackResolver((provider) => authBridge.resolveSync(provider));
   const modelRegistry = new ModelRegistry(authStorage);
+  const llmDebugMaxChars = Math.max(500, Math.floor(input.llmDebugMaxChars ?? 12_000));
+  const streamFn = createTracingStreamFn(logger, llmDebugMaxChars);
 
   const agent = new Agent({
     initialState: {
@@ -84,6 +87,7 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
     },
     convertToLlm,
     getApiKey: input.getApiKey,
+    streamFn,
   });
 
   if (input.contextMessages) {
@@ -272,6 +276,49 @@ function convertContextToAgentMessages(
 
     return user;
   });
+}
+
+function createTracingStreamFn(logger: RunnerLogger, maxChars: number): StreamFn {
+  return (model, context, options) => {
+    logger.debug(
+      "llm_io request agent_stream",
+      safeJson(
+        {
+          model: {
+            provider: model.provider,
+            id: model.id,
+            api: model.api,
+          },
+          context,
+          options,
+        },
+        maxChars,
+      ),
+    );
+
+    return streamSimple(model, context, {
+      ...options,
+      onPayload: (payload: unknown) => {
+        logger.debug("llm_io payload agent_stream", safeJson(payload, maxChars));
+      },
+    });
+  };
+}
+
+function safeJson(value: unknown, maxChars: number): string {
+  try {
+    return truncateForDebug(JSON.stringify(value, null, 2), maxChars);
+  } catch {
+    return "[unserializable payload]";
+  }
+}
+
+function truncateForDebug(value: string, maxChars: number): string {
+  if (value.length <= maxChars) {
+    return value;
+  }
+
+  return `${value.slice(0, Math.max(0, maxChars - 24))}...[truncated ${value.length - maxChars} chars]`;
 }
 
 function resolveVisionFallbackModel(

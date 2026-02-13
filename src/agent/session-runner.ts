@@ -79,6 +79,7 @@ export class SessionRunner {
       thinkingLevel: options.thinkingLevel,
       maxIterations: this.maxIterations,
       visionFallbackModel: options.visionFallbackModel,
+      llmDebugMaxChars: this.llmDebugMaxChars,
       logger: this.logger,
     });
 
