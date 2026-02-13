@@ -104,7 +104,7 @@ export class PiAiModelAdapter {
     const resolved = this.resolve(modelSpec);
     const callType = options.callType ?? "llm_call";
     const logger = options.logger;
-    const maxChars = Math.max(500, Math.floor(options.maxChars ?? 12_000));
+    const maxChars = Math.max(500, Math.floor(options.maxChars ?? 120_000));
 
     logger?.debug(
       `llm_io request ${callType}`,

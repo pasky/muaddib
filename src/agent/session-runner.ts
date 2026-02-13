@@ -65,7 +65,7 @@ export class SessionRunner {
     this.logger = options.logger ?? console;
     this.emptyCompletionRetryPrompt =
       options.emptyCompletionRetryPrompt ?? DEFAULT_EMPTY_COMPLETION_RETRY_PROMPT;
-    this.llmDebugMaxChars = Math.max(500, Math.floor(options.llmDebugMaxChars ?? 12_000));
+    this.llmDebugMaxChars = Math.max(500, Math.floor(options.llmDebugMaxChars ?? 120_000));
   }
 
   async runSingleTurn(prompt: string, options: SingleTurnOptions = {}): Promise<SingleTurnResult> {
@@ -101,6 +101,14 @@ export class SessionRunner {
         return;
       }
 
+      if (event.type === "message_end") {
+        const message = event.message as { role?: string };
+        if (message.role === "assistant") {
+          this.logger.debug("llm_io response agent_stream", safeJson(renderMessageForDebug(event.message, this.llmDebugMaxChars), this.llmDebugMaxChars));
+        }
+        return;
+      }
+
       if (event.type === "tool_execution_end") {
         if (event.isError) {
           this.logger.warn(`Tool ${event.toolName} failed: ${summarizeToolPayload(event.result, this.llmDebugMaxChars)}`);
@@ -119,8 +127,6 @@ export class SessionRunner {
     });
 
     try {
-      this.logLlmIo("before_prompt", session.messages);
-
       await this.promptWithRefusalFallback(
         session,
         agent,
@@ -128,8 +134,6 @@ export class SessionRunner {
         options.refusalFallbackModel,
         sessionCtx.ensureProviderKey,
       );
-
-      this.logLlmIo("after_primary_prompt", session.messages);
 
       let text = extractLastAssistantText(session.messages);
       for (let i = 0; i < 3 && !text; i += 1) {

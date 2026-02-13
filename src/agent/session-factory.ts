@@ -75,7 +75,7 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
   const authBridge = new MuaddibConfigBackedAuthBridge(input.getApiKey);
   authStorage.setFallbackResolver((provider) => authBridge.resolveSync(provider));
   const modelRegistry = new ModelRegistry(authStorage);
-  const llmDebugMaxChars = Math.max(500, Math.floor(input.llmDebugMaxChars ?? 12_000));
+  const llmDebugMaxChars = Math.max(500, Math.floor(input.llmDebugMaxChars ?? 120_000));
   const streamFn = createTracingStreamFn(logger, llmDebugMaxChars);
 
   const agent = new Agent({
@@ -280,22 +280,6 @@ function convertContextToAgentMessages(
 
 function createTracingStreamFn(logger: RunnerLogger, maxChars: number): StreamFn {
   return (model, context, options) => {
-    logger.debug(
-      "llm_io request agent_stream",
-      safeJson(
-        {
-          model: {
-            provider: model.provider,
-            id: model.id,
-            api: model.api,
-          },
-          context,
-          options,
-        },
-        maxChars,
-      ),
-    );
-
     return streamSimple(model, context, {
       ...options,
       onPayload: (payload: unknown) => {
