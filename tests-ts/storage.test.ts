@@ -206,7 +206,9 @@ describe("ChronicleStore", () => {
     const chronicleStore = new ChronicleStore(":memory:");
     await chronicleStore.initialize();
 
-    const completeFn = vi.fn(async () => makeAssistantText("Chapter summary paragraph."));
+    const modelAdapter = {
+      completeSimple: vi.fn(async () => makeAssistantText("Chapter summary paragraph.")),
+    } as any;
 
     const lifecycle = new ChronicleLifecycleTs({
       chronicleStore,
@@ -214,7 +216,7 @@ describe("ChronicleStore", () => {
         model: "openai:gpt-4o-mini",
         paragraphs_per_chapter: 2,
       },
-      completeFn,
+      modelAdapter,
     });
 
     await lifecycle.appendParagraph("libera##test", '<quest id="quest-1">First operational note.</quest>');
@@ -224,7 +226,7 @@ describe("ChronicleStore", () => {
     const chapterAfter = await chronicleStore.getOrOpenCurrentChapter("libera##test");
 
     expect(chapterAfter.id).toBeGreaterThan(chapterBefore.id);
-    expect(completeFn).toHaveBeenCalledTimes(1);
+    expect(modelAdapter.completeSimple).toHaveBeenCalledTimes(1);
 
     const currentChapter = await chronicleStore.renderChapterRelative("libera##test", 0);
     expect(currentChapter).toContain("Previous chapter recap: Chapter summary paragraph.");
@@ -319,7 +321,7 @@ describe("ChronicleStore", () => {
         model: "openai:gpt-4o-mini",
         paragraphs_per_chapter: 10,
       },
-      completeFn: vi.fn(async () => makeAssistantText("summary")),
+      modelAdapter: { completeSimple: vi.fn(async () => makeAssistantText("summary")) } as any,
       questRuntime,
     });
 
@@ -369,7 +371,7 @@ describe("AutoChroniclerTs", () => {
       config: {
         model: "openai:gpt-4o-mini",
       },
-      completeFn: vi.fn(async () => makeAssistantText("summary")),
+      modelAdapter: { completeSimple: vi.fn(async () => makeAssistantText("summary")) } as any,
     });
 
     const completeFn = vi.fn(async () => makeAssistantText("should not be called"));
@@ -427,7 +429,9 @@ describe("AutoChroniclerTs", () => {
         model: "openai:gpt-4o-mini",
         paragraphs_per_chapter: 5,
       },
-      completeFn: vi.fn(async () => makeAssistantText("Chapter summary paragraph.")),
+      modelAdapter: {
+        completeSimple: vi.fn(async () => makeAssistantText("Chapter summary paragraph.")),
+      } as any,
     });
 
     const completeFn = vi.fn(async () => makeAssistantText("Auto chronicled paragraph."));

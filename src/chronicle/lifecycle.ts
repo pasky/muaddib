@@ -1,21 +1,9 @@
-import {
-  type AssistantMessage,
-  type Model,
-  type SimpleStreamOptions,
-  type UserMessage,
-} from "@mariozechner/pi-ai";
 
 import { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
 import {
   ChronicleStore,
   type Chapter,
 } from "./chronicle-store.js";
-
-type CompleteSimpleFn = (
-  model: Model<any>,
-  context: { messages: UserMessage[]; systemPrompt?: string },
-  options?: SimpleStreamOptions,
-) => Promise<AssistantMessage>;
 
 export interface ChronicleLifecycleConfig {
   model: string;
@@ -40,7 +28,6 @@ export interface ChronicleLifecycleTsOptions {
   chronicleStore: ChronicleStore;
   config: ChronicleLifecycleConfig;
   modelAdapter?: PiAiModelAdapter;
-  completeFn?: CompleteSimpleFn;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   questRuntime?: ChronicleQuestRuntimeHook;
   logger?: ChronicleLogger;
@@ -60,7 +47,6 @@ export class ChronicleLifecycleTs implements ChronicleLifecycle {
   private readonly chronicleStore: ChronicleStore;
   private readonly config: ChronicleLifecycleConfig;
   private readonly modelAdapter: PiAiModelAdapter;
-  private readonly completeFn?: CompleteSimpleFn;
   private readonly questRuntime: ChronicleQuestRuntimeHook | null;
   private readonly logger?: ChronicleLogger;
   private readonly arcQueues = new Map<string, Promise<void>>();
@@ -69,7 +55,6 @@ export class ChronicleLifecycleTs implements ChronicleLifecycle {
     this.chronicleStore = options.chronicleStore;
     this.config = options.config;
     this.modelAdapter = options.modelAdapter ?? new PiAiModelAdapter();
-    this.completeFn = options.completeFn;
     this.questRuntime = options.questRuntime ?? null;
     this.logger = options.logger;
     this.getApiKey = async (provider: string) => {
@@ -166,45 +151,27 @@ export class ChronicleLifecycleTs implements ChronicleLifecycle {
   private async generateChapterSummary(arc: string, chapterParagraphs: string[]): Promise<string> {
     const modelSpec = this.resolveSummaryModelSpec(arc);
 
-    const response = this.completeFn
-      ? await this.completeFn(
-          this.modelAdapter.resolve(modelSpec).model,
+    const response = await this.modelAdapter.completeSimple(
+      modelSpec,
+      {
+        systemPrompt: CHAPTER_SUMMARY_PROMPT,
+        messages: [
           {
-            systemPrompt: CHAPTER_SUMMARY_PROMPT,
-            messages: [
-              {
-                role: "user",
-                content: chapterParagraphs.join("\n\n"),
-                timestamp: Date.now(),
-              },
-            ],
+            role: "user",
+            content: chapterParagraphs.join("\n\n"),
+            timestamp: Date.now(),
           },
-          {
-            apiKey: await this.getApiKey(this.modelAdapter.resolve(modelSpec).spec.provider),
-            maxTokens: 1024,
-          },
-        )
-      : await this.modelAdapter.completeSimple(
-          modelSpec,
-          {
-            systemPrompt: CHAPTER_SUMMARY_PROMPT,
-            messages: [
-              {
-                role: "user",
-                content: chapterParagraphs.join("\n\n"),
-                timestamp: Date.now(),
-              },
-            ],
-          },
-          {
-            callType: "chronicler_summary",
-            logger: this.logger,
-            getApiKey: this.getApiKey,
-            streamOptions: {
-              maxTokens: 1024,
-            },
-          },
-        );
+        ],
+      },
+      {
+        callType: "chronicler_summary",
+        logger: this.logger,
+        getApiKey: this.getApiKey,
+        streamOptions: {
+          maxTokens: 1024,
+        },
+      },
+    );
 
     const summary = response.content
       .filter((entry) => entry.type === "text")
