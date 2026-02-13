@@ -94,6 +94,8 @@ export interface CommandHandlerOptions {
     maxIterations?: number;
     maxCompletionRetries?: number;
     emptyCompletionRetryPrompt?: string;
+    llmDebugIo?: boolean;
+    llmDebugMaxChars?: number;
   };
 }
 
@@ -159,6 +161,8 @@ export class RoomCommandHandlerTs {
           getApiKey: options.getApiKey,
           maxIterations: options.agentLoop?.maxIterations,
           emptyCompletionRetryPrompt: options.agentLoop?.emptyCompletionRetryPrompt,
+          llmDebugIo: options.agentLoop?.llmDebugIo,
+          llmDebugMaxChars: options.agentLoop?.llmDebugMaxChars,
           logger: input.logger,
         }));
 

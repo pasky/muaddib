@@ -73,6 +73,8 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
 
   const maxIterations = numberOrUndefined(actorConfig?.max_iterations);
   const maxCompletionRetries = numberOrUndefined(actorConfig?.max_completion_retries);
+  const llmDebugIo = actorConfig?.llm_debug_io === true;
+  const llmDebugMaxChars = numberOrUndefined(actorConfig?.llm_debug_max_chars);
   const contextReducerModel = stringOrUndefined(contextReducerConfig?.model);
   const contextReducerPrompt = stringOrUndefined(contextReducerConfig?.prompt);
   const jinaApiKey = stringOrUndefined(asRecord(toolsConfig?.jina)?.api_key);
@@ -153,6 +155,8 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
         modelAdapter,
         getApiKey,
         maxIterations,
+        llmDebugIo,
+        llmDebugMaxChars,
         logger: input.logger,
       });
 
@@ -174,6 +178,8 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
       agentLoop: {
         maxIterations,
         maxCompletionRetries,
+        llmDebugIo,
+        llmDebugMaxChars,
       },
       toolOptions: {
         jinaApiKey,

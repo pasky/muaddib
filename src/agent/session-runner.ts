@@ -20,6 +20,8 @@ export interface SessionRunnerOptions {
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   maxIterations?: number;
   emptyCompletionRetryPrompt?: string;
+  llmDebugIo?: boolean;
+  llmDebugMaxChars?: number;
   logger?: RunnerLogger;
 }
 
@@ -52,6 +54,8 @@ export class SessionRunner {
   private readonly maxIterations?: number;
   private readonly logger: RunnerLogger;
   private readonly emptyCompletionRetryPrompt: string;
+  private readonly llmDebugIo: boolean;
+  private readonly llmDebugMaxChars: number;
 
   constructor(options: SessionRunnerOptions) {
     this.model = options.model;
@@ -63,6 +67,8 @@ export class SessionRunner {
     this.logger = options.logger ?? console;
     this.emptyCompletionRetryPrompt =
       options.emptyCompletionRetryPrompt ?? DEFAULT_EMPTY_COMPLETION_RETRY_PROMPT;
+    this.llmDebugIo = options.llmDebugIo ?? false;
+    this.llmDebugMaxChars = Math.max(500, Math.floor(options.llmDebugMaxChars ?? 12_000));
   }
 
   async runSingleTurn(prompt: string, options: SingleTurnOptions = {}): Promise<SingleTurnResult> {
@@ -103,10 +109,22 @@ export class SessionRunner {
         } else {
           this.logger.info(`Tool ${event.toolName} executed`);
         }
+        if (this.llmDebugIo) {
+          this.logger.debug(
+            "tool_execution_end details",
+            safeJson({
+              toolName: event.toolName,
+              isError: event.isError,
+              result: event.result,
+            }, this.llmDebugMaxChars),
+          );
+        }
       }
     });
 
     try {
+      this.logLlmIo("before_prompt", session.messages);
+
       await this.promptWithRefusalFallback(
         session,
         agent,
@@ -115,9 +133,13 @@ export class SessionRunner {
         sessionCtx.ensureProviderKey,
       );
 
+      this.logLlmIo("after_primary_prompt", session.messages);
+
       let text = extractLastAssistantText(session.messages);
       for (let i = 0; i < 3 && !text; i += 1) {
+        this.logger.debug(`Empty assistant text detected, retrying completion (${i + 1}/3)`);
         await session.prompt(this.emptyCompletionRetryPrompt);
+        this.logLlmIo(`after_empty_retry_${i + 1}`, session.messages);
         text = extractLastAssistantText(session.messages);
       }
 
@@ -141,6 +163,15 @@ export class SessionRunner {
     } finally {
       unsubscribe();
     }
+  }
+
+  private logLlmIo(stage: string, messages: readonly unknown[]): void {
+    if (!this.llmDebugIo) {
+      return;
+    }
+
+    const rendered = messages.map((message) => renderMessageForDebug(message, this.llmDebugMaxChars));
+    this.logger.debug(`llm_io ${stage}`, safeJson(rendered, this.llmDebugMaxChars));
   }
 
   private async promptWithRefusalFallback(
@@ -257,4 +288,95 @@ function stringifyError(error: unknown): string {
     return error.message;
   }
   return String(error);
+}
+
+function renderMessageForDebug(message: unknown, maxChars: number): Record<string, unknown> {
+  if (!message || typeof message !== "object") {
+    return { value: truncateForDebug(String(message), maxChars) };
+  }
+
+  const record = message as Record<string, unknown>;
+  const role = typeof record.role === "string" ? record.role : "unknown";
+
+  return {
+    role,
+    timestamp: record.timestamp,
+    toolCallId: record.toolCallId,
+    toolName: record.toolName,
+    isError: record.isError,
+    content: renderContentForDebug(record.content, maxChars),
+    stopReason: record.stopReason,
+    provider: record.provider,
+    model: record.model,
+  };
+}
+
+function renderContentForDebug(content: unknown, maxChars: number): unknown {
+  if (typeof content === "string") {
+    return truncateForDebug(content, maxChars);
+  }
+
+  if (!Array.isArray(content)) {
+    return content;
+  }
+
+  return content.map((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return entry;
+    }
+
+    const block = entry as Record<string, unknown>;
+    const type = block.type;
+
+    if (type === "text") {
+      return {
+        type,
+        text: truncateForDebug(String(block.text ?? ""), maxChars),
+      };
+    }
+
+    if (type === "thinking") {
+      return {
+        type,
+        thinking: truncateForDebug(String(block.thinking ?? ""), maxChars),
+      };
+    }
+
+    if (type === "image") {
+      const data = typeof block.data === "string" ? block.data : "";
+      return {
+        type,
+        mimeType: block.mimeType,
+        dataLength: data.length,
+        dataPreview: truncateForDebug(data, Math.min(120, maxChars)),
+      };
+    }
+
+    if (type === "toolCall") {
+      return {
+        type,
+        id: block.id,
+        name: block.name,
+        arguments: block.arguments,
+      };
+    }
+
+    return block;
+  });
+}
+
+function safeJson(value: unknown, maxChars: number): string {
+  try {
+    return truncateForDebug(JSON.stringify(value), maxChars);
+  } catch {
+    return "[unserializable payload]";
+  }
+}
+
+function truncateForDebug(value: string, maxChars: number): string {
+  if (value.length <= maxChars) {
+    return value;
+  }
+
+  return `${value.slice(0, Math.max(0, maxChars - 24))}...[truncated ${value.length - maxChars} chars]`;
 }
