@@ -124,11 +124,14 @@ export class IrcRoomMonitor {
   }
 
   async processMessageEvent(event: IrcEvent): Promise<void> {
+    this.logger.debug("Processing message event", event);
+
     if (event.type !== "message") {
       return;
     }
 
     if (!event.server || !event.target || !event.nick || !event.message) {
+      this.logger.debug("Skipping invalid message event", event);
       return;
     }
 
@@ -145,11 +148,15 @@ export class IrcRoomMonitor {
     }
 
     const [normalizedNick, normalizedMessage] = normalizeSenderAndMessage(nick, message);
+    if (normalizedNick !== nick) {
+      this.logger.debug("Normalized bridged IRC sender", `from=${nick}`, `to=${normalizedNick}`);
+    }
 
     if (
       this.options.commandHandler.shouldIgnoreUser(nick) ||
       this.options.commandHandler.shouldIgnoreUser(normalizedNick)
     ) {
+      this.logger.debug("Ignoring user", `nick=${nick}`, `normalized=${normalizedNick}`);
       return;
     }
 
@@ -233,11 +240,17 @@ export class IrcRoomMonitor {
       return cached;
     }
 
-    const nick = await this.varlinkSender.getServerNick(server);
-    if (nick) {
-      this.serverNicks.set(server, nick);
+    try {
+      const nick = await this.varlinkSender.getServerNick(server);
+      if (nick) {
+        this.serverNicks.set(server, nick);
+        this.logger.debug("Got nick for server", `server=${server}`, `nick=${nick}`);
+      }
+      return nick;
+    } catch (error) {
+      this.logger.error("Failed to get nick for server", `server=${server}`, error);
+      return null;
     }
-    return nick;
   }
 }
 

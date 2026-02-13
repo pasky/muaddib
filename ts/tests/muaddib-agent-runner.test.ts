@@ -74,10 +74,18 @@ describe("MuaddibAgentRunner", () => {
     };
 
     const toolQueries: string[] = [];
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
     const runner = new MuaddibAgentRunner({
       model: "openai:gpt-4o-mini",
       systemPrompt: "You are a test assistant.",
       streamFn,
+      logger,
       tools: [
         {
           name: "web_search",
@@ -116,6 +124,9 @@ describe("MuaddibAgentRunner", () => {
         expect(firstContent.text).toContain("result:first");
       }
     }
+
+    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining("Tool web_search executed: result:first"));
+    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining("Tool web_search executed: result:second"));
   });
 
   it("enforces max iteration cap for endless tool loops", async () => {
@@ -131,11 +142,19 @@ describe("MuaddibAgentRunner", () => {
       );
     };
 
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
     const runner = new MuaddibAgentRunner({
       model: "openai:gpt-4o-mini",
       systemPrompt: "loop test",
       streamFn,
       maxIterations: 2,
+      logger,
       tools: [
         {
           name: "loop_tool",
@@ -152,6 +171,61 @@ describe("MuaddibAgentRunner", () => {
 
     await expect(runner.runSingleTurn("never stop")).rejects.toBeInstanceOf(AgentIterationLimitError);
     expect(streamCalls).toBe(2);
+    expect(logger.warn).toHaveBeenCalledWith("Exceeding max iterations...");
+    expect(logger.error).toHaveBeenCalledWith(
+      "Agent iteration failed:",
+      "Agent exceeded max iterations (2).",
+    );
+  });
+
+  it("logs tool execution failures with warning severity", async () => {
+    let streamCallIndex = 0;
+
+    const streamFn: StreamFn = async () => {
+      streamCallIndex += 1;
+
+      if (streamCallIndex === 1) {
+        return streamWithMessage(
+          makeAssistantMessage([
+            { type: "toolCall", id: "fail-1", name: "web_search", arguments: { query: "boom" } },
+          ], "toolUse"),
+        );
+      }
+
+      return streamWithMessage(makeAssistantMessage([{ type: "text", text: "done" }], "stop"));
+    };
+
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    const runner = new MuaddibAgentRunner({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "tool failure",
+      streamFn,
+      logger,
+      tools: [
+        {
+          name: "web_search",
+          label: "Web Search",
+          description: "search",
+          parameters: Type.Object({
+            query: Type.String(),
+          }),
+          execute: async () => {
+            throw new Error("boom");
+          },
+        },
+      ],
+    });
+
+    const result = await runner.runSingleTurn("trigger failure");
+
+    expect(result.text).toBe("done");
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("Tool web_search failed:"));
   });
 
   it("retries when completion is empty and returns non-empty follow-up completion", async () => {
@@ -517,6 +591,7 @@ describe("MuaddibAgentRunner", () => {
     };
 
     const logger = {
+      debug: vi.fn(),
       info: vi.fn(),
       warn: vi.fn(),
       error: vi.fn(),

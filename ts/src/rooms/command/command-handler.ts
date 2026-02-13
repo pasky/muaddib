@@ -58,6 +58,12 @@ export interface CommandRunnerFactoryInput {
   model: string;
   systemPrompt: string;
   tools: AgentTool<any>[];
+  logger?: {
+    debug(message: string, ...data: unknown[]): void;
+    info(message: string, ...data: unknown[]): void;
+    warn(message: string, ...data: unknown[]): void;
+    error(message: string, ...data: unknown[]): void;
+  };
 }
 
 export type CommandRunnerFactory = (input: CommandRunnerFactoryInput) => CommandRunner;
@@ -149,6 +155,7 @@ export class RoomCommandHandlerTs {
     );
 
     this.modelAdapter = options.modelAdapter ?? new PiAiModelAdapter();
+    this.logger = options.logger ?? createConsoleLogger("muaddib.rooms.command");
 
     this.runnerFactory =
       options.runnerFactory ??
@@ -162,6 +169,7 @@ export class RoomCommandHandlerTs {
           maxIterations: options.agentLoop?.maxIterations,
           maxCompletionRetries: options.agentLoop?.maxCompletionRetries,
           emptyCompletionRetryPrompt: options.agentLoop?.emptyCompletionRetryPrompt,
+          logger: input.logger,
         } as MuaddibAgentRunnerOptions));
 
     this.refusalFallbackModel = options.refusalFallbackModel
@@ -188,7 +196,6 @@ export class RoomCommandHandlerTs {
         numberWithDefault(this.commandConfig.rate_period, 900),
       );
     this.steeringQueue = new SteeringQueue();
-    this.logger = options.logger ?? createConsoleLogger("muaddib.rooms.command");
   }
 
   shouldIgnoreUser(nick: string): boolean {
@@ -249,6 +256,13 @@ export class RoomCommandHandlerTs {
       return this.rateLimitedResult(message);
     }
 
+    this.logger.info(
+      "Received command",
+      `arc=${message.serverTag}#${message.channelName}`,
+      `nick=${message.nick}`,
+      `content=${message.content}`,
+    );
+
     const context = await this.options.history.getContextForMessage(message, maxSize);
     const followupMessages = await this.collectDebouncedFollowups(message, context);
 
@@ -264,6 +278,13 @@ export class RoomCommandHandlerTs {
     };
 
     if (resolvedWithFollowups.error) {
+      this.logger.warn(
+        "Command parse error",
+        `arc=${message.serverTag}#${message.channelName}`,
+        `nick=${message.nick}`,
+        `error=${resolvedWithFollowups.error}`,
+        `content=${message.content}`,
+      );
       return {
         response: `${message.nick}: ${resolvedWithFollowups.error}`,
         resolved: resolvedWithFollowups,
@@ -274,6 +295,7 @@ export class RoomCommandHandlerTs {
     }
 
     if (resolvedWithFollowups.helpRequested) {
+      this.logger.debug("Sending help message", `nick=${message.nick}`);
       return {
         response: this.resolver.buildHelpMessage(message.serverTag, message.channelName),
         resolved: resolvedWithFollowups,
@@ -312,6 +334,34 @@ export class RoomCommandHandlerTs {
         usage: null,
         toolCallsCount: 0,
       };
+    }
+
+    if (resolvedWithFollowups.modelOverride) {
+      this.logger.debug("Overriding model", `model=${resolvedWithFollowups.modelOverride}`);
+    }
+
+    if (resolvedWithFollowups.selectedAutomatically) {
+      this.logger.debug(
+        "Processing automatic mode request",
+        `nick=${message.nick}`,
+        `query=${resolvedWithFollowups.queryText}`,
+      );
+      if (resolvedWithFollowups.channelMode) {
+        this.logger.debug(
+          "Channel policy resolved",
+          `policy=${resolvedWithFollowups.channelMode}`,
+          `label=${resolvedWithFollowups.selectedLabel}`,
+          `trigger=${resolvedWithFollowups.selectedTrigger}`,
+        );
+      }
+    } else {
+      this.logger.debug(
+        "Processing explicit trigger",
+        `trigger=${resolvedWithFollowups.selectedTrigger}`,
+        `mode=${resolvedWithFollowups.modeKey}`,
+        `nick=${message.nick}`,
+        `query=${resolvedWithFollowups.queryText}`,
+      );
     }
 
     this.logger.info(
@@ -389,21 +439,27 @@ export class RoomCommandHandlerTs {
         }
       : undefined;
 
-    const runResult = await this.runWithRefusalFallback(
-      modelSpec,
-      {
-        prompt: resolvedWithFollowups.queryText,
-        contextMessages: runnerContext,
-        thinkingLevel: normalizeThinkingLevel(resolvedWithFollowups.runtime.reasoningEffort),
-        persistenceSummaryModel: this.options.persistenceSummaryModel,
-        onPersistenceSummary: persistenceSummaryCallback,
-        visionFallbackModel: resolvedWithFollowups.runtime.visionModel ?? undefined,
-      },
-      {
-        systemPrompt,
-        tools,
-      },
-    );
+    let runResult: RunWithFallbackResult;
+    try {
+      runResult = await this.runWithRefusalFallback(
+        modelSpec,
+        {
+          prompt: resolvedWithFollowups.queryText,
+          contextMessages: runnerContext,
+          thinkingLevel: normalizeThinkingLevel(resolvedWithFollowups.runtime.reasoningEffort),
+          persistenceSummaryModel: this.options.persistenceSummaryModel,
+          onPersistenceSummary: persistenceSummaryCallback,
+          visionFallbackModel: resolvedWithFollowups.runtime.visionModel ?? undefined,
+        },
+        {
+          systemPrompt,
+          tools,
+        },
+      );
+    } catch (error) {
+      this.logger.error("Error during agent execution", error);
+      throw error;
+    }
 
     let responseText = runResult.agentResult.text;
     if (runResult.fallbackModelSpec) {
@@ -413,6 +469,15 @@ export class RoomCommandHandlerTs {
 
     responseText = await this.applyResponseLengthPolicy(responseText);
     const cleaned = this.cleanResponseText(responseText, message.nick);
+
+    if (!cleaned) {
+      this.logger.info(
+        "Agent chose not to answer",
+        `arc=${message.serverTag}#${message.channelName}`,
+        `mode=${resolvedWithFollowups.selectedLabel}`,
+        `trigger=${resolvedWithFollowups.selectedTrigger}`,
+      );
+    }
 
     return {
       response: cleaned || null,
@@ -442,6 +507,7 @@ export class RoomCommandHandlerTs {
       model: primaryModelSpec,
       systemPrompt: runnerInput.systemPrompt,
       tools: runnerInput.tools,
+      logger: this.logger,
     });
 
     const primarySummaryBuffer: string[] = [];
@@ -471,7 +537,7 @@ export class RoomCommandHandlerTs {
         throw error;
       }
 
-      this.logger.warn(
+      this.logger.info(
         "Primary model failed with refusal signal; retrying fallback model",
         `signal=${refusalSignal}`,
         `fallback_model=${this.refusalFallbackModel}`,
@@ -498,7 +564,7 @@ export class RoomCommandHandlerTs {
       };
     }
 
-    this.logger.warn(
+    this.logger.info(
       "Primary model response matched refusal signal; retrying fallback model",
       `signal=${refusalSignal}`,
       `fallback_model=${this.refusalFallbackModel}`,
@@ -530,6 +596,7 @@ export class RoomCommandHandlerTs {
       model: fallbackModelSpec,
       systemPrompt: runnerInput.systemPrompt,
       tools: runnerInput.tools,
+      logger: this.logger,
     });
 
     const fallbackSummaryBuffer: string[] = [];
@@ -607,17 +674,21 @@ export class RoomCommandHandlerTs {
 
     let llmCallId: number | null = null;
     if (result.model && result.usage) {
-      const spec = parseModelSpec(result.model);
-      llmCallId = await this.options.history.logLlmCall({
-        provider: spec.provider,
-        model: spec.modelId,
-        inputTokens: result.usage.input,
-        outputTokens: result.usage.output,
-        cost: result.usage.cost.total,
-        callType: "agent_run",
-        arcName,
-        triggerMessageId,
-      });
+      try {
+        const spec = parseModelSpec(result.model);
+        llmCallId = await this.options.history.logLlmCall({
+          provider: spec.provider,
+          model: spec.modelId,
+          inputTokens: result.usage.input,
+          outputTokens: result.usage.output,
+          cost: result.usage.cost.total,
+          callType: "agent_run",
+          arcName,
+          triggerMessageId,
+        });
+      } catch {
+        this.logger.warn("Could not parse model spec", `model=${result.model}`);
+      }
     }
 
     this.logger.info(
@@ -626,6 +697,16 @@ export class RoomCommandHandlerTs {
       `model=${result.model ?? "n/a"}`,
       `tool_calls=${result.toolCallsCount}`,
       `llm_call_id=${llmCallId ?? "n/a"}`,
+    );
+
+    const costStr = result.usage ? `$${result.usage.cost.total.toFixed(4)}` : "?";
+    this.logger.info(
+      "Sending direct response",
+      `mode=${result.resolved.selectedLabel ?? "n/a"}`,
+      `trigger=${result.resolved.selectedTrigger ?? "n/a"}`,
+      `cost=${costStr}`,
+      `arc=${arcName}`,
+      `response=${result.response}`,
     );
 
     if (sendResponse) {
@@ -850,6 +931,10 @@ export class RoomCommandHandlerTs {
     );
 
     const followupMessages = followups.map((entry) => entry.message).filter((entry) => entry.length > 0);
+    if (followupMessages.length > 0) {
+      this.logger.debug("Debounced followup messages", `count=${followupMessages.length}`, `nick=${message.nick}`);
+    }
+
     if (followupMessages.length > 0 && context.length > 0) {
       const lastIndex = context.length - 1;
       context[lastIndex] = {
@@ -898,9 +983,16 @@ export class RoomCommandHandlerTs {
       return responseText;
     }
 
-    if (byteLengthUtf8(responseText) <= this.responseMaxBytes) {
+    const responseBytes = byteLengthUtf8(responseText);
+    if (responseBytes <= this.responseMaxBytes) {
       return responseText;
     }
+
+    this.logger.info(
+      "Response too long, creating artifact",
+      `bytes=${responseBytes}`,
+      `max_bytes=${this.responseMaxBytes}`,
+    );
 
     return await this.longResponseToArtifact(responseText);
   }

@@ -149,6 +149,7 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
         getApiKey,
         maxIterations,
         maxCompletionRetries,
+        logger: input.logger,
       });
 
     const commandHandler = new RoomCommandHandlerTs({

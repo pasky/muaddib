@@ -386,7 +386,11 @@ function createRoomCommandHandler(
   return new RoomCommandHandlerTs({
     roomConfig,
     history,
-    classifyMode: createModeClassifier(commandConfig, { getApiKey, modelAdapter }),
+    classifyMode: createModeClassifier(commandConfig, {
+      getApiKey,
+      modelAdapter,
+      logger,
+    }),
     getApiKey,
     modelAdapter,
     responseCleaner,

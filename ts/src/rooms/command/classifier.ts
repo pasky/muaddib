@@ -15,10 +15,18 @@ type CompleteSimpleFn = (
   options?: SimpleStreamOptions,
 ) => Promise<AssistantMessage>;
 
+interface ModeClassifierLogger {
+  debug(message: string, ...data: unknown[]): void;
+  info(message: string, ...data: unknown[]): void;
+  warn(message: string, ...data: unknown[]): void;
+  error(message: string, ...data: unknown[]): void;
+}
+
 export interface ModeClassifierOptions {
   modelAdapter?: PiAiModelAdapter;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   completeFn?: CompleteSimpleFn;
+  logger?: ModeClassifierLogger;
 }
 
 export function createModeClassifier(
@@ -26,8 +34,8 @@ export function createModeClassifier(
   options: ModeClassifierOptions = {},
 ): (context: Array<{ role: string; content: string }>) => Promise<string> {
   const adapter = options.modelAdapter ?? new PiAiModelAdapter();
-
   const completeFn = options.completeFn ?? completeSimple;
+  const logger = options.logger ?? noopModeClassifierLogger();
 
   return async (context: Array<{ role: string; content: string }>): Promise<string> => {
     const fallbackLabel =
@@ -35,6 +43,7 @@ export function createModeClassifier(
       Object.keys(commandConfig.mode_classifier.labels)[0];
 
     if (context.length === 0) {
+      logger.error("Error classifying mode", "context is empty");
       return fallbackLabel;
     }
 
@@ -67,16 +76,16 @@ export function createModeClassifier(
         },
       );
 
-      const text = response.content
+      const responseText = response.content
         .filter((block) => block.type === "text")
         .map((block) => block.text)
         .join(" ")
-        .trim()
-        .toUpperCase();
+        .trim();
+      const normalizedText = responseText.toUpperCase();
 
       const counts = new Map<string, number>();
       for (const label of labels) {
-        counts.set(label, countOccurrences(text, label.toUpperCase()));
+        counts.set(label, countOccurrences(normalizedText, label.toUpperCase()));
       }
 
       let bestLabel = fallbackLabel;
@@ -88,8 +97,14 @@ export function createModeClassifier(
         }
       }
 
-      return bestCount === 0 ? fallbackLabel : bestLabel;
-    } catch {
+      if (bestCount === 0) {
+        logger.warn("Invalid mode classification response", `response=${responseText}`);
+        return fallbackLabel;
+      }
+
+      return bestLabel;
+    } catch (error) {
+      logger.error("Error classifying mode", error);
       return fallbackLabel;
     }
   };
@@ -115,4 +130,13 @@ function countOccurrences(text: string, token: string): number {
     count += 1;
     index += token.length;
   }
+}
+
+function noopModeClassifierLogger(): ModeClassifierLogger {
+  return {
+    debug: () => {},
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+  };
 }

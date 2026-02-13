@@ -1,5 +1,10 @@
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
+import { RuntimeLogWriter } from "../src/app/logging.js";
 import { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { RoomCommandHandlerTs } from "../src/rooms/command/command-handler.js";
 import type { RoomMessage } from "../src/rooms/message.js";
@@ -285,6 +290,218 @@ describe("RoomCommandHandlerTs", () => {
       "response_message_id=2",
     );
 
+    await history.close();
+  });
+
+  it("logs parse/help/rate-limit events with Python-matching severities", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    const parseErrorHandler = new RoomCommandHandlerTs({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      logger,
+      runnerFactory: () => ({
+        runSingleTurn: async () => makeRunnerResult("unused"),
+      }),
+    });
+
+    await parseErrorHandler.handleIncomingMessage(makeMessage("!unknown ping"), {
+      isDirect: true,
+    });
+    await parseErrorHandler.handleIncomingMessage(makeMessage("!h"), {
+      isDirect: true,
+    });
+
+    const rateLimitedHandler = new RoomCommandHandlerTs({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      logger,
+      rateLimiter: {
+        checkLimit: vi.fn().mockReturnValue(false),
+      },
+      runnerFactory: () => ({
+        runSingleTurn: async () => makeRunnerResult("unused"),
+      }),
+    });
+
+    await rateLimitedHandler.handleIncomingMessage(makeMessage("!s too-fast"), {
+      isDirect: true,
+    });
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Command parse error",
+      "arc=libera##test",
+      "nick=alice",
+      "error=Unknown command '!unknown'. Use !h for help.",
+      "content=!unknown ping",
+    );
+    expect(logger.debug).toHaveBeenCalledWith("Sending help message", "nick=alice");
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Rate limit triggered",
+      "arc=libera##test",
+      "nick=alice",
+    );
+
+    await history.close();
+  });
+
+  it("logs fallback + cost milestone lifecycle with info severity", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    await history.logLlmCall({
+      provider: "openai",
+      model: "gpt-4o-mini",
+      inputTokens: 10,
+      outputTokens: 10,
+      cost: 0.9,
+      callType: "agent_run",
+      arcName: "libera##test",
+    });
+
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    const handler = new RoomCommandHandlerTs({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      refusalFallbackModel: "anthropic:claude-3-5-haiku",
+      logger,
+      runnerFactory: (input) => {
+        if (input.model === "openai:gpt-4o-mini") {
+          return {
+            runSingleTurn: async () => makeRunnerResult("The AI refused to respond to this request"),
+          };
+        }
+        return {
+          runSingleTurn: async () =>
+            makeRunnerResult("fallback answer", {
+              inputTokens: 123,
+              outputTokens: 45,
+              totalCost: 0.35,
+              toolCallsCount: 2,
+            }),
+        };
+      },
+    });
+
+    await handler.handleIncomingMessage(makeMessage("!s expensive fallback"), {
+      isDirect: true,
+      sendResponse: async () => {},
+    });
+
+    expect(logger.info).toHaveBeenCalledWith(
+      "Primary model response matched refusal signal; retrying fallback model",
+      "signal=python_refusal_message",
+      "fallback_model=anthropic:claude-3-5-haiku",
+    );
+    expect(logger.info).toHaveBeenCalledWith("Sending cost followup", "arc=libera##test", "cost=0.3500");
+    expect(logger.info).toHaveBeenCalledWith(
+      "Sending daily cost milestone",
+      "arc=libera##test",
+      "total_today=1.2500",
+    );
+
+    await history.close();
+  });
+
+  it("logs agent execution failures at error severity", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    const handler = new RoomCommandHandlerTs({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      logger,
+      runnerFactory: () => ({
+        runSingleTurn: async () => {
+          throw new Error("runner boom");
+        },
+      }),
+    });
+
+    await expect(
+      handler.handleIncomingMessage(makeMessage("!d explode"), {
+        isDirect: true,
+      }),
+    ).rejects.toThrow("runner boom");
+
+    expect(logger.error).toHaveBeenCalledWith("Error during agent execution", expect.any(Error));
+
+    await history.close();
+  });
+
+  it("writes command lifecycle logs into message-context files", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const logsHome = await mkdtemp(join(tmpdir(), "muaddib-command-logs-"));
+    const fixedNow = new Date(2026, 1, 12, 13, 14, 15, 123);
+    const runtimeLogs = new RuntimeLogWriter({
+      muaddibHome: logsHome,
+      nowProvider: () => fixedNow,
+      stdout: {
+        write: () => true,
+      } as unknown as NodeJS.WriteStream,
+    });
+
+    const handler = new RoomCommandHandlerTs({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      logger: runtimeLogs.getLogger("muaddib.rooms.command"),
+      runnerFactory: () => ({
+        runSingleTurn: async () => makeRunnerResult("pong"),
+      }),
+    });
+
+    await runtimeLogs.getLogger("muaddib.rooms.command").withMessageContext(
+      {
+        arc: "libera##test",
+        nick: "alice",
+        message: "!s ping",
+      },
+      async () => {
+        await handler.handleIncomingMessage(makeMessage("!s ping"), {
+          isDirect: true,
+        });
+      },
+    );
+
+    const datePath = fixedNow.toISOString().slice(0, 10);
+    const arcDir = join(logsHome, "logs", datePath, "libera##test");
+    const arcFiles = await readdir(arcDir);
+    expect(arcFiles).toHaveLength(1);
+
+    const messageLog = await readFile(join(arcDir, arcFiles[0]), "utf-8");
+    expect(messageLog).toContain(" - INFO - Handling direct command");
+    expect(messageLog).toContain(" - INFO - Resolved direct command");
+    expect(messageLog).toContain(" - INFO - Persisting direct command response");
+
+    await rm(logsHome, { recursive: true, force: true });
     await history.close();
   });
 

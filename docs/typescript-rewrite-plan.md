@@ -10,6 +10,7 @@ Keep a compact, up-to-date plan for the TypeScript runtime rewrite, focused on:
 Historical milestone-by-milestone notes were intentionally removed; use git history for full chronology.
 
 Latest update:
+- 2026-02-13: Closed direct-command logging parity audit/fix with a code-referenced Python-vs-TS matrix (`docs/typescript-logging-parity-matrix.md`) and TS runtime updates for severity-aligned command/classifier/agent-loop logging plus per-message context propagation; added regression coverage in `ts/tests/command-handler.test.ts`, `ts/tests/muaddib-agent-runner.test.ts`, and `ts/tests/classifier.test.ts`.
 - 2026-02-13: Added TS DeepSeek provider parity bridge for Anthropic-compatible `deepseek:*` model specs across command/classifier/context-reducer/chronicler paths by extending `PiAiModelAdapter` + shared adapter wiring in app/CLI startup, with regression coverage in `ts/tests/pi-ai-model-adapter.test.ts` and `ts/tests/cli-message-mode.test.ts`.
 - 2026-02-13: Closed TS response-cleaning parity gap for echoed IRC prefixes (strip leading `[model]` / `!mode` / `[HH:MM]` / non-quest `<nick>` wrappers while preserving `<quest>` and `<quest_finished>` payloads) in `RoomCommandHandlerTs`, with regression coverage in `ts/tests/command-handler.test.ts`.
 - 2026-02-13: Improved TS per-message command observability by wiring runtime logger into `RoomCommandHandlerTs` and emitting direct-command lifecycle entries (handle/resolution/persist), ensuring message-sharded logs contain more than monitor-only lines.

@@ -56,6 +56,7 @@ interface PersistentToolCall {
 }
 
 interface RunnerLogger {
+  debug(...data: unknown[]): void;
   info(...data: unknown[]): void;
   warn(...data: unknown[]): void;
   error(...data: unknown[]): void;
@@ -222,7 +223,11 @@ export class MuaddibAgentRunner {
     let iterationCount = 0;
     this.agent.streamFn = async (...args: Parameters<StreamFn>) => {
       iterationCount += 1;
+      if (iterationCount > 1) {
+        this.logger.info(`Agent iteration ${iterationCount}/${maxIterations}`);
+      }
       if (iterationCount > maxIterations) {
+        this.logger.warn("Exceeding max iterations...");
         return createIterationLimitErrorStream(this.modelInfo, maxIterations);
       }
 
@@ -252,8 +257,11 @@ export class MuaddibAgentRunner {
       toolArgsByCallId.delete(event.toolCallId);
 
       if (event.isError) {
+        this.logger.warn(`Tool ${event.toolName} failed: ${summarizeToolResultForLog(event.result)}`);
         return;
       }
+
+      this.logger.info(`Tool ${event.toolName} executed: ${summarizeToolResultForLog(event.result)}...`);
 
       if (!visionFallbackInUse && visionFallbackModel && hasImageToolOutput(event.result)) {
         visionFallbackInUse = true;
@@ -315,7 +323,11 @@ export class MuaddibAgentRunner {
         }
 
         completionAttempt += 1;
+        this.logger.warn(`Empty completion from agent, retrying (${completionAttempt}/${maxCompletionRetries})...`);
       }
+    } catch (error) {
+      this.logger.error("Agent iteration failed:", stringifyError(error));
+      throw error;
     } finally {
       unsubscribe();
       this.agent.streamFn = previousStreamFn;
@@ -795,6 +807,67 @@ function extractUrlsFromText(text: string): string[] {
   }
 
   return matches.map((entry) => entry.replace(/[.,;:!?]+$/u, ""));
+}
+
+function summarizeToolResultForLog(result: unknown): string {
+  if (Array.isArray(result)) {
+    return summarizeToolBlocksForLog(result);
+  }
+
+  if (!result || typeof result !== "object") {
+    return String(result).slice(0, 100);
+  }
+
+  const record = result as Record<string, unknown>;
+  const content = record.content;
+  if (Array.isArray(content)) {
+    return summarizeToolBlocksForLog(content);
+  }
+
+  return renderPersistenceValue(result).slice(0, 100);
+}
+
+function summarizeToolBlocksForLog(content: unknown[]): string {
+  const logBlocks: string[] = [];
+
+  for (const entry of content) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+
+    const block = entry as Record<string, unknown>;
+    if (block.type === "image") {
+      const source = (block.source as Record<string, unknown> | undefined) ?? {};
+      const mediaType =
+        typeof block.mimeType === "string"
+          ? block.mimeType
+          : typeof source.media_type === "string"
+            ? source.media_type
+            : "image";
+      const data =
+        typeof block.data === "string"
+          ? block.data
+          : typeof source.data === "string"
+            ? source.data
+            : "";
+      const truncated = data.length > 64 ? `${data.slice(0, 64)}...` : data;
+      logBlocks.push(`[image: ${mediaType}, ${truncated}]`);
+      continue;
+    }
+
+    if (block.type === "text") {
+      logBlocks.push(String(block.text ?? "").slice(0, 100));
+      continue;
+    }
+
+    logBlocks.push(renderPersistenceValue(block).slice(0, 100));
+  }
+
+  if (logBlocks.length === 0) {
+    return "";
+  }
+
+  return logBlocks.join(", ");
 }
 
 function stringifyError(error: unknown): string {
