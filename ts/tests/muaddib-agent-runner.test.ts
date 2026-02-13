@@ -125,9 +125,11 @@ describe("MuaddibAgentRunner", () => {
       }
     }
 
-    expect(logger.info).toHaveBeenCalledWith("Tool web_search executed");
-    expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining("Tool web_search result: result:first"));
-    expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining("Tool web_search result: result:second"));
+    expect(logger.info).toHaveBeenCalledWith("Tool web_search executed: result:first...");
+    expect(logger.info).toHaveBeenCalledWith("Tool web_search executed: result:second...");
+    expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining("Tool web_search result details:"));
+    expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining("result:first"));
+    expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining("result:second"));
   });
 
   it("enforces max iteration cap for endless tool loops", async () => {
@@ -226,8 +228,8 @@ describe("MuaddibAgentRunner", () => {
     const result = await runner.runSingleTurn("trigger failure");
 
     expect(result.text).toBe("done");
-    expect(logger.warn).toHaveBeenCalledWith("Tool web_search failed");
-    expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining("Tool web_search error:"));
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("Tool web_search failed:"));
+    expect(logger.debug).toHaveBeenCalledWith(expect.stringContaining("Tool web_search error details:"));
   });
 
   it("retries when completion is empty and returns non-empty follow-up completion", async () => {

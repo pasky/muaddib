@@ -257,16 +257,16 @@ export class MuaddibAgentRunner {
       toolArgsByCallId.delete(event.toolCallId);
 
       if (event.isError) {
-        this.logger.warn(`Tool ${event.toolName} failed`);
+        this.logger.warn(`Tool ${event.toolName} failed: ${formatToolResultPreviewForInfo(event.result)}`);
         this.logger.debug(
-          `Tool ${event.toolName} error: ${summarizeToolResultForLog(event.result)}`,
+          `Tool ${event.toolName} error details: ${renderToolResultDetailsForLog(event.result)}`,
         );
         return;
       }
 
-      this.logger.info(`Tool ${event.toolName} executed`);
+      this.logger.info(`Tool ${event.toolName} executed: ${formatToolResultPreviewForInfo(event.result)}`);
       this.logger.debug(
-        `Tool ${event.toolName} result: ${summarizeToolResultForLog(event.result)}`,
+        `Tool ${event.toolName} result details: ${renderToolResultDetailsForLog(event.result)}`,
       );
 
       if (!visionFallbackInUse && visionFallbackModel && hasImageToolOutput(event.result)) {
@@ -874,6 +874,15 @@ function summarizeToolBlocksForLog(content: unknown[]): string {
   }
 
   return logBlocks.join(", ");
+}
+
+function formatToolResultPreviewForInfo(result: unknown): string {
+  const preview = summarizeToolResultForLog(result).trim();
+  return `${preview || "<empty>"}...`;
+}
+
+function renderToolResultDetailsForLog(result: unknown): string {
+  return renderPersistenceValue(result);
 }
 
 function stringifyError(error: unknown): string {
