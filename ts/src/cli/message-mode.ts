@@ -7,6 +7,7 @@ import { getMuaddibHome, resolveMuaddibPath } from "../app/bootstrap.js";
 import { resolveRefusalFallbackModel } from "../app/refusal-fallback.js";
 import { resolvePersistenceSummaryModel } from "../app/persistence-summary.js";
 import { MuaddibAgentRunner } from "../agent/muaddib-agent-runner.js";
+import { createPiAiModelAdapterFromConfig } from "../models/pi-ai-model-adapter.js";
 import { ChronicleStore } from "../chronicle/chronicle-store.js";
 import {
   ChronicleLifecycleTs,
@@ -48,6 +49,7 @@ export interface CliMessageModeResult {
 export async function runCliMessageMode(options: CliMessageModeOptions): Promise<CliMessageModeResult> {
   const config = JSON.parse(readFileSync(options.configPath, "utf-8")) as Record<string, unknown>;
   assertNoDeferredFeatureConfig(config);
+  const modelAdapter = createPiAiModelAdapterFromConfig(config);
 
   const roomName = options.roomName ?? "irc";
   const roomConfig = getRoomConfig(config, roomName) as any;
@@ -60,8 +62,8 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
   const imageGenConfig = asRecord(toolsConfig?.image_gen);
   const providersConfig = asRecord(config.providers);
   const openRouterProviderConfig = asRecord(providersConfig?.openrouter);
-  const refusalFallbackModel = resolveRefusalFallbackModel(config);
-  const persistenceSummaryModel = resolvePersistenceSummaryModel(config);
+  const refusalFallbackModel = resolveRefusalFallbackModel(config, { modelAdapter });
+  const persistenceSummaryModel = resolvePersistenceSummaryModel(config, { modelAdapter });
   const getApiKey = createConfigApiKeyResolver(config);
 
   const maxIterations = numberOrUndefined(actorConfig?.max_iterations);
@@ -113,6 +115,7 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
       chronicleLifecycle = new ChronicleLifecycleTs({
         chronicleStore,
         config: lifecycleConfig,
+        modelAdapter,
         getApiKey,
       });
 
@@ -124,6 +127,7 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
           model: chroniclerModel,
           arc_models: toStringRecord(chroniclerConfig.arc_models),
         },
+        modelAdapter,
         getApiKey,
       });
     }
@@ -141,6 +145,7 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
         model: input.model,
         systemPrompt: input.systemPrompt,
         tools: input.tools,
+        modelAdapter,
         getApiKey,
         maxIterations,
         maxCompletionRetries,
@@ -149,8 +154,9 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
     const commandHandler = new RoomCommandHandlerTs({
       roomConfig,
       history,
-      classifyMode: createModeClassifier(commandConfig, { getApiKey }),
+      classifyMode: createModeClassifier(commandConfig, { getApiKey, modelAdapter }),
       getApiKey,
+      modelAdapter,
       refusalFallbackModel,
       persistenceSummaryModel,
       contextReducerConfig: {

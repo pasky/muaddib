@@ -19,6 +19,10 @@ import {
   type AutoChronicler,
 } from "../rooms/autochronicler.js";
 import { createModeClassifier } from "../rooms/command/classifier.js";
+import {
+  createPiAiModelAdapterFromConfig,
+  type PiAiModelAdapter,
+} from "../models/pi-ai-model-adapter.js";
 import { DiscordRoomMonitor } from "../rooms/discord/monitor.js";
 import { DiscordGatewayTransport } from "../rooms/discord/transport.js";
 import { IrcRoomMonitor } from "../rooms/irc/monitor.js";
@@ -53,6 +57,7 @@ export async function runMuaddibMain(argv: string[] = process.argv.slice(2)): Pr
 
   const config = loadConfig(args.configPath);
   assertNoDeferredFeatureConfig(config, logger);
+  const modelAdapter = createPiAiModelAdapterFromConfig(config);
 
   const historyDbPath = resolveMuaddibPath(
     (config.history as any)?.database?.path,
@@ -73,10 +78,11 @@ export async function runMuaddibMain(argv: string[] = process.argv.slice(2)): Pr
     history,
     apiKeyResolver,
     runtimeLogger,
+    modelAdapter,
   );
 
   try {
-    const monitors = createMonitors(config, history, apiKeyResolver, runtimeLogger, chroniclerRuntime);
+    const monitors = createMonitors(config, history, apiKeyResolver, runtimeLogger, chroniclerRuntime, modelAdapter);
     if (monitors.length === 0) {
       logger.error("No room monitors enabled.");
       throw new Error("No room monitors enabled.");
@@ -97,6 +103,7 @@ function createMonitors(
   getApiKey: (provider: string) => Promise<string | undefined> | string | undefined,
   runtimeLogger: RuntimeLogWriter,
   chroniclerRuntime: ChroniclerRuntime,
+  modelAdapter: PiAiModelAdapter,
 ): RunnableMonitor[] {
   const monitors: RunnableMonitor[] = [];
   const logger = runtimeLogger.getLogger("muaddib.app.main");
@@ -115,6 +122,7 @@ function createMonitors(
       (text) => text.replace(/\n/g, "; ").trim(),
       config,
       chroniclerRuntime,
+      modelAdapter,
     );
 
     logger.info("Enabling IRC room monitor", `socket_path=${socketPath}`);
@@ -143,6 +151,7 @@ function createMonitors(
       undefined,
       config,
       chroniclerRuntime,
+      modelAdapter,
     );
     const discordToken = requireNonEmptyString(
       discordRoomConfig?.token,
@@ -177,6 +186,7 @@ function createMonitors(
       undefined,
       config,
       chroniclerRuntime,
+      modelAdapter,
     );
     const slackAppToken = requireNonEmptyString(
       slackRoomConfig?.app_token,
@@ -226,6 +236,7 @@ async function initializeChroniclerRuntime(
   history: ChatHistoryStore,
   getApiKey: (provider: string) => Promise<string | undefined> | string | undefined,
   runtimeLogger: RuntimeLogWriter,
+  modelAdapter: PiAiModelAdapter,
 ): Promise<ChroniclerRuntime> {
   const logger = runtimeLogger.getLogger("muaddib.app.main");
   const chroniclerConfig = asRecord(config.chronicler);
@@ -257,6 +268,7 @@ async function initializeChroniclerRuntime(
   const lifecycle = new ChronicleLifecycleTs({
     chronicleStore,
     config: lifecycleConfig,
+    modelAdapter,
     getApiKey,
   });
 
@@ -268,6 +280,7 @@ async function initializeChroniclerRuntime(
       model: chroniclerModel,
       arc_models: toStringRecord(chroniclerConfig.arc_models),
     },
+    modelAdapter,
     getApiKey,
     logger: runtimeLogger.getLogger("muaddib.rooms.autochronicler"),
   });
@@ -336,6 +349,7 @@ function createRoomCommandHandler(
   responseCleaner?: (text: string, nick: string) => string,
   runtimeConfig?: Record<string, unknown>,
   chroniclerRuntime: ChroniclerRuntime = {},
+  modelAdapter: PiAiModelAdapter = createPiAiModelAdapterFromConfig(runtimeConfig ?? {}),
 ): RoomCommandHandlerTs {
   const commandConfig = roomConfig?.command ?? {};
 
@@ -347,8 +361,8 @@ function createRoomCommandHandler(
   const imageGenConfig = asRecord(toolsConfig?.image_gen);
   const providersConfig = asRecord(runtimeConfig?.providers);
   const openRouterProviderConfig = asRecord(providersConfig?.openrouter);
-  const refusalFallbackModel = resolveRefusalFallbackModel(runtimeConfig ?? {});
-  const persistenceSummaryModel = resolvePersistenceSummaryModel(runtimeConfig ?? {});
+  const refusalFallbackModel = resolveRefusalFallbackModel(runtimeConfig ?? {}, { modelAdapter });
+  const persistenceSummaryModel = resolvePersistenceSummaryModel(runtimeConfig ?? {}, { modelAdapter });
 
   const maxIterations = numberOrUndefined(actorConfig?.max_iterations);
   const maxCompletionRetries = numberOrUndefined(actorConfig?.max_completion_retries);
@@ -368,8 +382,9 @@ function createRoomCommandHandler(
   return new RoomCommandHandlerTs({
     roomConfig,
     history,
-    classifyMode: createModeClassifier(commandConfig, { getApiKey }),
+    classifyMode: createModeClassifier(commandConfig, { getApiKey, modelAdapter }),
     getApiKey,
+    modelAdapter,
     responseCleaner,
     refusalFallbackModel,
     persistenceSummaryModel,

@@ -14,6 +14,7 @@ import {
 } from "../../agent/tools/baseline-tools.js";
 import { createDefaultToolExecutors } from "../../agent/tools/core-executors.js";
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
+import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { parseModelSpec } from "../../models/model-spec.js";
 import type { AutoChronicler } from "../autochronicler.js";
 import { RateLimiter } from "./rate-limiter.js";
@@ -71,6 +72,7 @@ export interface CommandHandlerOptions {
   runnerFactory?: CommandRunnerFactory;
   rateLimiter?: CommandRateLimiter;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+  modelAdapter?: PiAiModelAdapter;
   refusalFallbackModel?: string;
   persistenceSummaryModel?: string;
   contextReducer?: ContextReducer;
@@ -117,6 +119,7 @@ export class RoomCommandHandlerTs {
   private readonly runnerFactory: CommandRunnerFactory;
   private readonly rateLimiter: CommandRateLimiter;
   private readonly steeringQueue: SteeringQueue;
+  private readonly modelAdapter: PiAiModelAdapter;
   private readonly refusalFallbackModel: string | null;
   private readonly responseMaxBytes: number;
   private readonly shareArtifact: (content: string) => Promise<string>;
@@ -135,6 +138,8 @@ export class RoomCommandHandlerTs {
       modelStrCore,
     );
 
+    this.modelAdapter = options.modelAdapter ?? new PiAiModelAdapter();
+
     this.runnerFactory =
       options.runnerFactory ??
       ((input) =>
@@ -142,6 +147,7 @@ export class RoomCommandHandlerTs {
           model: input.model,
           systemPrompt: input.systemPrompt,
           tools: input.tools,
+          modelAdapter: this.modelAdapter,
           getApiKey: options.getApiKey,
           maxIterations: options.agentLoop?.maxIterations,
           maxCompletionRetries: options.agentLoop?.maxCompletionRetries,
@@ -159,6 +165,7 @@ export class RoomCommandHandlerTs {
       options.contextReducer ??
       new ContextReducerTs({
         config: options.contextReducerConfig,
+        modelAdapter: this.modelAdapter,
         getApiKey: options.getApiKey,
       });
     this.autoChronicler = options.autoChronicler ?? null;
