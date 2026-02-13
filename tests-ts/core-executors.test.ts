@@ -355,39 +355,6 @@ describe("core tool executors chronicler/quest support", () => {
 });
 
 describe("core tool executors oracle support", () => {
-  it("oracle executes configured model and returns text output", async () => {
-    const completeSimpleFn = vi.fn(async (_model: any, _context: any, _options?: any) => assistantTextMessage("oracle answer"));
-    const getApiKey = vi.fn(async (provider: string) => {
-      return provider === "openai" ? "openai-key" : undefined;
-    });
-
-    const executors = createDefaultToolExecutors({
-      oracleModel: "openai:gpt-4o-mini",
-      oraclePrompt: "You are an oracle.",
-      completeSimpleFn,
-      getApiKey,
-    });
-
-    const result = await executors.oracle({
-      query: "How should this migration be staged?",
-    });
-
-    expect(result).toBe("oracle answer");
-    expect(getApiKey).toHaveBeenCalledWith("openai");
-
-    const completeCall = completeSimpleFn.mock.calls[0];
-    expect(completeCall[1]).toMatchObject({
-      systemPrompt: "You are an oracle.",
-      messages: [
-        {
-          role: "user",
-          content: "How should this migration be staged?",
-        },
-      ],
-    });
-    expect(completeCall[2]).toMatchObject({ apiKey: "openai-key", reasoning: "high" });
-  });
-
   it("oracle fails fast when model config is missing", async () => {
     const executors = createDefaultToolExecutors();
 
@@ -401,7 +368,6 @@ describe("core tool executors oracle support", () => {
   it("oracle validates non-empty query", async () => {
     const executors = createDefaultToolExecutors({
       oracleModel: "openai:gpt-4o-mini",
-      completeSimpleFn: vi.fn(async () => assistantTextMessage("irrelevant")),
     });
 
     await expect(

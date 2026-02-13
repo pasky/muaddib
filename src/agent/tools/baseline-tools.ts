@@ -18,6 +18,7 @@ import {
 import {
   createDefaultOracleExecutor,
   createOracleTool,
+  ORACLE_EXCLUDED_TOOLS,
 } from "./oracle.js";
 import {
   createDefaultQuestSnoozeExecutor,
@@ -77,6 +78,7 @@ export {
   createSubquestStartTool,
   createVisitWebpageTool,
   createWebSearchTool,
+  ORACLE_EXCLUDED_TOOLS,
 };
 
 export interface BaselineToolOptions extends DefaultToolExecutorOptions {

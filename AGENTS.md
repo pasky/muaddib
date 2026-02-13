@@ -20,7 +20,7 @@
   - Discord: `src/rooms/discord/monitor.ts`, `src/rooms/discord/transport.ts`
   - Slack: `src/rooms/slack/monitor.ts`, `src/rooms/slack/transport.ts`
 - **Command Handling**: `src/rooms/command/*` (resolver, classifier, handler, rate limiter, context reduction)
-- **Agent Runtime**: `src/agent/muaddib-agent-runner.ts` + `src/agent/tools/*`
+- **Agent Runtime**: `src/agent/session-runner.ts` + `src/agent/session-factory.ts` + `src/agent/tools/*`
 - **Persistence**:
   - Chat history: `src/history/chat-history-store.ts`
   - Chronicle: `src/chronicle/*`

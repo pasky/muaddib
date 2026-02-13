@@ -1,14 +1,8 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
-import {
-  completeSimple,
-  type AssistantMessage,
-  type Model,
-  type SimpleStreamOptions,
-  type UserMessage,
-} from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
 
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
+import { SessionRunner } from "../session-runner.js";
 import type {
   BaselineToolExecutors,
   DefaultToolExecutorOptions,
@@ -18,20 +12,30 @@ import type {
 const DEFAULT_ORACLE_SYSTEM_PROMPT =
   "You are an oracle - a powerful reasoning entity consulted for complex analysis.";
 
-type CompleteSimpleFn = (
-  model: Model<any>,
-  context: { messages: UserMessage[]; systemPrompt?: string },
-  options?: SimpleStreamOptions,
-) => Promise<AssistantMessage>;
+/**
+ * Tools excluded from the oracle's nested agentic loop to prevent recursion
+ * and irrelevant side-effects.
+ */
+export const ORACLE_EXCLUDED_TOOLS = new Set([
+  "oracle",
+  "progress_report",
+  "quest_start",
+  "subquest_start",
+  "quest_snooze",
+]);
 
 export function createOracleTool(executors: Pick<BaselineToolExecutors, "oracle">): AgentTool<any> {
   return {
     name: "oracle",
     label: "Oracle",
-    description: "Consult the oracle model for deeper analysis or creative problem-solving guidance.",
+    description:
+      "Consult the oracle - a more powerful reasoning model that may be consulted for complex analysis and creative work. " +
+      "Invoke it whenever it would be helpful to get deep advice on complex problems or produce a high quality creative piece.",
     parameters: Type.Object({
       query: Type.String({
-        description: "The question or task for the oracle.",
+        description:
+          "The question or task for the oracle. Be extremely specific about what analysis, plan, or solution you need. " +
+          "The Oracle will get access to the chat context, but not to your progress made on the last request so far.",
       }),
     }),
     execute: async (_toolCallId, params: OracleInput) => {
@@ -51,7 +55,6 @@ export function createDefaultOracleExecutor(
   options: DefaultToolExecutorOptions,
 ): BaselineToolExecutors["oracle"] {
   const modelAdapter = options.modelAdapter ?? new PiAiModelAdapter();
-  const completeFn: CompleteSimpleFn = options.completeSimpleFn ?? completeSimple;
 
   return async (input: OracleInput): Promise<string> => {
     const query = input.query.trim();
@@ -64,51 +67,36 @@ export function createDefaultOracleExecutor(
       throw new Error("oracle tool requires tools.oracle.model configuration.");
     }
 
-    const resolvedModel = modelAdapter.resolve(configuredModel);
     const systemPrompt = toConfiguredString(options.oraclePrompt) ?? DEFAULT_ORACLE_SYSTEM_PROMPT;
 
-    const response = await completeFn(
-      resolvedModel.model,
-      {
-        systemPrompt,
-        messages: [
-          {
-            role: "user",
-            content: query,
-            timestamp: Date.now(),
-          },
-        ],
-      },
-      {
-        apiKey: await resolveProviderApiKey(options, String(resolvedModel.model.provider)),
-        reasoning: "high",
-      },
+    // Filter tools: exclude oracle itself and tools that don't belong in nested loop
+    const oracleTools = (options.oracleAgentTools ?? []).filter(
+      (tool) => !ORACLE_EXCLUDED_TOOLS.has(tool.name),
     );
 
-    const output = response.content
-      .filter((block) => block.type === "text")
-      .map((block) => block.text)
-      .join("\n")
-      .trim();
+    const runner = new SessionRunner({
+      model: configuredModel,
+      systemPrompt,
+      tools: oracleTools,
+      modelAdapter,
+      getApiKey: options.getApiKey,
+      maxIterations: options.oracleMaxIterations,
+    });
 
-    if (!output) {
-      throw new Error("oracle returned empty response.");
+    try {
+      const result = await runner.prompt(query, {
+        contextMessages: options.oracleConversationContext,
+        thinkingLevel: "high",
+      });
+      return result.text;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("iteration") || message.includes("max")) {
+        return `Oracle exhausted iterations: ${message}`;
+      }
+      throw error;
     }
-
-    return output;
   };
-}
-
-async function resolveProviderApiKey(
-  options: DefaultToolExecutorOptions,
-  provider: string,
-): Promise<string | undefined> {
-  if (!options.getApiKey) {
-    return undefined;
-  }
-
-  const key = await options.getApiKey(provider);
-  return toConfiguredString(key);
 }
 
 function toConfiguredString(value: unknown): string | undefined {

@@ -8,6 +8,7 @@ import {
   createExecuteCodeTool,
   createGenerateImageTool,
   createOracleTool,
+  ORACLE_EXCLUDED_TOOLS,
   createProgressReportTool,
   createQuestSnoozeTool,
   createQuestStartTool,
@@ -174,6 +175,23 @@ describe("baseline agent tools", () => {
 
     expect(oracle).toHaveBeenCalledWith(params);
     expect(result.content[0]).toEqual({ type: "text", text: "Deep oracle answer" });
+  });
+
+  it("oracle tool description mentions complex analysis and creative work", () => {
+    const tool = createOracleTool({ oracle: async () => "" });
+    expect(tool.description).toContain("complex analysis");
+    expect(tool.description).toContain("creative work");
+  });
+
+  it("ORACLE_EXCLUDED_TOOLS prevents recursion and irrelevant nested tools", () => {
+    expect(ORACLE_EXCLUDED_TOOLS).toContain("oracle");
+    expect(ORACLE_EXCLUDED_TOOLS).toContain("progress_report");
+    expect(ORACLE_EXCLUDED_TOOLS).toContain("quest_start");
+    expect(ORACLE_EXCLUDED_TOOLS).toContain("subquest_start");
+    expect(ORACLE_EXCLUDED_TOOLS).toContain("quest_snooze");
+    // Useful tools should NOT be excluded
+    expect(ORACLE_EXCLUDED_TOOLS).not.toContain("web_search");
+    expect(ORACLE_EXCLUDED_TOOLS).not.toContain("execute_code");
   });
 
   it("chronicle tools delegate to configured executors", async () => {
