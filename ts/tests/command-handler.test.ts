@@ -900,12 +900,19 @@ describe("RoomCommandHandlerTs", () => {
     await history.initialize();
 
     const incoming = makeMessage("!s summarize tools");
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
 
     const handler = new RoomCommandHandlerTs({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
       persistenceSummaryModel: "openai:gpt-4o-mini",
+      logger,
       runnerFactory: () => ({
         runSingleTurn: async (_prompt, options) => {
           if (options?.onPersistenceSummary) {
@@ -931,6 +938,13 @@ describe("RoomCommandHandlerTs", () => {
     const llmCalls = await history.getLlmCalls();
     expect(llmCalls).toHaveLength(1);
     expect(llmCalls[0].responseMessageId).toBe(rows[2].id);
+
+    expect(logger.debug).toHaveBeenCalledWith(
+      "Persisting internal monologue summary",
+      "arc=libera##test",
+      "chars=46",
+      "summary=Tool calls: web_search completed successfully.",
+    );
 
     await history.close();
   });

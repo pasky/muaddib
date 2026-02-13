@@ -426,11 +426,24 @@ export class RoomCommandHandlerTs {
 
     const persistenceSummaryCallback = this.options.persistenceSummaryModel
       ? async (text: string) => {
+          const summary = text.trim();
+          if (!summary) {
+            return;
+          }
+
+          const arc = `${message.serverTag}#${message.channelName}`;
+          this.logger.debug(
+            "Persisting internal monologue summary",
+            `arc=${arc}`,
+            `chars=${summary.length}`,
+            `summary=${formatLogPreview(summary)}`,
+          );
+
           await this.options.history.addMessage(
             {
               ...message,
               nick: message.mynick,
-              content: text,
+              content: summary,
             },
             {
               contentTemplate: "[internal monologue] {message}",
@@ -1178,6 +1191,14 @@ function trimToMaxBytes(text: string, maxBytes: number): string {
     trimmed = trimmed.slice(0, -1);
   }
   return trimmed;
+}
+
+function formatLogPreview(text: string, maxChars = 180): string {
+  const singleLine = text.replace(/\s+/gu, " ").trim();
+  if (singleLine.length <= maxChars) {
+    return singleLine;
+  }
+  return `${singleLine.slice(0, maxChars)}...`;
 }
 
 function extractSharedArtifactUrl(result: string): string {
