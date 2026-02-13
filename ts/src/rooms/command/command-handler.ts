@@ -219,7 +219,7 @@ export class RoomCommandHandlerTs {
       return null;
     }
 
-    this.logger.info(
+    this.logger.debug(
       "Handling direct command",
       `arc=${message.serverTag}#${message.channelName}`,
       `nick=${message.nick}`,
@@ -691,7 +691,7 @@ export class RoomCommandHandlerTs {
       }
     }
 
-    this.logger.info(
+    this.logger.debug(
       "Persisting direct command response",
       `arc=${arcName}`,
       `model=${result.model ?? "n/a"}`,

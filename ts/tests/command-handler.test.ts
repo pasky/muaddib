@@ -264,7 +264,7 @@ describe("RoomCommandHandlerTs", () => {
 
     await handler.handleIncomingMessage(incoming, { isDirect: true });
 
-    expect(logger.info).toHaveBeenCalledWith(
+    expect(logger.debug).toHaveBeenCalledWith(
       "Handling direct command",
       "arc=libera##test",
       "nick=alice",
@@ -277,7 +277,7 @@ describe("RoomCommandHandlerTs", () => {
       "model=openai:gpt-4o-mini",
       "context_disabled=false",
     );
-    expect(logger.info).toHaveBeenCalledWith(
+    expect(logger.debug).toHaveBeenCalledWith(
       "Persisting direct command response",
       "arc=libera##test",
       "model=openai:gpt-4o-mini",
@@ -497,9 +497,9 @@ describe("RoomCommandHandlerTs", () => {
     expect(arcFiles).toHaveLength(1);
 
     const messageLog = await readFile(join(arcDir, arcFiles[0]), "utf-8");
-    expect(messageLog).toContain(" - INFO - Handling direct command");
+    expect(messageLog).toContain(" - DEBUG - Handling direct command");
     expect(messageLog).toContain(" - INFO - Resolved direct command");
-    expect(messageLog).toContain(" - INFO - Persisting direct command response");
+    expect(messageLog).toContain(" - DEBUG - Persisting direct command response");
 
     await rm(logsHome, { recursive: true, force: true });
     await history.close();
