@@ -799,7 +799,7 @@ describe("core tool executors generate_image support", () => {
       fetchImpl,
       artifactsPath,
       artifactsUrl: "https://example.com/artifacts",
-      imageGenModel: "openrouter:google/gemini-3-pro-image-preview",
+      imageGenModel: "openrouter:auto",
       openRouterBaseUrl: "https://openrouter.example/api/v1",
       getApiKey: async (provider: string) => {
         return provider === "openrouter" ? "or-key" : undefined;
@@ -822,7 +822,7 @@ describe("core tool executors generate_image support", () => {
     const savedImage = await readFile(join(artifactsPath, artifactFilename));
     expect(savedImage.equals(Buffer.from("ABC"))).toBe(true);
 
-    expect(openRouterRequestBody.model).toBe("google/gemini-3-pro-image-preview");
+    expect(openRouterRequestBody.model).toBe("auto");
     expect(openRouterRequestBody.modalities).toEqual(["image", "text"]);
     expect(openRouterRequestBody.messages[0].content[0]).toEqual({ type: "text", text: "Draw a tiny cat" });
     expect(openRouterRequestBody.messages[0].content[1].type).toBe("image_url");
@@ -841,7 +841,7 @@ describe("core tool executors generate_image support", () => {
 
   it("generate_image rejects non-openrouter model providers", async () => {
     const executors = createDefaultToolExecutors({
-      imageGenModel: "openai:gpt-image-1",
+      imageGenModel: "openai:gpt-4o-mini",
       getApiKey: async () => "demo",
     });
 
@@ -885,7 +885,7 @@ describe("core tool executors generate_image support", () => {
       fetchImpl,
       artifactsPath,
       artifactsUrl: "https://example.com/artifacts",
-      imageGenModel: "openrouter:google/gemini-3-pro-image-preview",
+      imageGenModel: "openrouter:auto",
       openRouterBaseUrl: "https://openrouter.example/api/v1",
       getApiKey: async () => "or-key",
     });
