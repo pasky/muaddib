@@ -99,7 +99,7 @@ export class SessionRunner {
 
       if (event.type === "tool_execution_start") {
         toolCallsCount += 1;
-        this.logger.info(`Tool ${event.toolName} started`);
+        this.logger.info(`Tool ${event.toolName} started: ${summarizeToolPayload(event.args, this.llmDebugMaxChars)}`);
         return;
       }
 
