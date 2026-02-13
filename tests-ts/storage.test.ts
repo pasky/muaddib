@@ -1,6 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -179,20 +177,8 @@ describe("ChatHistoryStore", () => {
 });
 
 describe("ChronicleStore", () => {
-  const createdDirs: string[] = [];
-
-  afterEach(async () => {
-    for (const dir of createdDirs.splice(0, createdDirs.length)) {
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
   it("opens chapter, appends paragraph, and returns context messages", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "muaddib-chronicle-"));
-    createdDirs.push(dir);
-    const dbPath = join(dir, "chronicle.db");
-
-    const store = new ChronicleStore(dbPath);
+    const store = new ChronicleStore(":memory:");
     await store.initialize();
 
     const chapter = await store.getOrOpenCurrentChapter("libera##test");
@@ -217,10 +203,7 @@ describe("ChronicleStore", () => {
   });
 
   it("rolls chapters at threshold and inserts recap paragraph via lifecycle automation", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "muaddib-chronicle-"));
-    createdDirs.push(dir);
-
-    const chronicleStore = new ChronicleStore(join(dir, "chronicle.db"));
+    const chronicleStore = new ChronicleStore(":memory:");
     await chronicleStore.initialize();
 
     const completeFn = vi.fn(async () => makeAssistantText("Chapter summary paragraph."));
@@ -255,10 +238,8 @@ describe("ChronicleStore", () => {
   });
 
   it("stores quest rows and respects heartbeat readiness/status transitions", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "muaddib-chronicle-"));
-    createdDirs.push(dir);
 
-    const chronicleStore = new ChronicleStore(join(dir, "chronicle.db"));
+    const chronicleStore = new ChronicleStore(":memory:");
     await chronicleStore.initialize();
 
     const paragraph = await chronicleStore.appendParagraph(
@@ -299,10 +280,8 @@ describe("ChronicleStore", () => {
   });
 
   it("tracks quest append lifecycle and heartbeat quest steps via QuestRuntimeTs", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "muaddib-chronicle-"));
-    createdDirs.push(dir);
 
-    const chronicleStore = new ChronicleStore(join(dir, "chronicle.db"));
+    const chronicleStore = new ChronicleStore(":memory:");
     await chronicleStore.initialize();
 
     let lifecycle: ChronicleLifecycleTs | null = null;
@@ -382,8 +361,7 @@ describe("AutoChroniclerTs", () => {
       content: "only one",
     });
 
-    const dir = await mkdtemp(join(tmpdir(), "muaddib-chronicle-"));
-    const chronicleStore = new ChronicleStore(join(dir, "chronicle.db"));
+    const chronicleStore = new ChronicleStore(":memory:");
     await chronicleStore.initialize();
 
     const lifecycle = new ChronicleLifecycleTs({
@@ -419,7 +397,6 @@ describe("AutoChroniclerTs", () => {
 
     await history.close();
     await chronicleStore.close();
-    await rm(dir, { recursive: true, force: true });
   }, 10000);
 
   it("triggers chronicling at threshold, appends chronicle paragraph, and marks messages chronicled", async () => {
@@ -441,8 +418,7 @@ describe("AutoChroniclerTs", () => {
       content: "two",
     });
 
-    const dir = await mkdtemp(join(tmpdir(), "muaddib-chronicle-"));
-    const chronicleStore = new ChronicleStore(join(dir, "chronicle.db"));
+    const chronicleStore = new ChronicleStore(":memory:");
     await chronicleStore.initialize();
 
     const lifecycle = new ChronicleLifecycleTs({
@@ -483,6 +459,5 @@ describe("AutoChroniclerTs", () => {
 
     await history.close();
     await chronicleStore.close();
-    await rm(dir, { recursive: true, force: true });
   });
 });

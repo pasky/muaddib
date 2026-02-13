@@ -267,10 +267,7 @@ describe("core tool executors webpage secret header support", () => {
 
 describe("core tool executors chronicler/quest support", () => {
   it("chronicle_read and chronicle_append operate when chronicle store context is provided", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "muaddib-ts-chronicle-"));
-    tempDirs.push(dir);
-
-    const chronicleStore = new ChronicleStore(join(dir, "chronicle.db"));
+    const chronicleStore = new ChronicleStore(":memory:");
     await chronicleStore.initialize();
 
     const executors = createDefaultToolExecutors({
@@ -289,10 +286,7 @@ describe("core tool executors chronicler/quest support", () => {
   });
 
   it("chronicle_append uses lifecycle automation when lifecycle hook is provided", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "muaddib-ts-chronicle-"));
-    tempDirs.push(dir);
-
-    const chronicleStore = new ChronicleStore(join(dir, "chronicle.db"));
+    const chronicleStore = new ChronicleStore(":memory:");
     await chronicleStore.initialize();
 
     const appendParagraph = vi.fn(async () => ({ id: 1 }));
