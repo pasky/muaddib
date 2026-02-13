@@ -17,6 +17,10 @@ The intent is to separate:
 
 ### Progress log (parity-fix execution)
 
+- 2026-02-13 (cluster: artifact viewer parity regression fix):
+  - Replaced TS inline minimal artifact viewer template with a dedicated viewer asset at `ts/src/agent/tools/artifact-viewer.html`.
+  - Updated `core-executors` artifact directory bootstrap to load/install the dedicated viewer file, preserving viewer URL/query behavior while restoring richer rendering/download UX.
+  - Extended `ts/tests/core-executors.test.ts` assertions to verify the richer viewer payload is installed into `artifacts/index.html`.
 - 2026-02-12 (cluster: command-path foundation / rate limiting):
   - Implemented TS command rate limiting with parity warning text (`Slow down a little, will you? (rate limiting)`).
   - Added TS test coverage proving limiter-denied requests skip runner execution and still persist user+assistant history rows.

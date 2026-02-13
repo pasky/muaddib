@@ -8,7 +8,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && cp src/agent/tools/artifact-viewer.html dist/agent/tools/artifact-viewer.html",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "cli:message": "node ./dist/cli/main.js",

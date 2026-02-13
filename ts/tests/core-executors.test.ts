@@ -79,7 +79,8 @@ describe("core tool executors artifact support", () => {
     expect(content).toBe("hello from ts");
 
     const indexHtml = await readFile(join(artifactsPath, "index.html"), "utf-8");
-    expect(indexHtml).toContain("Muaddib Artifact Viewer");
+    expect(indexHtml).toContain("<title>Artifact Viewer</title>");
+    expect(indexHtml).toContain("Download raw file");
   });
 
   it("edit_artifact edits local artifact and preserves extension in derived artifact", async () => {

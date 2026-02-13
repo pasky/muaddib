@@ -1,8 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   completeSimple,
@@ -145,32 +147,27 @@ const IMAGE_SUFFIX_BY_MIME_TYPE: Record<string, string> = {
   "image/webp": ".webp",
   "image/gif": ".gif",
 };
-const ARTIFACT_VIEWER_HTML = `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Muaddib Artifact Viewer</title>
-  </head>
-  <body>
-    <pre id="artifact"></pre>
-    <script>
-      const filename = decodeURIComponent(window.location.search.slice(1));
-      if (filename) {
-        fetch(filename)
-          .then((response) => response.text())
-          .then((text) => {
-            document.getElementById('artifact').textContent = text;
-          })
-          .catch(() => {
-            document.getElementById('artifact').textContent = 'Failed to load artifact.';
-          });
-      } else {
-        document.getElementById('artifact').textContent = 'No artifact selected.';
-      }
-    </script>
-  </body>
-</html>
-`;
+const ARTIFACT_VIEWER_HTML = loadArtifactViewerHtml();
+
+function loadArtifactViewerHtml(): string {
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  const candidatePaths = [
+    join(moduleDir, "artifact-viewer.html"),
+    join(moduleDir, "../../../src/agent/tools/artifact-viewer.html"),
+  ];
+
+  for (const candidatePath of candidatePaths) {
+    try {
+      return readFileSync(candidatePath, "utf-8");
+    } catch {
+      // Recovery strategy: fallback to next candidate path.
+    }
+  }
+
+  throw new Error(
+    `Failed to load artifact viewer HTML. Checked: ${candidatePaths.join(", ")}`,
+  );
+}
 
 export function createDefaultToolExecutors(
   options: DefaultToolExecutorOptions = {},
