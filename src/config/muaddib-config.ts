@@ -254,8 +254,7 @@ export class MuaddibConfig {
     return new MuaddibConfig(overrides ?? {});
   }
 
-  /** Raw config object — for backward compat with APIs that still expect Record<string, unknown>. */
-  get raw(): Record<string, unknown> {
+  toObject(): Record<string, unknown> {
     return this.data;
   }
 

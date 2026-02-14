@@ -76,7 +76,7 @@ export function assertNoDeferredFeatureConfig(
   config: MuaddibConfig,
   logger: DeferredFeatureLogger = console,
 ): void {
-  const { blockingPaths, ignoredPaths } = collectDeferredFeatureConfigPaths(config.raw);
+  const { blockingPaths, ignoredPaths } = collectDeferredFeatureConfigPaths(config.toObject());
 
   if (ignoredPaths.length > 0) {
     logger.warn(
