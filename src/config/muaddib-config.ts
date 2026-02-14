@@ -62,8 +62,13 @@ export interface OpenRouterProviderConfig {
   baseUrl?: string;
 }
 
+export interface DeepSeekProviderConfig {
+  baseUrl?: string;
+}
+
 export interface ProvidersConfig {
   openrouter?: OpenRouterProviderConfig;
+  deepseek?: DeepSeekProviderConfig;
 }
 
 export interface HistoryConfig {
@@ -267,9 +272,14 @@ export class MuaddibConfig {
   getProvidersConfig(): ProvidersConfig {
     const providers = asRecord(this.data.providers);
     const openrouter = asRecord(providers?.openrouter);
+    const deepseek = asRecord(providers?.deepseek);
+
     return {
       openrouter: {
         baseUrl: stringOrUndefined(openrouter?.base_url),
+      },
+      deepseek: {
+        baseUrl: stringOrUndefined(deepseek?.url) ?? stringOrUndefined(deepseek?.base_url),
       },
     };
   }

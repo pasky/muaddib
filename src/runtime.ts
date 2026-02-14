@@ -50,11 +50,11 @@ export async function createMuaddibRuntime(
   const config = MuaddibConfig.load(options.configPath);
   assertNoDeferredFeatureConfig(config.raw, log);
 
-  const modelAdapter = createPiAiModelAdapterFromConfig(config.raw);
+  const modelAdapter = createPiAiModelAdapterFromConfig(config);
   const getApiKey = createConfigApiKeyResolver(config.raw);
 
   const refusalFallbackModel = resolveRefusalFallbackModel(config, { modelAdapter });
-  const persistenceSummaryModel = resolvePersistenceSummaryModel(config.raw, { modelAdapter });
+  const persistenceSummaryModel = resolvePersistenceSummaryModel(config, { modelAdapter });
 
   const historyConfig = config.getHistoryConfig();
   const historyDbPath = options.dbPath ?? resolveMuaddibPath(

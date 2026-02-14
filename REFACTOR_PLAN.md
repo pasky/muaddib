@@ -1,6 +1,6 @@
 # Config & Runtime Refactoring Plan
 
-Status: Step 1 done. Step 2 next.
+Status: Steps 1-3 done. Step 4 next.
 
 ## Context
 
@@ -32,14 +32,14 @@ context usage per session. Each step is a self-contained commit.
 - Update caller in `src/runtime.ts` (drop one `config.raw` usage)
 - Update tests if any reference the old signature
 
-## Step 2: `src/app/persistence-summary.ts`
+## Step 2: `src/app/persistence-summary.ts` ✅
 
 - Change `resolvePersistenceSummaryModel` to accept `MuaddibConfig`
 - Use `config.getToolsConfig().summary?.model` for the raw value
 - Delete local `asRecord()` helper
 - Update caller in `src/runtime.ts` (drop one `config.raw` usage)
 
-## Step 3: `src/models/pi-ai-model-adapter.ts`
+## Step 3: `src/models/pi-ai-model-adapter.ts` ✅
 
 - Change `createPiAiModelAdapterFromConfig` to accept `MuaddibConfig`
 - Add deepseek base URL to `MuaddibConfig` (e.g. in providers config or

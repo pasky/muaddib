@@ -10,6 +10,7 @@ import {
   type SimpleStreamOptions,
 } from "@mariozechner/pi-ai";
 
+import { MuaddibConfig } from "../config/muaddib-config.js";
 import { parseModelSpec, type ModelSpec } from "./model-spec.js";
 
 const DEEPSEEK_PROVIDER = "deepseek";
@@ -153,11 +154,9 @@ export class PiAiModelAdapter {
   }
 }
 
-export function createPiAiModelAdapterFromConfig(
-  config: Record<string, unknown>,
-): PiAiModelAdapter {
+export function createPiAiModelAdapterFromConfig(config: MuaddibConfig): PiAiModelAdapter {
   return new PiAiModelAdapter({
-    deepseekBaseUrl: readDeepSeekBaseUrlFromConfig(config),
+    deepseekBaseUrl: config.getProvidersConfig().deepseek?.baseUrl,
   });
 }
 
@@ -169,19 +168,6 @@ function getSupportedProviders(): Set<string> {
   const providers = new Set<string>(getProviders() as string[]);
   providers.add(DEEPSEEK_PROVIDER);
   return providers;
-}
-
-function readDeepSeekBaseUrlFromConfig(config: Record<string, unknown>): string | undefined {
-  const providers = asRecord(config.providers);
-  const deepseekConfig = asRecord(providers?.[DEEPSEEK_PROVIDER]);
-
-  const rawUrl = deepseekConfig?.url ?? deepseekConfig?.base_url;
-  if (typeof rawUrl !== "string") {
-    return undefined;
-  }
-
-  const trimmed = rawUrl.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 function normalizeDeepSeekBaseUrl(url: string | undefined): string {
@@ -201,13 +187,6 @@ function normalizeDeepSeekBaseUrl(url: string | undefined): string {
   }
 
   return withoutTrailingSlash;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-  return value as Record<string, unknown>;
 }
 
 function safeJson(value: unknown, maxChars: number): string {

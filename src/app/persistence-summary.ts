@@ -1,15 +1,14 @@
+import { MuaddibConfig } from "../config/muaddib-config.js";
 import { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
 import { parseModelSpec } from "../models/model-spec.js";
 
 export function resolvePersistenceSummaryModel(
-  config: Record<string, unknown>,
+  config: MuaddibConfig,
   options: {
     modelAdapter?: PiAiModelAdapter;
   } = {},
 ): string | undefined {
-  const toolsConfig = asRecord(config.tools);
-  const summaryConfig = asRecord(toolsConfig?.summary);
-  const rawSummaryModel = summaryConfig?.model;
+  const rawSummaryModel = config.getToolsConfig().summary?.model;
 
   if (rawSummaryModel === undefined || rawSummaryModel === null) {
     return undefined;
@@ -42,13 +41,6 @@ export function resolvePersistenceSummaryModel(
   }
 
   return normalizedModel;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-  return value as Record<string, unknown>;
 }
 
 function stringifyError(error: unknown): string {

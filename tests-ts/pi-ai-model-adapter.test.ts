@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { MuaddibConfig } from "../src/config/muaddib-config.js";
 import {
   createPiAiModelAdapterFromConfig,
   PiAiModelAdapter,
@@ -28,13 +29,15 @@ describe("PiAiModelAdapter", () => {
   });
 
   it("normalizes providers.deepseek.url into base URL when creating adapter from config", () => {
-    const withConfig = createPiAiModelAdapterFromConfig({
-      providers: {
-        deepseek: {
-          url: "https://api.deepseek.com/anthropic/v1/messages",
+    const withConfig = createPiAiModelAdapterFromConfig(
+      MuaddibConfig.inMemory({
+        providers: {
+          deepseek: {
+            url: "https://api.deepseek.com/anthropic/v1/messages",
+          },
         },
-      },
-    });
+      }),
+    );
 
     const resolved = withConfig.resolve("deepseek:deepseek-chat");
     expect(resolved.model.baseUrl).toBe("https://api.deepseek.com/anthropic");
