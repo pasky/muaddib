@@ -212,7 +212,7 @@ export function createDefaultExecuteCodeExecutor(
     // long-running sandbox commands are killed server-side.
     let cmd = command;
     if (execOptions?.timeoutMs) {
-      const secs = Math.ceil(execOptions.timeoutMs / 1000);
+      const secs = Math.max(0.1, execOptions.timeoutMs / 1000);
       cmd = `timeout ${secs} bash -c ${shellQuote(command)}`;
     }
 

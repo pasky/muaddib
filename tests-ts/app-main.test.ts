@@ -162,7 +162,7 @@ describe("runMuaddibMain", () => {
     const { dir, configPath } = await createConfigDir({
       history: {
         database: {
-          path: "/tmp/muaddib-test-history.db",
+          path: ":memory:",
         },
       },
       rooms: {
@@ -206,7 +206,7 @@ describe("runMuaddibMain", () => {
       runWithConfig({
         history: {
           database: {
-            path: "/tmp/muaddib-test-history.db",
+            path: ":memory:",
           },
         },
         rooms: {
@@ -232,7 +232,7 @@ describe("runMuaddibMain", () => {
       runWithConfig({
         history: {
           database: {
-            path: "/tmp/muaddib-test-history.db",
+            path: ":memory:",
           },
         },
         rooms: {
@@ -263,7 +263,7 @@ describe("runMuaddibMain", () => {
       runWithConfig({
         history: {
           database: {
-            path: "/tmp/muaddib-test-history.db",
+            path: ":memory:",
           },
         },
         rooms: {
@@ -289,7 +289,7 @@ describe("runMuaddibMain", () => {
       runWithConfig({
         history: {
           database: {
-            path: "/tmp/muaddib-test-history.db",
+            path: ":memory:",
           },
         },
         rooms: {
@@ -317,11 +317,14 @@ describe("runMuaddibMain", () => {
     const { dir, configPath } = await createConfigDir({
       history: {
         database: {
-          path: "/tmp/muaddib-test-history.db",
+          path: ":memory:",
         },
       },
       chronicler: {
         model: "openai:gpt-4o-mini",
+        database: {
+          path: ":memory:",
+        },
         quests: {
           arcs: ["libera##muaddib"],
         },
@@ -372,11 +375,14 @@ describe("runMuaddibMain", () => {
       runWithConfig({
         history: {
           database: {
-            path: "/tmp/muaddib-test-history.db",
+            path: ":memory:",
           },
         },
         chronicler: {
           model: "openai:gpt-4o-mini",
+          database: {
+            path: ":memory:",
+          },
           quests: {
             enabled: true,
           },
@@ -410,7 +416,7 @@ describe("runMuaddibMain", () => {
       runWithConfig({
         history: {
           database: {
-            path: "/tmp/muaddib-test-history.db",
+            path: ":memory:",
           },
         },
         providers: {
@@ -448,7 +454,7 @@ describe("runMuaddibMain", () => {
       runWithConfig({
         history: {
           database: {
-            path: "/tmp/muaddib-test-history.db",
+            path: ":memory:",
           },
         },
         rooms: {

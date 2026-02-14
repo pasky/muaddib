@@ -1196,7 +1196,7 @@ describe("core tool executors execute_code Sprites sandbox", () => {
   it("execute_code applies timeout to execution", async () => {
     const executors = createDefaultToolExecutors({
       spritesToken: "test-token",
-      executeCodeTimeoutMs: 2_000,
+      executeCodeTimeoutMs: 100,
     });
 
     const result = await executors.executeCode({

@@ -32,6 +32,10 @@ export function resolveMuaddibPath(path: string | undefined, fallback: string): 
     return fallback;
   }
 
+  if (path === ":memory:") {
+    return path;
+  }
+
   const expandedPath = expandHomePath(path);
   if (isAbsolute(expandedPath)) {
     return expandedPath;
