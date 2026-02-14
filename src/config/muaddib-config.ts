@@ -89,7 +89,7 @@ interface SlackWorkspaceConfig {
   name?: string;
 }
 
-interface ProactiveRoomConfig {
+export interface ProactiveRoomConfig {
   interjecting?: string[];
   debounce_seconds?: number;
   history_size?: number;

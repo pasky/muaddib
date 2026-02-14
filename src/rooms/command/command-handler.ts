@@ -1,33 +1,21 @@
-import type { AgentMessage, AgentTool, ThinkingLevel } from "@mariozechner/pi-agent-core";
-import { type Usage } from "@mariozechner/pi-ai";
+/**
+ * Command handler — session lifecycle coordinator.
+ *
+ * Owns the steering queue, proactive interjection lifecycle, and dispatch
+ * between command/passive message paths.  Delegates actual command execution
+ * to CommandExecutor.
+ */
 
+import { SessionRunner } from "../../agent/session-runner.js";
 import {
-  SessionRunner,
-  type PromptOptions,
-  type PromptResult,
-} from "../../agent/session-runner.js";
-import type { SessionFactoryContextMessage } from "../../agent/session-factory.js";
-import type { ChronicleStore } from "../../chronicle/chronicle-store.js";
-import {
-  createBaselineAgentTools,
   createDefaultToolExecutors,
   type BaselineToolOptions,
-  type MuaddibTool,
-  type ToolPersistType,
 } from "../../agent/tools/baseline-tools.js";
-import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
-import { parseModelSpec } from "../../models/model-spec.js";
-import type { AutoChronicler } from "../autochronicler.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import { createModeClassifier } from "./classifier.js";
 import { RateLimiter } from "./rate-limiter.js";
-import {
-  ContextReducerTs,
-  type ContextReducer,
-  type ContextReducerConfig,
-} from "./context-reducer.js";
-import type { RoomMessage } from "../message.js";
+import { ContextReducerTs } from "./context-reducer.js";
 import {
   SteeringQueue,
   type QueuedInboundMessage,
@@ -36,30 +24,39 @@ import {
 import {
   CommandResolver,
   type CommandConfig,
-  type ResolvedCommand,
 } from "./resolver.js";
 import {
   evaluateProactiveInterjection,
   type ProactiveConfig,
 } from "./proactive.js";
-import { createConsoleLogger } from "../../app/logging.js";
+import {
+  CommandExecutor,
+  type CommandExecutionResult,
+  type CommandRunnerFactory,
+  type CommandRunnerFactoryInput,
+  type CommandRateLimiter,
+  type CommandExecutorLogger,
+  type SteeringContextDrainer,
+  numberWithDefault,
+  pickModeModel,
+  parseResponseMaxBytes,
+  resolveConfigModelSpec,
+  modelStrCore,
+} from "./command-executor.js";
+import type { ChatHistoryStore } from "../../history/chat-history-store.js";
+import type { RoomMessage } from "../message.js";
+import type { ProactiveRoomConfig } from "../../config/muaddib-config.js";
 
-export interface ProactiveRoomConfig {
-  interjecting?: string[];
-  debounce_seconds?: number;
-  history_size?: number;
-  rate_limit?: number;
-  rate_period?: number;
-  interject_threshold?: number;
-  models?: {
-    validation?: string[];
-    serious?: string;
-  };
-  prompts?: {
-    interject?: string;
-    serious_extra?: string;
-  };
-}
+// Re-export types that external consumers depend on
+export type {
+  CommandExecutionResult,
+  CommandRunnerFactory,
+  CommandRunnerFactoryInput,
+  CommandRateLimiter,
+  CommandExecutorLogger as CommandHandlerLogger,
+  SteeringContextDrainer,
+} from "./command-executor.js";
+export type { CommandRunner } from "./command-executor.js";
 
 export interface CommandHandlerRoomConfig {
   command: CommandConfig;
@@ -67,78 +64,12 @@ export interface CommandHandlerRoomConfig {
   prompt_vars?: Record<string, string>;
 }
 
-export interface CommandRunner {
-  prompt(prompt: string, options?: PromptOptions): Promise<PromptResult>;
-}
-
-export interface CommandRunnerFactoryInput {
-  model: string;
-  systemPrompt: string;
-  tools: AgentTool<any>[];
-  steeringMessageProvider?: () => SessionFactoryContextMessage[];
-  logger?: {
-    debug(message: string, ...data: unknown[]): void;
-    info(message: string, ...data: unknown[]): void;
-    warn(message: string, ...data: unknown[]): void;
-    error(message: string, ...data: unknown[]): void;
-  };
-}
-
-export type CommandRunnerFactory = (input: CommandRunnerFactoryInput) => CommandRunner;
-
-export interface CommandRateLimiter {
-  checkLimit(): boolean;
-}
-
-interface CommandHandlerLogger {
-  debug(message: string, ...data: unknown[]): void;
-  info(message: string, ...data: unknown[]): void;
-  warn(message: string, ...data: unknown[]): void;
-  error(message: string, ...data: unknown[]): void;
-}
-
 export interface RoomCommandHandlerOverrides {
   responseCleaner?: (text: string, nick: string) => string;
   runnerFactory?: CommandRunnerFactory;
   rateLimiter?: CommandRateLimiter;
-  contextReducer?: ContextReducer;
+  contextReducer?: { isConfigured: boolean; reduce(context: Array<{ role: string; content: string }>, systemPrompt: string): Promise<Array<{ role: string; content: string }>> };
   onProgressReport?: (text: string) => void | Promise<void>;
-}
-
-interface CommandHandlerResolvedOptions {
-  roomConfig: CommandHandlerRoomConfig;
-  history: ChatHistoryStore;
-  classifyMode: (context: Array<{ role: string; content: string }>) => Promise<string>;
-  runnerFactory?: CommandRunnerFactory;
-  rateLimiter?: CommandRateLimiter;
-  getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
-  modelAdapter?: PiAiModelAdapter;
-  refusalFallbackModel?: string;
-  persistenceSummaryModel?: string;
-  contextReducer?: ContextReducer;
-  contextReducerConfig?: ContextReducerConfig;
-  autoChronicler?: AutoChronicler;
-  chronicleStore?: Pick<ChronicleStore, "getChapterContextMessages">;
-  responseCleaner?: (text: string, nick: string) => string;
-  helpToken?: string;
-  flagTokens?: string[];
-  onProgressReport?: (text: string) => void | Promise<void>;
-  toolOptions?: Omit<BaselineToolOptions, "onProgressReport">;
-  logger?: CommandHandlerLogger;
-  agentLoop?: {
-    maxIterations?: number;
-    maxCompletionRetries?: number;
-    emptyCompletionRetryPrompt?: string;
-    llmDebugMaxChars?: number;
-  };
-}
-
-export interface CommandExecutionResult {
-  response: string | null;
-  resolved: ResolvedCommand;
-  model: string | null;
-  usage: Usage | null;
-  toolCallsCount: number;
 }
 
 export interface HandleIncomingMessageOptions {
@@ -156,22 +87,17 @@ export interface HandleIncomingMessageOptions {
  */
 export class RoomCommandHandlerTs {
   readonly resolver: CommandResolver;
-  private readonly options: CommandHandlerResolvedOptions;
+  private readonly executor: CommandExecutor;
   private readonly commandConfig: CommandConfig;
-  private readonly runnerFactory: CommandRunnerFactory;
-  private readonly rateLimiter: CommandRateLimiter;
+  private readonly steeringQueue: SteeringQueue;
   private readonly proactiveRateLimiter: CommandRateLimiter | null;
   private readonly proactiveConfig: ProactiveConfig | null;
   private readonly proactiveChannels: Set<string>;
-  private readonly steeringQueue: SteeringQueue;
   private readonly modelAdapter: PiAiModelAdapter;
-  private readonly refusalFallbackModel: string | null;
-  private readonly responseMaxBytes: number;
-  private readonly shareArtifact: (content: string) => Promise<string>;
-  private readonly contextReducer: ContextReducer;
-  private readonly autoChronicler: AutoChronicler | null;
-  private readonly chronicleStore: Pick<ChronicleStore, "getChapterContextMessages"> | null;
-  private readonly logger: CommandHandlerLogger;
+  private readonly classifyMode: (context: Array<{ role: string; content: string }>) => Promise<string>;
+  private readonly history: ChatHistoryStore;
+  private readonly getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+  private readonly logger: CommandExecutorLogger;
 
   constructor(
     runtime: MuaddibRuntime,
@@ -190,48 +116,62 @@ export class RoomCommandHandlerTs {
     const providersConfig = runtime.config.getProvidersConfig();
     const loggerInstance = runtime.logger.getLogger(`muaddib.rooms.command.${roomName}`);
 
-    const options: CommandHandlerResolvedOptions = {
-      roomConfig: {
-        command: roomConfig.command,
-        proactive: roomConfig.proactive,
-        prompt_vars: roomConfig.prompt_vars,
-      },
-      history: runtime.history,
-      classifyMode: createModeClassifier(commandConfig, {
-        getApiKey: runtime.getApiKey,
-        modelAdapter: runtime.modelAdapter,
-        logger: loggerInstance,
-      }),
+    this.commandConfig = commandConfig;
+    this.logger = loggerInstance;
+    this.history = runtime.history;
+    this.getApiKey = runtime.getApiKey;
+    this.modelAdapter = runtime.modelAdapter ?? new PiAiModelAdapter();
+
+    this.classifyMode = createModeClassifier(commandConfig, {
       getApiKey: runtime.getApiKey,
       modelAdapter: runtime.modelAdapter,
-      responseCleaner: overrides?.responseCleaner,
       logger: loggerInstance,
-      refusalFallbackModel: resolveConfigModelSpec(
-        runtime.config.getRouterConfig().refusalFallbackModel,
-        "router.refusal_fallback_model",
-        runtime.modelAdapter,
-      ),
-      persistenceSummaryModel: resolveConfigModelSpec(
-        runtime.config.getToolsConfig().summary?.model,
-        "tools.summary.model",
-        runtime.modelAdapter,
-      ),
-      contextReducerConfig: {
-        model: contextReducerConfig.model,
-        prompt: contextReducerConfig.prompt,
-      },
-      autoChronicler: runtime.autoChronicler,
-      chronicleStore: runtime.chronicleStore,
-      runnerFactory: overrides?.runnerFactory,
-      rateLimiter: overrides?.rateLimiter,
-      contextReducer: overrides?.contextReducer,
-      onProgressReport: overrides?.onProgressReport,
-      agentLoop: {
-        maxIterations: actorConfig.maxIterations,
-        maxCompletionRetries: actorConfig.maxCompletionRetries,
-        llmDebugMaxChars: actorConfig.llmDebugMaxChars,
-      },
-      toolOptions: {
+    });
+
+    const refusalFallbackModel = resolveConfigModelSpec(
+      runtime.config.getRouterConfig().refusalFallbackModel,
+      "router.refusal_fallback_model",
+      this.modelAdapter,
+    );
+    const persistenceSummaryModel = resolveConfigModelSpec(
+      runtime.config.getToolsConfig().summary?.model,
+      "tools.summary.model",
+      this.modelAdapter,
+    );
+
+    this.resolver = new CommandResolver(
+      commandConfig,
+      this.classifyMode,
+      "!h",
+      new Set(["!c"]),
+      modelStrCore,
+    );
+
+    const runnerFactory: CommandRunnerFactory =
+      overrides?.runnerFactory ??
+      ((input: CommandRunnerFactoryInput) =>
+        new SessionRunner({
+          model: input.model,
+          systemPrompt: input.systemPrompt,
+          tools: input.tools,
+          modelAdapter: this.modelAdapter,
+          getApiKey: runtime.getApiKey,
+          maxIterations: actorConfig.maxIterations,
+
+          llmDebugMaxChars: actorConfig.llmDebugMaxChars,
+          logger: input.logger,
+          steeringMessageProvider: input.steeringMessageProvider,
+        }));
+
+    const rateLimiter: CommandRateLimiter =
+      overrides?.rateLimiter ??
+      new RateLimiter(
+        numberWithDefault(commandConfig.rate_limit, 30),
+        numberWithDefault(commandConfig.rate_period, 900),
+      );
+
+    const defaultExecutors = createDefaultToolExecutors(
+      (overrides as any)?.toolOptions ?? {
         spritesToken: toolsConfig.sprites?.token,
         jinaApiKey: toolsConfig.jina?.apiKey,
         artifactsPath: toolsConfig.artifacts?.path,
@@ -244,79 +184,70 @@ export class RoomCommandHandlerTs {
         openRouterBaseUrl: providersConfig.openrouter?.baseUrl,
         chronicleStore: runtime.chronicleStore,
         chronicleLifecycle: runtime.chronicleLifecycle,
-      },
-    };
-
-    this.options = options;
-    this.commandConfig = options.roomConfig.command;
-
-    this.resolver = new CommandResolver(
-      this.commandConfig,
-      options.classifyMode,
-      options.helpToken ?? "!h",
-      new Set(options.flagTokens ?? ["!c"]),
-      modelStrCore,
+      } satisfies Omit<BaselineToolOptions, "onProgressReport">,
     );
 
-    this.modelAdapter = options.modelAdapter ?? new PiAiModelAdapter();
-    this.logger = options.logger ?? createConsoleLogger("muaddib.rooms.command");
+    const toolOptions: Omit<BaselineToolOptions, "onProgressReport"> = {
+      spritesToken: toolsConfig.sprites?.token,
+      jinaApiKey: toolsConfig.jina?.apiKey,
+      artifactsPath: toolsConfig.artifacts?.path,
+      artifactsUrl: toolsConfig.artifacts?.url,
+      getApiKey: runtime.getApiKey,
+      logger: loggerInstance,
+      oracleModel: toolsConfig.oracle?.model,
+      oraclePrompt: toolsConfig.oracle?.prompt,
+      imageGenModel: toolsConfig.imageGen?.model,
+      openRouterBaseUrl: providersConfig.openrouter?.baseUrl,
+      chronicleStore: runtime.chronicleStore,
+      chronicleLifecycle: runtime.chronicleLifecycle,
+    };
 
-    this.runnerFactory =
-      options.runnerFactory ??
-      ((input) =>
-        new SessionRunner({
-          model: input.model,
-          systemPrompt: input.systemPrompt,
-          tools: input.tools,
+    this.executor = new CommandExecutor({
+      commandConfig,
+      promptVars: roomConfig.prompt_vars,
+      history: runtime.history,
+      resolver: this.resolver,
+      runnerFactory,
+      rateLimiter,
+      modelAdapter: this.modelAdapter,
+      contextReducer:
+        overrides?.contextReducer ??
+        new ContextReducerTs({
+          config: contextReducerConfig,
           modelAdapter: this.modelAdapter,
-          getApiKey: options.getApiKey,
-          maxIterations: options.agentLoop?.maxIterations,
-          emptyCompletionRetryPrompt: options.agentLoop?.emptyCompletionRetryPrompt,
-          llmDebugMaxChars: options.agentLoop?.llmDebugMaxChars,
-          logger: input.logger,
-          steeringMessageProvider: input.steeringMessageProvider,
-        }));
+          getApiKey: runtime.getApiKey,
+          logger: loggerInstance,
+        }),
+      autoChronicler: runtime.autoChronicler ?? null,
+      chronicleStore: runtime.chronicleStore ?? null,
+      logger: loggerInstance,
+      getApiKey: runtime.getApiKey,
+      refusalFallbackModel: refusalFallbackModel ?? null,
+      persistenceSummaryModel: persistenceSummaryModel ?? null,
+      responseMaxBytes: parseResponseMaxBytes(commandConfig.response_max_bytes),
+      shareArtifact:
+        (overrides as any)?.toolOptions?.executors?.shareArtifact ?? defaultExecutors.shareArtifact,
+      responseCleaner: overrides?.responseCleaner,
+      onProgressReport: overrides?.onProgressReport,
+      toolOptions,
+    });
 
-    this.refusalFallbackModel = options.refusalFallbackModel
-      ? normalizeModelSpec(options.refusalFallbackModel)
-      : null;
-    this.responseMaxBytes = parseResponseMaxBytes(this.commandConfig.response_max_bytes);
-    const defaultExecutors = createDefaultToolExecutors(options.toolOptions ?? {});
-    this.shareArtifact =
-      options.toolOptions?.executors?.shareArtifact ?? defaultExecutors.shareArtifact;
-    this.contextReducer =
-      options.contextReducer ??
-      new ContextReducerTs({
-        config: options.contextReducerConfig,
-        modelAdapter: this.modelAdapter,
-        getApiKey: options.getApiKey,
-        logger: this.logger,
-      });
-    this.autoChronicler = options.autoChronicler ?? null;
-    this.chronicleStore = options.chronicleStore ?? null;
-
-    this.rateLimiter =
-      options.rateLimiter ??
-      new RateLimiter(
-        numberWithDefault(this.commandConfig.rate_limit, 30),
-        numberWithDefault(this.commandConfig.rate_period, 900),
-      );
     this.steeringQueue = new SteeringQueue();
 
     // Proactive interjection setup
-    const rawProactive = options.roomConfig.proactive;
+    const rawProactive = roomConfig.proactive;
     const interjecting = rawProactive?.interjecting;
     if (rawProactive && interjecting && interjecting.length > 0) {
       this.proactiveConfig = {
         interjecting,
         debounce_seconds: rawProactive.debounce_seconds ?? 15,
-        history_size: rawProactive.history_size ?? this.commandConfig.history_size,
+        history_size: rawProactive.history_size ?? commandConfig.history_size,
         rate_limit: rawProactive.rate_limit ?? 10,
         rate_period: rawProactive.rate_period ?? 3600,
         interject_threshold: rawProactive.interject_threshold ?? 7,
         models: {
           validation: rawProactive.models?.validation ?? [],
-          serious: rawProactive.models?.serious ?? pickModeModel(this.commandConfig.modes.serious?.model) ?? "",
+          serious: rawProactive.models?.serious ?? pickModeModel(commandConfig.modes.serious?.model) ?? "",
         },
         prompts: {
           interject: rawProactive.prompts?.interject ?? "",
@@ -344,7 +275,7 @@ export class RoomCommandHandlerTs {
     message: RoomMessage,
     options: HandleIncomingMessageOptions,
   ): Promise<CommandExecutionResult | null> {
-    const triggerMessageId = await this.options.history.addMessage(message);
+    const triggerMessageId = await this.history.addMessage(message);
 
     if (!options.isDirect) {
       this.logger.debug(
@@ -363,409 +294,35 @@ export class RoomCommandHandlerTs {
     );
 
     if (this.resolver.shouldBypassSteeringQueue(message)) {
-      return this.executeAndPersist(
+      return this.executor.execute(
         message,
         triggerMessageId,
         options.sendResponse,
-        SteeringQueue.keyForMessage(message),
+        this.createSteeringContextDrainer(SteeringQueue.keyForMessage(message)),
       );
     }
 
-    return this.runOrQueueCommand(message, triggerMessageId, options.sendResponse);
+    return this.handleCommandMessage(message, triggerMessageId, options.sendResponse);
   }
 
+  /** Direct execution without steering queue (for CLI / tests). */
   async execute(message: RoomMessage): Promise<CommandExecutionResult> {
-    return this.executeWithSteering(message, SteeringQueue.keyForMessage(message));
-  }
-
-  private async executeWithSteering(
-    message: RoomMessage,
-    steeringKey: SteeringKey,
-  ): Promise<CommandExecutionResult> {
-    const defaultSize = this.commandConfig.history_size;
-    const maxSize = Math.max(
-      defaultSize,
-      ...Object.values(this.commandConfig.modes).map((mode) => Number(mode.history_size ?? 0)),
-    );
-
-    if (!this.rateLimiter.checkLimit()) {
-      this.logger.warn("Rate limit triggered", `arc=${message.serverTag}#${message.channelName}`, `nick=${message.nick}`);
-      return this.rateLimitedResult(message);
-    }
-
-    this.logger.info(
-      "Received command",
-      `arc=${message.serverTag}#${message.channelName}`,
-      `nick=${message.nick}`,
-      `content=${message.content}`,
-    );
-
-    const context = await this.options.history.getContextForMessage(message, maxSize);
-    const followupMessages = await this.collectDebouncedFollowups(message, context);
-
-    const resolved = await this.resolver.resolve({
+    return this.executor.execute(
       message,
-      context,
-      defaultSize,
-    });
-
-    const resolvedWithFollowups: ResolvedCommand = {
-      ...resolved,
-      queryText: mergeQueryText(resolved.queryText, followupMessages),
-    };
-
-    if (resolvedWithFollowups.error) {
-      this.logger.warn(
-        "Command parse error",
-        `arc=${message.serverTag}#${message.channelName}`,
-        `nick=${message.nick}`,
-        `error=${resolvedWithFollowups.error}`,
-        `content=${message.content}`,
-      );
-      return {
-        response: `${message.nick}: ${resolvedWithFollowups.error}`,
-        resolved: resolvedWithFollowups,
-        model: null,
-        usage: null,
-        toolCallsCount: 0,
-      };
-    }
-
-    if (resolvedWithFollowups.helpRequested) {
-      this.logger.debug("Sending help message", `nick=${message.nick}`);
-      return {
-        response: this.resolver.buildHelpMessage(message.serverTag, message.channelName),
-        resolved: resolvedWithFollowups,
-        model: null,
-        usage: null,
-        toolCallsCount: 0,
-      };
-    }
-
-    if (
-      !resolvedWithFollowups.modeKey ||
-      !resolvedWithFollowups.runtime ||
-      !resolvedWithFollowups.selectedTrigger
-    ) {
-      return {
-        response: `${message.nick}: Internal command resolution error.`,
-        resolved: resolvedWithFollowups,
-        model: null,
-        usage: null,
-        toolCallsCount: 0,
-      };
-    }
-
-    const modeConfig = this.commandConfig.modes[resolvedWithFollowups.modeKey];
-    const modelSpec =
-      resolvedWithFollowups.modelOverride ??
-      resolvedWithFollowups.runtime.model ??
-      pickModeModel(modeConfig.model) ??
-      null;
-
-    if (!modelSpec) {
-      return {
-        response: `${message.nick}: No model configured for mode '${resolvedWithFollowups.modeKey}'.`,
-        resolved: resolvedWithFollowups,
-        model: null,
-        usage: null,
-        toolCallsCount: 0,
-      };
-    }
-
-    if (resolvedWithFollowups.modelOverride) {
-      this.logger.debug("Overriding model", `model=${resolvedWithFollowups.modelOverride}`);
-    }
-
-    if (resolvedWithFollowups.selectedAutomatically) {
-      this.logger.debug(
-        "Processing automatic mode request",
-        `nick=${message.nick}`,
-        `query=${resolvedWithFollowups.queryText}`,
-      );
-      if (resolvedWithFollowups.channelMode) {
-        this.logger.debug(
-          "Channel policy resolved",
-          `policy=${resolvedWithFollowups.channelMode}`,
-          `label=${resolvedWithFollowups.selectedLabel}`,
-          `trigger=${resolvedWithFollowups.selectedTrigger}`,
-        );
-      }
-    } else {
-      this.logger.debug(
-        "Processing explicit trigger",
-        `trigger=${resolvedWithFollowups.selectedTrigger}`,
-        `mode=${resolvedWithFollowups.modeKey}`,
-        `nick=${message.nick}`,
-        `query=${resolvedWithFollowups.queryText}`,
-      );
-    }
-
-    this.logger.debug(
-      "Resolved direct command",
-      `arc=${message.serverTag}#${message.channelName}`,
-      `mode=${resolvedWithFollowups.modeKey}`,
-      `trigger=${resolvedWithFollowups.selectedTrigger}`,
-      `model=${modelSpec}`,
-      `context_disabled=${resolvedWithFollowups.noContext}`,
+      0, // no trigger message id for direct execution
+      undefined,
+      this.createSteeringContextDrainer(SteeringQueue.keyForMessage(message)),
     );
-
-    const steeringEnabled =
-      Boolean(resolvedWithFollowups.runtime.steering) && !resolvedWithFollowups.noContext;
-
-    const steeringMessages = steeringEnabled
-      ? this.steeringQueue.drainSteeringContextMessages(steeringKey)
-      : [];
-
-    const systemPrompt = this.buildSystemPrompt(
-      resolvedWithFollowups.modeKey,
-      message.mynick,
-      resolvedWithFollowups.modelOverride ?? undefined,
-    );
-
-    let prependedContext: Array<{ role: string; content: string }> = [];
-    if (
-      !resolvedWithFollowups.noContext &&
-      resolvedWithFollowups.runtime.includeChapterSummary &&
-      this.chronicleStore
-    ) {
-      prependedContext = await this.chronicleStore.getChapterContextMessages(
-        `${message.serverTag}#${message.channelName}`,
-      );
-    }
-
-    let selectedContext = (resolvedWithFollowups.noContext ? context.slice(-1) : context).slice(
-      -resolvedWithFollowups.runtime.historySize,
-    );
-
-    if (
-      !resolvedWithFollowups.noContext &&
-      resolvedWithFollowups.runtime.autoReduceContext &&
-      this.contextReducer.isConfigured &&
-      selectedContext.length > 1
-    ) {
-      const fullContext = [...prependedContext, ...selectedContext];
-      const reducedContext = await this.contextReducer.reduce(fullContext, systemPrompt);
-      prependedContext = [];
-      selectedContext = [
-        ...reducedContext,
-        selectedContext[selectedContext.length - 1],
-      ];
-    }
-
-    // The trigger message will be sent as the new prompt for this turn.
-    // Keep only prior context from history here to avoid sending the trigger twice.
-    const runnerContext = [
-      ...prependedContext,
-      ...selectedContext.slice(0, -1),
-      ...steeringMessages,
-    ].map(toRunnerContextMessage);
-
-    const tools = this.selectTools(message, resolvedWithFollowups.runtime.allowedTools, runnerContext);
-
-    const steeringMessageProvider = steeringEnabled
-      ? () => this.steeringQueue.drainSteeringContextMessages(steeringKey).map((msg) => ({
-          role: "user" as const,
-          content: msg.content,
-        }))
-      : undefined;
-
-    const runner = this.runnerFactory({
-      model: modelSpec,
-      systemPrompt,
-      tools,
-      steeringMessageProvider,
-      logger: this.logger,
-    });
-
-    let agentResult: PromptResult;
-    try {
-      agentResult = await runner.prompt(resolvedWithFollowups.queryText, {
-        contextMessages: runnerContext,
-        thinkingLevel: normalizeThinkingLevel(resolvedWithFollowups.runtime.reasoningEffort),
-        visionFallbackModel: resolvedWithFollowups.runtime.visionModel ?? undefined,
-        refusalFallbackModel: this.refusalFallbackModel ?? undefined,
-      });
-
-      await this.persistToolSummaryFromSession(message, agentResult, tools as MuaddibTool[]);
-      agentResult.session?.dispose();
-    } catch (error) {
-      this.logger.error("Error during agent execution", error);
-      throw error;
-    }
-
-    let responseText = agentResult.text;
-    if (agentResult.refusalFallbackActivated && agentResult.refusalFallbackModel) {
-      const fallbackSpec = parseModelSpec(agentResult.refusalFallbackModel);
-      responseText = `${responseText} [refusal fallback to ${fallbackSpec.modelId}]`.trim();
-    }
-
-    responseText = await this.applyResponseLengthPolicy(responseText);
-    const cleaned = this.cleanResponseText(responseText, message.nick);
-
-    if (!cleaned) {
-      this.logger.info(
-        "Agent chose not to answer",
-        `arc=${message.serverTag}#${message.channelName}`,
-        `mode=${resolvedWithFollowups.selectedLabel}`,
-        `trigger=${resolvedWithFollowups.selectedTrigger}`,
-      );
-    }
-
-    return {
-      response: cleaned || null,
-      resolved: resolvedWithFollowups,
-      model: modelSpec,
-      usage: agentResult.usage,
-      toolCallsCount: agentResult.toolCallsCount ?? 0,
-    };
   }
 
-  private async executeAndPersist(
-    message: RoomMessage,
-    triggerMessageId: number,
-    sendResponse: ((text: string) => Promise<void>) | undefined,
-    steeringKey: SteeringKey,
-  ): Promise<CommandExecutionResult> {
-    const result = await this.executeWithSteering(message, steeringKey);
-    await this.persistExecutionResult(message, triggerMessageId, result, sendResponse);
-
-    if (!this.isRateLimitedResult(result)) {
-      await this.triggerAutoChronicler(message, this.commandConfig.history_size);
-    }
-
-    return result;
+  /** Expose buildSystemPrompt for tests. */
+  buildSystemPrompt(mode: string, mynick: string, modelOverride?: string): string {
+    return this.executor.buildSystemPrompt(mode, mynick, modelOverride);
   }
 
-  private async persistExecutionResult(
-    message: RoomMessage,
-    triggerMessageId: number,
-    result: CommandExecutionResult,
-    sendResponse: ((text: string) => Promise<void>) | undefined,
-  ): Promise<void> {
-    if (!result.response) {
-      return;
-    }
+  // ── Session lifecycle: commands ──
 
-    const arcName = `${message.serverTag}#${message.channelName}`;
-
-    let llmCallId: number | null = null;
-    if (result.model && result.usage) {
-      try {
-        const spec = parseModelSpec(result.model);
-        llmCallId = await this.options.history.logLlmCall({
-          provider: spec.provider,
-          model: spec.modelId,
-          inputTokens: result.usage.input,
-          outputTokens: result.usage.output,
-          cost: result.usage.cost.total,
-          callType: "agent_run",
-          arcName,
-          triggerMessageId,
-        });
-      } catch {
-        this.logger.warn("Could not parse model spec", `model=${result.model}`);
-      }
-    }
-
-    this.logger.debug(
-      "Persisting direct command response",
-      `arc=${arcName}`,
-      `model=${result.model ?? "n/a"}`,
-      `tool_calls=${result.toolCallsCount}`,
-      `llm_call_id=${llmCallId ?? "n/a"}`,
-    );
-
-    const costStr = result.usage ? `$${result.usage.cost.total.toFixed(4)}` : "?";
-    this.logger.info(
-      "Sending direct response",
-      `mode=${result.resolved.selectedLabel ?? "n/a"}`,
-      `trigger=${result.resolved.selectedTrigger ?? "n/a"}`,
-      `cost=${costStr}`,
-      `arc=${arcName}`,
-      `response=${result.response}`,
-    );
-
-    if (sendResponse) {
-      await sendResponse(result.response);
-    }
-
-    const responseMessageId = await this.options.history.addMessage(
-      {
-        ...message,
-        nick: message.mynick,
-        content: result.response,
-      },
-      {
-        mode: result.resolved.selectedTrigger ?? undefined,
-        llmCallId,
-      },
-    );
-
-    if (llmCallId) {
-      await this.options.history.updateLlmCallResponse(llmCallId, responseMessageId);
-    }
-
-    this.logger.debug(
-      "Direct command response stored",
-      `arc=${arcName}`,
-      `response_message_id=${responseMessageId}`,
-    );
-
-    await this.emitCostFollowups(message, result, arcName, sendResponse);
-  }
-
-  private async emitCostFollowups(
-    message: RoomMessage,
-    result: CommandExecutionResult,
-    arcName: string,
-    sendResponse: ((text: string) => Promise<void>) | undefined,
-  ): Promise<void> {
-    if (!sendResponse || !result.usage) {
-      return;
-    }
-
-    const totalCost = result.usage.cost.total;
-    if (!(totalCost > 0)) {
-      return;
-    }
-
-    if (totalCost > 0.2) {
-      const costMessage = `(${[
-        `this message used ${result.toolCallsCount} tool calls`,
-        `${result.usage.input} in / ${result.usage.output} out tokens`,
-        `and cost $${totalCost.toFixed(4)}`,
-      ].join(", ")})`;
-
-      this.logger.info("Sending cost followup", `arc=${arcName}`, `cost=${totalCost.toFixed(4)}`);
-      await sendResponse(costMessage);
-      await this.options.history.addMessage({
-        ...message,
-        nick: message.mynick,
-        content: costMessage,
-      });
-    }
-
-    const totalToday = await this.options.history.getArcCostToday(arcName);
-    const costBefore = totalToday - totalCost;
-    const dollarsBefore = Math.trunc(costBefore);
-    const dollarsAfter = Math.trunc(totalToday);
-    if (dollarsAfter <= dollarsBefore) {
-      return;
-    }
-
-    const milestoneMessage =
-      `(fun fact: my messages in this channel have already cost $${totalToday.toFixed(4)} today)`;
-    this.logger.info("Sending daily cost milestone", `arc=${arcName}`, `total_today=${totalToday.toFixed(4)}`);
-    await sendResponse(milestoneMessage);
-    await this.options.history.addMessage({
-      ...message,
-      nick: message.mynick,
-      content: milestoneMessage,
-    });
-  }
-
-  private async runOrQueueCommand(
+  private async handleCommandMessage(
     message: RoomMessage,
     triggerMessageId: number,
     sendResponse: ((text: string) => Promise<void>) | undefined,
@@ -786,11 +343,11 @@ export class RoomCommandHandlerTs {
         throw new Error("Runner command item is missing trigger message id.");
       }
 
-      runnerItem.result = await this.executeAndPersist(
+      runnerItem.result = await this.executor.execute(
         runnerItem.message,
         runnerItem.triggerMessageId,
         runnerItem.sendResponse,
-        steeringKey,
+        this.createSteeringContextDrainer(steeringKey),
       );
 
       this.steeringQueue.finishItem(runnerItem);
@@ -804,6 +361,8 @@ export class RoomCommandHandlerTs {
     return (runnerItem.result as CommandExecutionResult | null) ?? null;
   }
 
+  // ── Session lifecycle: passives ──
+
   private async handlePassiveMessage(
     message: RoomMessage,
     sendResponse: ((text: string) => Promise<void>) | undefined,
@@ -815,14 +374,11 @@ export class RoomCommandHandlerTs {
       this.steeringQueue.enqueuePassive(message, sendResponse, startProactive);
 
     if (queued) {
-      // Enqueued into an existing session (command or proactive) — wait for it.
       await item.completion;
       return;
     }
 
     if (isProactiveRunner) {
-      // We became the proactive runner for this key — run debounce + evaluation.
-      // Fire-and-forget: the proactive runner manages its own lifecycle.
       this.runProactiveSession(steeringKey, item).catch((error) => {
         this.logger.error("Proactive session failed", error);
       });
@@ -830,7 +386,6 @@ export class RoomCommandHandlerTs {
       return;
     }
 
-    // No session exists and proactive not enabled — just handle passively.
     await this.handlePassiveMessageCore(message, sendResponse);
   }
 
@@ -838,14 +393,11 @@ export class RoomCommandHandlerTs {
     message: RoomMessage,
     _sendResponse: ((text: string) => Promise<void>) | undefined,
   ): Promise<void> {
-    await this.triggerAutoChronicler(message, this.commandConfig.history_size);
+    await this.executor.triggerAutoChronicler(message, this.commandConfig.history_size);
   }
 
-  /**
-   * Proactive runner session.  Debounces until silence, then evaluates whether
-   * to interject.  If a command arrives during debounce or execution, it is
-   * handled via the normal steering/compaction path.
-   */
+  // ── Proactive interjection lifecycle ──
+
   private async runProactiveSession(
     steeringKey: SteeringKey,
     triggerItem: QueuedInboundMessage,
@@ -857,10 +409,6 @@ export class RoomCommandHandlerTs {
     }
 
     const debounceMs = this.proactiveConfig.debounce_seconds * 1000;
-
-    // The trigger passive message that started the session is our initial item.
-    // It's not in the queue (it was returned as the "runner item"), so finish it
-    // right away — its content is already persisted in history.
     this.steeringQueue.finishItem(triggerItem);
 
     let activeItem: QueuedInboundMessage | null = null;
@@ -871,17 +419,13 @@ export class RoomCommandHandlerTs {
         const result = await this.steeringQueue.waitForNewItem(steeringKey, debounceMs);
 
         if (result === "timeout") {
-          // Silence achieved — proceed to evaluation.
           break;
         }
 
-        // Something arrived — check if it's a command.
         if (this.steeringQueue.hasQueuedCommands(steeringKey)) {
-          // Command arrived during debounce — break and let compaction handle it.
           break;
         }
 
-        // Just more passives — drain them (finish their completions) and keep debouncing.
         this.steeringQueue.drainSteeringContextMessages(steeringKey);
       }
 
@@ -893,7 +437,6 @@ export class RoomCommandHandlerTs {
       }
 
       if (!nextItem) {
-        // Session empty after debounce — run proactive evaluation using trigger message context.
         await this.evaluateAndMaybeInterject(steeringKey, triggerItem.message, triggerItem.sendResponse);
         return;
       }
@@ -901,25 +444,21 @@ export class RoomCommandHandlerTs {
       activeItem = nextItem;
 
       if (activeItem.kind === "command") {
-        // Command preempted the proactive check — handle it normally.
         if (activeItem.triggerMessageId === null) {
           throw new Error("Queued command item is missing trigger message id.");
         }
-        activeItem.result = await this.executeAndPersist(
+        activeItem.result = await this.executor.execute(
           activeItem.message,
           activeItem.triggerMessageId,
           activeItem.sendResponse,
-          steeringKey,
+          this.createSteeringContextDrainer(steeringKey),
         );
       } else {
-        // Last passive after compaction — run proactive evaluation.
         await this.evaluateAndMaybeInterject(steeringKey, activeItem.message, activeItem.sendResponse);
         activeItem.result = null;
       }
 
       this.steeringQueue.finishItem(activeItem);
-
-      // ── Continue the steering session loop (same as command runner) ──
       await this.drainRemainingSessionItems(steeringKey);
     } catch (error) {
       this.steeringQueue.abortSession(steeringKey, error);
@@ -930,10 +469,6 @@ export class RoomCommandHandlerTs {
     }
   }
 
-  /**
-   * Evaluate proactive interjection for a message.  If the evaluation says
-   * yes, run the agent in serious mode and send the response.
-   */
   private async evaluateAndMaybeInterject(
     steeringKey: SteeringKey,
     message: RoomMessage,
@@ -952,7 +487,7 @@ export class RoomCommandHandlerTs {
       return;
     }
 
-    const context = await this.options.history.getContextForMessage(
+    const context = await this.history.getContextForMessage(
       message,
       this.proactiveConfig.history_size,
     );
@@ -962,7 +497,7 @@ export class RoomCommandHandlerTs {
       context,
       {
         modelAdapter: this.modelAdapter,
-        getApiKey: this.options.getApiKey,
+        getApiKey: this.getApiKey,
         logger: this.logger,
       },
     );
@@ -976,8 +511,7 @@ export class RoomCommandHandlerTs {
       return;
     }
 
-    // Classify to ensure it maps to serious mode.
-    const classifiedLabel = await this.options.classifyMode(context);
+    const classifiedLabel = await this.classifyMode(context);
     const classifiedTrigger = this.resolver.triggerForLabel(classifiedLabel);
     const [classifiedModeKey, classifiedRuntime] = this.resolver.runtimeForTrigger(classifiedTrigger);
 
@@ -999,105 +533,18 @@ export class RoomCommandHandlerTs {
       `reason=${evalResult.reason}`,
     );
 
-    // Build and run the agent in serious mode with proactive extra prompt.
-    const modelSpec = this.proactiveConfig.models.serious;
-    const systemPrompt =
-      this.buildSystemPrompt("serious", message.mynick) +
-      " " + this.proactiveConfig.prompts.serious_extra;
-
-    const steeringEnabled = Boolean(classifiedRuntime.steering);
-    const steeringMessages = steeringEnabled
-      ? this.steeringQueue.drainSteeringContextMessages(steeringKey)
-      : [];
-
-    const runnerContext = [
-      ...context.slice(0, -1),
-      ...steeringMessages,
-    ].map(toRunnerContextMessage);
-
-    const tools = this.selectTools(message, classifiedRuntime.allowedTools, runnerContext);
-
-    const steeringMessageProvider = steeringEnabled
-      ? () => this.steeringQueue.drainSteeringContextMessages(steeringKey).map((msg) => ({
-          role: "user" as const,
-          content: msg.content,
-        }))
-      : undefined;
-
-    const runner = this.runnerFactory({
-      model: modelSpec,
-      systemPrompt,
-      tools,
-      steeringMessageProvider,
-      logger: this.logger,
-    });
-
-    const lastMessage = context[context.length - 1];
-    const queryText = lastMessage?.content ?? "";
-
-    let agentResult: PromptResult;
-    try {
-      agentResult = await runner.prompt(queryText, {
-        contextMessages: runnerContext,
-        thinkingLevel: normalizeThinkingLevel(classifiedRuntime.reasoningEffort),
-        refusalFallbackModel: this.refusalFallbackModel ?? undefined,
-      });
-
-      await this.persistToolSummaryFromSession(message, agentResult, tools as MuaddibTool[]);
-      agentResult.session?.dispose();
-    } catch (error) {
-      this.logger.error("Error during proactive agent execution", error);
-      return;
-    }
-
-    let responseText = agentResult.text;
-    if (!responseText || responseText.startsWith("Error: ")) {
-      this.logger.info(
-        "Agent decided not to interject proactively",
-        `arc=${message.serverTag}#${message.channelName}`,
-      );
-      return;
-    }
-
-    responseText = await this.applyResponseLengthPolicy(responseText);
-    responseText = this.cleanResponseText(responseText, message.nick);
-
-    if (!responseText) {
-      return;
-    }
-
-    responseText = `[${modelStrCore(modelSpec)}] ${responseText}`;
-
-    this.logger.info(
-      "Sending proactive response",
-      `arc=${message.serverTag}#${message.channelName}`,
-      `label=${classifiedLabel}`,
-      `trigger=${classifiedTrigger}`,
-      `response=${responseText}`,
+    await this.executor.executeProactive(
+      message,
+      sendResponse,
+      this.proactiveConfig,
+      classifiedTrigger,
+      classifiedRuntime,
+      this.createSteeringContextDrainer(steeringKey),
     );
-
-    if (sendResponse) {
-      await sendResponse(responseText);
-    }
-
-    await this.options.history.addMessage(
-      {
-        ...message,
-        nick: message.mynick,
-        content: responseText,
-      },
-      {
-        mode: classifiedTrigger,
-      },
-    );
-
-    await this.triggerAutoChronicler(message, this.commandConfig.history_size);
   }
 
-  /**
-   * Drain remaining queued items after a proactive or command session item
-   * completes.  Shared by both `runProactiveSession` and `runOrQueueCommand`.
-   */
+  // ── Shared session drain loop ──
+
   private async drainRemainingSessionItems(steeringKey: SteeringKey): Promise<void> {
     while (true) {
       const { dropped, nextItem } = this.steeringQueue.takeNextWorkCompacted(steeringKey);
@@ -1114,11 +561,11 @@ export class RoomCommandHandlerTs {
         if (nextItem.triggerMessageId === null) {
           throw new Error("Queued command item is missing trigger message id.");
         }
-        nextItem.result = await this.executeAndPersist(
+        nextItem.result = await this.executor.execute(
           nextItem.message,
           nextItem.triggerMessageId,
           nextItem.sendResponse,
-          steeringKey,
+          this.createSteeringContextDrainer(steeringKey),
         );
       } else {
         await this.handlePassiveMessageCore(nextItem.message, nextItem.sendResponse);
@@ -1129,493 +576,13 @@ export class RoomCommandHandlerTs {
     }
   }
 
-  private async triggerAutoChronicler(message: RoomMessage, maxSize: number): Promise<void> {
-    if (!this.autoChronicler) {
-      return;
-    }
+  // ── Helpers ──
 
-    await this.autoChronicler.checkAndChronicle(
-      message.mynick,
-      message.serverTag,
-      message.channelName,
-      maxSize,
-    );
+  private createSteeringContextDrainer(steeringKey: SteeringKey): SteeringContextDrainer {
+    return () =>
+      this.steeringQueue.drainSteeringContextMessages(steeringKey).map((msg) => ({
+        role: "user",
+        content: msg.content,
+      }));
   }
-
-  buildSystemPrompt(mode: string, mynick: string, modelOverride?: string): string {
-    const modeConfig = this.commandConfig.modes[mode];
-    if (!modeConfig) {
-      throw new Error(`Command mode '${mode}' not found in config`);
-    }
-
-    let promptTemplate = modeConfig.prompt ?? "You are {mynick}. Current time: {current_time}.";
-
-    const triggerModelVars: Record<string, string> = {};
-    for (const [trigger, modeKey] of Object.entries(this.resolver.triggerToMode)) {
-      const triggerOverrideModel = this.resolver.triggerOverrides[trigger]?.model as string | undefined;
-      const effectiveModel =
-        triggerOverrideModel ??
-        (modeKey === mode && modelOverride ? modelOverride : pickModeModel(this.commandConfig.modes[modeKey].model));
-      triggerModelVars[`${trigger}_model`] = modelStrCore(effectiveModel ?? "");
-    }
-
-    promptTemplate = promptTemplate.replace(
-      /\{(![A-Za-z][\w-]*_model)\}/g,
-      (_full, key: string) => triggerModelVars[key] ?? _full,
-    );
-
-    const promptVars = this.options.roomConfig.prompt_vars ?? {};
-    const vars: Record<string, string> = {
-      ...promptVars,
-      mynick,
-      current_time: formatCurrentTime(),
-    };
-
-    return promptTemplate.replace(/\{([A-Za-z0-9_]+)\}/g, (full, key: string) => vars[key] ?? full);
-  }
-
-  private async collectDebouncedFollowups(
-    message: RoomMessage,
-    context: Array<{ role: string; content: string }>,
-  ): Promise<string[]> {
-    const debounceSeconds = numberWithDefault(this.commandConfig.debounce, 0);
-    if (debounceSeconds <= 0) {
-      return [];
-    }
-
-    const originalTimestamp = Date.now() / 1000;
-    await sleep(debounceSeconds * 1000);
-
-    const followups = await this.options.history.getRecentMessagesSince(
-      message.serverTag,
-      message.channelName,
-      message.nick,
-      originalTimestamp,
-      message.threadId,
-    );
-
-    const followupMessages = followups.map((entry) => entry.message).filter((entry) => entry.length > 0);
-    if (followupMessages.length > 0) {
-      this.logger.debug("Debounced followup messages", `count=${followupMessages.length}`, `nick=${message.nick}`);
-    }
-
-    if (followupMessages.length > 0 && context.length > 0) {
-      const lastIndex = context.length - 1;
-      context[lastIndex] = {
-        ...context[lastIndex],
-        content: `${context[lastIndex].content}\n${followupMessages.join("\n")}`,
-      };
-    }
-
-    return followupMessages;
-  }
-
-  private rateLimitedResult(message: RoomMessage): CommandExecutionResult {
-    return {
-      response: `${message.nick}: Slow down a little, will you? (rate limiting)`,
-      resolved: {
-        noContext: false,
-        queryText: message.content,
-        modelOverride: null,
-        selectedLabel: null,
-        selectedTrigger: null,
-        modeKey: null,
-        runtime: null,
-        helpRequested: false,
-        selectedAutomatically: false,
-      },
-      model: null,
-      usage: null,
-      toolCallsCount: 0,
-    };
-  }
-
-  private isRateLimitedResult(result: CommandExecutionResult): boolean {
-    return Boolean(result.response?.includes("(rate limiting)")) && !result.model;
-  }
-
-  private cleanResponseText(text: string, nick: string): string {
-    const cleaned = stripLeadingIrcContextEchoPrefixes(text.trim());
-    if (!this.options.responseCleaner) {
-      return cleaned;
-    }
-    return this.options.responseCleaner(cleaned, nick).trim();
-  }
-
-  private async applyResponseLengthPolicy(responseText: string): Promise<string> {
-    if (!responseText) {
-      return responseText;
-    }
-
-    const responseBytes = byteLengthUtf8(responseText);
-    if (responseBytes <= this.responseMaxBytes) {
-      return responseText;
-    }
-
-    this.logger.info(
-      "Response too long, creating artifact",
-      `bytes=${responseBytes}`,
-      `max_bytes=${this.responseMaxBytes}`,
-    );
-
-    return await this.longResponseToArtifact(responseText);
-  }
-
-  private async longResponseToArtifact(fullResponse: string): Promise<string> {
-    const artifactResult = await this.shareArtifact(fullResponse);
-    const artifactUrl = extractSharedArtifactUrl(artifactResult);
-
-    let trimmed = trimToMaxBytes(fullResponse, this.responseMaxBytes);
-
-    const minLength = Math.max(0, trimmed.length - 100);
-    const lastSentence = trimmed.lastIndexOf(".");
-    const lastWord = trimmed.lastIndexOf(" ");
-    if (lastSentence > minLength) {
-      trimmed = trimmed.slice(0, lastSentence + 1);
-    } else if (lastWord > minLength) {
-      trimmed = trimmed.slice(0, lastWord);
-    }
-
-    return `${trimmed}... full response: ${artifactUrl}`;
-  }
-
-  private async persistToolSummaryFromSession(
-    message: RoomMessage,
-    result: PromptResult,
-    tools: MuaddibTool[],
-  ): Promise<void> {
-    if (!this.options.persistenceSummaryModel) {
-      return;
-    }
-
-    if (!result.session) {
-      return;
-    }
-
-    const calls = collectPersistentToolCalls(result.session.messages, tools);
-    if (calls.length === 0) {
-      return;
-    }
-
-    try {
-      const summaryResponse = await this.modelAdapter.completeSimple(
-        this.options.persistenceSummaryModel,
-        {
-          systemPrompt: PERSISTENCE_SUMMARY_SYSTEM_PROMPT,
-          messages: [
-            {
-              role: "user",
-              content: buildPersistenceSummaryInput(calls),
-              timestamp: Date.now(),
-            },
-          ],
-        },
-        {
-          callType: "tool_persistence_summary",
-          logger: this.logger,
-          getApiKey: this.options.getApiKey,
-        },
-      );
-
-      const summaryText = summaryResponse.content
-        .filter((block) => block.type === "text")
-        .map((block) => block.text)
-        .join("\n")
-        .trim();
-
-      if (!summaryText) {
-        return;
-      }
-
-      const arc = `${message.serverTag}#${message.channelName}`;
-      this.logger.debug(
-        "Persisting internal monologue summary",
-        `arc=${arc}`,
-        `chars=${summaryText.length}`,
-        `summary=${formatLogPreview(summaryText)}`,
-      );
-
-      await this.options.history.addMessage(
-        {
-          ...message,
-          nick: message.mynick,
-          content: summaryText,
-        },
-        {
-          contentTemplate: "[internal monologue] {message}",
-        },
-      );
-    } catch (error) {
-      this.logger.error("Failed to generate tool persistence summary", error);
-    }
-  }
-
-  private selectTools(
-    message: RoomMessage,
-    allowedTools: string[] | null,
-    conversationContext?: SessionFactoryContextMessage[],
-  ): MuaddibTool[] {
-    // Build tool options for this invocation (arc + secrets, like Python's per-invocation setup)
-    const invocationToolOptions: BaselineToolOptions = {
-      ...this.options.toolOptions,
-      chronicleArc: `${message.serverTag}#${message.channelName}`,
-      spritesArc: `${message.serverTag}#${message.channelName}`,
-      secrets: message.secrets,
-    };
-
-    const baseline = createBaselineAgentTools({
-      ...invocationToolOptions,
-      onProgressReport: this.options.onProgressReport,
-      // Wire oracle with conversation context and a tool factory, mirroring
-      // Python's OracleExecutor which receives config + arc + context and
-      // builds its own tools via get_tools_for_arc at invocation time.
-      oracleInvocation: {
-        conversationContext: conversationContext ?? [],
-        toolOptions: invocationToolOptions,
-        buildTools: createBaselineAgentTools,
-      },
-    });
-
-    if (!allowedTools) {
-      return baseline;
-    }
-
-    const allowed = new Set(allowedTools);
-    return baseline.filter((tool) => allowed.has(tool.name));
-  }
-}
-
-const PERSISTENCE_SUMMARY_SYSTEM_PROMPT =
-  "As an AI agent, you need to remember in the future what tools you used when generating a response, and what the tools told you. Summarize all tool uses in a single concise paragraph. If artifact links are included, include every artifact link and tie each link to the corresponding tool call.";
-
-interface PersistentToolCall {
-  toolName: string;
-  input: unknown;
-  output: unknown;
-  persistType: ToolPersistType;
-  artifactUrls: string[];
-}
-
-function collectPersistentToolCalls(messages: AgentMessage[], tools: MuaddibTool[]): PersistentToolCall[] {
-  const toolPersistMap = new Map<string, ToolPersistType>();
-  for (const tool of tools) {
-    toolPersistMap.set(tool.name, tool.persistType);
-  }
-
-  return messages
-    .filter((message) => message.role === "toolResult")
-    .flatMap((message) => {
-      const toolResult = message as AgentMessage & {
-        toolName: string;
-        details?: Record<string, unknown>;
-        isError?: boolean;
-      };
-      if (toolResult.isError) {
-        return [];
-      }
-      const policy = toolPersistMap.get(toolResult.toolName) ?? "none";
-      if (policy !== "summary" && policy !== "artifact") {
-        return [];
-      }
-
-      return [{
-        toolName: toolResult.toolName,
-        input: toolResult.details?.input,
-        output: toolResult,
-        persistType: policy,
-        artifactUrls: extractArtifactUrls(toolResult),
-      }];
-    });
-}
-
-function buildPersistenceSummaryInput(persistentToolCalls: PersistentToolCall[]): string {
-  const lines: string[] = ["The following tool calls were made during this conversation:"];
-
-  for (const call of persistentToolCalls) {
-    lines.push(`\n\n# Calling tool **${call.toolName}** (persist: ${call.persistType})`);
-    lines.push(`## **Input:**\n${renderPersistenceValue(call.input)}\n`);
-    lines.push(`## **Output:**\n${renderPersistenceValue(call.output)}\n`);
-
-    for (const artifactUrl of call.artifactUrls) {
-      lines.push(`(Tool call I/O stored as artifact: ${artifactUrl})\n`);
-    }
-  }
-
-  lines.push("\nPlease provide a concise summary of what was accomplished in these tool calls.");
-  return lines.join("\n");
-}
-
-function renderPersistenceValue(value: unknown): string {
-  if (typeof value === "string") {
-    return value;
-  }
-
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function extractArtifactUrls(result: unknown): string[] {
-  const urls = new Set<string>();
-
-  if (!result || typeof result !== "object") {
-    return [];
-  }
-
-  const record = result as Record<string, unknown>;
-  const details = record.details as Record<string, unknown> | undefined;
-  const artifactUrls = details?.artifactUrls;
-  if (Array.isArray(artifactUrls)) {
-    for (const artifactUrl of artifactUrls) {
-      if (typeof artifactUrl === "string" && artifactUrl.trim().length > 0) {
-        urls.add(artifactUrl.trim());
-      }
-    }
-  }
-
-  return Array.from(urls);
-}
-
-
-const LEADING_IRC_CONTEXT_ECHO_PREFIX_RE = /^(?:\s*(?:\[[^\]]+\]\s*)?(?:![A-Za-z][\w-]*\s+)?(?:\[?\d{1,2}:\d{2}\]?\s*)?(?:<(?!\/?quest(?:_finished)?\b)[^>]+>))*\s*/iu;
-
-function stripLeadingIrcContextEchoPrefixes(text: string): string {
-  return text.replace(LEADING_IRC_CONTEXT_ECHO_PREFIX_RE, "");
-}
-
-function normalizeModelSpec(model: string): string {
-  const spec = parseModelSpec(model);
-  return `${spec.provider}:${spec.modelId}`;
-}
-
-function numberWithDefault(value: unknown, fallback: number): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) {
-    return fallback;
-  }
-  return parsed;
-}
-
-function mergeQueryText(queryText: string, followupMessages: string[]): string {
-  if (followupMessages.length === 0) {
-    return queryText;
-  }
-  if (!queryText.trim()) {
-    return followupMessages.join("\n");
-  }
-  return `${queryText}\n${followupMessages.join("\n")}`;
-}
-
-async function sleep(ms: number): Promise<void> {
-  await new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
-function modelStrCore(model: unknown): string {
-  return String(model).replace(/(?:[-\w]*:)?(?:[-\w]*\/)?([-\w]+)(?:#[-\w,]*)?/, "$1");
-}
-
-function pickModeModel(model: string | string[] | undefined): string | null {
-  if (!model) {
-    return null;
-  }
-  if (Array.isArray(model)) {
-    return model[0] ?? null;
-  }
-  return model;
-}
-
-function toRunnerContextMessage(message: { role: string; content: string }): SessionFactoryContextMessage {
-  return {
-    role: message.role === "assistant" ? "assistant" : "user",
-    content: message.content,
-  };
-}
-
-function normalizeThinkingLevel(reasoningEffort: string): ThinkingLevel {
-  switch (reasoningEffort) {
-    case "off":
-    case "minimal":
-    case "low":
-    case "medium":
-    case "high":
-    case "xhigh":
-      return reasoningEffort;
-    default:
-      return "minimal";
-  }
-}
-
-function formatCurrentTime(date = new Date()): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hour = String(date.getHours()).padStart(2, "0");
-  const minute = String(date.getMinutes()).padStart(2, "0");
-  return `${year}-${month}-${day} ${hour}:${minute}`;
-}
-
-function parseResponseMaxBytes(value: unknown): number {
-  if (value === undefined || value === null) {
-    return 600;
-  }
-
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error("command.response_max_bytes must be a positive integer.");
-  }
-
-  return parsed;
-}
-
-function byteLengthUtf8(text: string): number {
-  return Buffer.byteLength(text, "utf8");
-}
-
-function trimToMaxBytes(text: string, maxBytes: number): string {
-  let trimmed = text;
-  while (trimmed.length > 0 && byteLengthUtf8(trimmed) > maxBytes) {
-    trimmed = trimmed.slice(0, -1);
-  }
-  return trimmed;
-}
-
-function formatLogPreview(text: string, maxChars = 180): string {
-  const singleLine = text.replace(/\s+/gu, " ").trim();
-  if (singleLine.length <= maxChars) {
-    return singleLine;
-  }
-  return `${singleLine.slice(0, maxChars)}...`;
-}
-
-function resolveConfigModelSpec(
-  raw: unknown,
-  configKey: string,
-  _modelAdapter: PiAiModelAdapter,
-): string | undefined {
-  if (raw === undefined || raw === null) {
-    return undefined;
-  }
-
-  if (typeof raw !== "string" || raw.trim().length === 0) {
-    throw new Error(`${configKey} must be a non-empty string fully qualified as provider:model.`);
-  }
-
-  const trimmed = raw.trim();
-  const spec = parseModelSpec(trimmed);
-  return `${spec.provider}:${spec.modelId}`;
-}
-
-function extractSharedArtifactUrl(result: string): string {
-  const prefix = "Artifact shared: ";
-  if (!result.startsWith(prefix)) {
-    throw new Error(
-      `response_max_bytes artifact fallback expected 'Artifact shared: <url>' but got: ${result}`,
-    );
-  }
-
-  return result.slice(prefix.length).trim();
 }
