@@ -4,11 +4,13 @@ import { Type } from "@sinclair/typebox";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { SessionRunner } from "../session-runner.js";
 import type { RunnerLogger, SessionFactoryContextMessage } from "../session-factory.js";
-import type {
-  BaselineToolExecutors,
-  DefaultToolExecutorOptions,
-  OracleInput,
-} from "./types.js";
+import type { DefaultToolExecutorOptions } from "./types.js";
+
+export interface OracleInput {
+  query: string;
+}
+
+export type OracleExecutor = (input: OracleInput) => Promise<string>;
 
 const DEFAULT_ORACLE_SYSTEM_PROMPT =
   "You are an oracle - a powerful reasoning entity consulted for complex analysis.";
@@ -27,7 +29,7 @@ export const ORACLE_EXCLUDED_TOOLS = new Set([
 
 const ORACLE_LOG_SEPARATOR = "----------------------------------------------";
 
-export function createOracleTool(executors: Pick<BaselineToolExecutors, "oracle">): AgentTool<any> {
+export function createOracleTool(executors: { oracle: OracleExecutor }): AgentTool<any> {
   return {
     name: "oracle",
     label: "Oracle",
@@ -76,7 +78,7 @@ export interface OracleInvocationContext {
 export function createDefaultOracleExecutor(
   options: DefaultToolExecutorOptions,
   invocation?: OracleInvocationContext,
-): BaselineToolExecutors["oracle"] {
+): OracleExecutor {
   const modelAdapter = options.modelAdapter ?? new PiAiModelAdapter();
   // Cast to RunnerLogger — callers (command handler, CLI) pass full loggers;
   // the ToolExecutorLogger type is just narrower than what's actually provided.

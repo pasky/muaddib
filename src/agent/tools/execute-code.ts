@@ -6,16 +6,21 @@ import { join, resolve } from "node:path";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 
-import type {
-  BaselineToolExecutors,
-  DefaultToolExecutorOptions,
-  ExecuteCodeInput,
-} from "./types.js";
+import type { DefaultToolExecutorOptions } from "./types.js";
+
+export interface ExecuteCodeInput {
+  code: string;
+  language?: "python" | "bash";
+  input_artifacts?: string[];
+  output_files?: string[];
+}
+
+export type ExecuteCodeExecutor = (input: ExecuteCodeInput) => Promise<string>;
 
 const DEFAULT_EXECUTE_TIMEOUT_MS = 60_000;
 const DEFAULT_CAPTURE_LIMIT = 24_000;
 
-export function createExecuteCodeTool(executors: Pick<BaselineToolExecutors, "executeCode">): AgentTool<any> {
+export function createExecuteCodeTool(executors: { executeCode: ExecuteCodeExecutor }): AgentTool<any> {
   return {
     name: "execute_code",
     label: "Execute Code",
@@ -56,7 +61,7 @@ export function createExecuteCodeTool(executors: Pick<BaselineToolExecutors, "ex
 
 export function createDefaultExecuteCodeExecutor(
   options: DefaultToolExecutorOptions,
-): BaselineToolExecutors["executeCode"] {
+): ExecuteCodeExecutor {
   const timeoutMs = options.executeCodeTimeoutMs ?? DEFAULT_EXECUTE_TIMEOUT_MS;
   let workDirPromise: Promise<string> | null = null;
   let versionCounter = 0;

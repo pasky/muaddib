@@ -1,16 +1,23 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 
-import type {
-  BaselineToolExecutors,
-  DefaultToolExecutorOptions,
-  VisitWebpageResult,
-} from "./types.js";
+import type { DefaultToolExecutorOptions } from "./types.js";
+
+export interface VisitWebpageImageResult {
+  kind: "image";
+  data: string;
+  mimeType: string;
+}
+
+export type VisitWebpageResult = string | VisitWebpageImageResult;
+
+export type WebSearchExecutor = (query: string) => Promise<string>;
+export type VisitWebpageExecutor = (url: string) => Promise<VisitWebpageResult>;
 
 const DEFAULT_WEB_CONTENT_LIMIT = 40_000;
 const DEFAULT_IMAGE_LIMIT = 3_500_000;
 
-export function createWebSearchTool(executors: Pick<BaselineToolExecutors, "webSearch">): AgentTool<any> {
+export function createWebSearchTool(executors: { webSearch: WebSearchExecutor }): AgentTool<any> {
   return {
     name: "web_search",
     label: "Web Search",
@@ -33,7 +40,7 @@ export function createWebSearchTool(executors: Pick<BaselineToolExecutors, "webS
 }
 
 export function createVisitWebpageTool(
-  executors: Pick<BaselineToolExecutors, "visitWebpage">,
+  executors: { visitWebpage: VisitWebpageExecutor },
 ): AgentTool<any> {
   return {
     name: "visit_webpage",
@@ -55,7 +62,7 @@ export function createVisitWebpageTool(
 
 export function createDefaultWebSearchExecutor(
   options: DefaultToolExecutorOptions,
-): BaselineToolExecutors["webSearch"] {
+): WebSearchExecutor {
   const fetchImpl = getFetch(options);
 
   return async (query: string): Promise<string> => {
@@ -90,7 +97,7 @@ export function createDefaultWebSearchExecutor(
 
 export function createDefaultVisitWebpageExecutor(
   options: DefaultToolExecutorOptions,
-): BaselineToolExecutors["visitWebpage"] {
+): VisitWebpageExecutor {
   const fetchImpl = getFetch(options);
   const maxWebContentLength = options.maxWebContentLength ?? DEFAULT_WEB_CONTENT_LIMIT;
   const maxImageBytes = options.maxImageBytes ?? DEFAULT_IMAGE_LIMIT;

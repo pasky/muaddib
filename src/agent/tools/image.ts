@@ -2,13 +2,25 @@ import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 
 import { parseModelSpec } from "../../models/model-spec.js";
-import type {
-  BaselineToolExecutors,
-  DefaultToolExecutorOptions,
-  GenerateImageInput,
-  GenerateImageResult,
-  GeneratedImageResultItem,
-} from "./types.js";
+import type { DefaultToolExecutorOptions } from "./types.js";
+
+export interface GenerateImageInput {
+  prompt: string;
+  image_urls?: string[];
+}
+
+export interface GeneratedImageResultItem {
+  data: string;
+  mimeType: string;
+  artifactUrl: string;
+}
+
+export interface GenerateImageResult {
+  summaryText: string;
+  images: GeneratedImageResultItem[];
+}
+
+export type GenerateImageExecutor = (input: GenerateImageInput) => Promise<GenerateImageResult>;
 import { writeArtifactBytes } from "./artifact-storage.js";
 
 const DEFAULT_IMAGE_LIMIT = 3_500_000;
@@ -22,7 +34,7 @@ const IMAGE_SUFFIX_BY_MIME_TYPE: Record<string, string> = {
 };
 
 export function createGenerateImageTool(
-  executors: Pick<BaselineToolExecutors, "generateImage">,
+  executors: { generateImage: GenerateImageExecutor },
 ): AgentTool<any> {
   return {
     name: "generate_image",
@@ -62,7 +74,7 @@ export function createGenerateImageTool(
 
 export function createDefaultGenerateImageExecutor(
   options: DefaultToolExecutorOptions,
-): BaselineToolExecutors["generateImage"] {
+): GenerateImageExecutor {
   const fetchImpl = getFetch(options);
   const openRouterBaseUrl = (toConfiguredString(options.openRouterBaseUrl) ?? DEFAULT_OPENROUTER_BASE_URL).replace(/\/+$/, "");
   const maxImageBytes = options.maxImageBytes ?? DEFAULT_IMAGE_LIMIT;

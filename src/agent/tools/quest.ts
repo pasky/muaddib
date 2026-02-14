@@ -1,19 +1,33 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 
-import type {
-  BaselineToolExecutors,
-  DefaultToolExecutorOptions,
-  QuestSnoozeInput,
-  QuestStartInput,
-  SubquestStartInput,
-} from "./types.js";
+import type { DefaultToolExecutorOptions } from "./types.js";
+
+export interface QuestStartInput {
+  id: string;
+  goal: string;
+  success_criteria: string;
+}
+
+export interface SubquestStartInput {
+  id: string;
+  goal: string;
+  success_criteria: string;
+}
+
+export interface QuestSnoozeInput {
+  until: string;
+}
+
+export type QuestStartExecutor = (input: QuestStartInput) => Promise<string>;
+export type SubquestStartExecutor = (input: SubquestStartInput) => Promise<string>;
+export type QuestSnoozeExecutor = (input: QuestSnoozeInput) => Promise<string>;
 
 const DEFERRED_QUEST_TOOL_MESSAGE =
   "REJECTED: quests runtime is deferred in the TypeScript runtime (parity v1).";
 
 export function createQuestStartTool(
-  executors: Pick<BaselineToolExecutors, "questStart">,
+  executors: { questStart: QuestStartExecutor },
 ): AgentTool<any> {
   return {
     name: "quest_start",
@@ -45,7 +59,7 @@ export function createQuestStartTool(
 }
 
 export function createSubquestStartTool(
-  executors: Pick<BaselineToolExecutors, "subquestStart">,
+  executors: { subquestStart: SubquestStartExecutor },
 ): AgentTool<any> {
   return {
     name: "subquest_start",
@@ -76,7 +90,7 @@ export function createSubquestStartTool(
 }
 
 export function createQuestSnoozeTool(
-  executors: Pick<BaselineToolExecutors, "questSnooze">,
+  executors: { questSnooze: QuestSnoozeExecutor },
 ): AgentTool<any> {
   return {
     name: "quest_snooze",
@@ -102,7 +116,7 @@ export function createQuestSnoozeTool(
 
 export function createDefaultQuestStartExecutor(
   _options: DefaultToolExecutorOptions,
-): BaselineToolExecutors["questStart"] {
+): QuestStartExecutor {
   return async (input: QuestStartInput): Promise<string> => {
     if (!toConfiguredString(input.id)) {
       throw new Error("quest_start.id must be non-empty.");
@@ -122,7 +136,7 @@ export function createDefaultQuestStartExecutor(
 
 export function createDefaultSubquestStartExecutor(
   options: DefaultToolExecutorOptions,
-): BaselineToolExecutors["subquestStart"] {
+): SubquestStartExecutor {
   return async (input: SubquestStartInput): Promise<string> => {
     if (!toConfiguredString(options.currentQuestId)) {
       return "Error: subquest_start requires an active quest context.";
@@ -146,7 +160,7 @@ export function createDefaultSubquestStartExecutor(
 
 export function createDefaultQuestSnoozeExecutor(
   options: DefaultToolExecutorOptions,
-): BaselineToolExecutors["questSnooze"] {
+): QuestSnoozeExecutor {
   return async (input: QuestSnoozeInput): Promise<string> => {
     if (!toConfiguredString(options.currentQuestId)) {
       return "Error: quest_snooze requires an active quest context.";

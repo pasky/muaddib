@@ -41,28 +41,38 @@ import {
   createEditArtifactTool,
   createShareArtifactTool,
 } from "./artifact.js";
-import type {
-  BaselineToolExecutors,
-  DefaultToolExecutorOptions,
-} from "./types.js";
+import type { EditArtifactInput, ShareArtifactExecutor, EditArtifactExecutor } from "./artifact.js";
+import type { ChronicleReadInput, ChronicleAppendInput, ChronicleReadExecutor, ChronicleAppendExecutor } from "./chronicle.js";
+import type { ExecuteCodeInput, ExecuteCodeExecutor } from "./execute-code.js";
+import type { GenerateImageInput, GenerateImageResult, GeneratedImageResultItem, GenerateImageExecutor } from "./image.js";
+import type { OracleInput, OracleExecutor } from "./oracle.js";
+import type { QuestStartInput, SubquestStartInput, QuestSnoozeInput, QuestStartExecutor, SubquestStartExecutor, QuestSnoozeExecutor } from "./quest.js";
+import type { VisitWebpageImageResult, VisitWebpageResult, WebSearchExecutor, VisitWebpageExecutor } from "./web.js";
+import type { DefaultToolExecutorOptions } from "./types.js";
 
-export type {
-  BaselineToolExecutors,
-  ChronicleAppendInput,
-  ChronicleReadInput,
-  DefaultToolExecutorOptions,
-  EditArtifactInput,
-  ExecuteCodeInput,
-  GenerateImageInput,
-  GenerateImageResult,
-  GeneratedImageResultItem,
-  OracleInput,
-  QuestSnoozeInput,
-  QuestStartInput,
-  SubquestStartInput,
-  VisitWebpageImageResult,
-  VisitWebpageResult,
-} from "./types.js";
+export interface BaselineToolExecutors {
+  webSearch: WebSearchExecutor;
+  visitWebpage: VisitWebpageExecutor;
+  executeCode: ExecuteCodeExecutor;
+  shareArtifact: ShareArtifactExecutor;
+  editArtifact: EditArtifactExecutor;
+  oracle: OracleExecutor;
+  generateImage: GenerateImageExecutor;
+  chronicleRead: ChronicleReadExecutor;
+  chronicleAppend: ChronicleAppendExecutor;
+  questStart: QuestStartExecutor;
+  subquestStart: SubquestStartExecutor;
+  questSnooze: QuestSnoozeExecutor;
+}
+
+export type { DefaultToolExecutorOptions };
+export type { EditArtifactInput, ShareArtifactExecutor, EditArtifactExecutor } from "./artifact.js";
+export type { ChronicleReadInput, ChronicleAppendInput, ChronicleReadExecutor, ChronicleAppendExecutor } from "./chronicle.js";
+export type { ExecuteCodeInput, ExecuteCodeExecutor } from "./execute-code.js";
+export type { GenerateImageInput, GenerateImageResult, GeneratedImageResultItem, GenerateImageExecutor } from "./image.js";
+export type { OracleInput, OracleExecutor } from "./oracle.js";
+export type { QuestStartInput, SubquestStartInput, QuestSnoozeInput, QuestStartExecutor, SubquestStartExecutor, QuestSnoozeExecutor } from "./quest.js";
+export type { VisitWebpageImageResult, VisitWebpageResult, WebSearchExecutor, VisitWebpageExecutor } from "./web.js";
 
 export {
   createChronicleAppendTool,

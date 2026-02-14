@@ -1,15 +1,21 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 
-import type {
-  BaselineToolExecutors,
-  ChronicleAppendInput,
-  ChronicleReadInput,
-  DefaultToolExecutorOptions,
-} from "./types.js";
+import type { DefaultToolExecutorOptions } from "./types.js";
+
+export interface ChronicleReadInput {
+  relative_chapter_id: number;
+}
+
+export interface ChronicleAppendInput {
+  text: string;
+}
+
+export type ChronicleReadExecutor = (input: ChronicleReadInput) => Promise<string>;
+export type ChronicleAppendExecutor = (input: ChronicleAppendInput) => Promise<string>;
 
 export function createChronicleReadTool(
-  executors: Pick<BaselineToolExecutors, "chronicleRead">,
+  executors: { chronicleRead: ChronicleReadExecutor },
 ): AgentTool<any> {
   return {
     name: "chronicle_read",
@@ -36,7 +42,7 @@ export function createChronicleReadTool(
 }
 
 export function createChronicleAppendTool(
-  executors: Pick<BaselineToolExecutors, "chronicleAppend">,
+  executors: { chronicleAppend: ChronicleAppendExecutor },
 ): AgentTool<any> {
   return {
     name: "chronicle_append",
@@ -62,7 +68,7 @@ export function createChronicleAppendTool(
 
 export function createDefaultChronicleReadExecutor(
   options: DefaultToolExecutorOptions,
-): BaselineToolExecutors["chronicleRead"] {
+): ChronicleReadExecutor {
   return async (input: ChronicleReadInput): Promise<string> => {
     if (!Number.isInteger(input.relative_chapter_id)) {
       throw new Error("chronicle_read.relative_chapter_id must be an integer.");
@@ -81,7 +87,7 @@ export function createDefaultChronicleReadExecutor(
 
 export function createDefaultChronicleAppendExecutor(
   options: DefaultToolExecutorOptions,
-): BaselineToolExecutors["chronicleAppend"] {
+): ChronicleAppendExecutor {
   return async (input: ChronicleAppendInput): Promise<string> => {
     const text = input.text.trim();
     if (!text) {

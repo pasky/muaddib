@@ -4,16 +4,21 @@ import { isAbsolute, relative, resolve } from "node:path";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 
-import type {
-  BaselineToolExecutors,
-  DefaultToolExecutorOptions,
-  EditArtifactInput,
-} from "./types.js";
+import type { DefaultToolExecutorOptions } from "./types.js";
+
+export interface EditArtifactInput {
+  artifact_url: string;
+  old_string: string;
+  new_string: string;
+}
+
+export type ShareArtifactExecutor = (content: string) => Promise<string>;
+export type EditArtifactExecutor = (input: EditArtifactInput) => Promise<string>;
 import { writeArtifactText } from "./artifact-storage.js";
-import { createDefaultVisitWebpageExecutor } from "./web.js";
+import { createDefaultVisitWebpageExecutor, type VisitWebpageExecutor } from "./web.js";
 
 export function createShareArtifactTool(
-  executors: Pick<BaselineToolExecutors, "shareArtifact">,
+  executors: { shareArtifact: ShareArtifactExecutor },
 ): AgentTool<any> {
   return {
     name: "share_artifact",
@@ -37,7 +42,7 @@ export function createShareArtifactTool(
   };
 }
 
-export function createEditArtifactTool(executors: Pick<BaselineToolExecutors, "editArtifact">): AgentTool<any> {
+export function createEditArtifactTool(executors: { editArtifact: EditArtifactExecutor }): AgentTool<any> {
   return {
     name: "edit_artifact",
     label: "Edit Artifact",
@@ -70,7 +75,7 @@ export function createEditArtifactTool(executors: Pick<BaselineToolExecutors, "e
 
 export function createDefaultShareArtifactExecutor(
   options: DefaultToolExecutorOptions,
-): BaselineToolExecutors["shareArtifact"] {
+): ShareArtifactExecutor {
   return async (content: string): Promise<string> => {
     if (!content.trim()) {
       throw new Error("share_artifact.content must be non-empty.");
@@ -83,7 +88,7 @@ export function createDefaultShareArtifactExecutor(
 
 export function createDefaultEditArtifactExecutor(
   options: DefaultToolExecutorOptions,
-): BaselineToolExecutors["editArtifact"] {
+): EditArtifactExecutor {
   const visitWebpage = createDefaultVisitWebpageExecutor(options);
 
   return async (input: EditArtifactInput): Promise<string> => {
@@ -133,7 +138,7 @@ export function createDefaultEditArtifactExecutor(
 async function loadArtifactContentForEdit(
   options: DefaultToolExecutorOptions,
   artifactUrl: string,
-  visitWebpage: BaselineToolExecutors["visitWebpage"],
+  visitWebpage: VisitWebpageExecutor,
 ): Promise<string> {
   const localArtifactPath = extractLocalArtifactPath(artifactUrl, options.artifactsUrl);
   if (localArtifactPath && options.artifactsPath) {
