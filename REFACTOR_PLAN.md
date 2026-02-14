@@ -1,6 +1,6 @@
 # Config & Runtime Refactoring Plan
 
-Status: Steps 1-3 done. Step 4 next.
+Status: Steps 1-4 done. Step 5 next.
 
 ## Context
 
@@ -47,7 +47,7 @@ context usage per session. Each step is a self-contained commit.
 - Delete local `asRecord()` and `readDeepSeekBaseUrlFromConfig()`
 - Update caller in `src/runtime.ts` (drop one `config.raw` usage)
 
-## Step 4: `src/app/api-keys.ts`
+## Step 4: `src/app/api-keys.ts` ✅
 
 - Change `createConfigApiKeyResolver` to accept `MuaddibConfig`
 - Add a method to `MuaddibConfig` that exposes provider key+validation info

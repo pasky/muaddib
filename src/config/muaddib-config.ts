@@ -71,6 +71,11 @@ export interface ProvidersConfig {
   deepseek?: DeepSeekProviderConfig;
 }
 
+export interface ProviderCredentialConfig {
+  staticKeys: Record<string, string>;
+  unsupportedPaths: string[];
+}
+
 export interface HistoryConfig {
   database?: { path?: string };
 }
@@ -281,6 +286,43 @@ export class MuaddibConfig {
       deepseek: {
         baseUrl: stringOrUndefined(deepseek?.url) ?? stringOrUndefined(deepseek?.base_url),
       },
+    };
+  }
+
+  getProviderCredentialConfig(): ProviderCredentialConfig {
+    const providers = asRecord(this.data.providers) ?? {};
+    const staticKeys: Record<string, string> = {};
+    const unsupportedPaths: string[] = [];
+
+    for (const [provider, rawProviderConfig] of Object.entries(providers)) {
+      const providerConfig = asRecord(rawProviderConfig);
+      if (!providerConfig) {
+        continue;
+      }
+
+      const key = providerConfig.key;
+      if (key !== undefined && key !== null) {
+        if (typeof key !== "string") {
+          unsupportedPaths.push(`providers.${provider}.key`);
+        } else {
+          const trimmedKey = key.trim();
+          if (trimmedKey.length > 0) {
+            staticKeys[provider] = trimmedKey;
+          }
+        }
+      }
+
+      if (providerConfig.oauth !== undefined && providerConfig.oauth !== null) {
+        unsupportedPaths.push(`providers.${provider}.oauth`);
+      }
+      if (providerConfig.session !== undefined && providerConfig.session !== null) {
+        unsupportedPaths.push(`providers.${provider}.session`);
+      }
+    }
+
+    return {
+      staticKeys,
+      unsupportedPaths,
     };
   }
 

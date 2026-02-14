@@ -1,8 +1,8 @@
+import { MuaddibConfig } from "../config/muaddib-config.js";
+
 export type ApiKeyResolver = (
   provider: string,
 ) => Promise<string | undefined> | string | undefined;
-
-const UNSUPPORTED_REFRESH_FIELDS = ["oauth", "session"] as const;
 
 const PROVIDER_ENV_API_KEY: Record<string, string> = {
   openai: "OPENAI_API_KEY",
@@ -24,35 +24,9 @@ const PROVIDER_ENV_API_KEY: Record<string, string> = {
  * OAuth/session-backed refresh credentials are intentionally fail-fast for now
  * to avoid ambiguous operator behavior.
  */
-export function createConfigApiKeyResolver(config: Record<string, unknown>): ApiKeyResolver {
-  const providers = (config.providers as Record<string, unknown> | undefined) ?? {};
-  const staticKeys = new Map<string, string>();
-  const unsupportedPaths: string[] = [];
-
-  for (const [provider, rawProviderConfig] of Object.entries(providers)) {
-    if (!isRecord(rawProviderConfig)) {
-      continue;
-    }
-
-    const key = rawProviderConfig.key;
-    if (key !== undefined && key !== null) {
-      if (typeof key !== "string") {
-        unsupportedPaths.push(`providers.${provider}.key`);
-      } else {
-        const trimmedKey = key.trim();
-        if (trimmedKey.length > 0) {
-          staticKeys.set(provider, trimmedKey);
-        }
-      }
-    }
-
-    for (const field of UNSUPPORTED_REFRESH_FIELDS) {
-      const refreshConfig = rawProviderConfig[field];
-      if (refreshConfig !== undefined && refreshConfig !== null) {
-        unsupportedPaths.push(`providers.${provider}.${field}`);
-      }
-    }
-  }
+export function createConfigApiKeyResolver(config: MuaddibConfig): ApiKeyResolver {
+  const { staticKeys: configuredKeys, unsupportedPaths } = config.getProviderCredentialConfig();
+  const staticKeys = new Map<string, string>(Object.entries(configuredKeys));
 
   if (unsupportedPaths.length > 0) {
     const uniquePaths = Array.from(new Set(unsupportedPaths)).sort();
@@ -96,8 +70,4 @@ function buildOperatorGuidance(paths: string[]): string {
   }
 
   return `Operator guidance: ${guidance.join("; ")}.`;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
