@@ -7,6 +7,7 @@
  * loop, evaluation, and delegation to the executor for actual interjection.
  */
 
+import type { ChatRole } from "../../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import type { ProactiveRoomConfig } from "../../config/muaddib-config.js";
 import type { MuaddibRuntime } from "../../runtime.js";
@@ -229,7 +230,7 @@ export class ProactiveRunner {
   private async evaluateAndMaybeInterject(
     message: RoomMessage,
     sendResponse: ((text: string) => Promise<void>) | undefined,
-    contextDrainer: () => Array<{ role: string; content: string }>,
+    contextDrainer: () => Array<{ role: ChatRole; content: string }>,
   ): Promise<void> {
     if (!this.rateLimiter.checkLimit()) {
       this.logger.debug(
@@ -306,7 +307,7 @@ export class ProactiveRunner {
  */
 export async function evaluateProactiveInterjection(
   config: ProactiveConfig,
-  context: Array<{ role: string; content: string }>,
+  context: Array<{ role: ChatRole; content: string }>,
   options: ProactiveEvaluatorOptions = {},
 ): Promise<ProactiveEvalResult> {
   const adapter = options.modelAdapter ?? new PiAiModelAdapter();

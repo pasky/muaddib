@@ -1,3 +1,4 @@
+import type { ChatRole } from "../../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 
 export interface ContextReducerConfig {
@@ -8,9 +9,9 @@ export interface ContextReducerConfig {
 export interface ContextReducer {
   readonly isConfigured: boolean;
   reduce(
-    context: Array<{ role: string; content: string }>,
+    context: Array<{ role: ChatRole; content: string }>,
     agentSystemPrompt: string,
-  ): Promise<Array<{ role: string; content: string }>>;
+  ): Promise<Array<{ role: ChatRole; content: string }>>;
 }
 
 interface ContextReducerLogger {
@@ -38,9 +39,9 @@ export class ContextReducerTs implements ContextReducer {
   }
 
   async reduce(
-    context: Array<{ role: string; content: string }>,
+    context: Array<{ role: ChatRole; content: string }>,
     agentSystemPrompt: string,
-  ): Promise<Array<{ role: string; content: string }>> {
+  ): Promise<Array<{ role: ChatRole; content: string }>> {
     const contextToReduce = context.slice(0, -1);
 
     if (!this.isConfigured) {
@@ -92,7 +93,7 @@ export class ContextReducerTs implements ContextReducer {
   }
 
   private formatContextForReduction(
-    context: Array<{ role: string; content: string }>,
+    context: Array<{ role: ChatRole; content: string }>,
     agentSystemPrompt: string,
   ): string {
     const lines: string[] = [];
@@ -115,8 +116,8 @@ export class ContextReducerTs implements ContextReducer {
     return lines.join("\n");
   }
 
-  private parseReducedContext(response: string): Array<{ role: string; content: string }> {
-    const messages: Array<{ role: string; content: string }> = [];
+  private parseReducedContext(response: string): Array<{ role: ChatRole; content: string }> {
+    const messages: Array<{ role: ChatRole; content: string }> = [];
     const pattern = /\[(USER|ASSISTANT)\]:[ ]*(.*?)(?=\n\[(?:USER|ASSISTANT)\]:|$)/gis;
 
     for (const match of response.matchAll(pattern)) {

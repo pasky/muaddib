@@ -39,15 +39,15 @@ describe("ContextReducerTs", () => {
   it("reduce returns context minus last message when not configured", async () => {
     const reducer = new ContextReducerTs();
     const context = [
-      { role: "user", content: "hello" },
-      { role: "assistant", content: "hi" },
-      { role: "user", content: "latest" },
+      { role: "user" as const, content: "hello" },
+      { role: "assistant" as const, content: "hi" },
+      { role: "user" as const, content: "latest" },
     ];
 
     const result = await reducer.reduce(context, "system prompt");
     expect(result).toEqual([
-      { role: "user", content: "hello" },
-      { role: "assistant", content: "hi" },
+      { role: "user" as const, content: "hello" },
+      { role: "assistant" as const, content: "hi" },
     ]);
   });
 
@@ -58,7 +58,7 @@ describe("ContextReducerTs", () => {
       modelAdapter,
     });
 
-    const result = await reducer.reduce([{ role: "user", content: "only message" }], "sys");
+    const result = await reducer.reduce([{ role: "user" as const, content: "only message" }], "sys");
     expect(result).toEqual([]);
     expect(modelAdapter.completeSimple).not.toHaveBeenCalled();
   });
@@ -74,15 +74,15 @@ describe("ContextReducerTs", () => {
     });
 
     const context = [
-      { role: "user", content: "long question" },
-      { role: "assistant", content: "long answer" },
-      { role: "user", content: "follow up" },
+      { role: "user" as const, content: "long question" },
+      { role: "assistant" as const, content: "long answer" },
+      { role: "user" as const, content: "follow up" },
     ];
 
     const result = await reducer.reduce(context, "agent system prompt");
     expect(result).toEqual([
-      { role: "user", content: "summarized question" },
-      { role: "assistant", content: "summarized answer" },
+      { role: "user" as const, content: "summarized question" },
+      { role: "assistant" as const, content: "summarized answer" },
     ]);
 
     const firstCall = modelAdapter.completeSimple.mock.calls[0] as any[];
@@ -110,9 +110,9 @@ describe("ContextReducerTs", () => {
     });
 
     const context = [
-      { role: "user", content: "tell me about cats" },
-      { role: "assistant", content: "cats are great" },
-      { role: "user", content: "more" },
+      { role: "user" as const, content: "tell me about cats" },
+      { role: "assistant" as const, content: "cats are great" },
+      { role: "user" as const, content: "more" },
     ];
 
     const result = await reducer.reduce(context, "sys");
@@ -133,15 +133,15 @@ describe("ContextReducerTs", () => {
     });
 
     const context = [
-      { role: "user", content: "a" },
-      { role: "assistant", content: "b" },
-      { role: "user", content: "c" },
+      { role: "user" as const, content: "a" },
+      { role: "assistant" as const, content: "b" },
+      { role: "user" as const, content: "c" },
     ];
 
     const result = await reducer.reduce(context, "sys");
     expect(result).toEqual([
-      { role: "user", content: "a" },
-      { role: "assistant", content: "b" },
+      { role: "user" as const, content: "a" },
+      { role: "assistant" as const, content: "b" },
     ]);
   });
 
@@ -158,12 +158,12 @@ describe("ContextReducerTs", () => {
     });
 
     const context = [
-      { role: "user", content: "a" },
-      { role: "user", content: "b" },
+      { role: "user" as const, content: "a" },
+      { role: "user" as const, content: "b" },
     ];
 
     const result = await reducer.reduce(context, "sys");
-    expect(result).toEqual([{ role: "user", content: "a" }]);
+    expect(result).toEqual([{ role: "user" as const, content: "a" }]);
   });
 
   it("reduce resolves API key via getApiKey callback", async () => {
@@ -178,8 +178,8 @@ describe("ContextReducerTs", () => {
 
     await reducer.reduce(
       [
-        { role: "user", content: "a" },
-        { role: "user", content: "b" },
+        { role: "user" as const, content: "a" },
+        { role: "user" as const, content: "b" },
       ],
       "sys",
     );
@@ -201,19 +201,19 @@ describe("ContextReducerTs", () => {
 
     const result = await reducer.reduce(
       [
-        { role: "user", content: "a" },
-        { role: "assistant", content: "b" },
-        { role: "user", content: "c" },
-        { role: "assistant", content: "d" },
-        { role: "user", content: "e" },
+        { role: "user" as const, content: "a" },
+        { role: "assistant" as const, content: "b" },
+        { role: "user" as const, content: "c" },
+        { role: "assistant" as const, content: "d" },
+        { role: "user" as const, content: "e" },
       ],
       "sys",
     );
 
     expect(result).toEqual([
-      { role: "user", content: "question one" },
-      { role: "assistant", content: "answer one" },
-      { role: "user", content: "question two" },
+      { role: "user" as const, content: "question one" },
+      { role: "assistant" as const, content: "answer one" },
+      { role: "user" as const, content: "question two" },
     ]);
   });
 
@@ -229,13 +229,13 @@ describe("ContextReducerTs", () => {
 
     const result = await reducer.reduce(
       [
-        { role: "user", content: "a" },
-        { role: "assistant", content: "b" },
-        { role: "user", content: "c" },
+        { role: "user" as const, content: "a" },
+        { role: "assistant" as const, content: "b" },
+        { role: "user" as const, content: "c" },
       ],
       "sys",
     );
 
-    expect(result).toEqual([{ role: "assistant", content: "actual content" }]);
+    expect(result).toEqual([{ role: "assistant" as const, content: "actual content" }]);
   });
 });

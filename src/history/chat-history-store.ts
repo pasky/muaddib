@@ -3,6 +3,8 @@ import sqlite3 from "sqlite3";
 
 import type { RoomMessage } from "../rooms/message.js";
 
+export type ChatRole = "user" | "assistant";
+
 export interface LlmCallInput {
   provider: string;
   model: string;
@@ -18,7 +20,7 @@ export interface HistoryMessageRow {
   id: number;
   nick: string;
   message: string;
-  role: string;
+  role: ChatRole;
   timestamp: string;
 }
 
@@ -37,7 +39,7 @@ export interface LlmCallRow {
 
 interface ContextRow {
   message: string;
-  role: string;
+  role: ChatRole;
   time_only: string;
   mode: string | null;
 }
@@ -46,7 +48,7 @@ interface FullHistoryRow {
   id: number;
   nick: string;
   message: string;
-  role: string;
+  role: ChatRole;
   timestamp: string;
 }
 
@@ -181,7 +183,7 @@ export class ChatHistoryStore {
       mode?: string | null;
       llmCallId?: number | null;
       contentTemplate?: string;
-      role?: string;
+      role?: ChatRole;
     } = {},
   ): Promise<number> {
     const db = this.requireDb();
@@ -215,7 +217,7 @@ export class ChatHistoryStore {
   async getContextForMessage(
     message: RoomMessage,
     limit?: number,
-  ): Promise<Array<{ role: string; content: string }>> {
+  ): Promise<Array<{ role: ChatRole; content: string }>> {
     return this.getContext(
       message.serverTag,
       message.channelName,
@@ -231,7 +233,7 @@ export class ChatHistoryStore {
     limit?: number,
     threadId?: string,
     threadStarterId?: number,
-  ): Promise<Array<{ role: string; content: string }>> {
+  ): Promise<Array<{ role: ChatRole; content: string }>> {
     const db = this.requireDb();
     const inferenceLimit = limit ?? this.inferenceLimit;
 
@@ -331,7 +333,7 @@ export class ChatHistoryStore {
       id: Number(row.id),
       nick: String(row.nick),
       message: String(row.message),
-      role: String(row.role),
+      role: String(row.role) as ChatRole,
       timestamp: String(row.timestamp),
     }));
   }
@@ -518,7 +520,7 @@ export class ChatHistoryStore {
     return Number(result.changes ?? 0) > 0;
   }
 
-  private defaultRoleForMessage(message: RoomMessage): string {
+  private defaultRoleForMessage(message: RoomMessage): ChatRole {
     return message.nick.toLowerCase() === message.mynick.toLowerCase() ? "assistant" : "user";
   }
 

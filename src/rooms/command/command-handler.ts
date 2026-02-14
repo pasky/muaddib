@@ -6,6 +6,7 @@
  * lifecycle to ProactiveRunner.
  */
 
+import type { ChatRole } from "../../history/chat-history-store.js";
 import { SteeringQueue } from "./steering-queue.js";
 import { CommandResolver } from "./resolver.js";
 import { buildProactiveConfig, ProactiveRunner } from "./proactive.js";
@@ -197,7 +198,7 @@ export class RoomCommandHandlerTs {
 
   private async processSessionItem(
     item: import("./steering-queue.js").QueuedInboundMessage,
-    contextDrainer: () => Array<{ role: string; content: string }>,
+    contextDrainer: () => Array<{ role: ChatRole; content: string }>,
   ): Promise<void> {
     if (item.kind === "command") {
       if (item.triggerMessageId === null) {

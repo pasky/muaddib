@@ -24,7 +24,7 @@ import {
   type MuaddibTool,
   type ToolPersistType,
 } from "../../agent/tools/baseline-tools.js";
-import type { ChatHistoryStore } from "../../history/chat-history-store.js";
+import type { ChatHistoryStore, ChatRole } from "../../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { parseModelSpec } from "../../models/model-spec.js";
 import { ContextReducerTs, type ContextReducer } from "./context-reducer.js";
@@ -73,7 +73,7 @@ export interface CommandExecutorLogger {
 }
 
 /** Callback to drain steering context messages during agent execution. */
-export type SteeringContextDrainer = () => Array<{ role: string; content: string }>;
+export type SteeringContextDrainer = () => Array<{ role: ChatRole; content: string }>;
 
 export interface CommandExecutorOverrides {
   responseCleaner?: (text: string, nick: string) => string;
@@ -243,10 +243,10 @@ export class CommandExecutor {
       ? steeringContextDrainer()
       : [];
 
-    const runnerContext = [
+    const runnerContext: SessionFactoryContextMessage[] = [
       ...context.slice(0, -1),
       ...initialSteeringMessages,
-    ].map(toRunnerContextMessage);
+    ];
 
     const tools = this.selectTools(message, classifiedRuntime.allowedTools, runnerContext);
 
@@ -478,7 +478,7 @@ export class CommandExecutor {
       resolved.modelOverride ?? undefined,
     );
 
-    let prependedContext: Array<{ role: string; content: string }> = [];
+    let prependedContext: Array<{ role: ChatRole; content: string }> = [];
     if (
       !resolved.noContext &&
       resolved.runtime.includeChapterSummary &&
@@ -508,11 +508,11 @@ export class CommandExecutor {
       ];
     }
 
-    const runnerContext = [
+    const runnerContext: SessionFactoryContextMessage[] = [
       ...prependedContext,
       ...selectedContext.slice(0, -1),
       ...initialSteeringMessages,
-    ].map(toRunnerContextMessage);
+    ];
 
     const tools = this.selectTools(message, resolved.runtime.allowedTools, runnerContext);
 
@@ -1033,13 +1033,6 @@ export function pickModeModel(model: string | string[] | undefined): string | nu
     return model[0] ?? null;
   }
   return model;
-}
-
-function toRunnerContextMessage(message: { role: string; content: string }): SessionFactoryContextMessage {
-  return {
-    role: message.role === "assistant" ? "assistant" : "user",
-    content: message.content,
-  };
 }
 
 function normalizeThinkingLevel(reasoningEffort: string): ThinkingLevel {

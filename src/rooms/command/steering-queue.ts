@@ -1,3 +1,4 @@
+import type { ChatRole } from "../../history/chat-history-store.js";
 import { roomArc, type RoomMessage } from "../message.js";
 
 export type SteeringKey = readonly [arc: string, nick: string, threadId: string | null];
@@ -244,7 +245,7 @@ export class SteeringQueue {
    * The returned callback drains all queued messages as context,
    * finishing those items and returning their content.
    */
-  createContextDrainer(key: SteeringKey): () => Array<{ role: string; content: string }> {
+  createContextDrainer(key: SteeringKey): () => Array<{ role: ChatRole; content: string }> {
     return () =>
       this.drainSteeringContextMessages(key).map((msg) => ({
         role: msg.role,
@@ -263,7 +264,7 @@ export class SteeringQueue {
     key: SteeringKey,
     processItem: (
       item: QueuedInboundMessage,
-      contextDrainer: () => Array<{ role: string; content: string }>,
+      contextDrainer: () => Array<{ role: ChatRole; content: string }>,
     ) => Promise<void>,
   ): Promise<void> {
     const contextDrainer = this.createContextDrainer(key);

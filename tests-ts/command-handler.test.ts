@@ -565,7 +565,7 @@ describe("RoomCommandHandlerTs", () => {
       isConfigured: true,
       reduce: vi.fn(async () => [
         {
-          role: "user",
+          role: "user" as const,
           content: "[10:00] <summary> reduced context",
         },
       ]),

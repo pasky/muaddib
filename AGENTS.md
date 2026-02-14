@@ -49,7 +49,8 @@
 
 ## Contributing Guideline
 - All new changes follow the red-green-refactor TDD approach!
-- For AI agents: When user is frustrated, stop and think why and consider whether not to append an additional behavioral instruction to this AGENTS.md file.
+- For AI agents: When user is frustrated, stop and think: why? Consider whether not to append an additional behavioral instruction to this AGENTS.md file.
+- Every time after committing your work, stop and think: how could I improve the codebase I just touched? Did I notice any case of spaghetti code, useless adapters, wrong decoupling, invalid separation of concerns? Propose concrete ideas to the user.
 
 ## Deprecated Python Runtime (auxiliary)
 - Legacy invocation remains available temporarily via: `uv run muaddib`
