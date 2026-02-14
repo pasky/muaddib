@@ -133,6 +133,14 @@ function suffixFromFilename(filename: string): string {
   return ext || ".bin";
 }
 
+/**
+ * Shell-quote a string for safe inclusion in a bash command.
+ * Uses single-quote wrapping with proper escaping of embedded single quotes.
+ */
+function shellQuote(s: string): string {
+  return "'" + s.replace(/'/g, "'\\''") + "'";
+}
+
 // ---------------------------------------------------------------------------
 // Executor
 // ---------------------------------------------------------------------------
@@ -183,7 +191,7 @@ export function createDefaultExecuteCodeExecutor(
     const actorId = randomUUID().slice(0, 8);
     workdir = `/tmp/actor-${actorId}`;
 
-    await spriteExec(sp, `mkdir -p ${workdir} /workspace /artifacts`);
+    await spriteExec(sp, `mkdir -p ${shellQuote(workdir)} /workspace /artifacts`);
     options.logger?.info(`Created actor workdir: ${workdir}`);
     return workdir;
   }
@@ -196,12 +204,20 @@ export function createDefaultExecuteCodeExecutor(
   async function spriteExec(
     sp: Sprite,
     command: string,
-    execOptions?: { cwd?: string },
+    execOptions?: { cwd?: string; timeoutMs?: number },
   ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
     const { ExecError } = await import("@fly/sprites");
 
+    // Wrap with `timeout` command when a timeout is specified, so that
+    // long-running sandbox commands are killed server-side.
+    let cmd = command;
+    if (execOptions?.timeoutMs) {
+      const secs = Math.ceil(execOptions.timeoutMs / 1000);
+      cmd = `timeout ${secs} bash -c ${shellQuote(command)}`;
+    }
+
     try {
-      const result = await sp.exec(command, {
+      const result = await sp.exec(cmd, {
         cwd: execOptions?.cwd,
       });
       return {
@@ -229,13 +245,15 @@ export function createDefaultExecuteCodeExecutor(
   async function downloadSpriteFile(
     sp: Sprite,
     path: string,
-  ): Promise<{ data: string; filename: string } | null> {
-    const result = await spriteExec(sp, `cat ${path}`);
+  ): Promise<{ data: Buffer; filename: string } | null> {
+    const result = await spriteExec(sp, `base64 ${shellQuote(path)}`);
     if (result.exitCode !== 0) {
       options.logger?.info(`Failed to read file ${path}: ${result.stderr}`);
       return null;
     }
-    return { data: result.stdout, filename: posix.basename(path) };
+    // Decode the base64-encoded content back to binary
+    const data = Buffer.from(result.stdout.trim(), "base64");
+    return { data, filename: posix.basename(path) };
   }
 
   async function uploadInputArtifacts(
@@ -260,9 +278,8 @@ export function createDefaultExecuteCodeExecutor(
         const spritePath = `/artifacts/${filename}`;
 
         if (typeof content === "string") {
-          // Write text via echo/cat to avoid shell escaping issues — use base64
           const b64 = Buffer.from(content, "utf-8").toString("base64");
-          await spriteExec(sp, `echo '${b64}' | base64 -d > ${spritePath}`);
+          await spriteExec(sp, `printf '%s' ${shellQuote(b64)} | base64 -d > ${shellQuote(spritePath)}`);
           messages.push(`**Uploaded text: ${spritePath}**`);
         } else {
           const imageData = extractImageDataFromResult(content);
@@ -271,7 +288,7 @@ export function createDefaultExecuteCodeExecutor(
             continue;
           }
           const b64 = imageData.toString("base64");
-          await spriteExec(sp, `echo '${b64}' | base64 -d > ${spritePath}`);
+          await spriteExec(sp, `printf '%s' ${shellQuote(b64)} | base64 -d > ${shellQuote(spritePath)}`);
           messages.push(`**Uploaded image: ${spritePath}**`);
         }
 
@@ -293,7 +310,7 @@ export function createDefaultExecuteCodeExecutor(
     const messages: string[] = [];
 
     for (const ext of ["*.png", "*.jpg", "*.jpeg"]) {
-      const findResult = await spriteExec(sp, `find ${wd} -name '${ext}' -type f`);
+      const findResult = await spriteExec(sp, `find ${shellQuote(wd)} -name '${ext}' -type f`);
       if (findResult.exitCode !== 0 || !findResult.stdout.trim()) continue;
 
       for (const imgPath of findResult.stdout.trim().split("\n")) {
@@ -303,9 +320,8 @@ export function createDefaultExecuteCodeExecutor(
         if (!fileResult) continue;
 
         try {
-          const data = Buffer.from(fileResult.data, "binary");
           const suffix = suffixFromFilename(fileResult.filename);
-          const url = await writeArtifactBytes(options, data, suffix);
+          const url = await writeArtifactBytes(options, fileResult.data, suffix);
           messages.push(`**Generated image:** ${url}`);
         } catch (err) {
           options.logger?.info(`Failed to upload generated image ${imgPath}: ${err}`);
@@ -334,9 +350,8 @@ export function createDefaultExecuteCodeExecutor(
       }
 
       try {
-        const data = Buffer.from(fileResult.data, "binary");
         const suffix = suffixFromFilename(fileResult.filename);
-        const url = await writeArtifactBytes(options, data, suffix);
+        const url = await writeArtifactBytes(options, fileResult.data, suffix);
         messages.push(`**Downloaded file (${fileResult.filename}):** ${url}`);
       } catch (err) {
         messages.push(`**Error uploading ${fileResult.filename}:** ${err}`);
@@ -391,11 +406,11 @@ export function createDefaultExecuteCodeExecutor(
 
       // Write code via base64 to avoid shell escaping issues
       const codeB64 = Buffer.from(input.code, "utf-8").toString("base64");
-      await spriteExec(sp, `echo '${codeB64}' | base64 -d > ${savedFile}`);
+      await spriteExec(sp, `printf '%s' ${shellQuote(codeB64)} | base64 -d > ${shellQuote(savedFile)}`);
 
-      // Execute
-      const cmd = language === "python" ? `python3 ${savedFile}` : `bash ${savedFile}`;
-      const execution = await spriteExec(sp, cmd, { cwd: wd });
+      // Execute with timeout
+      const cmd = language === "python" ? `python3 ${shellQuote(savedFile)}` : `bash ${shellQuote(savedFile)}`;
+      const execution = await spriteExec(sp, cmd, { cwd: wd, timeoutMs: timeoutMs });
 
       // Process results (matching Python output format exactly)
       if (execution.exitCode !== 0) {

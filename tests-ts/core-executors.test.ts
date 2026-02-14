@@ -1148,6 +1148,65 @@ describe("core tool executors execute_code Sprites sandbox", () => {
       executors.executeCode({ code: 'echo "hi"', language: "bash" }),
     ).rejects.toThrow("tools.sprites.token");
   });
+
+  it("execute_code handles binary output files correctly via base64 roundtrip", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "muaddib-ts-exec-"));
+    tempDirs.push(dir);
+    const artifactsDir = join(dir, "artifacts");
+
+    const executors = createDefaultToolExecutors({
+      spritesToken: "test-token",
+      artifactsPath: artifactsDir,
+      artifactsUrl: "https://example.com/artifacts",
+    });
+
+    // Write binary data (PNG header bytes) and download via output_files
+    const result = await executors.executeCode({
+      code: 'printf "\\x89PNG\\x0d\\x0a\\x1a\\x0a\\x00\\x00" > /tmp/binary-test.bin',
+      language: "bash",
+      output_files: ["/tmp/binary-test.bin"],
+    });
+
+    expect(result).toContain("Downloaded file (binary-test.bin):");
+    // Verify the artifact file was written with correct binary content
+    const match = result.match(/https:\/\/example\.com\/artifacts\/\?([^\s*]+)/);
+    expect(match).toBeTruthy();
+    const savedContent = await readFile(join(artifactsDir, match![1]));
+    // First byte should be 0x89 (PNG magic), not corrupted by string encoding
+    expect(savedContent[0]).toBe(0x89);
+    expect(savedContent[1]).toBe(0x50); // 'P'
+  });
+
+  it("execute_code handles code with shell-special characters safely", async () => {
+    const executors = createDefaultToolExecutors({
+      spritesToken: "test-token",
+    });
+
+    // Code containing single quotes, backticks, dollar signs
+    const result = await executors.executeCode({
+      code: "echo \"it's a \\$test\" && echo 'backtick: \\`cmd\\`'",
+      language: "bash",
+    });
+
+    expect(result).toContain("Code saved to");
+    // Should not error from shell escaping issues
+    expect(result).not.toContain("Error initializing sandbox");
+  });
+
+  it("execute_code applies timeout to execution", async () => {
+    const executors = createDefaultToolExecutors({
+      spritesToken: "test-token",
+      executeCodeTimeoutMs: 2_000,
+    });
+
+    const result = await executors.executeCode({
+      code: "sleep 30",
+      language: "bash",
+    });
+
+    // Should be killed by timeout, not hang for 30s
+    expect(result).toContain("Execution error");
+  }, 15_000);
 });
 
 describe("core tool executors quest validation with active quest", () => {

@@ -3,7 +3,7 @@
 ## Build/Test Commands
 - Install dependencies: `npm ci`
 - Typecheck: `npm run typecheck`
-- Tests: `npm test`
+- Tests: `npm test` (ALWAYS use a timeout, e.g. `timeout 120 npm test 2>&1`; NEVER pipe test output through `tail` or other filters — capture full output or use `timeout`)
 - Build runtime: `npm run build`
 - Any change should be accompanied with tests update. (Always prefer updating existing unit tests over adding new ones.)
 - Any change where viable should be tested by actually running the CLI e2e test: `MUADDIB_HOME=. npm run cli:message -- --message "your message here"`
