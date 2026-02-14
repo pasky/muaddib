@@ -1,6 +1,6 @@
 # Config & Runtime Refactoring Plan
 
-Status: Step 1 next.
+Status: Step 1 done. Step 2 next.
 
 ## Context
 
@@ -23,7 +23,7 @@ context usage per session. Each step is a self-contained commit.
 
 ---
 
-## Step 1: `src/app/refusal-fallback.ts`
+## Step 1: `src/app/refusal-fallback.ts` ✅
 
 - Change `resolveRefusalFallbackModel` to accept `MuaddibConfig` instead of
   `Record<string, unknown>`
