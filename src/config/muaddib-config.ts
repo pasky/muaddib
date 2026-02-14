@@ -89,6 +89,11 @@ export interface RoomVarlinkConfig {
   socket_path?: string;
 }
 
+export interface SlackWorkspaceConfig {
+  bot_token?: string;
+  name?: string;
+}
+
 export interface RoomConfig {
   enabled?: boolean;
   command?: CommandConfig;
@@ -97,7 +102,7 @@ export interface RoomConfig {
   token?: string;
   bot_name?: string;
   app_token?: string;
-  workspaces?: Record<string, Record<string, unknown>>;
+  workspaces?: Record<string, SlackWorkspaceConfig>;
   reply_start_thread?: {
     channel?: boolean;
     dm?: boolean;
@@ -148,6 +153,29 @@ function toStringRecord(value: unknown): Record<string, string> | undefined {
       continue;
     }
     result[key] = normalized;
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
+}
+
+function toSlackWorkspaces(value: unknown): Record<string, SlackWorkspaceConfig> | undefined {
+  const record = asRecord(value);
+  if (!record) {
+    return undefined;
+  }
+
+  const result: Record<string, SlackWorkspaceConfig> = {};
+  for (const [workspaceId, rawWorkspace] of Object.entries(record)) {
+    const workspace = asRecord(rawWorkspace);
+    if (!workspace) {
+      result[workspaceId] = {};
+      continue;
+    }
+
+    result[workspaceId] = {
+      bot_token: stringOrUndefined(workspace.bot_token),
+      name: stringOrUndefined(workspace.name),
+    };
   }
 
   return Object.keys(result).length > 0 ? result : undefined;
@@ -388,7 +416,7 @@ export class MuaddibConfig {
       token: stringOrUndefined(merged.token),
       bot_name: stringOrUndefined(merged.bot_name),
       app_token: stringOrUndefined(merged.app_token),
-      workspaces: asRecord(merged.workspaces) as Record<string, Record<string, unknown>> | undefined,
+      workspaces: toSlackWorkspaces(merged.workspaces),
       reply_start_thread: {
         channel: typeof replyStartThread?.channel === "boolean" ? replyStartThread.channel : undefined,
         dm: typeof replyStartThread?.dm === "boolean" ? replyStartThread.dm : undefined,

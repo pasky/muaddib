@@ -1,11 +1,9 @@
 import { pathToFileURL } from "node:url";
 
-import { RuntimeLogWriter, type RuntimeLogger } from "./logging.js";
-import { RoomCommandHandlerTs } from "../rooms/command/command-handler.js";
+import { RuntimeLogWriter } from "./logging.js";
 import { DiscordRoomMonitor } from "../rooms/discord/monitor.js";
 import { IrcRoomMonitor } from "../rooms/irc/monitor.js";
 import { SlackRoomMonitor } from "../rooms/slack/monitor.js";
-import { SlackSocketTransport } from "../rooms/slack/transport.js";
 import type { SendRetryEvent } from "../rooms/send-retry.js";
 import { getMuaddibHome, parseAppArgs } from "./bootstrap.js";
 import { createMuaddibRuntime, shutdownRuntime, type MuaddibRuntime } from "../runtime.js";
@@ -45,8 +43,6 @@ export async function runMuaddibMain(argv: string[] = process.argv.slice(2)): Pr
 
 function createMonitors(runtime: MuaddibRuntime): RunnableMonitor[] {
   const monitors: RunnableMonitor[] = [];
-  const logger = runtime.logger.getLogger("muaddib.app.main");
-
   // IRC
   monitors.push(...IrcRoomMonitor.fromRuntime(runtime));
 
@@ -54,64 +50,9 @@ function createMonitors(runtime: MuaddibRuntime): RunnableMonitor[] {
   monitors.push(...DiscordRoomMonitor.fromRuntime(runtime));
 
   // Slack
-  const slackRoomConfig = runtime.config.getRoomConfig("slack") as any;
-  if (isRoomEnabled(slackRoomConfig, false)) {
-    const commandHandler = RoomCommandHandlerTs.fromRuntime(runtime, "slack");
-    const slackAppToken = requireNonEmptyString(
-      slackRoomConfig?.app_token,
-      "Slack room is enabled but rooms.slack.app_token is missing.",
-    );
-
-    const workspaces = (slackRoomConfig?.workspaces as Record<string, any> | undefined) ?? {};
-    const workspaceEntries = Object.entries(workspaces);
-    if (workspaceEntries.length === 0) {
-      throw new Error("Slack room is enabled but rooms.slack.workspaces is missing.");
-    }
-
-    for (const [workspaceId, workspaceConfig] of workspaceEntries) {
-      const botToken = requireNonEmptyString(
-        workspaceConfig?.bot_token,
-        `Slack room is enabled but rooms.slack.workspaces.${workspaceId}.bot_token is missing.`,
-      );
-
-      const transport = new SlackSocketTransport({
-        appToken: slackAppToken,
-        botToken,
-        workspaceId,
-        workspaceName: workspaceConfig?.name,
-        botNameFallback: workspaceConfig?.name,
-      });
-
-      logger.info("Enabling Slack room monitor", `workspace=${workspaceId}`);
-      monitors.push(
-        new SlackRoomMonitor({
-          roomConfig: slackRoomConfig,
-          history: runtime.history,
-          commandHandler,
-          eventSource: transport,
-          sender: transport,
-          onSendRetryEvent: createSendRetryEventLogger(runtime.logger.getLogger(`muaddib.send-retry.slack.${workspaceId}`)),
-          logger: runtime.logger.getLogger(`muaddib.rooms.slack.monitor.${workspaceId}`),
-        }),
-      );
-    }
-  }
+  monitors.push(...SlackRoomMonitor.fromRuntime(runtime));
 
   return monitors;
-}
-
-function requireNonEmptyString(value: unknown, message: string): string {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new Error(message);
-  }
-  return value;
-}
-
-function isRoomEnabled(roomConfig: any, defaultValue: boolean): boolean {
-  if (typeof roomConfig?.enabled === "boolean") {
-    return roomConfig.enabled;
-  }
-  return defaultValue;
 }
 
 interface SendRetryLogger {

@@ -1,9 +1,141 @@
 import { describe, expect, it } from "vitest";
 
+import { RuntimeLogWriter } from "../src/app/logging.js";
+import { MuaddibConfig } from "../src/config/muaddib-config.js";
 import { ChatHistoryStore } from "../src/history/chat-history-store.js";
+import { PiAiModelAdapter } from "../src/models/pi-ai-model-adapter.js";
 import { SlackRoomMonitor } from "../src/rooms/slack/monitor.js";
+import type { MuaddibRuntime } from "../src/runtime.js";
+
+function baseCommandConfig() {
+  return {
+    history_size: 40,
+    default_mode: "classifier:serious",
+    modes: {
+      serious: {
+        model: "openai:gpt-4o-mini",
+        prompt: "You are {mynick}",
+        triggers: {
+          "!s": {},
+        },
+      },
+    },
+    mode_classifier: {
+      model: "openai:gpt-4o-mini",
+      labels: {
+        EASY_SERIOUS: "!s",
+      },
+      fallback_label: "EASY_SERIOUS",
+    },
+  };
+}
+
+function buildRuntime(configData: Record<string, unknown>, history: ChatHistoryStore): MuaddibRuntime {
+  return {
+    config: MuaddibConfig.inMemory(configData),
+    history,
+    modelAdapter: new PiAiModelAdapter(),
+    getApiKey: () => undefined,
+    logger: new RuntimeLogWriter({
+      muaddibHome: process.cwd(),
+      stdout: { write: () => true } as unknown as NodeJS.WriteStream,
+    }),
+  };
+}
 
 describe("SlackRoomMonitor", () => {
+  it("fromRuntime returns [] when Slack is disabled", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    const monitors = SlackRoomMonitor.fromRuntime(buildRuntime({
+      rooms: {
+        common: {
+          command: baseCommandConfig(),
+        },
+        slack: {
+          enabled: false,
+        },
+      },
+    }, history));
+
+    expect(monitors).toEqual([]);
+    await history.close();
+  });
+
+  it("fromRuntime validates app token/workspaces when Slack is enabled", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    expect(() => SlackRoomMonitor.fromRuntime(buildRuntime({
+      rooms: {
+        common: {
+          command: baseCommandConfig(),
+        },
+        slack: {
+          enabled: true,
+        },
+      },
+    }, history))).toThrow("Slack room is enabled but rooms.slack.app_token is missing.");
+
+    expect(() => SlackRoomMonitor.fromRuntime(buildRuntime({
+      rooms: {
+        common: {
+          command: baseCommandConfig(),
+        },
+        slack: {
+          enabled: true,
+          app_token: "xapp-test",
+        },
+      },
+    }, history))).toThrow("Slack room is enabled but rooms.slack.workspaces is missing.");
+
+    expect(() => SlackRoomMonitor.fromRuntime(buildRuntime({
+      rooms: {
+        common: {
+          command: baseCommandConfig(),
+        },
+        slack: {
+          enabled: true,
+          app_token: "xapp-test",
+          workspaces: {
+            T123: {},
+          },
+        },
+      },
+    }, history))).toThrow("Slack room is enabled but rooms.slack.workspaces.T123.bot_token is missing.");
+
+    await history.close();
+  });
+
+  it("fromRuntime builds one Slack monitor per workspace when enabled", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    const monitors = SlackRoomMonitor.fromRuntime(buildRuntime({
+      rooms: {
+        common: {
+          command: baseCommandConfig(),
+        },
+        slack: {
+          enabled: true,
+          app_token: "xapp-test",
+          workspaces: {
+            T123: {
+              bot_token: "xoxb-1",
+            },
+            T456: {
+              bot_token: "xoxb-2",
+            },
+          },
+        },
+      },
+    }, history));
+
+    expect(monitors).toHaveLength(2);
+    await history.close();
+  });
+
   it("maps direct mention event to shared command handler with cleaned text", async () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();
