@@ -345,13 +345,12 @@ describe("core tool executors chronicler/quest support", () => {
       "Error: quest_snooze requires an active quest context.",
     );
 
-    await expect(
-      executors.questStart({
-        id: " ",
-        goal: "Do a thing",
-        success_criteria: "Done",
-      }),
-    ).rejects.toThrow("quest_start.id must be non-empty.");
+    const result = await executors.questStart({
+      id: " ",
+      goal: "Do a thing",
+      success_criteria: "Done",
+    });
+    expect(result).toContain("Error:");
   });
 });
 
@@ -860,9 +859,16 @@ describe("core tool executors quest validation with active quest", () => {
   it("subquest_start validates input with active quest context", async () => {
     const executors = createDefaultToolExecutors({ currentQuestId: "active-quest" });
 
-    await expect(
-      executors.subquestStart({ id: " ", goal: "g", success_criteria: "s" }),
-    ).rejects.toThrow("subquest_start.id must be non-empty");
+    const emptyId = await executors.subquestStart({ id: " ", goal: "g", success_criteria: "s" });
+    expect(emptyId).toContain("Error:");
+
+    const dotId = await executors.subquestStart({ id: "a.b", goal: "g", success_criteria: "s" });
+    expect(dotId).toContain("Error:");
+    expect(dotId).toContain("dots");
+
+    const longId = await executors.subquestStart({ id: "a".repeat(65), goal: "g", success_criteria: "s" });
+    expect(longId).toContain("Error:");
+    expect(longId).toContain("too long");
 
     await expect(
       executors.subquestStart({ id: "x", goal: " ", success_criteria: "s" }),
@@ -891,6 +897,16 @@ describe("core tool executors quest validation with active quest", () => {
 
   it("quest_start validates all required fields", async () => {
     const executors = createDefaultToolExecutors();
+
+    const emptyId = await executors.questStart({ id: "", goal: "g", success_criteria: "s" });
+    expect(emptyId).toContain("Error:");
+
+    const dotId = await executors.questStart({ id: "a.b", goal: "g", success_criteria: "s" });
+    expect(dotId).toContain("Error:");
+    expect(dotId).toContain("dots");
+
+    const badChars = await executors.questStart({ id: "a b", goal: "g", success_criteria: "s" });
+    expect(badChars).toContain("Error:");
 
     await expect(
       executors.questStart({ id: "x", goal: " ", success_criteria: "s" }),

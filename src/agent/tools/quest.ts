@@ -23,6 +23,16 @@ export type QuestStartExecutor = (input: QuestStartInput) => Promise<string>;
 export type SubquestStartExecutor = (input: SubquestStartInput) => Promise<string>;
 export type QuestSnoozeExecutor = (input: QuestSnoozeInput) => Promise<string>;
 
+const VALID_QUEST_ID_RE = /^[a-zA-Z0-9_-]+$/;
+
+function validateQuestId(questId: string): string | undefined {
+  if (!questId) return "Quest ID cannot be empty";
+  if (questId.length > 64) return "Quest ID too long (max 64 characters)";
+  if (questId.includes(".")) return "Quest ID cannot contain dots (reserved for hierarchy)";
+  if (!VALID_QUEST_ID_RE.test(questId)) return "Quest ID can only contain letters, numbers, hyphens, and underscores";
+  return undefined;
+}
+
 const DEFERRED_QUEST_TOOL_MESSAGE =
   "REJECTED: quests runtime is deferred in the TypeScript runtime (parity v1).";
 
@@ -33,16 +43,16 @@ export function createQuestStartTool(
     name: "quest_start",
     label: "Quest Start",
     description:
-      "Start a top-level quest. Only use when a user explicitly asks for a multi-step autonomous task.",
+      "Start a new quest for yourself. Only use on explicit user request for a multi-step autonomous task. The quest system will periodically advance the quest until success criteria are met. MUST be called alongside final_answer in the same turn.",
     parameters: Type.Object({
       id: Type.String({
-        description: "Quest identifier (letters, numbers, hyphens, underscores).",
+        description: "Unique quest identifier (letters, numbers, hyphens, underscores only). Example: 'check-xmas25-news-tuesday'",
       }),
       goal: Type.String({
-        description: "What the quest should accomplish.",
+        description: "Clear description of what the quest should accomplish.",
       }),
       success_criteria: Type.String({
-        description: "Specific criteria for quest completion.",
+        description: "Specific, measurable criteria for when the quest is complete.",
       }),
     }),
     execute: async (_toolCallId, params: QuestStartInput) => {
@@ -64,16 +74,17 @@ export function createSubquestStartTool(
   return {
     name: "subquest_start",
     label: "Subquest Start",
-    description: "Start a subquest for the active quest context.",
+    description:
+      "Start a subquest to fully focus on a particular task of the current quest. When the subquest finishes, the parent quest resumes. BEFORE starting subquests, call make_plan to outline your approach - the plan will be included in context for all future quest steps and can be updated via subsequent make_plan calls. If starting multiple subquests, do not call this tool in parallel for subquests that depend on each other. MUST be called alongside final_answer in the same turn.",
     parameters: Type.Object({
       id: Type.String({
-        description: "Subquest identifier.",
+        description: "Subquest identifier (letters, numbers, hyphens, underscores only). Will be prefixed with parent quest ID.",
       }),
       goal: Type.String({
-        description: "What the subquest should accomplish.",
+        description: "Clear description of what this subquest should accomplish.",
       }),
       success_criteria: Type.String({
-        description: "Specific criteria for subquest completion.",
+        description: "Specific criteria for when this subquest is complete.",
       }),
     }),
     execute: async (_toolCallId, params: SubquestStartInput) => {
@@ -95,10 +106,11 @@ export function createQuestSnoozeTool(
   return {
     name: "quest_snooze",
     label: "Quest Snooze",
-    description: "Snooze the active quest until HH:MM local time.",
+    description:
+      "Snooze the current quest until a specified time. MUST be called alongside final_answer in the same turn - you will be pinged to resume the quest at the specified time.",
     parameters: Type.Object({
       until: Type.String({
-        description: "Resume time in HH:MM (24-hour) format.",
+        description: "Time to resume the quest in HH:MM format (24-hour). If the time is in the past today, it will be interpreted as tomorrow.",
       }),
     }),
     execute: async (_toolCallId, params: QuestSnoozeInput) => {
@@ -118,9 +130,8 @@ export function createDefaultQuestStartExecutor(
   _options: DefaultToolExecutorOptions,
 ): QuestStartExecutor {
   return async (input: QuestStartInput): Promise<string> => {
-    if (!toConfiguredString(input.id)) {
-      throw new Error("quest_start.id must be non-empty.");
-    }
+    const idErr = validateQuestId(input.id);
+    if (idErr) return `Error: ${idErr}`;
 
     if (!toConfiguredString(input.goal)) {
       throw new Error("quest_start.goal must be non-empty.");
@@ -142,9 +153,8 @@ export function createDefaultSubquestStartExecutor(
       return "Error: subquest_start requires an active quest context.";
     }
 
-    if (!toConfiguredString(input.id)) {
-      throw new Error("subquest_start.id must be non-empty.");
-    }
+    const idErr = validateQuestId(input.id);
+    if (idErr) return `Error: ${idErr}`;
 
     if (!toConfiguredString(input.goal)) {
       throw new Error("subquest_start.goal must be non-empty.");

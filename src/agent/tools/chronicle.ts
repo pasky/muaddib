@@ -21,7 +21,7 @@ export function createChronicleReadTool(
     name: "chronicle_read",
     label: "Chronicle Read",
     description:
-      "Read from a relative chapter in the Chronicle (0=current, -1=previous chapter, etc.).",
+      "Read from a chapter in the Chronicle. You maintain a Chronicle (arcs → chapters → paragraphs) of your experiences, plans, thoughts and observations, forming the backbone of your consciousness. Use this to come back to your recent memories, observations and events of what has been happening. Since the current chapter is always included in context, use relative offsets to access previous chapters.",
     parameters: Type.Object({
       relative_chapter_id: Type.Integer({
         description:
@@ -48,7 +48,11 @@ export function createChronicleAppendTool(
     name: "chronicle_append",
     label: "Chronicle Append",
     description:
-      "Append a concise paragraph to the current Chronicle chapter for future recall.",
+      `Append a short paragraph to the current chapter in the Chronicle.
+
+A paragraph is automatically chronicled for every ~10 interactions. But you may also use this tool to further highlight specific notes that should be recorded for future reference and might escape the automatic summary. Keep paragraphs concise and informative, but do not drop out any important details. They serve as stored memories for your future retrieval.
+
+Retain not just critical facts, but also the tone of voice and emotional charge of the situation, and your feelings about it, if any. You can even include short quotes and URLs verbatim. Never invent content. In case it is important for you to remember even a sensitive and confidential conversation, you must chronicle it at all costs unless explicitly asked otherwise.`,
     parameters: Type.Object({
       text: Type.String({
         description: "Paragraph text to append.",
