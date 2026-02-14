@@ -6,11 +6,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createDefaultToolExecutors } from "../src/agent/tools/baseline-tools.js";
 import { createDefaultOracleExecutor } from "../src/agent/tools/oracle.js";
+import { resetWebRateLimiters, jinaRetryConfig } from "../src/agent/tools/web.js";
 import { ChronicleStore } from "../src/chronicle/chronicle-store.js";
 
 const tempDirs: string[] = [];
+const originalJinaRetryDelays = [...jinaRetryConfig.delaysMs];
+
+beforeEach(() => {
+  resetWebRateLimiters();
+});
 
 afterEach(async () => {
+  jinaRetryConfig.delaysMs = [...originalJinaRetryDelays];
   for (const dir of tempDirs.splice(0, tempDirs.length)) {
     await rm(dir, { recursive: true, force: true });
   }
@@ -705,6 +712,165 @@ describe("core tool executors visit_webpage support", () => {
 
     const executors = createDefaultToolExecutors({ fetchImpl, maxImageBytes: 1000 });
     await expect(executors.visitWebpage("https://example.com/big.png")).rejects.toThrow("Image too large");
+  });
+});
+
+describe("core tool executors visit_webpage Jina retry support", () => {
+  it("visit_webpage retries on Jina HTTP 451 and succeeds on second attempt", async () => {
+    jinaRetryConfig.delaysMs = [0, 0, 0];
+    let attempt = 0;
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "HEAD") {
+        return new Response("", { status: 200, headers: { "content-type": "text/html" } });
+      }
+      if (url.startsWith("https://r.jina.ai/")) {
+        attempt++;
+        if (attempt === 1) {
+          return new Response("Unavailable for legal reasons", { status: 451 });
+        }
+        return new Response("# Retry success", { status: 200 });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    }) as typeof fetch;
+
+    const executors = createDefaultToolExecutors({ fetchImpl });
+    const result = await executors.visitWebpage("https://example.com/page");
+    expect(result).toContain("Retry success");
+    expect(attempt).toBe(2);
+  });
+
+  it("visit_webpage retries on Jina HTTP 500 and throws after exhausting retries", async () => {
+    jinaRetryConfig.delaysMs = [0, 0, 0];
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "HEAD") {
+        return new Response("", { status: 200, headers: { "content-type": "text/html" } });
+      }
+      return new Response("Server error", { status: 500 });
+    }) as typeof fetch;
+
+    const executors = createDefaultToolExecutors({ fetchImpl });
+    await expect(executors.visitWebpage("https://example.com/page")).rejects.toThrow(
+      "Jina HTTP 500",
+    );
+  });
+});
+
+describe("core tool executors visit_webpage newline cleanup", () => {
+  it("visit_webpage collapses excessive newlines in Jina content", async () => {
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "HEAD") {
+        return new Response("", { status: 200, headers: { "content-type": "text/html" } });
+      }
+      return new Response("line1\n\n\n\n\nline2", { status: 200 });
+    }) as typeof fetch;
+
+    const executors = createDefaultToolExecutors({ fetchImpl });
+    const result = await executors.visitWebpage("https://example.com/page") as string;
+    expect(result).toContain("line1\n\nline2");
+    expect(result).not.toContain("\n\n\n");
+  });
+});
+
+describe("core tool executors visit_webpage local artifact support", () => {
+  it("visit_webpage reads local text artifact directly from disk", async () => {
+    const { artifactsPath } = await makeArtifactsDir();
+    await writeFile(join(artifactsPath, "test.txt"), "local content here");
+
+    const executors = createDefaultToolExecutors({
+      fetchImpl: vi.fn(() => { throw new Error("should not fetch"); }) as unknown as typeof fetch,
+      artifactsPath,
+      artifactsUrl: "https://artifacts.example.com/files",
+    });
+
+    const result = await executors.visitWebpage("https://artifacts.example.com/files/?test.txt");
+    expect(result).toBe("local content here");
+  });
+
+  it("visit_webpage reads local image artifact directly from disk", async () => {
+    const { artifactsPath } = await makeArtifactsDir();
+    const pngHeader = Buffer.from([137, 80, 78, 71]);
+    await writeFile(join(artifactsPath, "img.png"), pngHeader);
+
+    const executors = createDefaultToolExecutors({
+      fetchImpl: vi.fn(() => { throw new Error("should not fetch"); }) as unknown as typeof fetch,
+      artifactsPath,
+      artifactsUrl: "https://artifacts.example.com/files",
+    });
+
+    const result = await executors.visitWebpage("https://artifacts.example.com/files/?img.png");
+    expect(typeof result).toBe("object");
+    expect((result as any).kind).toBe("image");
+    expect((result as any).mimeType).toBe("image/png");
+  });
+
+  it("visit_webpage rejects path traversal in local artifact URLs", async () => {
+    const { artifactsPath } = await makeArtifactsDir();
+
+    const executors = createDefaultToolExecutors({
+      fetchImpl: vi.fn(() => { throw new Error("should not fetch"); }) as unknown as typeof fetch,
+      artifactsPath,
+      artifactsUrl: "https://artifacts.example.com/files",
+    });
+
+    await expect(
+      executors.visitWebpage("https://artifacts.example.com/files/?../../../etc/passwd"),
+    ).rejects.toThrow("Path traversal");
+  });
+});
+
+describe("core tool executors visit_webpage exact http_headers support", () => {
+  it("visit_webpage uses exact http_headers match for specific URL", async () => {
+    const targetUrl = "https://secret.example.com/api/data";
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "HEAD") {
+        return new Response("", { status: 200, headers: { "content-type": "text/plain" } });
+      }
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      if (url === targetUrl) {
+        expect(headers["X-Secret-Key"]).toBe("exact-match-key");
+        return new Response("secret data", { status: 200, headers: { "content-type": "text/plain" } });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    }) as typeof fetch;
+
+    const executors = createDefaultToolExecutors({
+      fetchImpl,
+      secrets: {
+        http_headers: {
+          [targetUrl]: { "X-Secret-Key": "exact-match-key" },
+        },
+      },
+    });
+
+    const result = await executors.visitWebpage(targetUrl);
+    expect(result).toContain("secret data");
+  });
+});
+
+describe("core tool executors visit_webpage binary content support", () => {
+  it("visit_webpage returns base64-encoded binary for non-text content types", async () => {
+    const binaryData = Buffer.from([0x00, 0x01, 0x02, 0x03]);
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "HEAD") {
+        return new Response("", { status: 200, headers: { "content-type": "application/octet-stream" } });
+      }
+      return new Response(binaryData, {
+        status: 200,
+        headers: { "content-type": "application/octet-stream" },
+      });
+    }) as typeof fetch;
+
+    const executors = createDefaultToolExecutors({
+      fetchImpl,
+      secrets: { http_headers: { "https://example.com/file.bin": { Authorization: "Bearer x" } } },
+    });
+
+    const result = await executors.visitWebpage("https://example.com/file.bin") as string;
+    expect(result).toContain("Binary content from");
+    expect(result).toContain("application/octet-stream");
+    expect(result).toContain("Base64");
   });
 });
 
