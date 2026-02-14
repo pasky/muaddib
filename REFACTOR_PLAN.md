@@ -1,6 +1,6 @@
 # Config & Runtime Refactoring Plan
 
-Status: Steps 1-4 done. Step 5 next.
+Status: Steps 1-5 done. Step 6 next.
 
 ## Context
 
@@ -54,7 +54,7 @@ context usage per session. Each step is a self-contained commit.
   (static keys map + unsupported credential paths for fail-fast)
 - Update caller in `src/runtime.ts` (drop one `config.raw` usage)
 
-## Step 5: `src/app/deferred-features.ts`
+## Step 5: `src/app/deferred-features.ts` ✅
 
 - Change `assertNoDeferredFeatureConfig` to accept `MuaddibConfig`
 - This module intrinsically walks unknown keys, so it may use `config.raw`

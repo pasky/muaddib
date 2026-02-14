@@ -48,7 +48,7 @@ export async function createMuaddibRuntime(
   const log = runtimeLogger.getLogger("muaddib.runtime");
 
   const config = MuaddibConfig.load(options.configPath);
-  assertNoDeferredFeatureConfig(config.raw, log);
+  assertNoDeferredFeatureConfig(config, log);
 
   const modelAdapter = createPiAiModelAdapterFromConfig(config);
   const getApiKey = createConfigApiKeyResolver(config);

@@ -1,3 +1,5 @@
+import { MuaddibConfig } from "../config/muaddib-config.js";
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -71,10 +73,10 @@ interface DeferredFeatureLogger {
 }
 
 export function assertNoDeferredFeatureConfig(
-  config: Record<string, unknown>,
+  config: MuaddibConfig,
   logger: DeferredFeatureLogger = console,
 ): void {
-  const { blockingPaths, ignoredPaths } = collectDeferredFeatureConfigPaths(config);
+  const { blockingPaths, ignoredPaths } = collectDeferredFeatureConfigPaths(config.raw);
 
   if (ignoredPaths.length > 0) {
     logger.warn(
