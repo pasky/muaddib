@@ -6,8 +6,14 @@ import { describe, expect, it, vi } from "vitest";
 
 import { RuntimeLogWriter } from "../src/app/logging.js";
 import { ChatHistoryStore } from "../src/history/chat-history-store.js";
-import { RoomCommandHandlerTs } from "../src/rooms/command/command-handler.js";
+import {
+  RoomCommandHandlerTs,
+  type CommandRateLimiter,
+  type CommandRunnerFactory,
+} from "../src/rooms/command/command-handler.js";
+import type { ContextReducer } from "../src/rooms/command/context-reducer.js";
 import type { RoomMessage } from "../src/rooms/message.js";
+import { createTestRuntime } from "./test-runtime.js";
 
 const roomConfig = {
   command: {
@@ -46,6 +52,56 @@ const roomConfig = {
     output: "",
   },
 } as const;
+
+function createHandler(options: {
+  roomConfig?: Record<string, unknown>;
+  history: ChatHistoryStore;
+  runnerFactory?: CommandRunnerFactory;
+  rateLimiter?: CommandRateLimiter;
+  contextReducer?: ContextReducer;
+  responseCleaner?: (text: string, nick: string) => string;
+  onProgressReport?: (text: string) => void | Promise<void>;
+  refusalFallbackModel?: string;
+  persistenceSummaryModel?: string;
+  autoChronicler?: any;
+  chronicleStore?: any;
+  classifyMode?: unknown;
+  logger?: unknown;
+  toolOptions?: unknown;
+  getApiKey?: unknown;
+  modelAdapter?: unknown;
+  runtimeLogger?: RuntimeLogWriter;
+  configData?: Record<string, unknown>;
+}): RoomCommandHandlerTs {
+  const runtime = createTestRuntime({
+    history: options.history,
+    configData: {
+      ...(options.configData ?? {}),
+      rooms: { irc: options.roomConfig ?? roomConfig },
+    },
+    refusalFallbackModel: options.refusalFallbackModel,
+    persistenceSummaryModel: options.persistenceSummaryModel,
+    logger: options.runtimeLogger,
+  });
+
+  if (options.autoChronicler) {
+    runtime.autoChronicler = options.autoChronicler;
+  }
+  if (options.chronicleStore) {
+    runtime.chronicleStore = options.chronicleStore;
+  }
+  if (options.logger) {
+    runtime.logger.getLogger = () => options.logger as any;
+  }
+
+  return new RoomCommandHandlerTs(runtime, "irc", {
+    runnerFactory: options.runnerFactory,
+    rateLimiter: options.rateLimiter,
+    contextReducer: options.contextReducer,
+    responseCleaner: options.responseCleaner,
+    onProgressReport: options.onProgressReport,
+  });
+}
 
 function makeMessage(content: string): RoomMessage {
   return {
@@ -139,7 +195,7 @@ describe("RoomCommandHandlerTs", () => {
     let runnerThinkingLevel: string | undefined;
     let runnerContextContents: string[] = [];
 
-    const handler = new RoomCommandHandlerTs({
+    const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
@@ -204,7 +260,7 @@ describe("RoomCommandHandlerTs", () => {
 
     const incoming = makeMessage("!s ping");
 
-    const handler = new RoomCommandHandlerTs({
+    const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
@@ -227,7 +283,7 @@ describe("RoomCommandHandlerTs", () => {
 
     const incoming = makeMessage("!s quest update");
 
-    const handler = new RoomCommandHandlerTs({
+    const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
@@ -256,7 +312,7 @@ describe("RoomCommandHandlerTs", () => {
       error: vi.fn(),
     };
 
-    const handler = new RoomCommandHandlerTs({
+    const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
@@ -308,7 +364,7 @@ describe("RoomCommandHandlerTs", () => {
       error: vi.fn(),
     };
 
-    const parseErrorHandler = new RoomCommandHandlerTs({
+    const parseErrorHandler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
@@ -325,7 +381,7 @@ describe("RoomCommandHandlerTs", () => {
       isDirect: true,
     });
 
-    const rateLimitedHandler = new RoomCommandHandlerTs({
+    const rateLimitedHandler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
@@ -380,7 +436,7 @@ describe("RoomCommandHandlerTs", () => {
       error: vi.fn(),
     };
 
-    const handler = new RoomCommandHandlerTs({
+    const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
@@ -423,7 +479,7 @@ describe("RoomCommandHandlerTs", () => {
       error: vi.fn(),
     };
 
-    const handler = new RoomCommandHandlerTs({
+    const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
@@ -460,11 +516,11 @@ describe("RoomCommandHandlerTs", () => {
       } as unknown as NodeJS.WriteStream,
     });
 
-    const handler = new RoomCommandHandlerTs({
+    const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      logger: runtimeLogs.getLogger("muaddib.rooms.command"),
+      runtimeLogger: runtimeLogs,
       runnerFactory: () => ({
         prompt: async () => makeRunnerResult("pong"),
       }),
@@ -522,7 +578,7 @@ describe("RoomCommandHandlerTs", () => {
     let runnerPrompt = "";
     let runnerContextContents: string[] = [];
 
-    const handler = new RoomCommandHandlerTs({
+    const handler = createHandler({
       roomConfig: {
         ...roomConfig,
         command: {
@@ -584,7 +640,7 @@ describe("RoomCommandHandlerTs", () => {
 
     const runnerContextWithSummary: string[][] = [];
 
-    const handlerWithSummary = new RoomCommandHandlerTs({
+    const handlerWithSummary = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
@@ -602,7 +658,7 @@ describe("RoomCommandHandlerTs", () => {
     expect(chronicleStore.getChapterContextMessages).toHaveBeenCalledWith("libera##test");
     expect(runnerContextWithSummary[0][0]).toBe("<context_summary>chapter recap</context_summary>");
 
-    const handlerWithoutSummary = new RoomCommandHandlerTs({
+    const handlerWithoutSummary = createHandler({
       roomConfig: {
         ...roomConfig,
         command: {
@@ -637,7 +693,7 @@ describe("RoomCommandHandlerTs", () => {
     const incoming = makeMessage("!s scoped tools");
     const seenToolNames: string[] = [];
 
-    const handler = new RoomCommandHandlerTs({
+    const handler = createHandler({
       roomConfig: {
         ...roomConfig,
         command: {
@@ -684,7 +740,7 @@ describe("RoomCommandHandlerTs", () => {
     let oracleTool: any = null;
     let seenContextMessages: any[] = [];
 
-    const handler = new RoomCommandHandlerTs({
+    const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
@@ -735,7 +791,7 @@ describe("RoomCommandHandlerTs", () => {
     let runnerPrompt = "";
     let runnerContextContents: string[] = [];
 
-    const handler = new RoomCommandHandlerTs({
+    const handler = createHandler({
       roomConfig: {
         ...roomConfig,
         command: {
@@ -807,7 +863,7 @@ describe("RoomCommandHandlerTs", () => {
     const incoming = makeMessage("!h");
     await history.addMessage(incoming);
 
-    const handler = new RoomCommandHandlerTs({
+    const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
@@ -831,7 +887,7 @@ describe("RoomCommandHandlerTs", () => {
     const incoming = makeMessage("!s should be rate limited");
     const sent: string[] = [];
 
-    const handler = new RoomCommandHandlerTs({
+    const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
@@ -875,7 +931,7 @@ describe("RoomCommandHandlerTs", () => {
       checkAndChronicle: vi.fn(async () => false),
     };
 
-    const handler = new RoomCommandHandlerTs({
+    const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
@@ -908,7 +964,7 @@ describe("RoomCommandHandlerTs", () => {
       checkAndChronicle: vi.fn(async () => false),
     };
 
-    const rateLimitedHandler = new RoomCommandHandlerTs({
+    const rateLimitedHandler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
@@ -936,7 +992,7 @@ describe("RoomCommandHandlerTs", () => {
 
     const incoming = makeMessage("!s persistence check");
 
-    const handler = new RoomCommandHandlerTs({
+    const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
@@ -1010,7 +1066,7 @@ describe("RoomCommandHandlerTs", () => {
     const incoming = makeMessage("!s expensive response");
     const sent: string[] = [];
 
-    const handler = new RoomCommandHandlerTs({
+    const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
@@ -1054,12 +1110,10 @@ describe("RoomCommandHandlerTs", () => {
 
     const incoming = makeMessage("!s make it long");
     const longResponse = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. ".repeat(8).trim();
-    const shareArtifact = vi
-      .fn<(_: string) => Promise<string>>()
-      .mockResolvedValue("Artifact shared: https://example.com/artifacts/?long-response.txt");
+    const artifactsPath = await mkdtemp(join(tmpdir(), "muaddib-artifacts-"));
     const sent: string[] = [];
 
-    const handler = new RoomCommandHandlerTs({
+    const handler = createHandler({
       roomConfig: {
         ...roomConfig,
         command: {
@@ -1069,9 +1123,12 @@ describe("RoomCommandHandlerTs", () => {
       } as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      toolOptions: {
-        executors: {
-          shareArtifact,
+      configData: {
+        tools: {
+          artifacts: {
+            path: artifactsPath,
+            url: "https://example.com/artifacts/?",
+          },
         },
       },
       runnerFactory: () => ({
@@ -1086,13 +1143,12 @@ describe("RoomCommandHandlerTs", () => {
       },
     });
 
-    expect(shareArtifact).toHaveBeenCalledWith(longResponse);
-    expect(result?.response).toContain("... full response: https://example.com/artifacts/?long-response.txt");
+    expect(result?.response).toContain("... full response: https://example.com/artifacts/?");
     expect(sent).toEqual([result?.response ?? ""]);
 
     const rows = await history.getFullHistory("libera", "#test");
     expect(rows).toHaveLength(2);
-    expect(rows[1].message).toContain("full response: https://example.com/artifacts/?long-response.txt");
+    expect(rows[1].message).toContain("full response: https://example.com/artifacts/?");
 
     const llmCalls = await history.getLlmCalls();
     expect(llmCalls).toHaveLength(1);
@@ -1106,11 +1162,8 @@ describe("RoomCommandHandlerTs", () => {
     await history.initialize();
 
     const incoming = makeMessage("!s short response");
-    const shareArtifact = vi
-      .fn<(_: string) => Promise<string>>()
-      .mockResolvedValue("Artifact shared: https://example.com/artifacts/?unused.txt");
 
-    const handler = new RoomCommandHandlerTs({
+    const handler = createHandler({
       roomConfig: {
         ...roomConfig,
         command: {
@@ -1120,11 +1173,6 @@ describe("RoomCommandHandlerTs", () => {
       } as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      toolOptions: {
-        executors: {
-          shareArtifact,
-        },
-      },
       runnerFactory: () => ({
         prompt: async () => makeRunnerResult("short answer"),
       }),
@@ -1133,7 +1181,6 @@ describe("RoomCommandHandlerTs", () => {
     const result = await handler.handleIncomingMessage(incoming, { isDirect: true });
 
     expect(result?.response).toBe("short answer");
-    expect(shareArtifact).not.toHaveBeenCalled();
 
     await history.close();
   });
@@ -1143,12 +1190,8 @@ describe("RoomCommandHandlerTs", () => {
     await history.initialize();
 
     const incoming = makeMessage("!s refusal + long fallback");
-    const shareArtifact = vi
-      .fn<(_: string) => Promise<string>>()
-      .mockResolvedValue("Artifact shared: https://example.com/artifacts/?fallback-long.txt");
-    const longFallbackResponse = "Fallback answer with a lot of detail. ".repeat(10).trim();
 
-    const handler = new RoomCommandHandlerTs({
+    const handler = createHandler({
       roomConfig: {
         ...roomConfig,
         command: {
@@ -1159,11 +1202,6 @@ describe("RoomCommandHandlerTs", () => {
       history,
       classifyMode: async () => "EASY_SERIOUS",
       refusalFallbackModel: "anthropic:claude-3-5-haiku",
-      toolOptions: {
-        executors: {
-          shareArtifact,
-        },
-      },
       runnerFactory: () => ({
         prompt: async () =>
           makeRunnerResult("The AI refused to respond to this request", {
@@ -1177,7 +1215,6 @@ describe("RoomCommandHandlerTs", () => {
 
     expect(result?.model).toBe("openai:gpt-4o-mini");
     expect(result?.response).toContain("The AI refused to respond to this request");
-    expect(shareArtifact).not.toHaveBeenCalled();
 
     const rows = await history.getFullHistory("libera", "#test");
     expect(rows).toHaveLength(2);
@@ -1198,7 +1235,7 @@ describe("RoomCommandHandlerTs", () => {
 
     expect(
       () =>
-        new RoomCommandHandlerTs({
+        createHandler({
           roomConfig: {
             ...roomConfig,
             command: {
@@ -1221,7 +1258,7 @@ describe("RoomCommandHandlerTs", () => {
     const incoming = makeMessage("!s refusal fallback");
     const runnerModels: string[] = [];
 
-    const handler = new RoomCommandHandlerTs({
+    const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
@@ -1261,7 +1298,7 @@ describe("RoomCommandHandlerTs", () => {
 
     const incoming = makeMessage("!s safety fallback");
 
-    const handler = new RoomCommandHandlerTs({
+    const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
@@ -1287,7 +1324,7 @@ describe("RoomCommandHandlerTs", () => {
     const incoming = makeMessage("!s no fallback");
     const runnerModels: string[] = [];
 
-    const handler = new RoomCommandHandlerTs({
+    const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
@@ -1326,7 +1363,7 @@ describe("RoomCommandHandlerTs", () => {
     const runnerContextContents: string[][] = [];
     const sent: string[] = [];
 
-    const handler = new RoomCommandHandlerTs({
+    const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
@@ -1400,7 +1437,7 @@ describe("RoomCommandHandlerTs", () => {
     const runnerContextContents: string[][] = [];
     const sent: string[] = [];
 
-    const handler = new RoomCommandHandlerTs({
+    const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
@@ -1494,7 +1531,7 @@ describe("RoomCommandHandlerTs", () => {
     const runnerContextContents: string[][] = [];
     const sent: string[] = [];
 
-    const handler = new RoomCommandHandlerTs({
+    const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",

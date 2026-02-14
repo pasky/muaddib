@@ -127,7 +127,7 @@ export class DiscordRoomMonitor {
       "Discord room is enabled but rooms.discord.token is missing.",
     );
 
-    const commandHandler = RoomCommandHandlerTs.fromRuntime(runtime, "discord");
+    const commandHandler = new RoomCommandHandlerTs(runtime, "discord");
     const transport = new DiscordGatewayTransport({
       token,
       botNameFallback: roomConfig.bot_name,

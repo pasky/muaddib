@@ -45,9 +45,8 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
   });
 
   try {
-    const commandHandler = RoomCommandHandlerTs.fromRuntime(runtime, roomName, {
+    const commandHandler = new RoomCommandHandlerTs(runtime, roomName, {
       runnerFactory: options.runnerFactory,
-      logger: runtimeLogger.getLogger("muaddib.rooms.command"),
     });
 
     const message: RoomMessage = {

@@ -71,7 +71,7 @@ export class IrcRoomMonitor {
       "IRC room is enabled but rooms.irc.varlink.socket_path is missing.",
     );
 
-    const commandHandler = RoomCommandHandlerTs.fromRuntime(runtime, "irc", {
+    const commandHandler = new RoomCommandHandlerTs(runtime, "irc", {
       responseCleaner: (text) => text.replace(/\n/g, "; ").trim(),
     });
 

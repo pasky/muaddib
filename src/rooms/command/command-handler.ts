@@ -74,7 +74,15 @@ interface CommandHandlerLogger {
   error(message: string, ...data: unknown[]): void;
 }
 
-export interface CommandHandlerOptions {
+export interface RoomCommandHandlerOverrides {
+  responseCleaner?: (text: string, nick: string) => string;
+  runnerFactory?: CommandRunnerFactory;
+  rateLimiter?: CommandRateLimiter;
+  contextReducer?: ContextReducer;
+  onProgressReport?: (text: string) => void | Promise<void>;
+}
+
+interface CommandHandlerResolvedOptions {
   roomConfig: CommandHandlerRoomConfig;
   history: ChatHistoryStore;
   classifyMode: (context: Array<{ role: string; content: string }>) => Promise<string>;
@@ -120,6 +128,7 @@ export interface HandleIncomingMessageOptions {
  */
 export class RoomCommandHandlerTs {
   readonly resolver: CommandResolver;
+  private readonly options: CommandHandlerResolvedOptions;
   private readonly commandConfig: CommandConfig;
   private readonly runnerFactory: CommandRunnerFactory;
   private readonly rateLimiter: CommandRateLimiter;
@@ -133,18 +142,11 @@ export class RoomCommandHandlerTs {
   private readonly chronicleStore: Pick<ChronicleStore, "getChapterContextMessages"> | null;
   private readonly logger: CommandHandlerLogger;
 
-  /**
-   * Factory: build a handler from a MuaddibRuntime for a given room.
-   */
-  static fromRuntime(
+  constructor(
     runtime: MuaddibRuntime,
     roomName: string,
-    overrides?: {
-      responseCleaner?: (text: string, nick: string) => string;
-      runnerFactory?: CommandRunnerFactory;
-      logger?: CommandHandlerLogger;
-    },
-  ): RoomCommandHandlerTs {
+    overrides?: RoomCommandHandlerOverrides,
+  ) {
     const roomConfig = runtime.config.getRoomConfig(roomName);
     if (!roomConfig.command) {
       throw new Error(`rooms.${roomName}.command is missing.`);
@@ -155,10 +157,9 @@ export class RoomCommandHandlerTs {
     const toolsConfig = runtime.config.getToolsConfig();
     const contextReducerConfig = runtime.config.getContextReducerConfig();
     const providersConfig = runtime.config.getProvidersConfig();
-    const loggerInstance = overrides?.logger ??
-      runtime.logger.getLogger(`muaddib.rooms.command.${roomName}`);
+    const loggerInstance = runtime.logger.getLogger(`muaddib.rooms.command.${roomName}`);
 
-    return new RoomCommandHandlerTs({
+    const options: CommandHandlerResolvedOptions = {
       roomConfig: {
         command: roomConfig.command,
         prompt_vars: roomConfig.prompt_vars,
@@ -182,6 +183,9 @@ export class RoomCommandHandlerTs {
       autoChronicler: runtime.autoChronicler,
       chronicleStore: runtime.chronicleStore,
       runnerFactory: overrides?.runnerFactory,
+      rateLimiter: overrides?.rateLimiter,
+      contextReducer: overrides?.contextReducer,
+      onProgressReport: overrides?.onProgressReport,
       agentLoop: {
         maxIterations: actorConfig.maxIterations,
         maxCompletionRetries: actorConfig.maxCompletionRetries,
@@ -201,10 +205,9 @@ export class RoomCommandHandlerTs {
         chronicleStore: runtime.chronicleStore,
         chronicleLifecycle: runtime.chronicleLifecycle,
       },
-    });
-  }
+    };
 
-  constructor(private readonly options: CommandHandlerOptions) {
+    this.options = options;
     this.commandConfig = options.roomConfig.command;
 
     this.resolver = new CommandResolver(

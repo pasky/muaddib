@@ -4,6 +4,7 @@ import { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { RoomCommandHandlerTs } from "../src/rooms/command/command-handler.js";
 import { DiscordRoomMonitor } from "../src/rooms/discord/monitor.js";
 import { SlackRoomMonitor } from "../src/rooms/slack/monitor.js";
+import { createTestRuntime } from "./test-runtime.js";
 
 function buildRoomConfig() {
   return {
@@ -35,15 +36,22 @@ describe("room adapters share RoomCommandHandlerTs behavior", () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();
 
-    const handler = new RoomCommandHandlerTs({
-      roomConfig: buildRoomConfig() as any,
-      history,
-      classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: () => ({
-        prompt: async () => ({
-          assistantMessage: {
-            role: "assistant",
-            content: [{ type: "text", text: "discord-shared" }],
+    const handler = new RoomCommandHandlerTs(
+      createTestRuntime({
+        history,
+        configData: {
+          rooms: {
+            irc: buildRoomConfig(),
+          },
+        },
+      }),
+      "irc",
+      {
+        runnerFactory: () => ({
+          prompt: async () => ({
+            assistantMessage: {
+              role: "assistant",
+              content: [{ type: "text", text: "discord-shared" }],
             api: "openai-completions",
             provider: "openai",
             model: "gpt-4o-mini",
@@ -110,18 +118,38 @@ describe("room adapters share RoomCommandHandlerTs behavior", () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();
 
-    const handler = new RoomCommandHandlerTs({
-      roomConfig: buildRoomConfig() as any,
-      history,
-      classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: () => ({
-        prompt: async () => ({
-          assistantMessage: {
-            role: "assistant",
-            content: [{ type: "text", text: "slack-shared" }],
-            api: "openai-completions",
-            provider: "openai",
-            model: "gpt-4o-mini",
+    const handler = new RoomCommandHandlerTs(
+      createTestRuntime({
+        history,
+        configData: {
+          rooms: {
+            irc: buildRoomConfig(),
+          },
+        },
+      }),
+      "irc",
+      {
+        runnerFactory: () => ({
+          prompt: async () => ({
+            assistantMessage: {
+              role: "assistant",
+              content: [{ type: "text", text: "slack-shared" }],
+              api: "openai-completions",
+              provider: "openai",
+              model: "gpt-4o-mini",
+              usage: {
+                input: 1,
+                output: 1,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 2,
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+              },
+              stopReason: "stop",
+              timestamp: Date.now(),
+            },
+            text: "slack-shared",
+            stopReason: "stop",
             usage: {
               input: 1,
               output: 1,
@@ -130,22 +158,10 @@ describe("room adapters share RoomCommandHandlerTs behavior", () => {
               totalTokens: 2,
               cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
             },
-            stopReason: "stop",
-            timestamp: Date.now(),
-          },
-          text: "slack-shared",
-          stopReason: "stop",
-          usage: {
-            input: 1,
-            output: 1,
-            cacheRead: 0,
-            cacheWrite: 0,
-            totalTokens: 2,
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-          },
+          }),
         }),
-      }),
-    });
+      },
+    );
 
     const sent: string[] = [];
     const monitor = new SlackRoomMonitor({

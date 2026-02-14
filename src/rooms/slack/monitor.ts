@@ -143,7 +143,7 @@ export class SlackRoomMonitor {
       throw new Error("Slack room is enabled but rooms.slack.workspaces is missing.");
     }
 
-    const commandHandler = RoomCommandHandlerTs.fromRuntime(runtime, "slack");
+    const commandHandler = new RoomCommandHandlerTs(runtime, "slack");
 
     return workspaceEntries.map(([workspaceId, workspaceConfig]) => {
       const botToken = requireNonEmptyString(
