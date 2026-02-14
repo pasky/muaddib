@@ -8,7 +8,7 @@
  * returns a result. All queue/session lifecycle stays in message-handler.
  */
 
-import type { AgentMessage, AgentTool, ThinkingLevel } from "@mariozechner/pi-agent-core";
+import type { AgentTool, ThinkingLevel } from "@mariozechner/pi-agent-core";
 import { type Usage } from "@mariozechner/pi-ai";
 
 import {
@@ -22,7 +22,6 @@ import {
   createDefaultToolExecutors,
   type BaselineToolOptions,
   type MuaddibTool,
-  type ToolPersistType,
 } from "../../agent/tools/baseline-tools.js";
 import type { ChatHistoryStore, ChatRole } from "../../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
@@ -38,6 +37,7 @@ import {
   type ResolvedCommand,
 } from "./resolver.js";
 import type { ProactiveConfig } from "./proactive.js";
+import { generateToolSummaryFromSession } from "../tool-summary.js";
 
 // ── Public types ──
 
@@ -276,7 +276,7 @@ export class CommandExecutor {
         refusalFallbackModel: this.refusalFallbackModel ?? undefined,
       });
 
-      await this.persistToolSummaryFromSession(message, agentResult, tools as MuaddibTool[]);
+      await this.persistGeneratedToolSummary(message, agentResult, tools as MuaddibTool[]);
       agentResult.session?.dispose();
     } catch (error) {
       logger.error("Error during proactive agent execution", error);
@@ -540,7 +540,7 @@ export class CommandExecutor {
         refusalFallbackModel: this.refusalFallbackModel ?? undefined,
       });
 
-      await this.persistToolSummaryFromSession(message, agentResult, tools as MuaddibTool[]);
+      await this.persistGeneratedToolSummary(message, agentResult, tools as MuaddibTool[]);
       agentResult.session?.dispose();
     } catch (error) {
       logger.error("Error during agent execution", error);
@@ -823,75 +823,35 @@ export class CommandExecutor {
     return `${trimmed}... full response: ${artifactUrl}`;
   }
 
-  private async persistToolSummaryFromSession(
+  private async persistGeneratedToolSummary(
     message: RoomMessage,
     result: PromptResult,
     tools: MuaddibTool[],
   ): Promise<void> {
-    if (!this.persistenceSummaryModel) {
+    const summaryText = await generateToolSummaryFromSession({
+      result,
+      tools,
+      persistenceSummaryModel: this.persistenceSummaryModel,
+      modelAdapter: this.modelAdapter,
+      logger: this.logger,
+      arc: `${message.serverTag}#${message.channelName}`,
+      getApiKey: this.getApiKey,
+    });
+
+    if (!summaryText) {
       return;
     }
 
-    if (!result.session) {
-      return;
-    }
-
-    const calls = collectPersistentToolCalls(result.session.messages, tools);
-    if (calls.length === 0) {
-      return;
-    }
-
-    try {
-      const summaryResponse = await this.modelAdapter.completeSimple(
-        this.persistenceSummaryModel,
-        {
-          systemPrompt: PERSISTENCE_SUMMARY_SYSTEM_PROMPT,
-          messages: [
-            {
-              role: "user",
-              content: buildPersistenceSummaryInput(calls),
-              timestamp: Date.now(),
-            },
-          ],
-        },
-        {
-          callType: "tool_persistence_summary",
-          logger: this.logger,
-          getApiKey: this.getApiKey,
-        },
-      );
-
-      const summaryText = summaryResponse.content
-        .filter((block) => block.type === "text")
-        .map((block) => block.text)
-        .join("\n")
-        .trim();
-
-      if (!summaryText) {
-        return;
-      }
-
-      const arc = `${message.serverTag}#${message.channelName}`;
-      this.logger.debug(
-        "Persisting internal monologue summary",
-        `arc=${arc}`,
-        `chars=${summaryText.length}`,
-        `summary=${formatLogPreview(summaryText)}`,
-      );
-
-      await this.history.addMessage(
-        {
-          ...message,
-          nick: message.mynick,
-          content: summaryText,
-        },
-        {
-          contentTemplate: "[internal monologue] {message}",
-        },
-      );
-    } catch (error) {
-      this.logger.error("Failed to generate tool persistence summary", error);
-    }
+    await this.history.addMessage(
+      {
+        ...message,
+        nick: message.mynick,
+        content: summaryText,
+      },
+      {
+        contentTemplate: "[internal monologue] {message}",
+      },
+    );
   }
 
   selectTools(
@@ -925,99 +885,6 @@ export class CommandExecutor {
 }
 
 // ── Module-level helpers ──
-
-const PERSISTENCE_SUMMARY_SYSTEM_PROMPT =
-  "As an AI agent, you need to remember in the future what tools you used when generating a response, and what the tools told you. Summarize all tool uses in a single concise paragraph. If artifact links are included, include every artifact link and tie each link to the corresponding tool call.";
-
-interface PersistentToolCall {
-  toolName: string;
-  input: unknown;
-  output: unknown;
-  persistType: ToolPersistType;
-  artifactUrls: string[];
-}
-
-function collectPersistentToolCalls(messages: AgentMessage[], tools: MuaddibTool[]): PersistentToolCall[] {
-  const toolPersistMap = new Map<string, ToolPersistType>();
-  for (const tool of tools) {
-    toolPersistMap.set(tool.name, tool.persistType);
-  }
-
-  return messages
-    .filter((message) => message.role === "toolResult")
-    .flatMap((message) => {
-      const toolResult = message as AgentMessage & {
-        toolName: string;
-        details?: Record<string, unknown>;
-        isError?: boolean;
-      };
-      if (toolResult.isError) {
-        return [];
-      }
-      const policy = toolPersistMap.get(toolResult.toolName) ?? "none";
-      if (policy !== "summary" && policy !== "artifact") {
-        return [];
-      }
-
-      return [{
-        toolName: toolResult.toolName,
-        input: toolResult.details?.input,
-        output: toolResult,
-        persistType: policy,
-        artifactUrls: extractArtifactUrls(toolResult),
-      }];
-    });
-}
-
-function buildPersistenceSummaryInput(persistentToolCalls: PersistentToolCall[]): string {
-  const lines: string[] = ["The following tool calls were made during this conversation:"];
-
-  for (const call of persistentToolCalls) {
-    lines.push(`\n\n# Calling tool **${call.toolName}** (persist: ${call.persistType})`);
-    lines.push(`## **Input:**\n${renderPersistenceValue(call.input)}\n`);
-    lines.push(`## **Output:**\n${renderPersistenceValue(call.output)}\n`);
-
-    for (const artifactUrl of call.artifactUrls) {
-      lines.push(`(Tool call I/O stored as artifact: ${artifactUrl})\n`);
-    }
-  }
-
-  lines.push("\nPlease provide a concise summary of what was accomplished in these tool calls.");
-  return lines.join("\n");
-}
-
-function renderPersistenceValue(value: unknown): string {
-  if (typeof value === "string") {
-    return value;
-  }
-
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function extractArtifactUrls(result: unknown): string[] {
-  const urls = new Set<string>();
-
-  if (!result || typeof result !== "object") {
-    return [];
-  }
-
-  const record = result as Record<string, unknown>;
-  const details = record.details as Record<string, unknown> | undefined;
-  const artifactUrls = details?.artifactUrls;
-  if (Array.isArray(artifactUrls)) {
-    for (const artifactUrl of artifactUrls) {
-      if (typeof artifactUrl === "string" && artifactUrl.trim().length > 0) {
-        urls.add(artifactUrl.trim());
-      }
-    }
-  }
-
-  return Array.from(urls);
-}
 
 // ── Shared utility functions (exported for message-handler) ──
 
@@ -1118,14 +985,6 @@ function trimToMaxBytes(text: string, maxBytes: number): string {
     trimmed = trimmed.slice(0, -1);
   }
   return trimmed;
-}
-
-function formatLogPreview(text: string, maxChars = 180): string {
-  const singleLine = text.replace(/\s+/gu, " ").trim();
-  if (singleLine.length <= maxChars) {
-    return singleLine;
-  }
-  return `${singleLine.slice(0, maxChars)}...`;
 }
 
 function extractSharedArtifactUrl(result: string): string {
