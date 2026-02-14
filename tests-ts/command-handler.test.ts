@@ -1819,4 +1819,294 @@ describe("RoomCommandHandlerTs", () => {
 
     await history.close();
   });
+
+  it("isolates sessions by nick when there is no thread", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const aliceStarted = createDeferred<void>();
+    const releaseAlice = createDeferred<void>();
+
+    let runCount = 0;
+    const prompts: string[] = [];
+    const sent: string[] = [];
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: () => ({
+        prompt: async (prompt) => {
+          runCount += 1;
+          prompts.push(prompt);
+
+          if (runCount === 1) {
+            aliceStarted.resolve();
+            await releaseAlice.promise;
+            return makeRunnerResult("alice reply");
+          }
+          return makeRunnerResult("bob reply");
+        },
+      }),
+    });
+
+    const t1 = handler.handleIncomingMessage(makeMessage("!s alice question"), {
+      isDirect: true,
+      sendResponse: async (text) => { sent.push(text); },
+    });
+
+    await aliceStarted.promise;
+
+    // Bob sends a command while Alice's is running — should get own session
+    const t2 = handler.handleIncomingMessage(
+      { ...makeMessage("!s bob question"), nick: "bob" },
+      {
+        isDirect: true,
+        sendResponse: async (text) => { sent.push(text); },
+      },
+    );
+
+    releaseAlice.resolve();
+    const [r1, r2] = await Promise.all([t1, t2]);
+
+    expect(runCount).toBe(2);
+    expect(r1?.response).toBe("alice reply");
+    expect(r2?.response).toBe("bob reply");
+    expect(prompts).toContain("alice question");
+    expect(prompts).toContain("bob question");
+
+    await history.close();
+  });
+
+  it("isolates sessions for the same nick across different channels", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const firstStarted = createDeferred<void>();
+    const releaseFirst = createDeferred<void>();
+
+    let runCount = 0;
+    const prompts: string[] = [];
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: () => ({
+        prompt: async (prompt) => {
+          runCount += 1;
+          prompts.push(prompt);
+
+          if (runCount === 1) {
+            firstStarted.resolve();
+            await releaseFirst.promise;
+            return makeRunnerResult("chan1 reply");
+          }
+          return makeRunnerResult("chan2 reply");
+        },
+      }),
+    });
+
+    const t1 = handler.handleIncomingMessage(
+      { ...makeMessage("!s first"), channelName: "#foo" },
+      { isDirect: true, sendResponse: async () => {} },
+    );
+
+    await firstStarted.promise;
+
+    const t2 = handler.handleIncomingMessage(
+      { ...makeMessage("!s second"), channelName: "#bar" },
+      { isDirect: true, sendResponse: async () => {} },
+    );
+
+    releaseFirst.resolve();
+    const [r1, r2] = await Promise.all([t1, t2]);
+
+    expect(runCount).toBe(2);
+    expect(r1?.response).toBe("chan1 reply");
+    expect(r2?.response).toBe("chan2 reply");
+
+    await history.close();
+  });
+
+  it("queued commands execute sequentially — first is work item, rest drain as context then get own turns", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const firstStarted = createDeferred<void>();
+    const releaseFirst = createDeferred<void>();
+    const secondStarted = createDeferred<void>();
+    const releaseSecond = createDeferred<void>();
+
+    let runCount = 0;
+    const prompts: string[] = [];
+    const runnerContextContents: string[][] = [];
+    const sent: string[] = [];
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: () => ({
+        prompt: async (prompt, options) => {
+          runCount += 1;
+          prompts.push(prompt);
+          runnerContextContents.push((options?.contextMessages ?? []).map((entry) => entry.content));
+
+          if (runCount === 1) {
+            firstStarted.resolve();
+            await releaseFirst.promise;
+            return makeRunnerResult("reply 1");
+          }
+          if (runCount === 2) {
+            secondStarted.resolve();
+            await releaseSecond.promise;
+            return makeRunnerResult("reply 2");
+          }
+          return makeRunnerResult(`reply ${runCount}`);
+        },
+      }),
+    });
+
+    const t1 = handler.handleIncomingMessage(makeMessage("!s first"), {
+      isDirect: true,
+      sendResponse: async (text) => { sent.push(text); },
+    });
+
+    await firstStarted.promise;
+
+    const t2 = handler.handleIncomingMessage(makeMessage("!s second"), {
+      isDirect: true,
+      sendResponse: async (text) => { sent.push(text); },
+    });
+
+    const t3 = handler.handleIncomingMessage(makeMessage("!s third"), {
+      isDirect: true,
+      sendResponse: async (text) => { sent.push(text); },
+    });
+
+    // Release first — second becomes next work item; if third arrives before
+    // the second runner drains context, it becomes steering context for second.
+    releaseFirst.resolve();
+    await secondStarted.promise;
+
+    // At this point cmd3 should have been collapsed as context into cmd2's run
+    releaseSecond.resolve();
+    const [r1, r2, r3] = await Promise.all([t1, t2, t3]);
+
+    // Two runner turns: first is the initial runner, second drains from session
+    expect(runCount).toBe(2);
+    expect(prompts[0]).toBe("first");
+    // Second prompt is one of the queued commands, the other is context
+    expect(["second", "third"]).toContain(prompts[1]);
+    expect(sent).toEqual(["reply 1", "reply 2"]);
+
+    // One of result2/result3 was collapsed (null), the other got a response
+    expect(r1?.response).toBe("reply 1");
+    const results = [r2, r3];
+    expect(results.filter(r => r?.response === "reply 2")).toHaveLength(1);
+    expect(results.filter(r => r === null)).toHaveLength(1);
+
+    await history.close();
+  });
+
+  it("runner error does not discard queued commands — they still execute", async () => {
+    // Suppress vitest's unhandled rejection detection for this test —
+    // the rejection IS handled via .catch() but vitest's global handler
+    // fires first on the microtask queue.
+    const suppress = () => {};
+    process.on("unhandledRejection", suppress);
+
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const firstStarted = createDeferred<void>();
+    const releaseFirst = createDeferred<void>();
+
+    let runCount = 0;
+    const prompts: string[] = [];
+    const sent: string[] = [];
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: () => ({
+        prompt: async (prompt) => {
+          runCount += 1;
+          prompts.push(prompt);
+
+          if (runCount === 1) {
+            firstStarted.resolve();
+            await releaseFirst.promise;
+            throw new Error("runner exploded");
+          }
+          return makeRunnerResult("recovered");
+        },
+      }),
+    });
+
+    const t1 = handler.handleIncomingMessage(makeMessage("!s first"), {
+      isDirect: true,
+      sendResponse: async (text) => { sent.push(text); },
+    }).catch((e: unknown) => e); // prevent unhandled rejection
+
+    await firstStarted.promise;
+
+    const t2 = handler.handleIncomingMessage(makeMessage("!s second"), {
+      isDirect: true,
+      sendResponse: async (text) => { sent.push(text); },
+    });
+
+    await new Promise((resolve) => { setTimeout(resolve, 50); });
+
+    releaseFirst.resolve();
+
+    const [r1settled, r2settled] = await Promise.allSettled([t1, t2]);
+
+    // First command should have failed (error caught inline)
+    expect(r1settled.status).toBe("fulfilled");
+    expect((r1settled as PromiseFulfilledResult<unknown>).value).toBeInstanceOf(Error);
+
+    // Second command should still execute successfully
+    expect(r2settled.status).toBe("fulfilled");
+    expect((r2settled as PromiseFulfilledResult<any>).value?.response).toBe("recovered");
+    expect(sent).toContain("recovered");
+    expect(prompts).toContain("second");
+
+    await history.close();
+    process.off("unhandledRejection", suppress);
+  });
+
+  it("passive messages with no active session and no proactive are no-ops", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    let runCount = 0;
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: () => ({
+        prompt: async () => {
+          runCount += 1;
+          return makeRunnerResult("should not happen");
+        },
+      }),
+    });
+
+    const r1 = await handler.handleIncomingMessage(makeMessage("just chatting"), {
+      isDirect: false,
+    });
+    const r2 = await handler.handleIncomingMessage(makeMessage("more chat"), {
+      isDirect: false,
+    });
+
+    expect(r1).toBeNull();
+    expect(r2).toBeNull();
+    expect(runCount).toBe(0);
+
+    await history.close();
+  });
 });

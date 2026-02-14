@@ -131,8 +131,13 @@ export class RoomCommandHandlerTs {
     } = this.steeringQueue.enqueueCommandOrStartRunner(message, triggerMessageId, sendResponse);
 
     if (!isRunner) {
-      await runnerItem.completion;
-      return (runnerItem.result as CommandExecutionResult | null) ?? null;
+      try {
+        await runnerItem.completion;
+        return (runnerItem.result as CommandExecutionResult | null) ?? null;
+      } catch {
+        // Runner session failed — retry as a new session.
+        return this.handleCommandMessage(message, triggerMessageId, sendResponse);
+      }
     }
 
     try {
