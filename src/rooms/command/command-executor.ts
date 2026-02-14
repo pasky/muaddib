@@ -11,14 +11,15 @@
 import type { AgentMessage, AgentTool, ThinkingLevel } from "@mariozechner/pi-agent-core";
 import { type Usage } from "@mariozechner/pi-ai";
 
-import type {
-  PromptOptions,
-  PromptResult,
+import {
+  SessionRunner,
+  type PromptOptions,
+  type PromptResult,
 } from "../../agent/session-runner.js";
 import type { SessionFactoryContextMessage } from "../../agent/session-factory.js";
-import type { ChronicleStore } from "../../chronicle/chronicle-store.js";
 import {
   createBaselineAgentTools,
+  createDefaultToolExecutors,
   type BaselineToolOptions,
   type MuaddibTool,
   type ToolPersistType,
@@ -26,9 +27,11 @@ import {
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { parseModelSpec } from "../../models/model-spec.js";
-import type { AutoChronicler } from "../autochronicler.js";
-import type { ContextReducer } from "./context-reducer.js";
+import { ContextReducerTs, type ContextReducer } from "./context-reducer.js";
 import type { RoomMessage } from "../message.js";
+import type { MuaddibRuntime } from "../../runtime.js";
+import { createModeClassifier } from "./classifier.js";
+import { RateLimiter } from "./rate-limiter.js";
 import {
   CommandResolver,
   type CommandConfig,
@@ -74,44 +77,134 @@ export interface CommandExecutorLogger {
 /** Callback to drain steering context messages during agent execution. */
 export type SteeringContextDrainer = () => Array<{ role: string; content: string }>;
 
-export interface CommandExecutorDeps {
-  commandConfig: CommandConfig;
-  promptVars?: Record<string, string>;
-  history: ChatHistoryStore;
-  resolver: CommandResolver;
-  runnerFactory: CommandRunnerFactory;
-  rateLimiter: CommandRateLimiter;
-  modelAdapter: PiAiModelAdapter;
-  contextReducer: ContextReducer;
-  autoChronicler: AutoChronicler | null;
-  chronicleStore: Pick<ChronicleStore, "getChapterContextMessages"> | null;
-  logger: CommandExecutorLogger;
-  getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
-  refusalFallbackModel: string | null;
-  persistenceSummaryModel: string | null;
-  responseMaxBytes: number;
-  shareArtifact: (content: string) => Promise<string>;
+export interface CommandExecutorOverrides {
   responseCleaner?: (text: string, nick: string) => string;
+  runnerFactory?: CommandRunnerFactory;
+  rateLimiter?: CommandRateLimiter;
+  contextReducer?: ContextReducer;
   onProgressReport?: (text: string) => void | Promise<void>;
-  toolOptions?: Omit<BaselineToolOptions, "onProgressReport">;
 }
 
 // ── Executor ──
 
 export class CommandExecutor {
-  private readonly deps: CommandExecutorDeps;
+  readonly resolver: CommandResolver;
+  readonly commandConfig: CommandConfig;
+  readonly classifyMode: (context: Array<{ role: string; content: string }>) => Promise<string>;
+  readonly history: ChatHistoryStore;
+  readonly modelAdapter: PiAiModelAdapter;
+  readonly logger: CommandExecutorLogger;
+  readonly getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
 
-  constructor(deps: CommandExecutorDeps) {
-    this.deps = deps;
+  private readonly runtime: MuaddibRuntime;
+  private readonly roomName: string;
+  private readonly overrides?: CommandExecutorOverrides;
+  private readonly runnerFactory: CommandRunnerFactory;
+  private readonly rateLimiter: CommandRateLimiter;
+  private readonly contextReducer: ContextReducer;
+  private readonly refusalFallbackModel: string | null;
+  private readonly persistenceSummaryModel: string | null;
+  private readonly responseMaxBytes: number;
+  private readonly shareArtifact: (content: string) => Promise<string>;
+
+  constructor(runtime: MuaddibRuntime, roomName: string, overrides?: CommandExecutorOverrides) {
+    this.runtime = runtime;
+    this.roomName = roomName;
+    this.overrides = overrides;
+
+    const roomConfig = runtime.config.getRoomConfig(roomName);
+    if (!roomConfig.command) {
+      throw new Error(`rooms.${roomName}.command is missing.`);
+    }
+
+    const actorConfig = runtime.config.getActorConfig();
+
+    this.commandConfig = roomConfig.command;
+    this.history = runtime.history;
+    this.getApiKey = runtime.getApiKey;
+    this.logger = runtime.logger.getLogger(`muaddib.rooms.command.${roomName}`);
+    this.modelAdapter = runtime.modelAdapter ?? new PiAiModelAdapter();
+
+    this.classifyMode = createModeClassifier(this.commandConfig, {
+      getApiKey: runtime.getApiKey,
+      modelAdapter: runtime.modelAdapter,
+      logger: this.logger,
+    });
+
+    this.resolver = new CommandResolver(
+      this.commandConfig,
+      this.classifyMode,
+      "!h",
+      new Set(["!c"]),
+      modelStrCore,
+    );
+
+    this.runnerFactory =
+      overrides?.runnerFactory ??
+      ((input: CommandRunnerFactoryInput) =>
+        new SessionRunner({
+          model: input.model,
+          systemPrompt: input.systemPrompt,
+          tools: input.tools,
+          modelAdapter: this.modelAdapter,
+          getApiKey: runtime.getApiKey,
+          maxIterations: actorConfig.maxIterations,
+          llmDebugMaxChars: actorConfig.llmDebugMaxChars,
+          logger: input.logger,
+          steeringMessageProvider: input.steeringMessageProvider,
+        }));
+
+    this.rateLimiter =
+      overrides?.rateLimiter ??
+      new RateLimiter(
+        numberWithDefault(this.commandConfig.rate_limit, 30),
+        numberWithDefault(this.commandConfig.rate_period, 900),
+      );
+
+    this.refusalFallbackModel = resolveConfigModelSpec(
+      runtime.config.getRouterConfig().refusalFallbackModel,
+      "router.refusal_fallback_model",
+      this.modelAdapter,
+    ) ?? null;
+
+    this.persistenceSummaryModel = resolveConfigModelSpec(
+      runtime.config.getToolsConfig().summary?.model,
+      "tools.summary.model",
+      this.modelAdapter,
+    ) ?? null;
+
+    this.responseMaxBytes = parseResponseMaxBytes(this.commandConfig.response_max_bytes);
+
+    this.contextReducer =
+      overrides?.contextReducer ??
+      new ContextReducerTs({
+        config: runtime.config.getContextReducerConfig(),
+        modelAdapter: this.modelAdapter,
+        getApiKey: runtime.getApiKey,
+        logger: this.logger,
+      });
+
+    const defaultExecutors = createDefaultToolExecutors(this.buildToolOptions());
+    this.shareArtifact = defaultExecutors.shareArtifact;
   }
 
-  /** Convenience accessors used by command-handler for dispatch decisions. */
-  get resolver(): CommandResolver {
-    return this.deps.resolver;
-  }
-
-  get commandConfig(): CommandConfig {
-    return this.deps.commandConfig;
+  private buildToolOptions(): Omit<BaselineToolOptions, "onProgressReport"> {
+    const toolsConfig = this.runtime.config.getToolsConfig();
+    const providersConfig = this.runtime.config.getProvidersConfig();
+    return {
+      spritesToken: toolsConfig.sprites?.token,
+      jinaApiKey: toolsConfig.jina?.apiKey,
+      artifactsPath: toolsConfig.artifacts?.path,
+      artifactsUrl: toolsConfig.artifacts?.url,
+      getApiKey: this.runtime.getApiKey,
+      logger: this.logger,
+      oracleModel: toolsConfig.oracle?.model,
+      oraclePrompt: toolsConfig.oracle?.prompt,
+      imageGenModel: toolsConfig.imageGen?.model,
+      openRouterBaseUrl: providersConfig.openrouter?.baseUrl,
+      chronicleStore: this.runtime.chronicleStore,
+      chronicleLifecycle: this.runtime.chronicleLifecycle,
+    };
   }
 
   /**
@@ -128,7 +221,7 @@ export class CommandExecutor {
     await this.persistExecutionResult(message, triggerMessageId, result, sendResponse);
 
     if (!this.isRateLimitedResult(result)) {
-      await this.triggerAutoChronicler(message, this.deps.commandConfig.history_size);
+      await this.triggerAutoChronicler(message, this.commandConfig.history_size);
     }
 
     return result;
@@ -146,13 +239,13 @@ export class CommandExecutor {
     classifiedRuntime: { steering?: boolean; reasoningEffort: string; allowedTools: string[] | null },
     steeringContextDrainer?: SteeringContextDrainer,
   ): Promise<boolean> {
-    const { logger } = this.deps;
+    const { logger } = this;
     const modelSpec = proactiveConfig.models.serious;
     const systemPrompt =
       this.buildSystemPrompt("serious", message.mynick) +
       " " + proactiveConfig.prompts.serious_extra;
 
-    const context = await this.deps.history.getContextForMessage(
+    const context = await this.history.getContextForMessage(
       message,
       proactiveConfig.history_size,
     );
@@ -176,7 +269,7 @@ export class CommandExecutor {
         }))
       : undefined;
 
-    const runner = this.deps.runnerFactory({
+    const runner = this.runnerFactory({
       model: modelSpec,
       systemPrompt,
       tools,
@@ -192,7 +285,7 @@ export class CommandExecutor {
       agentResult = await runner.prompt(queryText, {
         contextMessages: runnerContext,
         thinkingLevel: normalizeThinkingLevel(classifiedRuntime.reasoningEffort),
-        refusalFallbackModel: this.deps.refusalFallbackModel ?? undefined,
+        refusalFallbackModel: this.refusalFallbackModel ?? undefined,
       });
 
       await this.persistToolSummaryFromSession(message, agentResult, tools as MuaddibTool[]);
@@ -232,7 +325,7 @@ export class CommandExecutor {
       await sendResponse(responseText);
     }
 
-    await this.deps.history.addMessage(
+    await this.history.addMessage(
       {
         ...message,
         nick: message.mynick,
@@ -243,7 +336,7 @@ export class CommandExecutor {
       },
     );
 
-    await this.triggerAutoChronicler(message, this.deps.commandConfig.history_size);
+    await this.triggerAutoChronicler(message, this.commandConfig.history_size);
     return true;
   }
 
@@ -253,14 +346,14 @@ export class CommandExecutor {
     message: RoomMessage,
     steeringContextDrainer?: SteeringContextDrainer,
   ): Promise<CommandExecutionResult> {
-    const { commandConfig, logger } = this.deps;
+    const { commandConfig, logger } = this;
     const defaultSize = commandConfig.history_size;
     const maxSize = Math.max(
       defaultSize,
       ...Object.values(commandConfig.modes).map((mode) => Number(mode.history_size ?? 0)),
     );
 
-    if (!this.deps.rateLimiter.checkLimit()) {
+    if (!this.rateLimiter.checkLimit()) {
       logger.warn("Rate limit triggered", `arc=${message.serverTag}#${message.channelName}`, `nick=${message.nick}`);
       return this.rateLimitedResult(message);
     }
@@ -272,10 +365,10 @@ export class CommandExecutor {
       `content=${message.content}`,
     );
 
-    const context = await this.deps.history.getContextForMessage(message, maxSize);
+    const context = await this.history.getContextForMessage(message, maxSize);
     const followupMessages = await this.collectDebouncedFollowups(message, context);
 
-    const resolved = await this.deps.resolver.resolve({
+    const resolved = await this.resolver.resolve({
       message,
       context,
       defaultSize,
@@ -306,7 +399,7 @@ export class CommandExecutor {
     if (resolvedWithFollowups.helpRequested) {
       logger.debug("Sending help message", `nick=${message.nick}`);
       return {
-        response: this.deps.resolver.buildHelpMessage(message.serverTag, message.channelName),
+        response: this.resolver.buildHelpMessage(message.serverTag, message.channelName),
         resolved: resolvedWithFollowups,
         model: null,
         usage: null,
@@ -399,9 +492,9 @@ export class CommandExecutor {
     if (
       !resolvedWithFollowups.noContext &&
       resolvedWithFollowups.runtime.includeChapterSummary &&
-      this.deps.chronicleStore
+      this.runtime.chronicleStore
     ) {
-      prependedContext = await this.deps.chronicleStore.getChapterContextMessages(
+      prependedContext = await this.runtime.chronicleStore.getChapterContextMessages(
         `${message.serverTag}#${message.channelName}`,
       );
     }
@@ -413,11 +506,11 @@ export class CommandExecutor {
     if (
       !resolvedWithFollowups.noContext &&
       resolvedWithFollowups.runtime.autoReduceContext &&
-      this.deps.contextReducer.isConfigured &&
+      this.contextReducer.isConfigured &&
       selectedContext.length > 1
     ) {
       const fullContext = [...prependedContext, ...selectedContext];
-      const reducedContext = await this.deps.contextReducer.reduce(fullContext, systemPrompt);
+      const reducedContext = await this.contextReducer.reduce(fullContext, systemPrompt);
       prependedContext = [];
       selectedContext = [
         ...reducedContext,
@@ -440,7 +533,7 @@ export class CommandExecutor {
         }))
       : undefined;
 
-    const runner = this.deps.runnerFactory({
+    const runner = this.runnerFactory({
       model: modelSpec,
       systemPrompt,
       tools,
@@ -454,7 +547,7 @@ export class CommandExecutor {
         contextMessages: runnerContext,
         thinkingLevel: normalizeThinkingLevel(resolvedWithFollowups.runtime.reasoningEffort),
         visionFallbackModel: resolvedWithFollowups.runtime.visionModel ?? undefined,
-        refusalFallbackModel: this.deps.refusalFallbackModel ?? undefined,
+        refusalFallbackModel: this.refusalFallbackModel ?? undefined,
       });
 
       await this.persistToolSummaryFromSession(message, agentResult, tools as MuaddibTool[]);
@@ -503,7 +596,7 @@ export class CommandExecutor {
       return;
     }
 
-    const { history, logger } = this.deps;
+    const { history, logger } = this;
     const arcName = `${message.serverTag}#${message.channelName}`;
 
     let llmCallId: number | null = null;
@@ -582,7 +675,7 @@ export class CommandExecutor {
       return;
     }
 
-    const { history, logger } = this.deps;
+    const { history, logger } = this;
     const totalCost = result.usage.cost.total;
     if (!(totalCost > 0)) {
       return;
@@ -626,7 +719,7 @@ export class CommandExecutor {
   // ── Helpers ──
 
   buildSystemPrompt(mode: string, mynick: string, modelOverride?: string): string {
-    const modeConfig = this.deps.commandConfig.modes[mode];
+    const modeConfig = this.commandConfig.modes[mode];
     if (!modeConfig) {
       throw new Error(`Command mode '${mode}' not found in config`);
     }
@@ -634,11 +727,11 @@ export class CommandExecutor {
     let promptTemplate = modeConfig.prompt ?? "You are {mynick}. Current time: {current_time}.";
 
     const triggerModelVars: Record<string, string> = {};
-    for (const [trigger, modeKey] of Object.entries(this.deps.resolver.triggerToMode)) {
-      const triggerOverrideModel = this.deps.resolver.triggerOverrides[trigger]?.model as string | undefined;
+    for (const [trigger, modeKey] of Object.entries(this.resolver.triggerToMode)) {
+      const triggerOverrideModel = this.resolver.triggerOverrides[trigger]?.model as string | undefined;
       const effectiveModel =
         triggerOverrideModel ??
-        (modeKey === mode && modelOverride ? modelOverride : pickModeModel(this.deps.commandConfig.modes[modeKey].model));
+        (modeKey === mode && modelOverride ? modelOverride : pickModeModel(this.commandConfig.modes[modeKey].model));
       triggerModelVars[`${trigger}_model`] = modelStrCore(effectiveModel ?? "");
     }
 
@@ -647,7 +740,7 @@ export class CommandExecutor {
       (_full, key: string) => triggerModelVars[key] ?? _full,
     );
 
-    const promptVars = this.deps.promptVars ?? {};
+    const promptVars = this.runtime.config.getRoomConfig(this.roomName).prompt_vars ?? {};
     const vars: Record<string, string> = {
       ...promptVars,
       mynick,
@@ -658,11 +751,11 @@ export class CommandExecutor {
   }
 
   async triggerAutoChronicler(message: RoomMessage, maxSize: number): Promise<void> {
-    if (!this.deps.autoChronicler) {
+    if (!this.runtime.autoChronicler) {
       return;
     }
 
-    await this.deps.autoChronicler.checkAndChronicle(
+    await this.runtime.autoChronicler.checkAndChronicle(
       message.mynick,
       message.serverTag,
       message.channelName,
@@ -674,7 +767,7 @@ export class CommandExecutor {
     message: RoomMessage,
     context: Array<{ role: string; content: string }>,
   ): Promise<string[]> {
-    const debounceSeconds = numberWithDefault(this.deps.commandConfig.debounce, 0);
+    const debounceSeconds = numberWithDefault(this.commandConfig.debounce, 0);
     if (debounceSeconds <= 0) {
       return [];
     }
@@ -682,7 +775,7 @@ export class CommandExecutor {
     const originalTimestamp = Date.now() / 1000;
     await sleep(debounceSeconds * 1000);
 
-    const followups = await this.deps.history.getRecentMessagesSince(
+    const followups = await this.history.getRecentMessagesSince(
       message.serverTag,
       message.channelName,
       message.nick,
@@ -692,7 +785,7 @@ export class CommandExecutor {
 
     const followupMessages = followups.map((entry) => entry.message).filter((entry) => entry.length > 0);
     if (followupMessages.length > 0) {
-      this.deps.logger.debug("Debounced followup messages", `count=${followupMessages.length}`, `nick=${message.nick}`);
+      this.logger.debug("Debounced followup messages", `count=${followupMessages.length}`, `nick=${message.nick}`);
     }
 
     if (followupMessages.length > 0 && context.length > 0) {
@@ -732,10 +825,10 @@ export class CommandExecutor {
 
   private cleanResponseText(text: string, nick: string): string {
     const cleaned = stripLeadingIrcContextEchoPrefixes(text.trim());
-    if (!this.deps.responseCleaner) {
+    if (!this.overrides?.responseCleaner) {
       return cleaned;
     }
-    return this.deps.responseCleaner(cleaned, nick).trim();
+    return this.overrides?.responseCleaner(cleaned, nick).trim();
   }
 
   private async applyResponseLengthPolicy(responseText: string): Promise<string> {
@@ -744,24 +837,24 @@ export class CommandExecutor {
     }
 
     const responseBytes = byteLengthUtf8(responseText);
-    if (responseBytes <= this.deps.responseMaxBytes) {
+    if (responseBytes <= this.responseMaxBytes) {
       return responseText;
     }
 
-    this.deps.logger.info(
+    this.logger.info(
       "Response too long, creating artifact",
       `bytes=${responseBytes}`,
-      `max_bytes=${this.deps.responseMaxBytes}`,
+      `max_bytes=${this.responseMaxBytes}`,
     );
 
     return await this.longResponseToArtifact(responseText);
   }
 
   private async longResponseToArtifact(fullResponse: string): Promise<string> {
-    const artifactResult = await this.deps.shareArtifact(fullResponse);
+    const artifactResult = await this.shareArtifact(fullResponse);
     const artifactUrl = extractSharedArtifactUrl(artifactResult);
 
-    let trimmed = trimToMaxBytes(fullResponse, this.deps.responseMaxBytes);
+    let trimmed = trimToMaxBytes(fullResponse, this.responseMaxBytes);
 
     const minLength = Math.max(0, trimmed.length - 100);
     const lastSentence = trimmed.lastIndexOf(".");
@@ -780,7 +873,7 @@ export class CommandExecutor {
     result: PromptResult,
     tools: MuaddibTool[],
   ): Promise<void> {
-    if (!this.deps.persistenceSummaryModel) {
+    if (!this.persistenceSummaryModel) {
       return;
     }
 
@@ -794,8 +887,8 @@ export class CommandExecutor {
     }
 
     try {
-      const summaryResponse = await this.deps.modelAdapter.completeSimple(
-        this.deps.persistenceSummaryModel,
+      const summaryResponse = await this.modelAdapter.completeSimple(
+        this.persistenceSummaryModel,
         {
           systemPrompt: PERSISTENCE_SUMMARY_SYSTEM_PROMPT,
           messages: [
@@ -808,8 +901,8 @@ export class CommandExecutor {
         },
         {
           callType: "tool_persistence_summary",
-          logger: this.deps.logger,
-          getApiKey: this.deps.getApiKey,
+          logger: this.logger,
+          getApiKey: this.getApiKey,
         },
       );
 
@@ -824,14 +917,14 @@ export class CommandExecutor {
       }
 
       const arc = `${message.serverTag}#${message.channelName}`;
-      this.deps.logger.debug(
+      this.logger.debug(
         "Persisting internal monologue summary",
         `arc=${arc}`,
         `chars=${summaryText.length}`,
         `summary=${formatLogPreview(summaryText)}`,
       );
 
-      await this.deps.history.addMessage(
+      await this.history.addMessage(
         {
           ...message,
           nick: message.mynick,
@@ -842,7 +935,7 @@ export class CommandExecutor {
         },
       );
     } catch (error) {
-      this.deps.logger.error("Failed to generate tool persistence summary", error);
+      this.logger.error("Failed to generate tool persistence summary", error);
     }
   }
 
@@ -852,7 +945,7 @@ export class CommandExecutor {
     conversationContext?: SessionFactoryContextMessage[],
   ): MuaddibTool[] {
     const invocationToolOptions: BaselineToolOptions = {
-      ...this.deps.toolOptions,
+      ...this.buildToolOptions(),
       chronicleArc: `${message.serverTag}#${message.channelName}`,
       spritesArc: `${message.serverTag}#${message.channelName}`,
       secrets: message.secrets,
@@ -860,7 +953,7 @@ export class CommandExecutor {
 
     const baseline = createBaselineAgentTools({
       ...invocationToolOptions,
-      onProgressReport: this.deps.onProgressReport,
+      onProgressReport: this.overrides?.onProgressReport,
       oracleInvocation: {
         conversationContext: conversationContext ?? [],
         toolOptions: invocationToolOptions,
