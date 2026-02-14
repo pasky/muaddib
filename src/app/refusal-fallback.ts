@@ -1,20 +1,20 @@
 import { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
 import { parseModelSpec } from "../models/model-spec.js";
+import { MuaddibConfig } from "../config/muaddib-config.js";
 
 export function resolveRefusalFallbackModel(
-  config: Record<string, unknown>,
+  config: MuaddibConfig,
   options: {
     modelAdapter?: PiAiModelAdapter;
   } = {},
 ): string | undefined {
-  const routerConfig = asRecord(config.router);
-  const rawFallbackModel = routerConfig?.refusal_fallback_model;
+  const rawFallbackModel = config.getRouterConfig().refusalFallbackModel;
 
-  if (rawFallbackModel === undefined || rawFallbackModel === null) {
+  if (rawFallbackModel === undefined) {
     return undefined;
   }
 
-  if (typeof rawFallbackModel !== "string" || rawFallbackModel.trim().length === 0) {
+  if (rawFallbackModel.trim().length === 0) {
     throw new Error(
       "router.refusal_fallback_model must be a non-empty string fully qualified as provider:model.",
     );
@@ -43,13 +43,6 @@ export function resolveRefusalFallbackModel(
   }
 
   return normalizedModel;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-  return value as Record<string, unknown>;
 }
 
 function stringifyError(error: unknown): string {

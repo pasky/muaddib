@@ -53,7 +53,7 @@ export async function createMuaddibRuntime(
   const modelAdapter = createPiAiModelAdapterFromConfig(config.raw);
   const getApiKey = createConfigApiKeyResolver(config.raw);
 
-  const refusalFallbackModel = resolveRefusalFallbackModel(config.raw, { modelAdapter });
+  const refusalFallbackModel = resolveRefusalFallbackModel(config, { modelAdapter });
   const persistenceSummaryModel = resolvePersistenceSummaryModel(config.raw, { modelAdapter });
 
   const historyConfig = config.getHistoryConfig();
