@@ -2,7 +2,7 @@ import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { createConsoleLogger, type RuntimeLogger } from "../../app/logging.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import type { RoomMessage } from "../message.js";
-import { RoomCommandHandlerTs } from "../command/command-handler.js";
+import { RoomMessageHandler } from "../command/message-handler.js";
 import { VarlinkClient, VarlinkSender } from "./varlink.js";
 
 export interface IrcMonitorRoomConfig {
@@ -71,7 +71,7 @@ export class IrcRoomMonitor {
       "IRC room is enabled but rooms.irc.varlink.socket_path is missing.",
     );
 
-    const commandHandler = new RoomCommandHandlerTs(runtime, "irc", {
+    const commandHandler = new RoomMessageHandler(runtime, "irc", {
       responseCleaner: (text) => text.replace(/\n/g, "; ").trim(),
     });
 
@@ -287,7 +287,7 @@ export class IrcRoomMonitor {
   }
 }
 
-export function createIrcCommandHandlerOptions(commandHandler: RoomCommandHandlerTs): CommandLike {
+export function createIrcCommandHandlerOptions(commandHandler: RoomMessageHandler): CommandLike {
   return commandHandler;
 }
 

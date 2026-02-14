@@ -1,7 +1,7 @@
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { createConsoleLogger, type RuntimeLogger } from "../../app/logging.js";
 import type { MuaddibRuntime } from "../../runtime.js";
-import { RoomCommandHandlerTs } from "../command/command-handler.js";
+import { RoomMessageHandler } from "../command/message-handler.js";
 import type { RoomMessage } from "../message.js";
 import {
   sendWithRateLimitRetry,
@@ -144,7 +144,7 @@ export class SlackRoomMonitor {
       throw new Error("Slack room is enabled but rooms.slack.workspaces is missing.");
     }
 
-    const commandHandler = new RoomCommandHandlerTs(runtime, "slack");
+    const commandHandler = new RoomMessageHandler(runtime, "slack");
 
     return workspaceEntries.map(([workspaceId, workspaceConfig]) => {
       const botToken = requireNonEmptyString(

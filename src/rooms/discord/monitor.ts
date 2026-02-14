@@ -1,7 +1,7 @@
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { createConsoleLogger, type RuntimeLogger } from "../../app/logging.js";
 import type { MuaddibRuntime } from "../../runtime.js";
-import { RoomCommandHandlerTs } from "../command/command-handler.js";
+import { RoomMessageHandler } from "../command/message-handler.js";
 import type { RoomMessage } from "../message.js";
 import {
   sendWithRateLimitRetry,
@@ -128,7 +128,7 @@ export class DiscordRoomMonitor {
       "Discord room is enabled but rooms.discord.token is missing.",
     );
 
-    const commandHandler = new RoomCommandHandlerTs(runtime, "discord");
+    const commandHandler = new RoomMessageHandler(runtime, "discord");
     const transport = new DiscordGatewayTransport({
       token,
       botNameFallback: roomConfig.bot_name,

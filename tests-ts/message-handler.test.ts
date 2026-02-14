@@ -7,10 +7,10 @@ import { describe, expect, it, vi } from "vitest";
 import { RuntimeLogWriter } from "../src/app/logging.js";
 import { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import {
-  RoomCommandHandlerTs,
+  RoomMessageHandler,
   type CommandRateLimiter,
   type CommandRunnerFactory,
-} from "../src/rooms/command/command-handler.js";
+} from "../src/rooms/command/message-handler.js";
 import type { ContextReducer } from "../src/rooms/command/context-reducer.js";
 import type { RoomMessage } from "../src/rooms/message.js";
 import { createTestRuntime } from "./test-runtime.js";
@@ -70,7 +70,7 @@ function createHandler(options: {
   modelAdapter?: unknown;
   runtimeLogger?: RuntimeLogWriter;
   configData?: Record<string, unknown>;
-}): RoomCommandHandlerTs {
+}): RoomMessageHandler {
   const runtime = createTestRuntime({
     history: options.history,
     configData: {
@@ -90,7 +90,7 @@ function createHandler(options: {
     runtime.logger.getLogger = () => options.logger as any;
   }
 
-  return new RoomCommandHandlerTs(runtime, "irc", {
+  return new RoomMessageHandler(runtime, "irc", {
     runnerFactory: options.runnerFactory,
     rateLimiter: options.rateLimiter,
     contextReducer: options.contextReducer,
@@ -173,7 +173,7 @@ function createDeferred<T>() {
   };
 }
 
-describe("RoomCommandHandlerTs", () => {
+describe("RoomMessageHandler", () => {
   it("routes command to runner without duplicating trigger message and propagates reasoning level", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();

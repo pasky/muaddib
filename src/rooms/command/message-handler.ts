@@ -1,9 +1,8 @@
 /**
- * Command handler — session lifecycle coordinator.
+ * Room message handler — session lifecycle coordinator.
  *
- * Owns the steering queue and dispatch between command/passive message paths.
- * Delegates command execution to CommandExecutor and proactive interjection
- * lifecycle to ProactiveRunner.
+ * Owns the steering queue and dispatch between direct command vs passive message paths.
+ * Delegates execution to CommandExecutor and proactive interjection lifecycle to ProactiveRunner.
  */
 
 import type { ChatRole } from "../../history/chat-history-store.js";
@@ -30,14 +29,14 @@ export type {
 } from "./command-executor.js";
 
 /**
- * Shared TS command execution path with proactive interjection support.
+ * Shared room message handling path with proactive interjection support.
  *
  * Proactive interjection is integrated into the steering queue: passive messages
  * in proactive-enabled channels start a steering session with a debounce-until-
- * silence loop.  Commands arriving during the debounce or during agent execution
+ * silence loop. Commands arriving during the debounce or during agent execution
  * are handled via the normal steering mechanism (queued and drained mid-flight).
  */
-export class RoomCommandHandlerTs {
+export class RoomMessageHandler {
   readonly resolver: CommandResolver;
   private readonly executor: CommandExecutor;
   private readonly steeringQueue: SteeringQueue;

@@ -1,9 +1,9 @@
 import { RuntimeLogWriter } from "../app/logging.js";
 import { getMuaddibHome } from "../config/paths.js";
 import {
-  RoomCommandHandlerTs,
+  RoomMessageHandler,
   type CommandRunnerFactory,
-} from "../rooms/command/command-handler.js";
+} from "../rooms/command/message-handler.js";
 import type { RoomMessage } from "../rooms/message.js";
 import { createMuaddibRuntime, shutdownRuntime } from "../runtime.js";
 
@@ -45,7 +45,7 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
   });
 
   try {
-    const commandHandler = new RoomCommandHandlerTs(runtime, roomName, {
+    const commandHandler = new RoomMessageHandler(runtime, roomName, {
       runnerFactory: options.runnerFactory,
     });
 

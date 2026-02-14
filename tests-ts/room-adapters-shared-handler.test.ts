@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ChatHistoryStore } from "../src/history/chat-history-store.js";
-import { RoomCommandHandlerTs } from "../src/rooms/command/command-handler.js";
+import { RoomMessageHandler } from "../src/rooms/command/message-handler.js";
 import { DiscordRoomMonitor } from "../src/rooms/discord/monitor.js";
 import { SlackRoomMonitor } from "../src/rooms/slack/monitor.js";
 import { createTestRuntime } from "./test-runtime.js";
@@ -31,12 +31,12 @@ function buildRoomConfig() {
   };
 }
 
-describe("room adapters share RoomCommandHandlerTs behavior", () => {
+describe("room adapters share RoomMessageHandler behavior", () => {
   it("Discord adapter persists user+assistant via shared handler", async () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();
 
-    const handler = new RoomCommandHandlerTs(
+    const handler = new RoomMessageHandler(
       createTestRuntime({
         history,
         configData: {
@@ -118,7 +118,7 @@ describe("room adapters share RoomCommandHandlerTs behavior", () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();
 
-    const handler = new RoomCommandHandlerTs(
+    const handler = new RoomMessageHandler(
       createTestRuntime({
         history,
         configData: {

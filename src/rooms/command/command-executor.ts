@@ -5,7 +5,7 @@
  * agent invocation, result processing, persistence, and response delivery.
  *
  * Stateless with respect to steering sessions — takes a message, runs it,
- * returns a result.  All queue/session lifecycle stays in command-handler.
+ * returns a result. All queue/session lifecycle stays in message-handler.
  */
 
 import type { AgentMessage, AgentTool, ThinkingLevel } from "@mariozechner/pi-agent-core";
@@ -1019,7 +1019,7 @@ function extractArtifactUrls(result: unknown): string[] {
   return Array.from(urls);
 }
 
-// ── Shared utility functions (exported for command-handler) ──
+// ── Shared utility functions (exported for message-handler) ──
 
 export function modelStrCore(model: unknown): string {
   return String(model).replace(/(?:[-\w]*:)?(?:[-\w]*\/)?([-\w]+)(?:#[-\w,]*)?/, "$1");
