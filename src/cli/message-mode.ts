@@ -1,28 +1,11 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-
-import { createConfigApiKeyResolver } from "../app/api-keys.js";
-import { assertNoDeferredFeatureConfig } from "../app/deferred-features.js";
-import { getMuaddibHome, resolveMuaddibPath } from "../app/bootstrap.js";
-import { resolveRefusalFallbackModel } from "../app/refusal-fallback.js";
-import { resolvePersistenceSummaryModel } from "../app/persistence-summary.js";
 import { RuntimeLogWriter } from "../app/logging.js";
-import { SessionRunner } from "../agent/session-runner.js";
-import { createPiAiModelAdapterFromConfig } from "../models/pi-ai-model-adapter.js";
-import { ChronicleStore } from "../chronicle/chronicle-store.js";
-import {
-  ChronicleLifecycleTs,
-  type ChronicleLifecycleConfig,
-} from "../chronicle/lifecycle.js";
-import { ChatHistoryStore } from "../history/chat-history-store.js";
-import { createModeClassifier } from "../rooms/command/classifier.js";
-import { getRoomConfig } from "../rooms/command/config.js";
+import { getMuaddibHome } from "../app/bootstrap.js";
 import {
   RoomCommandHandlerTs,
   type CommandRunnerFactory,
 } from "../rooms/command/command-handler.js";
-import { AutoChroniclerTs } from "../rooms/autochronicler.js";
 import type { RoomMessage } from "../rooms/message.js";
+import { createMuaddibRuntime, shutdownRuntime } from "../runtime.js";
 
 export interface CliMessageModeOptions {
   message: string;
@@ -52,92 +35,20 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
   const runtimeLogger = new RuntimeLogWriter({ muaddibHome });
   const logger = runtimeLogger.getLogger("muaddib.cli.message");
 
-  const config = JSON.parse(readFileSync(options.configPath, "utf-8")) as Record<string, unknown>;
-  assertNoDeferredFeatureConfig(config, logger);
-  const modelAdapter = createPiAiModelAdapterFromConfig(config);
-
   const roomName = options.roomName ?? "irc";
-  const roomConfig = getRoomConfig(config, roomName) as any;
-  const commandConfig = roomConfig.command;
-  const actorConfig = asRecord(config.actor);
-  const contextReducerConfig = asRecord(config.context_reducer);
-  const toolsConfig = asRecord(config.tools);
-  const artifactsConfig = asRecord(toolsConfig?.artifacts);
-  const oracleConfig = asRecord(toolsConfig?.oracle);
-  const imageGenConfig = asRecord(toolsConfig?.image_gen);
-  const providersConfig = asRecord(config.providers);
-  const openRouterProviderConfig = asRecord(providersConfig?.openrouter);
-  const refusalFallbackModel = resolveRefusalFallbackModel(config, { modelAdapter });
-  const persistenceSummaryModel = resolvePersistenceSummaryModel(config, { modelAdapter });
-  const getApiKey = createConfigApiKeyResolver(config);
 
-  const maxIterations = numberOrUndefined(actorConfig?.max_iterations);
-  const maxCompletionRetries = numberOrUndefined(actorConfig?.max_completion_retries);
-  const llmDebugMaxChars = numberOrUndefined(actorConfig?.llm_debug_max_chars);
-  const contextReducerModel = stringOrUndefined(contextReducerConfig?.model);
-  const contextReducerPrompt = stringOrUndefined(contextReducerConfig?.prompt);
-  const jinaApiKey = stringOrUndefined(asRecord(toolsConfig?.jina)?.api_key);
-  const artifactsPathRaw = stringOrUndefined(artifactsConfig?.path);
-  const artifactsPath = artifactsPathRaw
-    ? resolveMuaddibPath(artifactsPathRaw, join(muaddibHome, "artifacts"))
-    : undefined;
-  const artifactsUrl = stringOrUndefined(artifactsConfig?.url);
-  const oracleModel = stringOrUndefined(oracleConfig?.model);
-  const oraclePrompt = stringOrUndefined(oracleConfig?.prompt);
-  const imageGenModel = stringOrUndefined(imageGenConfig?.model);
-  const openRouterBaseUrl = stringOrUndefined(openRouterProviderConfig?.base_url);
-
-  if (!commandConfig) {
-    throw new Error(`Room '${roomName}' does not define command config.`);
-  }
-
-  const chroniclerConfig = asRecord(config.chronicler);
-  const chroniclerModel = stringOrUndefined(chroniclerConfig?.model);
-
-  const history = new ChatHistoryStore(options.dbPath ?? ":memory:", commandConfig.history_size ?? 40);
-  await history.initialize();
-
-  let chronicleStore: ChronicleStore | undefined;
+  const runtime = await createMuaddibRuntime({
+    configPath: options.configPath,
+    muaddibHome,
+    dbPath: options.dbPath ?? ":memory:",
+    logger: runtimeLogger,
+  });
 
   try {
-    let chronicleLifecycle: ChronicleLifecycleTs | undefined;
-    let autoChronicler: AutoChroniclerTs | undefined;
-
-    if (chroniclerConfig && chroniclerModel) {
-      const chronicleDbPath = resolveMuaddibPath(
-        stringOrUndefined(asRecord(chroniclerConfig.database)?.path),
-        join(muaddibHome, "chronicle.db"),
-      );
-
-      chronicleStore = new ChronicleStore(chronicleDbPath);
-      await chronicleStore.initialize();
-
-      const lifecycleConfig: ChronicleLifecycleConfig = {
-        model: chroniclerModel,
-        arc_models: toStringRecord(chroniclerConfig.arc_models),
-        paragraphs_per_chapter: numberOrUndefined(chroniclerConfig.paragraphs_per_chapter),
-      };
-
-      chronicleLifecycle = new ChronicleLifecycleTs({
-        chronicleStore,
-        config: lifecycleConfig,
-        modelAdapter,
-        getApiKey,
-        logger: runtimeLogger.getLogger("muaddib.chronicle.lifecycle"),
-      });
-
-      autoChronicler = new AutoChroniclerTs({
-        history,
-        chronicleStore,
-        lifecycle: chronicleLifecycle,
-        config: {
-          model: chroniclerModel,
-          arc_models: toStringRecord(chroniclerConfig.arc_models),
-        },
-        modelAdapter,
-        getApiKey,
-      });
-    }
+    const commandHandler = RoomCommandHandlerTs.fromRuntime(runtime, roomName, {
+      runnerFactory: options.runnerFactory,
+      logger: runtimeLogger.getLogger("muaddib.rooms.command"),
+    });
 
     const message: RoomMessage = {
       serverTag: options.serverTag ?? "testserver",
@@ -146,58 +57,6 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
       mynick: options.mynick ?? "testbot",
       content: options.message,
     };
-
-    const defaultRunnerFactory: CommandRunnerFactory = (input) =>
-      new SessionRunner({
-        model: input.model,
-        systemPrompt: input.systemPrompt,
-        tools: input.tools,
-        modelAdapter,
-        getApiKey,
-        maxIterations,
-        llmDebugMaxChars,
-        logger: input.logger,
-      });
-
-    const commandHandler = new RoomCommandHandlerTs({
-      roomConfig,
-      history,
-      classifyMode: createModeClassifier(commandConfig, {
-        getApiKey,
-        modelAdapter,
-        logger: runtimeLogger.getLogger("muaddib.rooms.command"),
-      }),
-      getApiKey,
-      modelAdapter,
-      refusalFallbackModel,
-      persistenceSummaryModel,
-      contextReducerConfig: {
-        model: contextReducerModel,
-        prompt: contextReducerPrompt,
-      },
-      autoChronicler,
-      chronicleStore,
-      runnerFactory: options.runnerFactory ?? defaultRunnerFactory,
-      agentLoop: {
-        maxIterations,
-        maxCompletionRetries,
-        llmDebugMaxChars,
-      },
-      toolOptions: {
-        jinaApiKey,
-        artifactsPath,
-        artifactsUrl,
-        getApiKey,
-        logger: runtimeLogger.getLogger("muaddib.agent.tools"),
-        oracleModel,
-        oraclePrompt,
-        imageGenModel,
-        openRouterBaseUrl,
-        chronicleStore,
-        chronicleLifecycle,
-      },
-      logger: runtimeLogger.getLogger("muaddib.rooms.command"),
-    });
 
     const arc = `${message.serverTag}#${message.channelName}`;
     const result = await logger.withMessageContext(
@@ -219,49 +78,6 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
       selectedAutomatically: result?.resolved.selectedAutomatically ?? false,
     };
   } finally {
-    await history.close();
-    await chronicleStore?.close();
+    await shutdownRuntime(runtime);
   }
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-  return value as Record<string, unknown>;
-}
-
-function numberOrUndefined(value: unknown): number | undefined {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return undefined;
-  }
-  return parsed;
-}
-
-function stringOrUndefined(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function toStringRecord(value: unknown): Record<string, string> | undefined {
-  const record = asRecord(value);
-  if (!record) {
-    return undefined;
-  }
-
-  const result: Record<string, string> = {};
-  for (const [key, entry] of Object.entries(record)) {
-    const normalized = stringOrUndefined(entry);
-    if (!normalized) {
-      continue;
-    }
-
-    result[key] = normalized;
-  }
-
-  return Object.keys(result).length > 0 ? result : undefined;
 }

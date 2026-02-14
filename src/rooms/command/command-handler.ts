@@ -19,6 +19,8 @@ import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { parseModelSpec } from "../../models/model-spec.js";
 import type { AutoChronicler } from "../autochronicler.js";
+import type { MuaddibRuntime } from "../../runtime.js";
+import { createModeClassifier } from "./classifier.js";
 import { RateLimiter } from "./rate-limiter.js";
 import {
   ContextReducerTs,
@@ -130,6 +132,70 @@ export class RoomCommandHandlerTs {
   private readonly autoChronicler: AutoChronicler | null;
   private readonly chronicleStore: Pick<ChronicleStore, "getChapterContextMessages"> | null;
   private readonly logger: CommandHandlerLogger;
+
+  /**
+   * Factory: build a handler from a MuaddibRuntime for a given room.
+   */
+  static fromRuntime(
+    runtime: MuaddibRuntime,
+    roomName: string,
+    overrides?: {
+      responseCleaner?: (text: string, nick: string) => string;
+      runnerFactory?: CommandRunnerFactory;
+      logger?: CommandHandlerLogger;
+    },
+  ): RoomCommandHandlerTs {
+    const roomConfig = runtime.config.getRoomConfig(roomName) as any;
+    const commandConfig = roomConfig.command ?? {};
+    const actorConfig = runtime.config.getActorConfig();
+    const toolsConfig = runtime.config.getToolsConfig();
+    const contextReducerConfig = runtime.config.getContextReducerConfig();
+    const providersConfig = runtime.config.getProvidersConfig();
+    const loggerInstance = overrides?.logger ??
+      runtime.logger.getLogger(`muaddib.rooms.command.${roomName}`);
+
+    return new RoomCommandHandlerTs({
+      roomConfig,
+      history: runtime.history,
+      classifyMode: createModeClassifier(commandConfig, {
+        getApiKey: runtime.getApiKey,
+        modelAdapter: runtime.modelAdapter,
+        logger: loggerInstance,
+      }),
+      getApiKey: runtime.getApiKey,
+      modelAdapter: runtime.modelAdapter,
+      responseCleaner: overrides?.responseCleaner,
+      logger: loggerInstance,
+      refusalFallbackModel: runtime.refusalFallbackModel,
+      persistenceSummaryModel: runtime.persistenceSummaryModel,
+      contextReducerConfig: {
+        model: contextReducerConfig.model,
+        prompt: contextReducerConfig.prompt,
+      },
+      autoChronicler: runtime.autoChronicler,
+      chronicleStore: runtime.chronicleStore,
+      runnerFactory: overrides?.runnerFactory,
+      agentLoop: {
+        maxIterations: actorConfig.maxIterations,
+        maxCompletionRetries: actorConfig.maxCompletionRetries,
+        llmDebugMaxChars: actorConfig.llmDebugMaxChars,
+      },
+      toolOptions: {
+        spritesToken: toolsConfig.sprites?.token,
+        jinaApiKey: toolsConfig.jina?.apiKey,
+        artifactsPath: toolsConfig.artifacts?.path,
+        artifactsUrl: toolsConfig.artifacts?.url,
+        getApiKey: runtime.getApiKey,
+        logger: loggerInstance,
+        oracleModel: toolsConfig.oracle?.model,
+        oraclePrompt: toolsConfig.oracle?.prompt,
+        imageGenModel: toolsConfig.imageGen?.model,
+        openRouterBaseUrl: providersConfig.openrouter?.baseUrl,
+        chronicleStore: runtime.chronicleStore,
+        chronicleLifecycle: runtime.chronicleLifecycle,
+      },
+    });
+  }
 
   constructor(private readonly options: CommandHandlerOptions) {
     this.commandConfig = options.roomConfig.command;
