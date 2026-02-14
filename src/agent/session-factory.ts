@@ -83,8 +83,9 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
   authStorage.login = async () => {};
   authStorage.logout = () => {};
   const authBridge = new MuaddibConfigBackedAuthBridge(input.getApiKey);
-  authStorage.setFallbackResolver((provider) => authBridge.resolveSync(provider));
   const modelRegistry = new ModelRegistry(authStorage);
+  // Set fallback resolver AFTER ModelRegistry constructor (which overwrites it).
+  authStorage.setFallbackResolver((provider) => authBridge.resolveSync(provider));
   const llmDebugMaxChars = Math.max(500, Math.floor(input.llmDebugMaxChars ?? 120_000));
   const streamFn = createTracingStreamFn(logger, llmDebugMaxChars);
 
