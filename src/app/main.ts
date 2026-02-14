@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { RuntimeLogWriter } from "./logging.js";
@@ -5,8 +6,25 @@ import { DiscordRoomMonitor } from "../rooms/discord/monitor.js";
 import { IrcRoomMonitor } from "../rooms/irc/monitor.js";
 import { SlackRoomMonitor } from "../rooms/slack/monitor.js";
 import { createSendRetryEventLogger } from "../rooms/send-retry.js";
-import { getMuaddibHome, parseAppArgs } from "./bootstrap.js";
+import { getMuaddibHome } from "../config/paths.js";
 import { createMuaddibRuntime, shutdownRuntime, type MuaddibRuntime } from "../runtime.js";
+
+interface AppArgs {
+  configPath: string;
+}
+
+function parseAppArgs(argv: string[] = process.argv.slice(2)): AppArgs {
+  let configPath = join(getMuaddibHome(), "config.json");
+
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === "--config" && argv[i + 1]) {
+      configPath = argv[i + 1];
+      i += 1;
+    }
+  }
+
+  return { configPath };
+}
 
 interface RunnableMonitor {
   run(): Promise<void>;

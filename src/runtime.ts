@@ -1,10 +1,8 @@
 import { join } from "node:path";
 
-import { assertNoDeferredFeatureConfig } from "./app/deferred-features.js";
-import { getMuaddibHome, resolveMuaddibPath } from "./app/bootstrap.js";
+import { assertNoDeferredFeatureConfig } from "./config/deferred-features.js";
+import { getMuaddibHome, resolveMuaddibPath } from "./config/paths.js";
 import { RuntimeLogWriter, type RuntimeLogger } from "./app/logging.js";
-import { resolveRefusalFallbackModel } from "./app/refusal-fallback.js";
-import { resolvePersistenceSummaryModel } from "./app/persistence-summary.js";
 import { ChronicleStore } from "./chronicle/chronicle-store.js";
 import {
   ChronicleLifecycleTs,
@@ -15,6 +13,7 @@ import {
   createPiAiModelAdapterFromConfig,
   type PiAiModelAdapter,
 } from "./models/pi-ai-model-adapter.js";
+import { parseModelSpec } from "./models/model-spec.js";
 import { AutoChroniclerTs, type AutoChronicler } from "./rooms/autochronicler.js";
 import { MuaddibConfig } from "./config/muaddib-config.js";
 
@@ -53,8 +52,8 @@ export async function createMuaddibRuntime(
   const staticKeys = config.getProviderStaticKeys();
   const getApiKey = (provider: string): string | undefined => staticKeys[provider];
 
-  const refusalFallbackModel = resolveRefusalFallbackModel(config, { modelAdapter });
-  const persistenceSummaryModel = resolvePersistenceSummaryModel(config, { modelAdapter });
+  const refusalFallbackModel = resolveRefusalFallbackModel(config, modelAdapter);
+  const persistenceSummaryModel = resolvePersistenceSummaryModel(config, modelAdapter);
 
   const historyConfig = config.getHistoryConfig();
   const historyDbPath = options.dbPath ?? resolveMuaddibPath(
@@ -132,4 +131,89 @@ export async function createMuaddibRuntime(
 export async function shutdownRuntime(runtime: MuaddibRuntime): Promise<void> {
   await runtime.history.close();
   await runtime.chronicleStore?.close();
+}
+
+// ── Model resolution helpers (inlined from former app/ modules) ────────
+
+function stringifyError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
+
+function resolveRefusalFallbackModel(
+  config: MuaddibConfig,
+  modelAdapter: PiAiModelAdapter,
+): string | undefined {
+  const rawFallbackModel = config.getRouterConfig().refusalFallbackModel;
+
+  if (rawFallbackModel === undefined) {
+    return undefined;
+  }
+
+  if (rawFallbackModel.trim().length === 0) {
+    throw new Error(
+      "router.refusal_fallback_model must be a non-empty string fully qualified as provider:model.",
+    );
+  }
+
+  const trimmedModel = rawFallbackModel.trim();
+
+  let normalizedModel: string;
+  try {
+    const spec = parseModelSpec(trimmedModel);
+    normalizedModel = `${spec.provider}:${spec.modelId}`;
+  } catch (error) {
+    throw new Error(
+      `Invalid router.refusal_fallback_model '${trimmedModel}': ${stringifyError(error)}`,
+    );
+  }
+
+  try {
+    modelAdapter.resolve(normalizedModel);
+  } catch (error) {
+    throw new Error(
+      `Unsupported router.refusal_fallback_model '${normalizedModel}': ${stringifyError(error)}`,
+    );
+  }
+
+  return normalizedModel;
+}
+
+function resolvePersistenceSummaryModel(
+  config: MuaddibConfig,
+  modelAdapter: PiAiModelAdapter,
+): string | undefined {
+  const rawSummaryModel = config.getToolsConfig().summary?.model;
+
+  if (rawSummaryModel === undefined || rawSummaryModel === null) {
+    return undefined;
+  }
+
+  if (typeof rawSummaryModel !== "string" || rawSummaryModel.trim().length === 0) {
+    throw new Error(
+      "tools.summary.model must be a non-empty string fully qualified as provider:model.",
+    );
+  }
+
+  const trimmedModel = rawSummaryModel.trim();
+
+  let normalizedModel: string;
+  try {
+    const spec = parseModelSpec(trimmedModel);
+    normalizedModel = `${spec.provider}:${spec.modelId}`;
+  } catch (error) {
+    throw new Error(`Invalid tools.summary.model '${trimmedModel}': ${stringifyError(error)}`);
+  }
+
+  try {
+    modelAdapter.resolve(normalizedModel);
+  } catch (error) {
+    throw new Error(
+      `Unsupported tools.summary.model '${normalizedModel}': ${stringifyError(error)}`,
+    );
+  }
+
+  return normalizedModel;
 }

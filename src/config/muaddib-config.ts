@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { getMuaddibHome, resolveMuaddibPath } from "../app/bootstrap.js";
+import { getMuaddibHome, resolveMuaddibPath } from "./paths.js";
 import type { CommandConfig } from "../rooms/command/resolver.js";
 
 // ── Config section interfaces ──────────────────────────────────────────

@@ -2,23 +2,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
-export interface AppArgs {
-  configPath: string;
-}
-
-export function parseAppArgs(argv: string[] = process.argv.slice(2)): AppArgs {
-  let configPath = join(getMuaddibHome(), "config.json");
-
-  for (let i = 0; i < argv.length; i += 1) {
-    if (argv[i] === "--config" && argv[i + 1]) {
-      configPath = argv[i + 1];
-      i += 1;
-    }
-  }
-
-  return { configPath };
-}
-
 export function loadConfig(configPath: string): Record<string, unknown> {
   if (!existsSync(configPath)) {
     throw new Error(`Config file not found at ${configPath}`);

@@ -20,6 +20,5 @@ export * from "./chronicle/chronicle-store.js";
 export * from "./chronicle/lifecycle.js";
 export * from "./chronicle/quest-runtime.js";
 export * from "./cli/message-mode.js";
-export * from "./app/bootstrap.js";
+export * from "./config/paths.js";
 export * from "./app/main.js";
-export * from "./app/irc-main.js";

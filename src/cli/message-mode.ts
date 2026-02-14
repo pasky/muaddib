@@ -1,5 +1,5 @@
 import { RuntimeLogWriter } from "../app/logging.js";
-import { getMuaddibHome } from "../app/bootstrap.js";
+import { getMuaddibHome } from "../config/paths.js";
 import {
   RoomCommandHandlerTs,
   type CommandRunnerFactory,

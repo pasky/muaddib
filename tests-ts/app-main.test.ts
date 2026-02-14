@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { resolveMuaddibPath } from "../src/app/bootstrap.js";
+import { resolveMuaddibPath } from "../src/config/paths.js";
 import { runMuaddibMain } from "../src/app/main.js";
 import { createSendRetryEventLogger } from "../src/rooms/send-retry.js";
 
