@@ -166,7 +166,7 @@ describe("ContextReducerTs", () => {
     expect(result).toEqual([{ role: "user" as const, content: "a" }]);
   });
 
-  it("reduce resolves API key via getApiKey callback", async () => {
+  it("reduce does not pass API key callback per-call when adapter is injected", async () => {
     const getApiKey = vi.fn(async (provider: string) => (provider === "openai" ? "sk-test" : undefined));
     const modelAdapter = { completeSimple: vi.fn(async () => assistantTextMessage("[USER]: hi")) } as any;
 
@@ -185,7 +185,7 @@ describe("ContextReducerTs", () => {
     );
 
     const firstCall = modelAdapter.completeSimple.mock.calls[0] as any[];
-    expect(firstCall[2]).toMatchObject({ getApiKey });
+    expect(firstCall[2]).not.toHaveProperty("getApiKey");
   });
 
   it("reduce handles multi-turn parsed response correctly", async () => {

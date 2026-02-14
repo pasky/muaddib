@@ -20,7 +20,7 @@ export function createModeClassifier(
   commandConfig: CommandConfig,
   options: ModeClassifierOptions = {},
 ): (context: Array<{ role: string; content: string }>) => Promise<string> {
-  const adapter = options.modelAdapter ?? new PiAiModelAdapter();
+  const adapter = options.modelAdapter ?? new PiAiModelAdapter({ getApiKey: options.getApiKey });
   const logger = options.logger ?? noopModeClassifierLogger();
 
   return async (context: Array<{ role: string; content: string }>): Promise<string> => {
@@ -58,7 +58,6 @@ export function createModeClassifier(
         {
           callType: "mode_classifier",
           logger,
-          getApiKey: options.getApiKey,
           streamOptions: { reasoning: "minimal" },
         },
       );

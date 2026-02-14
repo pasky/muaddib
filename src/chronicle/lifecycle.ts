@@ -54,18 +54,10 @@ export class ChronicleLifecycleTs implements ChronicleLifecycle {
   constructor(options: ChronicleLifecycleTsOptions) {
     this.chronicleStore = options.chronicleStore;
     this.config = options.config;
-    this.modelAdapter = options.modelAdapter ?? new PiAiModelAdapter();
+    this.modelAdapter = options.modelAdapter ?? new PiAiModelAdapter({ getApiKey: options.getApiKey });
     this.questRuntime = options.questRuntime ?? null;
     this.logger = options.logger;
-    this.getApiKey = async (provider: string) => {
-      if (!options.getApiKey) {
-        return undefined;
-      }
-      return await options.getApiKey(provider);
-    };
   }
-
-  private readonly getApiKey: (provider: string) => Promise<string | undefined>;
 
   async appendParagraph(
     arc: string,
@@ -166,7 +158,6 @@ export class ChronicleLifecycleTs implements ChronicleLifecycle {
       {
         callType: "chronicler_summary",
         logger: this.logger,
-        getApiKey: this.getApiKey,
         streamOptions: {
           maxTokens: 1024,
         },

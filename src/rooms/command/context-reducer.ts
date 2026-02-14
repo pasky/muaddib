@@ -31,7 +31,7 @@ export class ContextReducerTs implements ContextReducer {
   private readonly modelAdapter: PiAiModelAdapter;
   constructor(private readonly options: ContextReducerTsOptions = {}) {
     this.config = options.config ?? {};
-    this.modelAdapter = options.modelAdapter ?? new PiAiModelAdapter();
+    this.modelAdapter = options.modelAdapter ?? new PiAiModelAdapter({ getApiKey: options.getApiKey });
   }
 
   get isConfigured(): boolean {
@@ -71,7 +71,6 @@ export class ContextReducerTs implements ContextReducer {
         {
           callType: "context_reducer",
           logger: this.options.logger,
-          getApiKey: this.options.getApiKey,
           streamOptions: { maxTokens: 2_048 },
         },
       );

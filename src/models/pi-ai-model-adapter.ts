@@ -26,7 +26,9 @@ export class PiAiModelResolutionError extends Error {
   }
 }
 
-export type PiAiModelAdapterOptions = ProviderOverrideOptions;
+export interface PiAiModelAdapterOptions extends ProviderOverrideOptions {
+  getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+}
 
 export interface ResolvedPiAiModel {
   spec: ModelSpec;
@@ -51,9 +53,11 @@ export interface CompleteSimpleOptions {
  */
 export class PiAiModelAdapter {
   private readonly providerOverrideOptions;
+  private readonly getApiKey;
 
   constructor(options: PiAiModelAdapterOptions = {}) {
     this.providerOverrideOptions = normalizeProviderOverrideOptions(options);
+    this.getApiKey = options.getApiKey;
   }
 
   resolve(modelSpec: string): ResolvedPiAiModel {
@@ -104,7 +108,11 @@ export class PiAiModelAdapter {
         context,
         {
           ...(options.streamOptions ?? {}),
-          apiKey: options.getApiKey ? await options.getApiKey(resolved.spec.provider) : undefined,
+          apiKey: options.getApiKey
+            ? await options.getApiKey(resolved.spec.provider)
+            : this.getApiKey
+              ? await this.getApiKey(resolved.spec.provider)
+              : undefined,
           onPayload: (payload: unknown) => {
             logger?.debug(`llm_io payload ${callType}`, safeJson(payload, maxChars));
           },
@@ -120,9 +128,13 @@ export class PiAiModelAdapter {
   }
 }
 
-export function createPiAiModelAdapterFromConfig(config: MuaddibConfig): PiAiModelAdapter {
+export function createPiAiModelAdapterFromConfig(
+  config: MuaddibConfig,
+  getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined,
+): PiAiModelAdapter {
   return new PiAiModelAdapter({
     deepseekBaseUrl: config.getProvidersConfig().deepseek?.baseUrl,
+    getApiKey,
   });
 }
 

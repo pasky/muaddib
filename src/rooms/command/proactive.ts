@@ -310,7 +310,7 @@ export async function evaluateProactiveInterjection(
   context: Array<{ role: ChatRole; content: string }>,
   options: ProactiveEvaluatorOptions = {},
 ): Promise<ProactiveEvalResult> {
-  const adapter = options.modelAdapter ?? new PiAiModelAdapter();
+  const adapter = options.modelAdapter ?? new PiAiModelAdapter({ getApiKey: options.getApiKey });
   const logger = options.logger;
 
   if (!context.length) {
@@ -339,7 +339,6 @@ export async function evaluateProactiveInterjection(
         {
           callType: "proactive_validation",
           logger: logger ?? { debug() {}, info() {}, warn() {}, error() {} },
-          getApiKey: options.getApiKey,
           streamOptions: { reasoning: "minimal" },
         },
       );
