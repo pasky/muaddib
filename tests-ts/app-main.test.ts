@@ -312,7 +312,7 @@ describe("runMuaddibMain", () => {
     ).rejects.toThrow("command.response_max_bytes must be a positive integer.");
   });
 
-  it("ignores deferred proactive + quest config knobs while allowing chronicler runtime config", async () => {
+  it("ignores deferred quest config knobs while allowing chronicler runtime config and proactive", async () => {
     const { dir, configPath } = await createConfigDir({
       history: {
         database: {
@@ -365,7 +365,8 @@ describe("runMuaddibMain", () => {
       "Deferred features are not supported in the TypeScript runtime and will be ignored",
     );
     expect(systemLog).toContain("chronicler.quests");
-    expect(systemLog).toContain("rooms.common.proactive");
+    // Proactive is now supported — should NOT appear in deferred warnings.
+    expect(systemLog).not.toContain("rooms.common.proactive");
     expect(systemLog).not.toContain("Disable or remove unsupported config keys: chronicler");
   });
 
@@ -389,10 +390,6 @@ describe("runMuaddibMain", () => {
         rooms: {
           common: {
             command: baseCommandConfig(),
-            proactive: {
-              enabled: true,
-              interjecting: ["libera##muaddib"],
-            },
           },
           irc: {
             enabled: false,
@@ -406,7 +403,7 @@ describe("runMuaddibMain", () => {
         },
       }),
     ).rejects.toThrow(
-      "Deferred features are not supported in the TypeScript runtime. Disable or remove unsupported config keys: chronicler.quests, rooms.common.proactive.",
+      "Deferred features are not supported in the TypeScript runtime. Disable or remove unsupported config keys: chronicler.quests.",
     );
   });
 

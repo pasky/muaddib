@@ -1676,4 +1676,147 @@ describe("RoomCommandHandlerTs", () => {
 
     await history.close();
   });
+
+  it("starts proactive session on passive message in proactive-enabled channel", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const proactiveRoomConfig = {
+      ...roomConfig,
+      proactive: {
+        interjecting: ["libera##test"],
+        debounce_seconds: 0.05,
+        history_size: 10,
+        rate_limit: 10,
+        rate_period: 60,
+        interject_threshold: 100, // Set impossibly high so it never actually interjects
+        models: {
+          validation: ["openai:gpt-4o-mini"],
+          serious: "openai:gpt-4o-mini",
+        },
+        prompts: {
+          interject: "Score this: {message}",
+          serious_extra: "Be proactive.",
+        },
+      },
+    };
+
+    let runnerCalled = false;
+
+    const handler = createHandler({
+      roomConfig: proactiveRoomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: () => ({
+        prompt: async () => {
+          runnerCalled = true;
+          return makeRunnerResult("proactive response");
+        },
+      }),
+      // Mock the model adapter to return a low score so proactive declines
+      modelAdapter: {
+        completeSimple: async () => ({
+          content: [{ type: "text", text: "Score: 2/10 - not interesting" }],
+        }),
+      },
+    });
+
+    // Send a passive message — should start proactive session and debounce
+    await handler.handleIncomingMessage(makeMessage("just chatting"), {
+      isDirect: false,
+    });
+
+    // Wait for debounce + evaluation to finish
+    await new Promise((resolve) => { setTimeout(resolve, 200); });
+
+    // Runner should NOT be called since score is below threshold
+    expect(runnerCalled).toBe(false);
+
+    await history.close();
+  });
+
+  it("does not start proactive session on passive message in non-proactive channel", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    // No proactive config at all
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: () => ({
+        prompt: async () => makeRunnerResult("unused"),
+      }),
+    });
+
+    await handler.handleIncomingMessage(makeMessage("just chatting"), {
+      isDirect: false,
+    });
+
+    // Should complete immediately without starting a proactive session
+    await history.close();
+  });
+
+  it("command preempts proactive debounce session", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const proactiveRoomConfig = {
+      ...roomConfig,
+      proactive: {
+        interjecting: ["libera##test"],
+        debounce_seconds: 5, // Long debounce — command should preempt
+        history_size: 10,
+        rate_limit: 10,
+        rate_period: 60,
+        interject_threshold: 1,
+        models: {
+          validation: ["openai:gpt-4o-mini"],
+          serious: "openai:gpt-4o-mini",
+        },
+        prompts: {
+          interject: "Score: {message}",
+          serious_extra: "",
+        },
+      },
+    };
+
+    const sent: string[] = [];
+    let runnerPrompts: string[] = [];
+
+    const handler = createHandler({
+      roomConfig: proactiveRoomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: () => ({
+        prompt: async (prompt) => {
+          runnerPrompts.push(prompt);
+          return makeRunnerResult("command response");
+        },
+      }),
+    });
+
+    // Start proactive session with a passive message
+    const passivePromise = handler.handleIncomingMessage(makeMessage("background chatter"), {
+      isDirect: false,
+    });
+
+    // Give it a tick to start the proactive session
+    await new Promise((resolve) => { setTimeout(resolve, 20); });
+
+    // Now send a command — should preempt the proactive debounce
+    const commandResult = await handler.handleIncomingMessage(makeMessage("!s direct question"), {
+      isDirect: true,
+      sendResponse: async (text) => { sent.push(text); },
+    });
+
+    await passivePromise;
+
+    // The command should have been executed
+    expect(commandResult?.response).toBe("command response");
+    expect(sent).toContain("command response");
+    expect(runnerPrompts.some(p => p.includes("direct question"))).toBe(true);
+
+    await history.close();
+  });
 });

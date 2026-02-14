@@ -52,6 +52,8 @@ export class QueuedInboundMessage {
 
 interface SteeringSession {
   queue: QueuedInboundMessage[];
+  /** Resolve function to wake the runner when a new item is enqueued. */
+  wakeRunner?: () => void;
 }
 
 export class SteeringQueue {
@@ -100,23 +102,57 @@ export class SteeringQueue {
     }
 
     session.queue.push(item);
+    this.wakeSession(session);
     return { isRunner: false, steeringKey, item };
   }
 
+  /**
+   * Enqueue a passive message into an existing session, or start a new
+   * proactive runner session if none exists and `startProactive` is true.
+   *
+   * Returns `{ queued, isProactiveRunner, steeringKey, item }`:
+   * - `queued=true, isProactiveRunner=false` — item enqueued into existing session
+   * - `queued=false, isProactiveRunner=true` — new proactive session started, caller is runner
+   * - `queued=false, isProactiveRunner=false` — no session exists and proactive not requested
+   */
+  enqueuePassive(
+    message: RoomMessage,
+    sendResponse?: (text: string) => Promise<void>,
+    startProactive?: boolean,
+  ): {
+    queued: boolean;
+    isProactiveRunner: boolean;
+    steeringKey: SteeringKey;
+    item: QueuedInboundMessage;
+  } {
+    const steeringKey = SteeringQueue.keyForMessage(message);
+    const keyId = this.steeringKeyId(steeringKey);
+    const item = new QueuedInboundMessage("passive", message, null, sendResponse);
+
+    const session = this.sessions.get(keyId);
+    if (session) {
+      session.queue.push(item);
+      this.wakeSession(session);
+      return { queued: true, isProactiveRunner: false, steeringKey, item };
+    }
+
+    if (startProactive) {
+      this.sessions.set(keyId, { queue: [] });
+      return { queued: false, isProactiveRunner: true, steeringKey, item };
+    }
+
+    return { queued: false, isProactiveRunner: false, steeringKey, item };
+  }
+
+  /**
+   * @deprecated Use `enqueuePassive` instead.
+   */
   enqueuePassiveIfSessionExists(
     message: RoomMessage,
     sendResponse?: (text: string) => Promise<void>,
   ): QueuedInboundMessage | null {
-    const steeringKey = SteeringQueue.keyForMessage(message);
-    const session = this.sessions.get(this.steeringKeyId(steeringKey));
-
-    if (!session) {
-      return null;
-    }
-
-    const queuedItem = new QueuedInboundMessage("passive", message, null, sendResponse);
-    session.queue.push(queuedItem);
-    return queuedItem;
+    const result = this.enqueuePassive(message, sendResponse, false);
+    return result.queued ? result.item : null;
   }
 
   drainSteeringContextMessages(key: SteeringKey): SteeringContextMessage[] {
@@ -166,6 +202,54 @@ export class SteeringQueue {
     return { dropped, nextItem };
   }
 
+  /**
+   * Wait until a new item is enqueued into the session, or until `timeoutMs`
+   * elapses.  Returns `"woken"` if a new item arrived, `"timeout"` otherwise.
+   */
+  waitForNewItem(key: SteeringKey, timeoutMs: number): Promise<"woken" | "timeout"> {
+    const keyId = this.steeringKeyId(key);
+    const session = this.sessions.get(keyId);
+    if (!session) {
+      return Promise.resolve("timeout");
+    }
+
+    // If items are already queued, return immediately.
+    if (session.queue.length > 0) {
+      return Promise.resolve("woken");
+    }
+
+    return new Promise<"woken" | "timeout">((resolve) => {
+      const timer = setTimeout(() => {
+        // Clear wake so a later enqueue doesn't resolve a stale promise.
+        if (session.wakeRunner === wake) {
+          session.wakeRunner = undefined;
+        }
+        resolve("timeout");
+      }, timeoutMs);
+
+      const wake = () => {
+        clearTimeout(timer);
+        if (session.wakeRunner === wake) {
+          session.wakeRunner = undefined;
+        }
+        resolve("woken");
+      };
+
+      session.wakeRunner = wake;
+    });
+  }
+
+  /**
+   * Check whether the session has any queued command items.
+   */
+  hasQueuedCommands(key: SteeringKey): boolean {
+    const session = this.sessions.get(this.steeringKeyId(key));
+    if (!session) {
+      return false;
+    }
+    return session.queue.some((item) => item.kind === "command");
+  }
+
   abortSession(key: SteeringKey, error: unknown): QueuedInboundMessage[] {
     const keyId = this.steeringKeyId(key);
     const session = this.sessions.get(keyId);
@@ -181,6 +265,28 @@ export class SteeringQueue {
     }
 
     return remaining;
+  }
+
+  /**
+   * Close a session without error, finishing all remaining queued items.
+   */
+  closeSession(key: SteeringKey): void {
+    const keyId = this.steeringKeyId(key);
+    const session = this.sessions.get(keyId);
+    if (!session) {
+      return;
+    }
+
+    this.sessions.delete(keyId);
+    for (const item of session.queue) {
+      this.finishItem(item);
+    }
+  }
+
+  private wakeSession(session: SteeringSession): void {
+    if (session.wakeRunner) {
+      session.wakeRunner();
+    }
   }
 
   private steeringKeyId(key: SteeringKey): string {

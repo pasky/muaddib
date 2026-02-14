@@ -89,9 +89,27 @@ interface SlackWorkspaceConfig {
   name?: string;
 }
 
+interface ProactiveRoomConfig {
+  interjecting?: string[];
+  debounce_seconds?: number;
+  history_size?: number;
+  rate_limit?: number;
+  rate_period?: number;
+  interject_threshold?: number;
+  models?: {
+    validation?: string[];
+    serious?: string;
+  };
+  prompts?: {
+    interject?: string;
+    serious_extra?: string;
+  };
+}
+
 interface RoomConfig {
   enabled?: boolean;
   command?: CommandConfig;
+  proactive?: ProactiveRoomConfig;
   prompt_vars?: Record<string, string>;
   varlink?: RoomVarlinkConfig;
   token?: string;
@@ -381,13 +399,39 @@ export class MuaddibConfig {
     const merged = deepMergeConfig(common, room);
 
     const command = asRecord(merged.command);
+    const proactive = asRecord(merged.proactive);
     const varlink = asRecord(merged.varlink);
     const replyStartThread = asRecord(merged.reply_start_thread);
     const reconnect = asRecord(merged.reconnect);
 
+    const proactiveModels = asRecord(proactive?.models);
+    const proactivePrompts = asRecord(proactive?.prompts);
+
     return {
       enabled: typeof merged.enabled === "boolean" ? merged.enabled : undefined,
       command: command as CommandConfig | undefined,
+      proactive: proactive
+        ? {
+            interjecting: Array.isArray(proactive.interjecting) ? (proactive.interjecting as string[]) : undefined,
+            debounce_seconds: numberOrUndefined(proactive.debounce_seconds),
+            history_size: numberOrUndefined(proactive.history_size),
+            rate_limit: numberOrUndefined(proactive.rate_limit),
+            rate_period: numberOrUndefined(proactive.rate_period),
+            interject_threshold: numberOrUndefined(proactive.interject_threshold),
+            models: proactiveModels
+              ? {
+                  validation: Array.isArray(proactiveModels.validation) ? (proactiveModels.validation as string[]) : undefined,
+                  serious: stringOrUndefined(proactiveModels.serious),
+                }
+              : undefined,
+            prompts: proactivePrompts
+              ? {
+                  interject: stringOrUndefined(proactivePrompts.interject),
+                  serious_extra: stringOrUndefined(proactivePrompts.serious_extra),
+                }
+              : undefined,
+          }
+        : undefined,
       prompt_vars: toStringRecord(merged.prompt_vars),
       varlink: {
         socket_path: stringOrUndefined(varlink?.socket_path),

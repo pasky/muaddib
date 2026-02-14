@@ -113,7 +113,7 @@ describe("runCliMessageMode", () => {
     expect(arcLogs.length).toBeGreaterThan(0);
   });
 
-  it("ignores deferred proactive config knobs when not explicitly enabled", async () => {
+  it("accepts proactive config knobs (no longer deferred)", async () => {
     const dir = await createTempHome();
 
     const configPath = join(dir, "config.json");
@@ -190,55 +190,8 @@ describe("runCliMessageMode", () => {
     const date = new Date().toISOString().slice(0, 10);
     const systemLogPath = join(dir, "logs", date, "system.log");
     const systemLog = await readFile(systemLogPath, "utf-8");
-    expect(systemLog).toContain("rooms.common.proactive");
-  });
-
-  it("fails fast on explicitly enabled deferred proactive config knobs", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "muaddib-cli-"));
-    tempDirs.push(dir);
-
-    const configPath = join(dir, "config.json");
-    const config = {
-      rooms: {
-        common: {
-          command: {
-            history_size: 40,
-            default_mode: "classifier:serious",
-            modes: {
-              serious: {
-                model: "openai:gpt-4o-mini",
-                prompt: "You are {mynick}",
-                triggers: {
-                  "!s": {},
-                },
-              },
-            },
-            mode_classifier: {
-              model: "openai:gpt-4o-mini",
-              labels: {
-                EASY_SERIOUS: "!s",
-              },
-              fallback_label: "EASY_SERIOUS",
-            },
-          },
-          proactive: {
-            enabled: true,
-            interjecting: ["libera##muaddib"],
-          },
-        },
-      },
-    };
-
-    await writeFile(configPath, JSON.stringify(config), "utf-8");
-
-    await expect(
-      runCliMessageMode({
-        configPath,
-        message: "!s hi",
-      }),
-    ).rejects.toThrow(
-      "Deferred features are not supported in the TypeScript runtime. Disable or remove unsupported config keys: rooms.common.proactive.",
-    );
+    // Proactive is now supported natively — should NOT appear in deferred warnings.
+    expect(systemLog).not.toContain("rooms.common.proactive");
   });
 
   it("fails fast when command.response_max_bytes is invalid", async () => {

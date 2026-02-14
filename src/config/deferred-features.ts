@@ -51,19 +51,7 @@ export function assertNoDeferredFeatureConfig(
     }
   }
 
-  const rooms = raw.rooms;
-  if (isObject(rooms)) {
-    for (const [roomName, roomConfig] of Object.entries(rooms)) {
-      if (isObject(roomConfig) && hasOwn(roomConfig, "proactive")) {
-        const path = `rooms.${roomName}.proactive`;
-        if (isExplicitlyEnabled(roomConfig.proactive)) {
-          blockingPaths.push(path);
-        } else {
-          ignoredPaths.push(path);
-        }
-      }
-    }
-  }
+  // Proactive interjection is now supported natively — no longer deferred.
 
   const uniqueIgnored = [...new Set(ignoredPaths)].sort((a, b) => a.localeCompare(b));
   const uniqueBlocking = [...new Set(blockingPaths)].sort((a, b) => a.localeCompare(b));

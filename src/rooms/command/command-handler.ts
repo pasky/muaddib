@@ -38,10 +38,32 @@ import {
   type CommandConfig,
   type ResolvedCommand,
 } from "./resolver.js";
+import {
+  evaluateProactiveInterjection,
+  type ProactiveConfig,
+} from "./proactive.js";
 import { createConsoleLogger } from "../../app/logging.js";
+
+export interface ProactiveRoomConfig {
+  interjecting?: string[];
+  debounce_seconds?: number;
+  history_size?: number;
+  rate_limit?: number;
+  rate_period?: number;
+  interject_threshold?: number;
+  models?: {
+    validation?: string[];
+    serious?: string;
+  };
+  prompts?: {
+    interject?: string;
+    serious_extra?: string;
+  };
+}
 
 export interface CommandHandlerRoomConfig {
   command: CommandConfig;
+  proactive?: ProactiveRoomConfig;
   prompt_vars?: Record<string, string>;
 }
 
@@ -125,7 +147,12 @@ export interface HandleIncomingMessageOptions {
 }
 
 /**
- * Shared TS command execution path (without proactive handling).
+ * Shared TS command execution path with proactive interjection support.
+ *
+ * Proactive interjection is integrated into the steering queue: passive messages
+ * in proactive-enabled channels start a steering session with a debounce-until-
+ * silence loop.  Commands arriving during the debounce or during agent execution
+ * are handled via the normal steering mechanism (queued and drained mid-flight).
  */
 export class RoomCommandHandlerTs {
   readonly resolver: CommandResolver;
@@ -133,6 +160,9 @@ export class RoomCommandHandlerTs {
   private readonly commandConfig: CommandConfig;
   private readonly runnerFactory: CommandRunnerFactory;
   private readonly rateLimiter: CommandRateLimiter;
+  private readonly proactiveRateLimiter: CommandRateLimiter | null;
+  private readonly proactiveConfig: ProactiveConfig | null;
+  private readonly proactiveChannels: Set<string>;
   private readonly steeringQueue: SteeringQueue;
   private readonly modelAdapter: PiAiModelAdapter;
   private readonly refusalFallbackModel: string | null;
@@ -163,6 +193,7 @@ export class RoomCommandHandlerTs {
     const options: CommandHandlerResolvedOptions = {
       roomConfig: {
         command: roomConfig.command,
+        proactive: roomConfig.proactive,
         prompt_vars: roomConfig.prompt_vars,
       },
       history: runtime.history,
@@ -271,6 +302,37 @@ export class RoomCommandHandlerTs {
         numberWithDefault(this.commandConfig.rate_period, 900),
       );
     this.steeringQueue = new SteeringQueue();
+
+    // Proactive interjection setup
+    const rawProactive = options.roomConfig.proactive;
+    const interjecting = rawProactive?.interjecting;
+    if (rawProactive && interjecting && interjecting.length > 0) {
+      this.proactiveConfig = {
+        interjecting,
+        debounce_seconds: rawProactive.debounce_seconds ?? 15,
+        history_size: rawProactive.history_size ?? this.commandConfig.history_size,
+        rate_limit: rawProactive.rate_limit ?? 10,
+        rate_period: rawProactive.rate_period ?? 3600,
+        interject_threshold: rawProactive.interject_threshold ?? 7,
+        models: {
+          validation: rawProactive.models?.validation ?? [],
+          serious: rawProactive.models?.serious ?? pickModeModel(this.commandConfig.modes.serious?.model) ?? "",
+        },
+        prompts: {
+          interject: rawProactive.prompts?.interject ?? "",
+          serious_extra: rawProactive.prompts?.serious_extra ?? "",
+        },
+      };
+      this.proactiveChannels = new Set(interjecting);
+      this.proactiveRateLimiter = new RateLimiter(
+        this.proactiveConfig.rate_limit,
+        this.proactiveConfig.rate_period,
+      );
+    } else {
+      this.proactiveConfig = null;
+      this.proactiveChannels = new Set();
+      this.proactiveRateLimiter = null;
+    }
   }
 
   shouldIgnoreUser(nick: string): boolean {
@@ -719,41 +781,23 @@ export class RoomCommandHandlerTs {
       return (runnerItem.result as CommandExecutionResult | null) ?? null;
     }
 
-    let activeItem: QueuedInboundMessage | null = runnerItem;
-
     try {
-      while (activeItem) {
-        if (activeItem.kind === "command") {
-          if (activeItem.triggerMessageId === null) {
-            throw new Error("Queued command item is missing trigger message id.");
-          }
-
-          activeItem.result = await this.executeAndPersist(
-            activeItem.message,
-            activeItem.triggerMessageId,
-            activeItem.sendResponse,
-            steeringKey,
-          );
-        } else {
-          await this.handlePassiveMessageCore(activeItem.message, activeItem.sendResponse);
-          activeItem.result = null;
-        }
-
-        this.steeringQueue.finishItem(activeItem);
-
-        const { dropped, nextItem } = this.steeringQueue.takeNextWorkCompacted(steeringKey);
-        for (const droppedItem of dropped) {
-          droppedItem.result = null;
-          this.steeringQueue.finishItem(droppedItem);
-        }
-
-        activeItem = nextItem;
+      if (runnerItem.triggerMessageId === null) {
+        throw new Error("Runner command item is missing trigger message id.");
       }
+
+      runnerItem.result = await this.executeAndPersist(
+        runnerItem.message,
+        runnerItem.triggerMessageId,
+        runnerItem.sendResponse,
+        steeringKey,
+      );
+
+      this.steeringQueue.finishItem(runnerItem);
+      await this.drainRemainingSessionItems(steeringKey);
     } catch (error) {
       this.steeringQueue.abortSession(steeringKey, error);
-      if (activeItem) {
-        this.steeringQueue.failItem(activeItem, error);
-      }
+      this.steeringQueue.failItem(runnerItem, error);
       throw error;
     }
 
@@ -764,13 +808,30 @@ export class RoomCommandHandlerTs {
     message: RoomMessage,
     sendResponse: ((text: string) => Promise<void>) | undefined,
   ): Promise<void> {
-    const queuedItem = this.steeringQueue.enqueuePassiveIfSessionExists(message, sendResponse);
-    if (!queuedItem) {
-      await this.handlePassiveMessageCore(message, sendResponse);
+    const channelKey = CommandResolver.channelKey(message.serverTag, message.channelName);
+    const startProactive = this.proactiveChannels.has(channelKey);
+
+    const { queued, isProactiveRunner, steeringKey, item } =
+      this.steeringQueue.enqueuePassive(message, sendResponse, startProactive);
+
+    if (queued) {
+      // Enqueued into an existing session (command or proactive) — wait for it.
+      await item.completion;
       return;
     }
 
-    await queuedItem.completion;
+    if (isProactiveRunner) {
+      // We became the proactive runner for this key — run debounce + evaluation.
+      // Fire-and-forget: the proactive runner manages its own lifecycle.
+      this.runProactiveSession(steeringKey, item).catch((error) => {
+        this.logger.error("Proactive session failed", error);
+      });
+      await item.completion;
+      return;
+    }
+
+    // No session exists and proactive not enabled — just handle passively.
+    await this.handlePassiveMessageCore(message, sendResponse);
   }
 
   private async handlePassiveMessageCore(
@@ -778,6 +839,294 @@ export class RoomCommandHandlerTs {
     _sendResponse: ((text: string) => Promise<void>) | undefined,
   ): Promise<void> {
     await this.triggerAutoChronicler(message, this.commandConfig.history_size);
+  }
+
+  /**
+   * Proactive runner session.  Debounces until silence, then evaluates whether
+   * to interject.  If a command arrives during debounce or execution, it is
+   * handled via the normal steering/compaction path.
+   */
+  private async runProactiveSession(
+    steeringKey: SteeringKey,
+    triggerItem: QueuedInboundMessage,
+  ): Promise<void> {
+    if (!this.proactiveConfig) {
+      this.steeringQueue.finishItem(triggerItem);
+      this.steeringQueue.closeSession(steeringKey);
+      return;
+    }
+
+    const debounceMs = this.proactiveConfig.debounce_seconds * 1000;
+
+    // The trigger passive message that started the session is our initial item.
+    // It's not in the queue (it was returned as the "runner item"), so finish it
+    // right away — its content is already persisted in history.
+    this.steeringQueue.finishItem(triggerItem);
+
+    let activeItem: QueuedInboundMessage | null = null;
+
+    try {
+      // ── Debounce loop: wait for silence ──
+      while (true) {
+        const result = await this.steeringQueue.waitForNewItem(steeringKey, debounceMs);
+
+        if (result === "timeout") {
+          // Silence achieved — proceed to evaluation.
+          break;
+        }
+
+        // Something arrived — check if it's a command.
+        if (this.steeringQueue.hasQueuedCommands(steeringKey)) {
+          // Command arrived during debounce — break and let compaction handle it.
+          break;
+        }
+
+        // Just more passives — drain them (finish their completions) and keep debouncing.
+        this.steeringQueue.drainSteeringContextMessages(steeringKey);
+      }
+
+      // ── Take next work item via compaction ──
+      const { dropped, nextItem } = this.steeringQueue.takeNextWorkCompacted(steeringKey);
+      for (const droppedItem of dropped) {
+        droppedItem.result = null;
+        this.steeringQueue.finishItem(droppedItem);
+      }
+
+      if (!nextItem) {
+        // Session empty after debounce — run proactive evaluation using trigger message context.
+        await this.evaluateAndMaybeInterject(steeringKey, triggerItem.message, triggerItem.sendResponse);
+        return;
+      }
+
+      activeItem = nextItem;
+
+      if (activeItem.kind === "command") {
+        // Command preempted the proactive check — handle it normally.
+        if (activeItem.triggerMessageId === null) {
+          throw new Error("Queued command item is missing trigger message id.");
+        }
+        activeItem.result = await this.executeAndPersist(
+          activeItem.message,
+          activeItem.triggerMessageId,
+          activeItem.sendResponse,
+          steeringKey,
+        );
+      } else {
+        // Last passive after compaction — run proactive evaluation.
+        await this.evaluateAndMaybeInterject(steeringKey, activeItem.message, activeItem.sendResponse);
+        activeItem.result = null;
+      }
+
+      this.steeringQueue.finishItem(activeItem);
+
+      // ── Continue the steering session loop (same as command runner) ──
+      await this.drainRemainingSessionItems(steeringKey);
+    } catch (error) {
+      this.steeringQueue.abortSession(steeringKey, error);
+      if (activeItem) {
+        this.steeringQueue.failItem(activeItem, error);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Evaluate proactive interjection for a message.  If the evaluation says
+   * yes, run the agent in serious mode and send the response.
+   */
+  private async evaluateAndMaybeInterject(
+    steeringKey: SteeringKey,
+    message: RoomMessage,
+    sendResponse: ((text: string) => Promise<void>) | undefined,
+  ): Promise<void> {
+    if (!this.proactiveConfig || !this.proactiveRateLimiter) {
+      return;
+    }
+
+    if (!this.proactiveRateLimiter.checkLimit()) {
+      this.logger.debug(
+        "Proactive interjection rate limited",
+        `arc=${message.serverTag}#${message.channelName}`,
+        `nick=${message.nick}`,
+      );
+      return;
+    }
+
+    const context = await this.options.history.getContextForMessage(
+      message,
+      this.proactiveConfig.history_size,
+    );
+
+    const evalResult = await evaluateProactiveInterjection(
+      this.proactiveConfig,
+      context,
+      {
+        modelAdapter: this.modelAdapter,
+        getApiKey: this.options.getApiKey,
+        logger: this.logger,
+      },
+    );
+
+    if (!evalResult.shouldInterject) {
+      this.logger.debug(
+        "Proactive interjection declined",
+        `arc=${message.serverTag}#${message.channelName}`,
+        `reason=${evalResult.reason}`,
+      );
+      return;
+    }
+
+    // Classify to ensure it maps to serious mode.
+    const classifiedLabel = await this.options.classifyMode(context);
+    const classifiedTrigger = this.resolver.triggerForLabel(classifiedLabel);
+    const [classifiedModeKey, classifiedRuntime] = this.resolver.runtimeForTrigger(classifiedTrigger);
+
+    if (classifiedModeKey !== "serious") {
+      this.logger.warn(
+        "Proactive interjection suggested but not serious mode",
+        `label=${classifiedLabel}`,
+        `trigger=${classifiedTrigger}`,
+        `reason=${evalResult.reason}`,
+      );
+      return;
+    }
+
+    this.logger.info(
+      "Interjecting proactively",
+      `arc=${message.serverTag}#${message.channelName}`,
+      `nick=${message.nick}`,
+      `message=${message.content.slice(0, 150)}`,
+      `reason=${evalResult.reason}`,
+    );
+
+    // Build and run the agent in serious mode with proactive extra prompt.
+    const modelSpec = this.proactiveConfig.models.serious;
+    const systemPrompt =
+      this.buildSystemPrompt("serious", message.mynick) +
+      " " + this.proactiveConfig.prompts.serious_extra;
+
+    const steeringEnabled = Boolean(classifiedRuntime.steering);
+    const steeringMessages = steeringEnabled
+      ? this.steeringQueue.drainSteeringContextMessages(steeringKey)
+      : [];
+
+    const runnerContext = [
+      ...context.slice(0, -1),
+      ...steeringMessages,
+    ].map(toRunnerContextMessage);
+
+    const tools = this.selectTools(message, classifiedRuntime.allowedTools, runnerContext);
+
+    const steeringMessageProvider = steeringEnabled
+      ? () => this.steeringQueue.drainSteeringContextMessages(steeringKey).map((msg) => ({
+          role: "user" as const,
+          content: msg.content,
+        }))
+      : undefined;
+
+    const runner = this.runnerFactory({
+      model: modelSpec,
+      systemPrompt,
+      tools,
+      steeringMessageProvider,
+      logger: this.logger,
+    });
+
+    const lastMessage = context[context.length - 1];
+    const queryText = lastMessage?.content ?? "";
+
+    let agentResult: PromptResult;
+    try {
+      agentResult = await runner.prompt(queryText, {
+        contextMessages: runnerContext,
+        thinkingLevel: normalizeThinkingLevel(classifiedRuntime.reasoningEffort),
+        refusalFallbackModel: this.refusalFallbackModel ?? undefined,
+      });
+
+      await this.persistToolSummaryFromSession(message, agentResult, tools as MuaddibTool[]);
+      agentResult.session?.dispose();
+    } catch (error) {
+      this.logger.error("Error during proactive agent execution", error);
+      return;
+    }
+
+    let responseText = agentResult.text;
+    if (!responseText || responseText.startsWith("Error: ")) {
+      this.logger.info(
+        "Agent decided not to interject proactively",
+        `arc=${message.serverTag}#${message.channelName}`,
+      );
+      return;
+    }
+
+    responseText = await this.applyResponseLengthPolicy(responseText);
+    responseText = this.cleanResponseText(responseText, message.nick);
+
+    if (!responseText) {
+      return;
+    }
+
+    responseText = `[${modelStrCore(modelSpec)}] ${responseText}`;
+
+    this.logger.info(
+      "Sending proactive response",
+      `arc=${message.serverTag}#${message.channelName}`,
+      `label=${classifiedLabel}`,
+      `trigger=${classifiedTrigger}`,
+      `response=${responseText}`,
+    );
+
+    if (sendResponse) {
+      await sendResponse(responseText);
+    }
+
+    await this.options.history.addMessage(
+      {
+        ...message,
+        nick: message.mynick,
+        content: responseText,
+      },
+      {
+        mode: classifiedTrigger,
+      },
+    );
+
+    await this.triggerAutoChronicler(message, this.commandConfig.history_size);
+  }
+
+  /**
+   * Drain remaining queued items after a proactive or command session item
+   * completes.  Shared by both `runProactiveSession` and `runOrQueueCommand`.
+   */
+  private async drainRemainingSessionItems(steeringKey: SteeringKey): Promise<void> {
+    while (true) {
+      const { dropped, nextItem } = this.steeringQueue.takeNextWorkCompacted(steeringKey);
+      for (const droppedItem of dropped) {
+        droppedItem.result = null;
+        this.steeringQueue.finishItem(droppedItem);
+      }
+
+      if (!nextItem) {
+        return;
+      }
+
+      if (nextItem.kind === "command") {
+        if (nextItem.triggerMessageId === null) {
+          throw new Error("Queued command item is missing trigger message id.");
+        }
+        nextItem.result = await this.executeAndPersist(
+          nextItem.message,
+          nextItem.triggerMessageId,
+          nextItem.sendResponse,
+          steeringKey,
+        );
+      } else {
+        await this.handlePassiveMessageCore(nextItem.message, nextItem.sendResponse);
+        nextItem.result = null;
+      }
+
+      this.steeringQueue.finishItem(nextItem);
+    }
   }
 
   private async triggerAutoChronicler(message: RoomMessage, maxSize: number): Promise<void> {
