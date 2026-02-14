@@ -21,17 +21,16 @@ interface ContextReducerLogger {
 
 export interface ContextReducerTsOptions {
   config?: ContextReducerConfig;
-  modelAdapter?: PiAiModelAdapter;
-  getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+  modelAdapter: PiAiModelAdapter;
   logger?: ContextReducerLogger;
 }
 
 export class ContextReducerTs implements ContextReducer {
   private readonly config: ContextReducerConfig;
   private readonly modelAdapter: PiAiModelAdapter;
-  constructor(private readonly options: ContextReducerTsOptions = {}) {
+  constructor(private readonly options: ContextReducerTsOptions) {
     this.config = options.config ?? {};
-    this.modelAdapter = options.modelAdapter ?? new PiAiModelAdapter({ getApiKey: options.getApiKey });
+    this.modelAdapter = options.modelAdapter;
   }
 
   get isConfigured(): boolean {

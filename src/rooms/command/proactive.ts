@@ -59,8 +59,7 @@ export interface ProactiveEvalResult {
 }
 
 export interface ProactiveEvaluatorOptions {
-  modelAdapter?: PiAiModelAdapter;
-  getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+  modelAdapter: PiAiModelAdapter;
   logger?: CommandExecutorLogger;
 }
 
@@ -251,7 +250,6 @@ export class ProactiveRunner {
       context,
       {
         modelAdapter: this.runtime.modelAdapter,
-        getApiKey: this.runtime.getApiKey,
         logger: this.logger,
       },
     );
@@ -308,9 +306,9 @@ export class ProactiveRunner {
 export async function evaluateProactiveInterjection(
   config: ProactiveConfig,
   context: Array<{ role: ChatRole; content: string }>,
-  options: ProactiveEvaluatorOptions = {},
+  options: ProactiveEvaluatorOptions,
 ): Promise<ProactiveEvalResult> {
-  const adapter = options.modelAdapter ?? new PiAiModelAdapter({ getApiKey: options.getApiKey });
+  const adapter = options.modelAdapter;
   const logger = options.logger;
 
   if (!context.length) {

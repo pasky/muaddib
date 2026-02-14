@@ -11,16 +11,15 @@ interface ModeClassifierLogger {
 }
 
 export interface ModeClassifierOptions {
-  modelAdapter?: PiAiModelAdapter;
-  getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+  modelAdapter: PiAiModelAdapter;
   logger?: ModeClassifierLogger;
 }
 
 export function createModeClassifier(
   commandConfig: CommandConfig,
-  options: ModeClassifierOptions = {},
+  options: ModeClassifierOptions,
 ): (context: Array<{ role: string; content: string }>) => Promise<string> {
-  const adapter = options.modelAdapter ?? new PiAiModelAdapter({ getApiKey: options.getApiKey });
+  const adapter = options.modelAdapter;
   const logger = options.logger ?? noopModeClassifierLogger();
 
   return async (context: Array<{ role: string; content: string }>): Promise<string> => {

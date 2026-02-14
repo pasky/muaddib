@@ -92,7 +92,6 @@ export class CommandExecutor {
   private readonly history: ChatHistoryStore;
   private readonly modelAdapter: PiAiModelAdapter;
   private readonly logger: CommandExecutorLogger;
-  private readonly getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
 
   private readonly runtime: MuaddibRuntime;
   private readonly roomName: string;
@@ -119,13 +118,11 @@ export class CommandExecutor {
 
     this.commandConfig = roomConfig.command;
     this.history = runtime.history;
-    this.getApiKey = runtime.getApiKey;
     this.logger = runtime.logger.getLogger(`muaddib.rooms.command.${roomName}`);
-    this.modelAdapter = runtime.modelAdapter ?? new PiAiModelAdapter();
+    this.modelAdapter = runtime.modelAdapter;
 
     this.classifyMode = createModeClassifier(this.commandConfig, {
-      getApiKey: runtime.getApiKey,
-      modelAdapter: runtime.modelAdapter,
+      modelAdapter: this.modelAdapter,
       logger: this.logger,
     });
 
@@ -176,7 +173,6 @@ export class CommandExecutor {
       new ContextReducerTs({
         config: runtime.config.getContextReducerConfig(),
         modelAdapter: this.modelAdapter,
-        getApiKey: runtime.getApiKey,
         logger: this.logger,
       });
 
@@ -835,7 +831,6 @@ export class CommandExecutor {
       modelAdapter: this.modelAdapter,
       logger: this.logger,
       arc: `${message.serverTag}#${message.channelName}`,
-      getApiKey: this.getApiKey,
     });
 
     if (!summaryText) {

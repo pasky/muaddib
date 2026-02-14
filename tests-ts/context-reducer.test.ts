@@ -23,21 +23,24 @@ function assistantTextMessage(text: string) {
 }
 
 describe("ContextReducerTs", () => {
+  const modelAdapter = { completeSimple: vi.fn() } as any;
+
   it("isConfigured returns false when model or prompt is missing", () => {
-    expect(new ContextReducerTs().isConfigured).toBe(false);
-    expect(new ContextReducerTs({ config: { model: "openai:gpt-4o-mini" } }).isConfigured).toBe(false);
-    expect(new ContextReducerTs({ config: { prompt: "Reduce this" } }).isConfigured).toBe(false);
+    expect(new ContextReducerTs({ modelAdapter }).isConfigured).toBe(false);
+    expect(new ContextReducerTs({ config: { model: "openai:gpt-4o-mini" }, modelAdapter }).isConfigured).toBe(false);
+    expect(new ContextReducerTs({ config: { prompt: "Reduce this" }, modelAdapter }).isConfigured).toBe(false);
   });
 
   it("isConfigured returns true when both model and prompt are set", () => {
     const reducer = new ContextReducerTs({
       config: { model: "openai:gpt-4o-mini", prompt: "Reduce this" },
+      modelAdapter,
     });
     expect(reducer.isConfigured).toBe(true);
   });
 
   it("reduce returns context minus last message when not configured", async () => {
-    const reducer = new ContextReducerTs();
+    const reducer = new ContextReducerTs({ modelAdapter });
     const context = [
       { role: "user" as const, content: "hello" },
       { role: "assistant" as const, content: "hi" },
@@ -167,13 +170,11 @@ describe("ContextReducerTs", () => {
   });
 
   it("reduce does not pass API key callback per-call when adapter is injected", async () => {
-    const getApiKey = vi.fn(async (provider: string) => (provider === "openai" ? "sk-test" : undefined));
     const modelAdapter = { completeSimple: vi.fn(async () => assistantTextMessage("[USER]: hi")) } as any;
 
     const reducer = new ContextReducerTs({
       config: { model: "openai:gpt-4o-mini", prompt: "Reduce" },
       modelAdapter,
-      getApiKey,
     });
 
     await reducer.reduce(

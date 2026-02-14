@@ -27,7 +27,6 @@ interface GenerateToolSummaryInput {
   modelAdapter: PiAiModelAdapter;
   logger: ToolSummaryLogger;
   arc?: string;
-  getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
 }
 
 export async function generateToolSummaryFromSession(input: GenerateToolSummaryInput): Promise<string | null> {
@@ -38,7 +37,6 @@ export async function generateToolSummaryFromSession(input: GenerateToolSummaryI
     modelAdapter,
     logger,
     arc,
-    getApiKey,
   } = input;
 
   if (!persistenceSummaryModel || !result.session) {
@@ -66,7 +64,6 @@ export async function generateToolSummaryFromSession(input: GenerateToolSummaryI
       {
         callType: "tool_persistence_summary",
         logger,
-        getApiKey,
       },
     );
 

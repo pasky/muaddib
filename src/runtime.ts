@@ -90,7 +90,6 @@ export async function createMuaddibRuntime(
       chronicleStore,
       config: lifecycleConfig,
       modelAdapter,
-      getApiKey,
       logger: runtimeLogger.getLogger("muaddib.chronicle.lifecycle"),
     });
 

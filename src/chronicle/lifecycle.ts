@@ -27,8 +27,7 @@ interface ChronicleLogger {
 export interface ChronicleLifecycleTsOptions {
   chronicleStore: ChronicleStore;
   config: ChronicleLifecycleConfig;
-  modelAdapter?: PiAiModelAdapter;
-  getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+  modelAdapter: PiAiModelAdapter;
   questRuntime?: ChronicleQuestRuntimeHook;
   logger?: ChronicleLogger;
 }
@@ -54,7 +53,7 @@ export class ChronicleLifecycleTs implements ChronicleLifecycle {
   constructor(options: ChronicleLifecycleTsOptions) {
     this.chronicleStore = options.chronicleStore;
     this.config = options.config;
-    this.modelAdapter = options.modelAdapter ?? new PiAiModelAdapter({ getApiKey: options.getApiKey });
+    this.modelAdapter = options.modelAdapter;
     this.questRuntime = options.questRuntime ?? null;
     this.logger = options.logger;
   }
