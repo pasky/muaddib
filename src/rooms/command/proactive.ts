@@ -8,8 +8,8 @@
  */
 
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
-import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import type { ProactiveRoomConfig } from "../../config/muaddib-config.js";
+import type { MuaddibRuntime } from "../../runtime.js";
 import type { CommandConfig } from "./resolver.js";
 import { CommandResolver } from "./resolver.js";
 import { RateLimiter } from "./rate-limiter.js";
@@ -17,7 +17,6 @@ import type {
   CommandExecutor,
   CommandRateLimiter,
   CommandExecutorLogger,
-  SteeringContextDrainer,
 } from "./command-executor.js";
 import { pickModeModel } from "./command-executor.js";
 import type { SteeringQueue, QueuedInboundMessage, SteeringKey } from "./steering-queue.js";
@@ -114,10 +113,7 @@ export class ProactiveRunner {
   private readonly config: ProactiveConfig;
   private readonly channels: Set<string>;
   private readonly rateLimiter: CommandRateLimiter;
-  private readonly history: ChatHistoryStore;
-  private readonly modelAdapter: PiAiModelAdapter;
-  private readonly getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
-  private readonly classifyMode: (context: Array<{ role: string; content: string }>) => Promise<string>;
+  private readonly runtime: MuaddibRuntime;
   private readonly logger: CommandExecutorLogger;
   private readonly executor: CommandExecutor;
   private readonly resolver: CommandResolver;
@@ -125,10 +121,7 @@ export class ProactiveRunner {
 
   constructor(opts: {
     config: ProactiveConfig;
-    history: ChatHistoryStore;
-    modelAdapter: PiAiModelAdapter;
-    getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
-    classifyMode: (context: Array<{ role: string; content: string }>) => Promise<string>;
+    runtime: MuaddibRuntime;
     logger: CommandExecutorLogger;
     executor: CommandExecutor;
     resolver: CommandResolver;
@@ -137,10 +130,7 @@ export class ProactiveRunner {
     this.config = opts.config;
     this.channels = new Set(opts.config.interjecting);
     this.rateLimiter = new RateLimiter(opts.config.rate_limit, opts.config.rate_period);
-    this.history = opts.history;
-    this.modelAdapter = opts.modelAdapter;
-    this.getApiKey = opts.getApiKey;
-    this.classifyMode = opts.classifyMode;
+    this.runtime = opts.runtime;
     this.logger = opts.logger;
     this.executor = opts.executor;
     this.resolver = opts.resolver;
@@ -159,9 +149,9 @@ export class ProactiveRunner {
   async runSession(
     steeringKey: SteeringKey,
     triggerItem: QueuedInboundMessage,
-    createSteeringContextDrainer: (key: SteeringKey) => SteeringContextDrainer,
   ): Promise<void> {
     const debounceMs = this.config.debounce_seconds * 1000;
+    const contextDrainer = this.steeringQueue.createContextDrainer(steeringKey);
     this.steeringQueue.finishItem(triggerItem);
 
     let activeItem: QueuedInboundMessage | null = null;
@@ -191,7 +181,7 @@ export class ProactiveRunner {
 
       if (!nextItem) {
         await this.evaluateAndMaybeInterject(
-          steeringKey, triggerItem.message, triggerItem.sendResponse, createSteeringContextDrainer,
+          triggerItem.message, triggerItem.sendResponse, contextDrainer,
         );
         return;
       }
@@ -206,11 +196,11 @@ export class ProactiveRunner {
           activeItem.message,
           activeItem.triggerMessageId,
           activeItem.sendResponse,
-          createSteeringContextDrainer(steeringKey),
+          contextDrainer,
         );
       } else {
         await this.evaluateAndMaybeInterject(
-          steeringKey, activeItem.message, activeItem.sendResponse, createSteeringContextDrainer,
+          activeItem.message, activeItem.sendResponse, contextDrainer,
         );
         activeItem.result = null;
       }
@@ -218,35 +208,22 @@ export class ProactiveRunner {
       this.steeringQueue.finishItem(activeItem);
 
       // Drain remaining items in the session
-      while (true) {
-        const { dropped: moreDropped, nextItem: moreNext } =
-          this.steeringQueue.takeNextWorkCompacted(steeringKey);
-        for (const droppedItem of moreDropped) {
-          droppedItem.result = null;
-          this.steeringQueue.finishItem(droppedItem);
-        }
-
-        if (!moreNext) {
-          return;
-        }
-
-        if (moreNext.kind === "command") {
-          if (moreNext.triggerMessageId === null) {
+      await this.steeringQueue.drainSession(steeringKey, async (item, drainer) => {
+        if (item.kind === "command") {
+          if (item.triggerMessageId === null) {
             throw new Error("Queued command item is missing trigger message id.");
           }
-          moreNext.result = await this.executor.execute(
-            moreNext.message,
-            moreNext.triggerMessageId,
-            moreNext.sendResponse,
-            createSteeringContextDrainer(steeringKey),
+          item.result = await this.executor.execute(
+            item.message,
+            item.triggerMessageId,
+            item.sendResponse,
+            drainer,
           );
         } else {
-          await this.executor.triggerAutoChronicler(moreNext.message, this.config.history_size);
-          moreNext.result = null;
+          await this.executor.triggerAutoChronicler(item.message);
+          item.result = null;
         }
-
-        this.steeringQueue.finishItem(moreNext);
-      }
+      });
     } catch (error) {
       this.steeringQueue.abortSession(steeringKey, error);
       if (activeItem) {
@@ -257,10 +234,9 @@ export class ProactiveRunner {
   }
 
   private async evaluateAndMaybeInterject(
-    steeringKey: SteeringKey,
     message: RoomMessage,
     sendResponse: ((text: string) => Promise<void>) | undefined,
-    createSteeringContextDrainer: (key: SteeringKey) => SteeringContextDrainer,
+    contextDrainer: () => Array<{ role: string; content: string }>,
   ): Promise<void> {
     if (!this.rateLimiter.checkLimit()) {
       this.logger.debug(
@@ -271,7 +247,7 @@ export class ProactiveRunner {
       return;
     }
 
-    const context = await this.history.getContextForMessage(
+    const context = await this.runtime.history.getContextForMessage(
       message,
       this.config.history_size,
     );
@@ -280,8 +256,8 @@ export class ProactiveRunner {
       this.config,
       context,
       {
-        modelAdapter: this.modelAdapter,
-        getApiKey: this.getApiKey,
+        modelAdapter: this.runtime.modelAdapter,
+        getApiKey: this.runtime.getApiKey,
         logger: this.logger,
       },
     );
@@ -295,7 +271,7 @@ export class ProactiveRunner {
       return;
     }
 
-    const classifiedLabel = await this.classifyMode(context);
+    const classifiedLabel = await this.executor.classifyMode(context);
     const classifiedTrigger = this.resolver.triggerForLabel(classifiedLabel);
     const [classifiedModeKey, classifiedRuntime] = this.resolver.runtimeForTrigger(classifiedTrigger);
 
@@ -323,7 +299,7 @@ export class ProactiveRunner {
       this.config,
       classifiedTrigger,
       classifiedRuntime,
-      createSteeringContextDrainer(steeringKey),
+      contextDrainer,
     );
   }
 }

@@ -250,6 +250,50 @@ export class SteeringQueue {
     return session.queue.some((item) => item.kind === "command");
   }
 
+  /**
+   * Create a steering context drainer for the given session key.
+   * The returned callback drains all queued messages as context,
+   * finishing those items and returning their content.
+   */
+  createContextDrainer(key: SteeringKey): () => Array<{ role: string; content: string }> {
+    return () =>
+      this.drainSteeringContextMessages(key).map((msg) => ({
+        role: msg.role,
+        content: msg.content,
+      }));
+  }
+
+  /**
+   * Drain remaining queued items from a session, compacting passives.
+   * For each work item, calls `processItem` with the item and a
+   * steering context drainer, then finishes it.
+   * Dropped (compacted) passive items are finished with `result = null`.
+   * Closes the session when the queue is empty.
+   */
+  async drainSession(
+    key: SteeringKey,
+    processItem: (
+      item: QueuedInboundMessage,
+      contextDrainer: () => Array<{ role: string; content: string }>,
+    ) => Promise<void>,
+  ): Promise<void> {
+    const contextDrainer = this.createContextDrainer(key);
+    while (true) {
+      const { dropped, nextItem } = this.takeNextWorkCompacted(key);
+      for (const droppedItem of dropped) {
+        droppedItem.result = null;
+        this.finishItem(droppedItem);
+      }
+
+      if (!nextItem) {
+        return;
+      }
+
+      await processItem(nextItem, contextDrainer);
+      this.finishItem(nextItem);
+    }
+  }
+
   abortSession(key: SteeringKey, error: unknown): QueuedInboundMessage[] {
     const keyId = this.steeringKeyId(key);
     const session = this.sessions.get(keyId);

@@ -150,7 +150,6 @@ describe("SlackRoomMonitor", () => {
         sendMessage: async () => {},
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (message, options) => {
           seenText = message.content;
           isDirect = options.isDirect;
@@ -185,7 +184,6 @@ describe("SlackRoomMonitor", () => {
       roomConfig: { enabled: true },
       history,
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (message) => {
           seenText = message.content;
           seenSecrets = message.secrets as Record<string, unknown> | undefined;
@@ -243,7 +241,6 @@ describe("SlackRoomMonitor", () => {
       roomConfig: { enabled: true },
       history,
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (message) => {
           seenText = message.content;
           return null;
@@ -279,7 +276,6 @@ describe("SlackRoomMonitor", () => {
       roomConfig: { enabled: true },
       history,
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (message) => {
           mappedServerTag = message.serverTag;
           mappedPlatformId = message.platformId ?? "";
@@ -327,7 +323,6 @@ describe("SlackRoomMonitor", () => {
         },
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (message, options) => {
           seenThreadId = message.threadId;
           seenResponseThreadId = message.responseThreadId;
@@ -373,7 +368,6 @@ describe("SlackRoomMonitor", () => {
         },
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (message, options) => {
           seenResponseThreadId = message.responseThreadId;
           await options.sendResponse?.("ok");
@@ -425,7 +419,6 @@ describe("SlackRoomMonitor", () => {
         },
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (message, options) => {
           seenThreadId = message.threadId;
           seenThreadStarterId = message.threadStarterId;
@@ -481,7 +474,6 @@ describe("SlackRoomMonitor", () => {
         },
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (_message, options) => {
           await options.sendResponse?.("first");
           await options.sendResponse?.("second");
@@ -537,7 +529,6 @@ describe("SlackRoomMonitor", () => {
         },
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (_message, options) => {
           await options.sendResponse?.("@Alice please check this");
           return { response: "ok" };
@@ -583,7 +574,6 @@ describe("SlackRoomMonitor", () => {
         sendMessage: async () => ({ messageTs: "1700000000.3000" }),
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (_message, options) => {
           await options.sendResponse?.("working");
           return { response: "working" };
@@ -629,7 +619,6 @@ describe("SlackRoomMonitor", () => {
       roomConfig: { enabled: true },
       history,
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async () => null,
       },
     });
@@ -661,9 +650,9 @@ describe("SlackRoomMonitor", () => {
 
     const monitor = new SlackRoomMonitor({
       roomConfig: { enabled: true },
+      ignoreUsers: ["alice"],
       history,
       commandHandler: {
-        shouldIgnoreUser: () => true,
         handleIncomingMessage: async () => {
           called = true;
           return null;
@@ -712,7 +701,6 @@ describe("SlackRoomMonitor", () => {
         },
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (_message, options) => {
           await options.sendResponse?.("ok");
           return { response: "ok" };
@@ -757,7 +745,6 @@ describe("SlackRoomMonitor", () => {
         },
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (_message, options) => {
           await options.sendResponse?.("ok");
           return { response: "ok" };
@@ -812,7 +799,6 @@ describe("SlackRoomMonitor", () => {
         sendMessage: async () => {},
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async () => null,
       },
     });
@@ -872,7 +858,6 @@ describe("SlackRoomMonitor", () => {
         },
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (message) => {
           processed.push(message.content);
           return null;
@@ -915,7 +900,6 @@ describe("SlackRoomMonitor", () => {
         receiveEvent: async () => null,
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async () => null,
       },
     });
@@ -956,7 +940,6 @@ describe("SlackRoomMonitor", () => {
         },
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async () => null,
       },
     });
@@ -997,7 +980,6 @@ describe("SlackRoomMonitor", () => {
         },
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async () => null,
       },
     });
@@ -1052,7 +1034,6 @@ describe("SlackRoomMonitor", () => {
         },
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (message) => {
           processed.push(message.content);
           if (processed.length === 1) {

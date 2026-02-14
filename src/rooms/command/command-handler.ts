@@ -6,16 +6,12 @@
  * lifecycle to ProactiveRunner.
  */
 
-import {
-  SteeringQueue,
-  type SteeringKey,
-} from "./steering-queue.js";
+import { SteeringQueue } from "./steering-queue.js";
 import { CommandResolver } from "./resolver.js";
 import { buildProactiveConfig, ProactiveRunner } from "./proactive.js";
 import {
   CommandExecutor,
   type CommandExecutionResult,
-  type SteeringContextDrainer,
   type CommandExecutorOverrides,
   type CommandExecutorLogger,
 } from "./command-executor.js";
@@ -73,28 +69,20 @@ export class RoomCommandHandlerTs {
 
     // Proactive interjection setup
     const roomConfig = runtime.config.getRoomConfig(roomName);
-    const proactiveConfig = buildProactiveConfig(roomConfig.proactive, this.executor.commandConfig);
+    const proactiveConfig = buildProactiveConfig(roomConfig.proactive, roomConfig.command!);
 
     if (proactiveConfig) {
       this.proactiveRunner = new ProactiveRunner({
         config: proactiveConfig,
-        history: runtime.history,
-        modelAdapter: runtime.modelAdapter,
-        getApiKey: runtime.getApiKey,
-        classifyMode: this.executor.classifyMode,
-        logger: this.logger,
+        runtime,
         executor: this.executor,
         resolver: this.resolver,
         steeringQueue: this.steeringQueue,
+        logger: this.logger,
       });
     } else {
       this.proactiveRunner = null;
     }
-  }
-
-  shouldIgnoreUser(nick: string): boolean {
-    const ignoreUsers = this.executor.commandConfig.ignore_users ?? [];
-    return ignoreUsers.some((ignored) => String(ignored).toLowerCase() === nick.toLowerCase());
   }
 
   async handleIncomingMessage(
@@ -124,7 +112,7 @@ export class RoomCommandHandlerTs {
         message,
         triggerMessageId,
         options.sendResponse,
-        this.createSteeringContextDrainer(SteeringQueue.keyForMessage(message)),
+        this.steeringQueue.createContextDrainer(SteeringQueue.keyForMessage(message)),
       );
     }
 
@@ -137,7 +125,7 @@ export class RoomCommandHandlerTs {
       message,
       0,
       undefined,
-      this.createSteeringContextDrainer(SteeringQueue.keyForMessage(message)),
+      this.steeringQueue.createContextDrainer(SteeringQueue.keyForMessage(message)),
     );
   }
 
@@ -173,11 +161,13 @@ export class RoomCommandHandlerTs {
         runnerItem.message,
         runnerItem.triggerMessageId,
         runnerItem.sendResponse,
-        this.createSteeringContextDrainer(steeringKey),
+        this.steeringQueue.createContextDrainer(steeringKey),
       );
 
       this.steeringQueue.finishItem(runnerItem);
-      await this.drainRemainingSessionItems(steeringKey);
+      await this.steeringQueue.drainSession(steeringKey, (item, contextDrainer) =>
+        this.processSessionItem(item, contextDrainer),
+      );
     } catch (error) {
       this.steeringQueue.abortSession(steeringKey, error);
       this.steeringQueue.failItem(runnerItem, error);
@@ -205,67 +195,35 @@ export class RoomCommandHandlerTs {
     }
 
     if (isProactiveRunner && this.proactiveRunner) {
-      this.proactiveRunner.runSession(
-        steeringKey,
-        item,
-        (key) => this.createSteeringContextDrainer(key),
-      ).catch((error) => {
+      this.proactiveRunner.runSession(steeringKey, item).catch((error) => {
         this.logger.error("Proactive session failed", error);
       });
       await item.completion;
       return;
     }
 
-    await this.handlePassiveMessageCore(message, sendResponse);
+    await this.executor.triggerAutoChronicler(message);
   }
 
-  private async handlePassiveMessageCore(
-    message: RoomMessage,
-    _sendResponse: ((text: string) => Promise<void>) | undefined,
+  // ── Shared session item processing ──
+
+  private async processSessionItem(
+    item: import("./steering-queue.js").QueuedInboundMessage,
+    contextDrainer: () => Array<{ role: string; content: string }>,
   ): Promise<void> {
-    await this.executor.triggerAutoChronicler(message, this.executor.commandConfig.history_size);
-  }
-
-  // ── Shared session drain loop ──
-
-  private async drainRemainingSessionItems(steeringKey: SteeringKey): Promise<void> {
-    while (true) {
-      const { dropped, nextItem } = this.steeringQueue.takeNextWorkCompacted(steeringKey);
-      for (const droppedItem of dropped) {
-        droppedItem.result = null;
-        this.steeringQueue.finishItem(droppedItem);
+    if (item.kind === "command") {
+      if (item.triggerMessageId === null) {
+        throw new Error("Queued command item is missing trigger message id.");
       }
-
-      if (!nextItem) {
-        return;
-      }
-
-      if (nextItem.kind === "command") {
-        if (nextItem.triggerMessageId === null) {
-          throw new Error("Queued command item is missing trigger message id.");
-        }
-        nextItem.result = await this.executor.execute(
-          nextItem.message,
-          nextItem.triggerMessageId,
-          nextItem.sendResponse,
-          this.createSteeringContextDrainer(steeringKey),
-        );
-      } else {
-        await this.handlePassiveMessageCore(nextItem.message, nextItem.sendResponse);
-        nextItem.result = null;
-      }
-
-      this.steeringQueue.finishItem(nextItem);
+      item.result = await this.executor.execute(
+        item.message,
+        item.triggerMessageId,
+        item.sendResponse,
+        contextDrainer,
+      );
+    } else {
+      await this.executor.triggerAutoChronicler(item.message);
+      item.result = null;
     }
-  }
-
-  // ── Helpers ──
-
-  private createSteeringContextDrainer(steeringKey: SteeringKey): SteeringContextDrainer {
-    return () =>
-      this.steeringQueue.drainSteeringContextMessages(steeringKey).map((msg) => ({
-        role: "user",
-        content: msg.content,
-      }));
   }
 }

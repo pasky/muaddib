@@ -11,7 +11,6 @@ import {
 import { DiscordGatewayTransport } from "./transport.js";
 
 interface CommandLike {
-  shouldIgnoreUser(nick: string): boolean;
   handleIncomingMessage(
     message: RoomMessage,
     options: { isDirect: boolean; sendResponse?: (text: string) => Promise<void> },
@@ -105,6 +104,7 @@ export interface DiscordSender {
 
 export interface DiscordRoomMonitorOptions {
   roomConfig: DiscordMonitorRoomConfig;
+  ignoreUsers?: string[];
   history: ChatHistoryStore;
   commandHandler: CommandLike;
   eventSource?: DiscordEventSource;
@@ -137,6 +137,7 @@ export class DiscordRoomMonitor {
     return [
       new DiscordRoomMonitor({
         roomConfig,
+        ignoreUsers: roomConfig.command?.ignore_users?.map(String),
         history: runtime.history,
         commandHandler,
         eventSource: transport,
@@ -243,7 +244,8 @@ export class DiscordRoomMonitor {
       return;
     }
 
-    if (this.options.commandHandler.shouldIgnoreUser(event.username)) {
+    const ignoreUsers = this.options.ignoreUsers ?? [];
+    if (ignoreUsers.some((u) => u.toLowerCase() === event.username.toLowerCase())) {
       return;
     }
 

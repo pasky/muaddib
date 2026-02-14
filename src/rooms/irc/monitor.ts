@@ -35,7 +35,6 @@ export interface IrcEventsClient {
 }
 
 interface CommandLike {
-  shouldIgnoreUser(nick: string): boolean;
   handleIncomingMessage(
     message: RoomMessage,
     options: { isDirect: boolean; sendResponse?: (text: string) => Promise<void> },
@@ -44,6 +43,7 @@ interface CommandLike {
 
 export interface IrcRoomMonitorOptions {
   roomConfig: IrcMonitorRoomConfig;
+  ignoreUsers?: string[];
   history: ChatHistoryStore;
   commandHandler: CommandLike;
   varlinkEvents?: IrcEventsClient;
@@ -82,6 +82,7 @@ export class IrcRoomMonitor {
             socket_path: socketPath,
           },
         },
+        ignoreUsers: roomConfig.command?.ignore_users?.map(String),
         history: runtime.history,
         commandHandler,
         logger: runtime.logger.getLogger("muaddib.rooms.irc.monitor"),
@@ -183,9 +184,10 @@ export class IrcRoomMonitor {
       this.logger.debug("Normalized bridged IRC sender", `from=${nick}`, `to=${normalizedNick}`);
     }
 
+    const ignoreUsers = this.options.ignoreUsers ?? [];
     if (
-      this.options.commandHandler.shouldIgnoreUser(nick) ||
-      this.options.commandHandler.shouldIgnoreUser(normalizedNick)
+      ignoreUsers.some((u) => u.toLowerCase() === nick.toLowerCase()) ||
+      ignoreUsers.some((u) => u.toLowerCase() === normalizedNick.toLowerCase())
     ) {
       this.logger.debug("Ignoring user", `nick=${nick}`, `normalized=${normalizedNick}`);
       return;

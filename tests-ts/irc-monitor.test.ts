@@ -160,7 +160,6 @@ describe("IrcRoomMonitor", () => {
       },
       history,
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (message, options) => {
           executeCalls.push(message.content);
           if (options.isDirect && options.sendResponse) {
@@ -217,7 +216,6 @@ describe("IrcRoomMonitor", () => {
       },
       history,
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (message, options) => {
           directFlag = options.isDirect;
           await history.addMessage(message);
@@ -306,7 +304,6 @@ describe("IrcRoomMonitor", () => {
       },
       history,
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (message, options) => {
           seen.push({
             mynick: message.mynick,
@@ -363,7 +360,6 @@ describe("IrcRoomMonitor", () => {
       },
       history,
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async () => null,
       },
       varlinkEvents: {
@@ -412,7 +408,6 @@ describe("IrcRoomMonitor", () => {
       },
       history,
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async () => null,
       },
       varlinkEvents: {
@@ -464,7 +459,6 @@ describe("IrcRoomMonitor", () => {
         } as unknown as NodeJS.WriteStream,
       }).getLogger("muaddib.rooms.irc.monitor"),
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async () => null,
       },
       varlinkEvents: {
@@ -522,7 +516,6 @@ describe("IrcRoomMonitor", () => {
       history,
       logger: runtimeLogs.getLogger("muaddib.rooms.irc.monitor"),
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async () => {
           runtimeLogs.getLogger("muaddib.tests.command").debug("inside direct handler marker");
           return null;
@@ -609,7 +602,6 @@ describe("IrcRoomMonitor", () => {
       },
       history,
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (message) => {
           processed.push(message.content);
           if (processed.length === 1) {
@@ -684,7 +676,6 @@ describe("IrcRoomMonitor", () => {
       },
       history,
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (message) => {
           if (message.content === "first") {
             firstStarted.resolve();

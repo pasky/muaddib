@@ -89,8 +89,8 @@ export interface CommandExecutorOverrides {
 
 export class CommandExecutor {
   readonly resolver: CommandResolver;
-  readonly commandConfig: CommandConfig;
   readonly classifyMode: (context: Array<{ role: string; content: string }>) => Promise<string>;
+  private readonly commandConfig: CommandConfig;
   private readonly history: ChatHistoryStore;
   private readonly modelAdapter: PiAiModelAdapter;
   private readonly logger: CommandExecutorLogger;
@@ -750,7 +750,8 @@ export class CommandExecutor {
     return promptTemplate.replace(/\{([A-Za-z0-9_]+)\}/g, (full, key: string) => vars[key] ?? full);
   }
 
-  async triggerAutoChronicler(message: RoomMessage, maxSize: number): Promise<void> {
+  async triggerAutoChronicler(message: RoomMessage, maxSize?: number): Promise<void> {
+    maxSize ??= this.commandConfig.history_size;
     if (!this.runtime.autoChronicler) {
       return;
     }

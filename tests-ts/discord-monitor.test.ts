@@ -123,7 +123,6 @@ describe("DiscordRoomMonitor", () => {
         },
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (message, options) => {
           seenMessage = message.content;
           isDirect = options.isDirect;
@@ -170,7 +169,6 @@ describe("DiscordRoomMonitor", () => {
         sendMessage: async () => {},
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (_message, options) => {
           await options.sendResponse?.("ok");
           return { response: "ok" };
@@ -203,7 +201,6 @@ describe("DiscordRoomMonitor", () => {
       roomConfig: { enabled: true },
       history,
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (message) => {
           seenContent = message.content;
           return null;
@@ -255,7 +252,6 @@ describe("DiscordRoomMonitor", () => {
       history,
       logger: runtimeLogs.getLogger("muaddib.rooms.discord.monitor"),
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async () => {
           runtimeLogs.getLogger("muaddib.tests.command").debug("inside discord direct handler");
           return null;
@@ -299,7 +295,6 @@ describe("DiscordRoomMonitor", () => {
       roomConfig: { enabled: true },
       history,
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (message) => {
           seenMessage = message.content;
           return null;
@@ -333,7 +328,6 @@ describe("DiscordRoomMonitor", () => {
       roomConfig: { enabled: true },
       history,
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (message) => {
           mappedServerTag = message.serverTag;
           mappedPlatformId = message.platformId ?? "";
@@ -385,7 +379,6 @@ describe("DiscordRoomMonitor", () => {
         },
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (message, options) => {
           seenThreadId = message.threadId;
           seenThreadStarterId = message.threadStarterId;
@@ -445,7 +438,6 @@ describe("DiscordRoomMonitor", () => {
         },
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (_message, options) => {
           await options.sendResponse?.("first");
           await options.sendResponse?.("second");
@@ -504,7 +496,6 @@ describe("DiscordRoomMonitor", () => {
         },
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (_message, options) => {
           await options.sendResponse?.("first");
           await options.sendResponse?.("second");
@@ -560,7 +551,6 @@ describe("DiscordRoomMonitor", () => {
       roomConfig: { enabled: true },
       history,
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async () => null,
       },
     });
@@ -592,7 +582,6 @@ describe("DiscordRoomMonitor", () => {
       roomConfig: { enabled: true },
       history,
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (_message, options) => {
           isDirect = options.isDirect;
           return null;
@@ -640,7 +629,6 @@ describe("DiscordRoomMonitor", () => {
         },
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (_message, options) => {
           await options.sendResponse?.("ok");
           return { response: "ok" };
@@ -684,7 +672,6 @@ describe("DiscordRoomMonitor", () => {
         },
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (_message, options) => {
           await options.sendResponse?.("ok");
           return { response: "ok" };
@@ -738,7 +725,6 @@ describe("DiscordRoomMonitor", () => {
         sendMessage: async () => {},
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async () => null,
       },
     });
@@ -797,7 +783,6 @@ describe("DiscordRoomMonitor", () => {
         },
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (message) => {
           processed.push(message.content);
           return null;
@@ -840,7 +825,6 @@ describe("DiscordRoomMonitor", () => {
         receiveEvent: async () => null,
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async () => null,
       },
     });
@@ -881,7 +865,6 @@ describe("DiscordRoomMonitor", () => {
         },
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async () => null,
       },
     });
@@ -922,7 +905,6 @@ describe("DiscordRoomMonitor", () => {
         },
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async () => null,
       },
     });
@@ -975,7 +957,6 @@ describe("DiscordRoomMonitor", () => {
         },
       },
       commandHandler: {
-        shouldIgnoreUser: () => false,
         handleIncomingMessage: async (message) => {
           processed.push(message.content);
           if (processed.length === 1) {

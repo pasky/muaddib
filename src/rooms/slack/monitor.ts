@@ -11,7 +11,6 @@ import {
 import { SlackSocketTransport } from "./transport.js";
 
 interface CommandLike {
-  shouldIgnoreUser(nick: string): boolean;
   handleIncomingMessage(
     message: RoomMessage,
     options: { isDirect: boolean; sendResponse?: (text: string) => Promise<void> },
@@ -116,6 +115,7 @@ export interface SlackSender {
 
 export interface SlackRoomMonitorOptions {
   roomConfig: SlackMonitorRoomConfig;
+  ignoreUsers?: string[];
   history: ChatHistoryStore;
   commandHandler: CommandLike;
   eventSource?: SlackEventSource;
@@ -162,6 +162,7 @@ export class SlackRoomMonitor {
 
       return new SlackRoomMonitor({
         roomConfig,
+        ignoreUsers: roomConfig.command?.ignore_users?.map(String),
         history: runtime.history,
         commandHandler,
         eventSource: transport,
@@ -273,7 +274,8 @@ export class SlackRoomMonitor {
       return;
     }
 
-    if (this.options.commandHandler.shouldIgnoreUser(event.username)) {
+    const ignoreUsers = this.options.ignoreUsers ?? [];
+    if (ignoreUsers.some((u) => u.toLowerCase() === event.username.toLowerCase())) {
       return;
     }
 
