@@ -43,6 +43,21 @@ describe("PiAiModelAdapter", () => {
     expect(resolved.model.baseUrl).toBe("https://api.deepseek.com/anthropic");
   });
 
+  it("normalizes deepseek base URL suffix from /messages too", () => {
+    const withConfig = createPiAiModelAdapterFromConfig(
+      MuaddibConfig.inMemory({
+        providers: {
+          deepseek: {
+            url: "https://api.deepseek.com/anthropic/messages",
+          },
+        },
+      }),
+    );
+
+    const resolved = withConfig.resolve("deepseek:deepseek-chat");
+    expect(resolved.model.baseUrl).toBe("https://api.deepseek.com/anthropic");
+  });
+
   it("throws explicit error for unknown provider", () => {
     expect(() => adapter.resolve("nonexistent-provider:model")).toThrow(PiAiModelResolutionError);
     expect(() => adapter.resolve("nonexistent-provider:model")).toThrow("Unknown provider");

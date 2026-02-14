@@ -12,21 +12,12 @@ import {
 
 import { MuaddibConfig } from "../config/muaddib-config.js";
 import { parseModelSpec, type ModelSpec } from "./model-spec.js";
-
-const DEEPSEEK_PROVIDER = "deepseek";
-const DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com/anthropic";
-
-// Pricing in USD per 1M tokens (prompt/output). Matches Python pricing tables.
-const DEEPSEEK_PRICING_BY_MODEL: Record<string, { input: number; output: number }> = {
-  "deepseek-chat": {
-    input: 0.14,
-    output: 0.28,
-  },
-  "deepseek-reasoner": {
-    input: 0.55,
-    output: 2.19,
-  },
-};
+import {
+  getOverriddenProviders,
+  normalizeProviderOverrideOptions,
+  resolveProviderOverrideModel,
+  type ProviderOverrideOptions,
+} from "./provider-overrides.js";
 
 export class PiAiModelResolutionError extends Error {
   constructor(message: string) {
@@ -35,9 +26,7 @@ export class PiAiModelResolutionError extends Error {
   }
 }
 
-export interface PiAiModelAdapterOptions {
-  deepseekBaseUrl?: string;
-}
+export type PiAiModelAdapterOptions = ProviderOverrideOptions;
 
 export interface ResolvedPiAiModel {
   spec: ModelSpec;
@@ -59,15 +48,12 @@ export interface CompleteSimpleOptions {
 
 /**
  * Adapter that enforces strict provider:model specs and resolves them via pi-ai's model registry.
- *
- * DeepSeek is intentionally handled as an Anthropic-compatible provider in the TS runtime,
- * mirroring Python's dedicated DeepSeek client behavior.
  */
 export class PiAiModelAdapter {
-  private readonly deepseekBaseUrl: string;
+  private readonly providerOverrideOptions;
 
   constructor(options: PiAiModelAdapterOptions = {}) {
-    this.deepseekBaseUrl = normalizeDeepSeekBaseUrl(options.deepseekBaseUrl);
+    this.providerOverrideOptions = normalizeProviderOverrideOptions(options);
   }
 
   resolve(modelSpec: string): ResolvedPiAiModel {
@@ -81,10 +67,15 @@ export class PiAiModelAdapter {
       );
     }
 
-    if (spec.provider === DEEPSEEK_PROVIDER) {
+    const providerOverrideModel = resolveProviderOverrideModel(
+      spec.provider,
+      spec.modelId,
+      this.providerOverrideOptions,
+    );
+    if (providerOverrideModel) {
       return {
         spec,
-        model: this.resolveDeepSeekModel(spec.modelId),
+        model: providerOverrideModel,
       };
     }
 
@@ -127,31 +118,6 @@ export class PiAiModelAdapter {
       throw error;
     }
   }
-
-  private resolveDeepSeekModel(modelId: string): Model<Api> {
-    const pricing = DEEPSEEK_PRICING_BY_MODEL[modelId] ?? {
-      input: 0,
-      output: 0,
-    };
-
-    return {
-      id: modelId,
-      name: modelId,
-      api: "anthropic-messages",
-      provider: DEEPSEEK_PROVIDER,
-      baseUrl: this.deepseekBaseUrl,
-      reasoning: modelId.includes("reasoner"),
-      input: ["text"],
-      cost: {
-        input: pricing.input,
-        output: pricing.output,
-        cacheRead: 0,
-        cacheWrite: 0,
-      },
-      contextWindow: 128_000,
-      maxTokens: 32_000,
-    };
-  }
 }
 
 export function createPiAiModelAdapterFromConfig(config: MuaddibConfig): PiAiModelAdapter {
@@ -166,27 +132,11 @@ export function resolvePiAiModel(modelSpec: string): Model<Api> {
 
 function getSupportedProviders(): Set<string> {
   const providers = new Set<string>(getProviders() as string[]);
-  providers.add(DEEPSEEK_PROVIDER);
+  for (const provider of getOverriddenProviders()) {
+    providers.add(provider);
+  }
+
   return providers;
-}
-
-function normalizeDeepSeekBaseUrl(url: string | undefined): string {
-  const raw = (url ?? DEFAULT_DEEPSEEK_BASE_URL).trim();
-  if (!raw) {
-    return DEFAULT_DEEPSEEK_BASE_URL;
-  }
-
-  const withoutTrailingSlash = raw.replace(/\/+$/u, "");
-
-  if (withoutTrailingSlash.endsWith("/v1/messages")) {
-    return withoutTrailingSlash.slice(0, -"/v1/messages".length);
-  }
-
-  if (withoutTrailingSlash.endsWith("/messages")) {
-    return withoutTrailingSlash.slice(0, -"/messages".length);
-  }
-
-  return withoutTrailingSlash;
 }
 
 function safeJson(value: unknown, maxChars: number): string {
