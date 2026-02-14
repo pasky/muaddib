@@ -1,6 +1,5 @@
 import { join } from "node:path";
 
-import { createConfigApiKeyResolver } from "./app/api-keys.js";
 import { assertNoDeferredFeatureConfig } from "./app/deferred-features.js";
 import { getMuaddibHome, resolveMuaddibPath } from "./app/bootstrap.js";
 import { RuntimeLogWriter, type RuntimeLogger } from "./app/logging.js";
@@ -51,7 +50,8 @@ export async function createMuaddibRuntime(
   assertNoDeferredFeatureConfig(config, log);
 
   const modelAdapter = createPiAiModelAdapterFromConfig(config);
-  const getApiKey = createConfigApiKeyResolver(config);
+  const staticKeys = config.getProviderStaticKeys();
+  const getApiKey = (provider: string): string | undefined => staticKeys[provider];
 
   const refusalFallbackModel = resolveRefusalFallbackModel(config, { modelAdapter });
   const persistenceSummaryModel = resolvePersistenceSummaryModel(config, { modelAdapter });

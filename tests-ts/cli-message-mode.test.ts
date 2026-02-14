@@ -241,57 +241,6 @@ describe("runCliMessageMode", () => {
     );
   });
 
-  it("fails fast with operator guidance on provider credential refresh/session config", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "muaddib-cli-"));
-    tempDirs.push(dir);
-
-    const configPath = join(dir, "config.json");
-    const config = {
-      providers: {
-        openai: {
-          session: {
-            id: "session_123",
-          },
-        },
-      },
-      rooms: {
-        common: {
-          command: {
-            history_size: 40,
-            default_mode: "classifier:serious",
-            modes: {
-              serious: {
-                model: "openai:gpt-4o-mini",
-                prompt: "You are {mynick}",
-                triggers: {
-                  "!s": {},
-                },
-              },
-            },
-            mode_classifier: {
-              model: "openai:gpt-4o-mini",
-              labels: {
-                EASY_SERIOUS: "!s",
-              },
-              fallback_label: "EASY_SERIOUS",
-            },
-          },
-        },
-      },
-    };
-
-    await writeFile(configPath, JSON.stringify(config), "utf-8");
-
-    await expect(
-      runCliMessageMode({
-        configPath,
-        message: "!s hi",
-      }),
-    ).rejects.toThrow(
-      "Operator guidance: remove providers.openai.session and use providers.openai.key as a static string or OPENAI_API_KEY.",
-    );
-  });
-
   it("fails fast when command.response_max_bytes is invalid", async () => {
     const dir = await mkdtemp(join(tmpdir(), "muaddib-cli-"));
     tempDirs.push(dir);

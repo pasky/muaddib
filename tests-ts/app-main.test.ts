@@ -410,44 +410,6 @@ describe("runMuaddibMain", () => {
     );
   });
 
-  it("throws with operator guidance when provider credential refresh/session config is present", async () => {
-    await expect(
-      runWithConfig({
-        history: {
-          database: {
-            path: ":memory:",
-          },
-        },
-        providers: {
-          openai: {
-            key: {
-              session_id: "sess_123",
-            },
-            oauth: {
-              refresh_token: "refresh_123",
-            },
-          },
-        },
-        rooms: {
-          common: {
-            command: baseCommandConfig(),
-          },
-          irc: {
-            enabled: false,
-          },
-          discord: {
-            enabled: false,
-          },
-          slack: {
-            enabled: false,
-          },
-        },
-      }),
-    ).rejects.toThrow(
-      "Operator guidance: remove providers.openai.key, providers.openai.oauth and use providers.openai.key as a static string or OPENAI_API_KEY.",
-    );
-  });
-
   it("throws when no monitors are enabled", async () => {
     await expect(
       runWithConfig({
