@@ -354,7 +354,6 @@ export class CommandExecutor {
     );
 
     const context = await this.history.getContextForMessage(message, maxSize);
-    const followupMessages = await this.collectDebouncedFollowups(message, context);
 
     const resolved = await this.resolver.resolve({
       message,
@@ -362,33 +361,28 @@ export class CommandExecutor {
       defaultSize,
     });
 
-    const resolvedWithFollowups: ResolvedCommand = {
-      ...resolved,
-      queryText: mergeQueryText(resolved.queryText, followupMessages),
-    };
-
-    if (resolvedWithFollowups.error) {
+    if (resolved.error) {
       logger.warn(
         "Command parse error",
         `arc=${message.serverTag}#${message.channelName}`,
         `nick=${message.nick}`,
-        `error=${resolvedWithFollowups.error}`,
+        `error=${resolved.error}`,
         `content=${message.content}`,
       );
       return {
-        response: `${message.nick}: ${resolvedWithFollowups.error}`,
-        resolved: resolvedWithFollowups,
+        response: `${message.nick}: ${resolved.error}`,
+        resolved: resolved,
         model: null,
         usage: null,
         toolCallsCount: 0,
       };
     }
 
-    if (resolvedWithFollowups.helpRequested) {
+    if (resolved.helpRequested) {
       logger.debug("Sending help message", `nick=${message.nick}`);
       return {
         response: this.resolver.buildHelpMessage(message.serverTag, message.channelName),
-        resolved: resolvedWithFollowups,
+        resolved: resolved,
         model: null,
         usage: null,
         toolCallsCount: 0,
@@ -396,90 +390,98 @@ export class CommandExecutor {
     }
 
     if (
-      !resolvedWithFollowups.modeKey ||
-      !resolvedWithFollowups.runtime ||
-      !resolvedWithFollowups.selectedTrigger
+      !resolved.modeKey ||
+      !resolved.runtime ||
+      !resolved.selectedTrigger
     ) {
       return {
         response: `${message.nick}: Internal command resolution error.`,
-        resolved: resolvedWithFollowups,
+        resolved: resolved,
         model: null,
         usage: null,
         toolCallsCount: 0,
       };
     }
 
-    const modeConfig = commandConfig.modes[resolvedWithFollowups.modeKey];
+    const modeConfig = commandConfig.modes[resolved.modeKey];
     const modelSpec =
-      resolvedWithFollowups.modelOverride ??
-      resolvedWithFollowups.runtime.model ??
+      resolved.modelOverride ??
+      resolved.runtime.model ??
       pickModeModel(modeConfig.model) ??
       null;
 
     if (!modelSpec) {
       return {
-        response: `${message.nick}: No model configured for mode '${resolvedWithFollowups.modeKey}'.`,
-        resolved: resolvedWithFollowups,
+        response: `${message.nick}: No model configured for mode '${resolved.modeKey}'.`,
+        resolved: resolved,
         model: null,
         usage: null,
         toolCallsCount: 0,
       };
     }
 
-    if (resolvedWithFollowups.modelOverride) {
-      logger.debug("Overriding model", `model=${resolvedWithFollowups.modelOverride}`);
+    if (resolved.modelOverride) {
+      logger.debug("Overriding model", `model=${resolved.modelOverride}`);
     }
 
-    if (resolvedWithFollowups.selectedAutomatically) {
+    if (resolved.selectedAutomatically) {
       logger.debug(
         "Processing automatic mode request",
         `nick=${message.nick}`,
-        `query=${resolvedWithFollowups.queryText}`,
+        `query=${resolved.queryText}`,
       );
-      if (resolvedWithFollowups.channelMode) {
+      if (resolved.channelMode) {
         logger.debug(
           "Channel policy resolved",
-          `policy=${resolvedWithFollowups.channelMode}`,
-          `label=${resolvedWithFollowups.selectedLabel}`,
-          `trigger=${resolvedWithFollowups.selectedTrigger}`,
+          `policy=${resolved.channelMode}`,
+          `label=${resolved.selectedLabel}`,
+          `trigger=${resolved.selectedTrigger}`,
         );
       }
     } else {
       logger.debug(
         "Processing explicit trigger",
-        `trigger=${resolvedWithFollowups.selectedTrigger}`,
-        `mode=${resolvedWithFollowups.modeKey}`,
+        `trigger=${resolved.selectedTrigger}`,
+        `mode=${resolved.modeKey}`,
         `nick=${message.nick}`,
-        `query=${resolvedWithFollowups.queryText}`,
+        `query=${resolved.queryText}`,
       );
     }
 
     logger.debug(
       "Resolved direct command",
       `arc=${message.serverTag}#${message.channelName}`,
-      `mode=${resolvedWithFollowups.modeKey}`,
-      `trigger=${resolvedWithFollowups.selectedTrigger}`,
+      `mode=${resolved.modeKey}`,
+      `trigger=${resolved.selectedTrigger}`,
       `model=${modelSpec}`,
-      `context_disabled=${resolvedWithFollowups.noContext}`,
+      `context_disabled=${resolved.noContext}`,
     );
 
     const steeringEnabled =
-      Boolean(resolvedWithFollowups.runtime.steering) && !resolvedWithFollowups.noContext;
+      Boolean(resolved.runtime.steering) && !resolved.noContext;
 
+    // Wait the debounce period so that rapid follow-up messages land in
+    // the steering queue before the first LLM invocation.
+    const debounceSeconds = numberWithDefault(this.commandConfig.debounce, 0);
+    if (debounceSeconds > 0) {
+      await sleep(debounceSeconds * 1000);
+    }
+
+    // Drain any messages that arrived during the debounce window.
     const initialSteeringMessages = steeringEnabled && steeringContextDrainer
       ? steeringContextDrainer()
       : [];
 
     const systemPrompt = this.buildSystemPrompt(
-      resolvedWithFollowups.modeKey,
+      resolved.modeKey,
       message.mynick,
-      resolvedWithFollowups.modelOverride ?? undefined,
+      resolved.modelOverride ?? undefined,
     );
 
     let prependedContext: Array<{ role: string; content: string }> = [];
     if (
-      !resolvedWithFollowups.noContext &&
-      resolvedWithFollowups.runtime.includeChapterSummary &&
+      !resolved.noContext &&
+      resolved.runtime.includeChapterSummary &&
       this.runtime.chronicleStore
     ) {
       prependedContext = await this.runtime.chronicleStore.getChapterContextMessages(
@@ -487,13 +489,13 @@ export class CommandExecutor {
       );
     }
 
-    let selectedContext = (resolvedWithFollowups.noContext ? context.slice(-1) : context).slice(
-      -resolvedWithFollowups.runtime.historySize,
+    let selectedContext = (resolved.noContext ? context.slice(-1) : context).slice(
+      -resolved.runtime.historySize,
     );
 
     if (
-      !resolvedWithFollowups.noContext &&
-      resolvedWithFollowups.runtime.autoReduceContext &&
+      !resolved.noContext &&
+      resolved.runtime.autoReduceContext &&
       this.contextReducer.isConfigured &&
       selectedContext.length > 1
     ) {
@@ -512,7 +514,7 @@ export class CommandExecutor {
       ...initialSteeringMessages,
     ].map(toRunnerContextMessage);
 
-    const tools = this.selectTools(message, resolvedWithFollowups.runtime.allowedTools, runnerContext);
+    const tools = this.selectTools(message, resolved.runtime.allowedTools, runnerContext);
 
     const steeringMessageProvider = steeringEnabled && steeringContextDrainer
       ? () => steeringContextDrainer().map((msg) => ({
@@ -531,10 +533,10 @@ export class CommandExecutor {
 
     let agentResult: PromptResult;
     try {
-      agentResult = await runner.prompt(resolvedWithFollowups.queryText, {
+      agentResult = await runner.prompt(resolved.queryText, {
         contextMessages: runnerContext,
-        thinkingLevel: normalizeThinkingLevel(resolvedWithFollowups.runtime.reasoningEffort),
-        visionFallbackModel: resolvedWithFollowups.runtime.visionModel ?? undefined,
+        thinkingLevel: normalizeThinkingLevel(resolved.runtime.reasoningEffort),
+        visionFallbackModel: resolved.runtime.visionModel ?? undefined,
         refusalFallbackModel: this.refusalFallbackModel ?? undefined,
       });
 
@@ -558,14 +560,14 @@ export class CommandExecutor {
       logger.info(
         "Agent chose not to answer",
         `arc=${message.serverTag}#${message.channelName}`,
-        `mode=${resolvedWithFollowups.selectedLabel}`,
-        `trigger=${resolvedWithFollowups.selectedTrigger}`,
+        `mode=${resolved.selectedLabel}`,
+        `trigger=${resolved.selectedTrigger}`,
       );
     }
 
     return {
       response: cleaned || null,
-      resolved: resolvedWithFollowups,
+      resolved: resolved,
       model: modelSpec,
       usage: agentResult.usage,
       toolCallsCount: agentResult.toolCallsCount ?? 0,
@@ -750,42 +752,6 @@ export class CommandExecutor {
       message.channelName,
       maxSize,
     );
-  }
-
-  private async collectDebouncedFollowups(
-    message: RoomMessage,
-    context: Array<{ role: string; content: string }>,
-  ): Promise<string[]> {
-    const debounceSeconds = numberWithDefault(this.commandConfig.debounce, 0);
-    if (debounceSeconds <= 0) {
-      return [];
-    }
-
-    const originalTimestamp = Date.now() / 1000;
-    await sleep(debounceSeconds * 1000);
-
-    const followups = await this.history.getRecentMessagesSince(
-      message.serverTag,
-      message.channelName,
-      message.nick,
-      originalTimestamp,
-      message.threadId,
-    );
-
-    const followupMessages = followups.map((entry) => entry.message).filter((entry) => entry.length > 0);
-    if (followupMessages.length > 0) {
-      this.logger.debug("Debounced followup messages", `count=${followupMessages.length}`, `nick=${message.nick}`);
-    }
-
-    if (followupMessages.length > 0 && context.length > 0) {
-      const lastIndex = context.length - 1;
-      context[lastIndex] = {
-        ...context[lastIndex],
-        content: `${context[lastIndex].content}\n${followupMessages.join("\n")}`,
-      };
-    }
-
-    return followupMessages;
   }
 
   private rateLimitedResult(message: RoomMessage): CommandExecutionResult {
@@ -1132,16 +1098,6 @@ const LEADING_IRC_CONTEXT_ECHO_PREFIX_RE = /^(?:\s*(?:\[[^\]]+\]\s*)?(?:![A-Za-z
 
 function stripLeadingIrcContextEchoPrefixes(text: string): string {
   return text.replace(LEADING_IRC_CONTEXT_ECHO_PREFIX_RE, "");
-}
-
-function mergeQueryText(queryText: string, followupMessages: string[]): string {
-  if (followupMessages.length === 0) {
-    return queryText;
-  }
-  if (!queryText.trim()) {
-    return followupMessages.join("\n");
-  }
-  return `${queryText}\n${followupMessages.join("\n")}`;
 }
 
 async function sleep(ms: number): Promise<void> {

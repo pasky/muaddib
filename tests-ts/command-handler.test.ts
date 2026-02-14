@@ -764,7 +764,7 @@ describe("RoomCommandHandlerTs", () => {
     await history.close();
   });
 
-  it("merges debounced same-user followups into the runner prompt", async () => {
+  it("debounce waits before prompt and drains steering queue followups into context", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();
 
@@ -779,11 +779,6 @@ describe("RoomCommandHandlerTs", () => {
     };
     await history.addMessage(incoming);
 
-    const recentSpy = vi.spyOn(history, "getRecentMessagesSince").mockResolvedValue([
-      { message: "second line", timestamp: "2026-01-01 00:00:01" },
-      { message: "third line", timestamp: "2026-01-01 00:00:02" },
-    ]);
-
     let runnerPrompt = "";
     let runnerContextContents: string[] = [];
 
@@ -792,7 +787,14 @@ describe("RoomCommandHandlerTs", () => {
         ...roomConfig,
         command: {
           ...roomConfig.command,
-          debounce: 0.001,
+          debounce: 0.05,
+          modes: {
+            ...roomConfig.command.modes,
+            serious: {
+              ...roomConfig.command.modes.serious,
+              steering: true,
+            },
+          },
         },
       } as any,
       history,
@@ -834,20 +836,29 @@ describe("RoomCommandHandlerTs", () => {
       }),
     });
 
-    const result = await handler.execute(incoming);
+    // Start the command — it will sleep during debounce
+    const resultPromise = handler.handleIncomingMessage(incoming, {
+      isDirect: true,
+      sendResponse: async () => {},
+    });
 
-    expect(result.response).toBe("done");
-    expect(result.resolved.queryText).toBe("first line\nsecond line\nthird line");
-    expect(runnerPrompt).toBe("first line\nsecond line\nthird line");
-    expect(runnerContextContents.some((entry) => entry.includes("second line"))).toBe(false);
-    expect(recentSpy).toHaveBeenCalledTimes(1);
-    expect(recentSpy).toHaveBeenCalledWith(
-      "libera",
-      "#test",
-      "alice",
-      expect.any(Number),
-      "thread-1",
-    );
+    // Enqueue a followup during the debounce window
+    const followup: RoomMessage = {
+      ...makeMessage("!s second line"),
+      threadId: "thread-1",
+    };
+    // Send the followup through the handler so it lands in the steering queue
+    handler.handleIncomingMessage(followup, {
+      isDirect: true,
+      sendResponse: async () => {},
+    });
+
+    const result = await resultPromise;
+
+    expect(result!.response).toBe("done");
+    expect(runnerPrompt).toBe("first line");
+    // The followup should appear as a steering context message
+    expect(runnerContextContents.some((entry) => entry.includes("second line"))).toBe(true);
 
     await history.close();
   });
