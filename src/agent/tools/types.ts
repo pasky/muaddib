@@ -1,5 +1,6 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { ChronicleStore } from "../../chronicle/chronicle-store.js";
+import type { ToolsConfig, ProvidersConfig } from "../../config/muaddib-config.js";
 import type { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 
 /** How a tool's I/O is persisted for future context recall. */
@@ -20,28 +21,24 @@ export interface ToolExecutorLogger {
 }
 
 export interface DefaultToolExecutorOptions {
+  /** Tools configuration — each tool executor resolves its own config from here. */
+  toolsConfig?: ToolsConfig;
+  /** Provider configuration (base URLs, etc.). */
+  providersConfig?: ProvidersConfig;
+
   fetchImpl?: typeof fetch;
-  jinaApiKey?: string;
   secrets?: Record<string, unknown>;
   logger?: ToolExecutorLogger;
   maxWebContentLength?: number;
   maxImageBytes?: number;
   executeCodeTimeoutMs?: number;
   executeCodeWorkingDirectory?: string;
-  /** Fly.io Sprites API token for sandboxed code execution. */
-  spritesToken?: string;
   /** Arc identifier for Sprites sandbox isolation (one sprite per arc). */
   spritesArc?: string;
-  artifactsPath?: string;
-  artifactsUrl?: string;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   modelAdapter?: PiAiModelAdapter;
   completeSimpleFn?: CompleteSimpleFn;
-  oracleModel?: string;
-  oraclePrompt?: string;
   oracleMaxIterations?: number;
-  imageGenModel?: string;
-  openRouterBaseUrl?: string;
   imageGenTimeoutMs?: number;
   chronicleStore?: ChronicleStore;
   chronicleLifecycle?: {

@@ -141,13 +141,13 @@ async function loadArtifactContentForEdit(
   artifactUrl: string,
   visitWebpage: VisitWebpageExecutor,
 ): Promise<string> {
-  const localArtifactPath = extractLocalArtifactPath(artifactUrl, options.artifactsUrl);
-  if (localArtifactPath && options.artifactsPath) {
+  const localArtifactPath = extractLocalArtifactPath(artifactUrl, options.toolsConfig?.artifacts?.url);
+  if (localArtifactPath && options.toolsConfig?.artifacts?.path) {
     if (looksLikeImageUrl(localArtifactPath)) {
       throw new Error("Cannot edit binary artifacts (images).");
     }
 
-    return await readLocalArtifact(options.artifactsPath, localArtifactPath);
+    return await readLocalArtifact(options.toolsConfig.artifacts.path, localArtifactPath);
   }
 
   const fetchedContent = await visitWebpage(artifactUrl);

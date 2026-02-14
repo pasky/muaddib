@@ -34,8 +34,8 @@ export async function writeArtifactText(
   content: string,
   suffix: string,
 ): Promise<string> {
-  const artifactsPath = options.artifactsPath;
-  const artifactsUrl = options.artifactsUrl;
+  const artifactsPath = options.toolsConfig?.artifacts?.path;
+  const artifactsUrl = options.toolsConfig?.artifacts?.url;
 
   if (!artifactsPath || !artifactsUrl) {
     throw new Error("Artifact tools require tools.artifacts.path and tools.artifacts.url configuration.");
@@ -59,8 +59,8 @@ export async function writeArtifactBytes(
   data: Buffer,
   suffix: string,
 ): Promise<string> {
-  const artifactsPath = options.artifactsPath;
-  const artifactsUrl = options.artifactsUrl;
+  const artifactsPath = options.toolsConfig?.artifacts?.path;
+  const artifactsUrl = options.toolsConfig?.artifacts?.url;
 
   if (!artifactsPath || !artifactsUrl) {
     throw new Error("Artifact tools require tools.artifacts.path and tools.artifacts.url configuration.");

@@ -12,25 +12,25 @@ interface ActorConfig {
   llmDebugMaxChars?: number;
 }
 
-interface ArtifactsConfig {
+export interface ArtifactsConfig {
   path?: string;
   url?: string;
 }
 
-interface OracleConfig {
+export interface OracleConfig {
   model?: string;
   prompt?: string;
 }
 
-interface ImageGenConfig {
+export interface ImageGenConfig {
   model?: string;
 }
 
-interface JinaConfig {
+export interface JinaConfig {
   apiKey?: string;
 }
 
-interface SpritesConfig {
+export interface SpritesConfig {
   token?: string;
 }
 
@@ -38,7 +38,7 @@ interface SummaryConfig {
   model?: string;
 }
 
-interface ToolsConfig {
+export interface ToolsConfig {
   artifacts?: ArtifactsConfig;
   oracle?: OracleConfig;
   imageGen?: ImageGenConfig;
@@ -59,15 +59,15 @@ interface ChroniclerConfig {
   arcModels?: Record<string, string>;
 }
 
-interface OpenRouterProviderConfig {
+export interface OpenRouterProviderConfig {
   baseUrl?: string;
 }
 
-interface DeepSeekProviderConfig {
+export interface DeepSeekProviderConfig {
   baseUrl?: string;
 }
 
-interface ProvidersConfig {
+export interface ProvidersConfig {
   openrouter?: OpenRouterProviderConfig;
   deepseek?: DeepSeekProviderConfig;
 }

@@ -76,7 +76,7 @@ export function createDefaultGenerateImageExecutor(
   options: DefaultToolExecutorOptions,
 ): GenerateImageExecutor {
   const fetchImpl = getFetch(options);
-  const openRouterBaseUrl = (toConfiguredString(options.openRouterBaseUrl) ?? DEFAULT_OPENROUTER_BASE_URL).replace(/\/+$/, "");
+  const openRouterBaseUrl = (toConfiguredString(options.providersConfig?.openrouter?.baseUrl) ?? DEFAULT_OPENROUTER_BASE_URL).replace(/\/+$/, "");
   const maxImageBytes = options.maxImageBytes ?? DEFAULT_IMAGE_LIMIT;
   const timeoutMs = options.imageGenTimeoutMs ?? DEFAULT_IMAGE_GEN_TIMEOUT_MS;
 
@@ -86,7 +86,7 @@ export function createDefaultGenerateImageExecutor(
       throw new Error("generate_image.prompt must be non-empty.");
     }
 
-    const configuredModel = toConfiguredString(options.imageGenModel);
+    const configuredModel = toConfiguredString(options.toolsConfig?.imageGen?.model);
     if (!configuredModel) {
       throw new Error("generate_image tool requires tools.image_gen.model configuration.");
     }

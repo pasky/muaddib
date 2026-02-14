@@ -115,8 +115,7 @@ describe("core tool executors artifact support", () => {
     const logger = { info: vi.fn() };
 
     const executors = createDefaultToolExecutors({
-      artifactsPath,
-      artifactsUrl: "https://example.com/artifacts",
+      toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" } },
       logger,
     });
 
@@ -142,8 +141,7 @@ describe("core tool executors artifact support", () => {
     await writeFile(join(artifactsPath, "source.py"), "def answer():\n    return 41\n", "utf-8");
 
     const executors = createDefaultToolExecutors({
-      artifactsPath,
-      artifactsUrl: "https://example.com/artifacts",
+      toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" } },
     });
 
     const result = await executors.editArtifact({
@@ -168,8 +166,7 @@ describe("core tool executors artifact support", () => {
     await writeFile(join(artifactsPath, "source.txt"), "alpha\nbeta\n", "utf-8");
 
     const executors = createDefaultToolExecutors({
-      artifactsPath,
-      artifactsUrl: "https://example.com/artifacts",
+      toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" } },
     });
 
     await expect(
@@ -187,8 +184,7 @@ describe("core tool executors artifact support", () => {
     await writeFile(join(artifactsPath, "source.txt"), "same\nsame\n", "utf-8");
 
     const executors = createDefaultToolExecutors({
-      artifactsPath,
-      artifactsUrl: "https://example.com/artifacts",
+      toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" } },
     });
 
     await expect(
@@ -236,8 +232,7 @@ describe("core tool executors artifact support", () => {
 
     const executors = createDefaultToolExecutors({
       fetchImpl,
-      artifactsPath,
-      artifactsUrl: "https://example.com/artifacts",
+      toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" } },
     });
 
     await expect(
@@ -253,8 +248,7 @@ describe("core tool executors artifact support", () => {
     const { artifactsPath } = await makeArtifactsDir();
 
     const executors = createDefaultToolExecutors({
-      artifactsPath,
-      artifactsUrl: "https://example.com/artifacts",
+      toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" } },
     });
 
     await expect(
@@ -416,7 +410,7 @@ describe("core tool executors oracle support", () => {
 
   it("oracle validates non-empty query", async () => {
     const executors = createDefaultToolExecutors({
-      oracleModel: "openai:gpt-4o-mini",
+      toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } },
     });
 
     await expect(
@@ -466,10 +460,10 @@ describe("oracle executor with invocation context", () => {
       { name: "visit_webpage" },
     ] as any[]);
 
-    const toolOptions = { oracleModel: "openai:gpt-4o-mini" };
+    const toolOptions = { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }};
 
     const executor = createDefaultOracleExecutor(
-      { oracleModel: "openai:gpt-4o-mini", logger: { info: vi.fn() } },
+      { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }, logger: { info: vi.fn() } },
       {
         conversationContext: [{ role: "user", content: "prior context" }],
         toolOptions,
@@ -503,7 +497,7 @@ describe("oracle executor with invocation context", () => {
     ];
 
     const executor = createDefaultOracleExecutor(
-      { oracleModel: "openai:gpt-4o-mini", logger: { info: vi.fn() } },
+      { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }, logger: { info: vi.fn() } },
       {
         conversationContext: context,
         toolOptions: {},
@@ -526,7 +520,7 @@ describe("oracle executor with invocation context", () => {
     const logger = { info: infoLog, debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
     const executor = createDefaultOracleExecutor(
-      { oracleModel: "openai:gpt-4o-mini", logger },
+      { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }, logger },
       { conversationContext: [], toolOptions: {}, buildTools: () => [] },
     );
 
@@ -547,7 +541,7 @@ describe("oracle executor with invocation context", () => {
     const logger = { info: infoLog, debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
     const executor = createDefaultOracleExecutor(
-      { oracleModel: "openai:gpt-4o-mini", logger },
+      { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }, logger },
       { conversationContext: [], toolOptions: {}, buildTools: () => [] },
     );
 
@@ -566,7 +560,7 @@ describe("oracle executor with invocation context", () => {
     const logger = { info: infoLog, debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
     const executor = createDefaultOracleExecutor(
-      { oracleModel: "openai:gpt-4o-mini", logger },
+      { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }, logger },
       { conversationContext: [], toolOptions: {}, buildTools: () => [] },
     );
 
@@ -584,7 +578,7 @@ describe("oracle executor with invocation context", () => {
     const logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
     const executor = createDefaultOracleExecutor(
-      { oracleModel: "openai:gpt-4o-mini", logger },
+      { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }, logger },
     );
 
     const result = await executor({ query: "no context" });
@@ -603,7 +597,7 @@ describe("oracle executor with invocation context", () => {
     const logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
     const executor = createDefaultOracleExecutor(
-      { oracleModel: "openai:gpt-4o-mini", logger },
+      { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }, logger },
       { conversationContext: [], toolOptions: {}, buildTools: () => [] },
     );
 
@@ -666,7 +660,7 @@ describe("core tool executors web_search support", () => {
       return new Response("results", { status: 200 });
     }) as typeof fetch;
 
-    const executors = createDefaultToolExecutors({ fetchImpl, jinaApiKey: "jina-key-123" });
+    const executors = createDefaultToolExecutors({ fetchImpl, toolsConfig: { jina: { apiKey: "jina-key-123" } }});
     await executors.webSearch("test");
   });
 });
@@ -821,8 +815,7 @@ describe("core tool executors visit_webpage local artifact support", () => {
 
     const executors = createDefaultToolExecutors({
       fetchImpl: vi.fn(() => { throw new Error("should not fetch"); }) as unknown as typeof fetch,
-      artifactsPath,
-      artifactsUrl: "https://artifacts.example.com/files",
+      toolsConfig: { artifacts: { path: artifactsPath, url: "https://artifacts.example.com/files" } },
     });
 
     const result = await executors.visitWebpage("https://artifacts.example.com/files/?test.txt");
@@ -836,8 +829,7 @@ describe("core tool executors visit_webpage local artifact support", () => {
 
     const executors = createDefaultToolExecutors({
       fetchImpl: vi.fn(() => { throw new Error("should not fetch"); }) as unknown as typeof fetch,
-      artifactsPath,
-      artifactsUrl: "https://artifacts.example.com/files",
+      toolsConfig: { artifacts: { path: artifactsPath, url: "https://artifacts.example.com/files" } },
     });
 
     const result = await executors.visitWebpage("https://artifacts.example.com/files/?img.png");
@@ -851,8 +843,7 @@ describe("core tool executors visit_webpage local artifact support", () => {
 
     const executors = createDefaultToolExecutors({
       fetchImpl: vi.fn(() => { throw new Error("should not fetch"); }) as unknown as typeof fetch,
-      artifactsPath,
-      artifactsUrl: "https://artifacts.example.com/files",
+      toolsConfig: { artifacts: { path: artifactsPath, url: "https://artifacts.example.com/files" } },
     });
 
     await expect(
@@ -922,7 +913,7 @@ describe("core tool executors execute_code support", () => {
     tempDirs.push(dir);
 
     const executors = createDefaultToolExecutors({
-      spritesToken: "test-token",
+      toolsConfig: { sprites: { token: "test-token" } },
     });
 
     const result = await executors.executeCode({
@@ -939,7 +930,7 @@ describe("core tool executors execute_code support", () => {
     tempDirs.push(dir);
 
     const executors = createDefaultToolExecutors({
-      spritesToken: "test-token",
+      toolsConfig: { sprites: { token: "test-token" } },
     });
 
     const result = await executors.executeCode({
@@ -955,7 +946,7 @@ describe("core tool executors execute_code support", () => {
     tempDirs.push(dir);
 
     const executors = createDefaultToolExecutors({
-      spritesToken: "test-token",
+      toolsConfig: { sprites: { token: "test-token" } },
     });
 
     const result = await executors.executeCode({
@@ -984,7 +975,7 @@ describe("core tool executors execute_code support", () => {
     tempDirs.push(dir);
 
     const executors = createDefaultToolExecutors({
-      spritesToken: "test-token",
+      toolsConfig: { sprites: { token: "test-token" } },
     });
 
     const result = await executors.executeCode({
@@ -1002,7 +993,7 @@ describe("core tool executors execute_code support", () => {
     tempDirs.push(dir);
 
     const executors = createDefaultToolExecutors({
-      spritesToken: "test-token",
+      toolsConfig: { sprites: { token: "test-token" } },
     });
 
     const result = await executors.executeCode({
@@ -1021,9 +1012,7 @@ describe("core tool executors execute_code support", () => {
     const artifactsDir = join(dir, "artifacts");
 
     const executors = createDefaultToolExecutors({
-      spritesToken: "test-token",
-      artifactsPath: artifactsDir,
-      artifactsUrl: "https://example.com/artifacts",
+      toolsConfig: { sprites: { token: "test-token" }, artifacts: { path: artifactsDir, url: "https://example.com/artifacts" } },
     });
 
     const result = await executors.executeCode({
@@ -1042,9 +1031,7 @@ describe("core tool executors execute_code support", () => {
     tempDirs.push(dir);
 
     const executors = createDefaultToolExecutors({
-      spritesToken: "test-token",
-      artifactsPath: join(dir, "artifacts"),
-      artifactsUrl: "https://example.com/artifacts",
+      toolsConfig: { sprites: { token: "test-token" }, artifacts: { path: join(dir, "artifacts"), url: "https://example.com/artifacts" } },
     });
 
     const result = await executors.executeCode({
@@ -1064,9 +1051,7 @@ describe("core tool executors execute_code support", () => {
     const artifactsDir = join(dir, "artifacts");
 
     const executors = createDefaultToolExecutors({
-      spritesToken: "test-token",
-      artifactsPath: artifactsDir,
-      artifactsUrl: "https://example.com/artifacts",
+      toolsConfig: { sprites: { token: "test-token" }, artifacts: { path: artifactsDir, url: "https://example.com/artifacts" } },
     });
 
     // Create a minimal PNG file (1x1 pixel) via bash
@@ -1085,7 +1070,7 @@ describe("core tool executors execute_code support", () => {
     tempDirs.push(dir);
 
     const executors = createDefaultToolExecutors({
-      spritesToken: "test-token",
+      toolsConfig: { sprites: { token: "test-token" } },
     });
 
     const result = await executors.executeCode({
@@ -1103,7 +1088,7 @@ describe("core tool executors execute_code support", () => {
     tempDirs.push(dir);
 
     const executors = createDefaultToolExecutors({
-      spritesToken: "test-token",
+      toolsConfig: { sprites: { token: "test-token" } },
     });
 
     // Generate output larger than 24000 chars
@@ -1125,9 +1110,7 @@ describe("core tool executors execute_code support", () => {
     const artifactsDir = join(dir, "artifacts");
 
     const executors = createDefaultToolExecutors({
-      spritesToken: "test-token",
-      artifactsPath: artifactsDir,
-      artifactsUrl: "https://example.com/artifacts",
+      toolsConfig: { sprites: { token: "test-token" }, artifacts: { path: artifactsDir, url: "https://example.com/artifacts" } },
     });
 
     // Create a tiny GIF in the workdir
@@ -1152,7 +1135,7 @@ with open('test.webp', 'wb') as f:
     tempDirs.push(dir);
 
     const executors = createDefaultToolExecutors({
-      spritesToken: "test-token",
+      toolsConfig: { sprites: { token: "test-token" } },
     });
 
     const result = await executors.executeCode({
@@ -1179,9 +1162,7 @@ describe("core tool executors execute_code Sprites sandbox", () => {
     const artifactsDir = join(dir, "artifacts");
 
     const executors = createDefaultToolExecutors({
-      spritesToken: "test-token",
-      artifactsPath: artifactsDir,
-      artifactsUrl: "https://example.com/artifacts",
+      toolsConfig: { sprites: { token: "test-token" }, artifacts: { path: artifactsDir, url: "https://example.com/artifacts" } },
     });
 
     // Write binary data (PNG header bytes) and download via output_files
@@ -1203,7 +1184,7 @@ describe("core tool executors execute_code Sprites sandbox", () => {
 
   it("execute_code handles code with shell-special characters safely", async () => {
     const executors = createDefaultToolExecutors({
-      spritesToken: "test-token",
+      toolsConfig: { sprites: { token: "test-token" } },
     });
 
     // Code containing single quotes, backticks, dollar signs
@@ -1219,7 +1200,7 @@ describe("core tool executors execute_code Sprites sandbox", () => {
 
   it("execute_code applies timeout to execution", async () => {
     const executors = createDefaultToolExecutors({
-      spritesToken: "test-token",
+      toolsConfig: { sprites: { token: "test-token" } },
       executeCodeTimeoutMs: 100,
     });
 
@@ -1359,10 +1340,8 @@ describe("core tool executors generate_image support", () => {
 
     const executors = createDefaultToolExecutors({
       fetchImpl,
-      artifactsPath,
-      artifactsUrl: "https://example.com/artifacts",
-      imageGenModel: "openrouter:google/gemini-3-pro-image-preview",
-      openRouterBaseUrl: "https://openrouter.example/api/v1",
+      toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" }, imageGen: { model: "openrouter:google/gemini-3-pro-image-preview" } },
+      providersConfig: { openrouter: { baseUrl: "https://openrouter.example/api/v1" } },
       getApiKey: async (provider: string) => {
         return provider === "openrouter" ? "or-key" : undefined;
       },
@@ -1403,7 +1382,7 @@ describe("core tool executors generate_image support", () => {
 
   it("generate_image rejects non-openrouter model providers", async () => {
     const executors = createDefaultToolExecutors({
-      imageGenModel: "openai:gpt-image-1",
+      toolsConfig: { imageGen: { model: "openai:gpt-image-1" } },
       getApiKey: async () => "demo",
     });
 
@@ -1445,10 +1424,8 @@ describe("core tool executors generate_image support", () => {
 
     const executors = createDefaultToolExecutors({
       fetchImpl,
-      artifactsPath,
-      artifactsUrl: "https://example.com/artifacts",
-      imageGenModel: "openrouter:google/gemini-3-pro-image-preview",
-      openRouterBaseUrl: "https://openrouter.example/api/v1",
+      toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" }, imageGen: { model: "openrouter:google/gemini-3-pro-image-preview" } },
+      providersConfig: { openrouter: { baseUrl: "https://openrouter.example/api/v1" } },
       getApiKey: async () => "or-key",
     });
 

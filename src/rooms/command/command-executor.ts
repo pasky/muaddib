@@ -185,19 +185,11 @@ export class CommandExecutor {
   }
 
   private buildToolOptions(): Omit<BaselineToolOptions, "onProgressReport"> {
-    const toolsConfig = this.runtime.config.getToolsConfig();
-    const providersConfig = this.runtime.config.getProvidersConfig();
     return {
-      spritesToken: toolsConfig.sprites?.token,
-      jinaApiKey: toolsConfig.jina?.apiKey,
-      artifactsPath: toolsConfig.artifacts?.path,
-      artifactsUrl: toolsConfig.artifacts?.url,
+      toolsConfig: this.runtime.config.getToolsConfig(),
+      providersConfig: this.runtime.config.getProvidersConfig(),
       getApiKey: this.runtime.getApiKey,
       logger: this.logger,
-      oracleModel: toolsConfig.oracle?.model,
-      oraclePrompt: toolsConfig.oracle?.prompt,
-      imageGenModel: toolsConfig.imageGen?.model,
-      openRouterBaseUrl: providersConfig.openrouter?.baseUrl,
       chronicleStore: this.runtime.chronicleStore,
       chronicleLifecycle: this.runtime.chronicleLifecycle,
     };

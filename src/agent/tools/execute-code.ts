@@ -150,7 +150,7 @@ export function createDefaultExecuteCodeExecutor(
   options: DefaultToolExecutorOptions,
 ): ExecuteCodeExecutor {
   const timeoutMs = options.executeCodeTimeoutMs ?? DEFAULT_EXECUTE_TIMEOUT_MS;
-  const spritesToken = options.spritesToken;
+  const spritesToken = options.toolsConfig?.sprites?.token;
   const arc = options.spritesArc ?? "default";
 
   let sprite: Sprite | null = null;
@@ -328,7 +328,7 @@ export function createDefaultExecuteCodeExecutor(
     sp: Sprite,
     wd: string,
   ): Promise<string[]> {
-    if (!options.artifactsPath || !options.artifactsUrl) return [];
+    if (!options.toolsConfig?.artifacts?.path || !options.toolsConfig?.artifacts?.url) return [];
 
     const messages: string[] = [];
 
@@ -359,7 +359,7 @@ export function createDefaultExecuteCodeExecutor(
     sp: Sprite,
     outputFiles: string[],
   ): Promise<string[]> {
-    if (!options.artifactsPath || !options.artifactsUrl) {
+    if (!options.toolsConfig?.artifacts?.path || !options.toolsConfig?.artifacts?.url) {
       return ["**Warning:** output_files requested but artifact store not configured."];
     }
 

@@ -92,12 +92,12 @@ export function createDefaultOracleExecutor(
       throw new Error("oracle.query must be non-empty.");
     }
 
-    const configuredModel = toConfiguredString(options.oracleModel);
+    const configuredModel = toConfiguredString(options.toolsConfig?.oracle?.model);
     if (!configuredModel) {
       throw new Error("oracle tool requires tools.oracle.model configuration.");
     }
 
-    const systemPrompt = toConfiguredString(options.oraclePrompt) ?? DEFAULT_ORACLE_SYSTEM_PROMPT;
+    const systemPrompt = toConfiguredString(options.toolsConfig?.oracle?.prompt) ?? DEFAULT_ORACLE_SYSTEM_PROMPT;
 
     // Build tools independently (like Python's get_tools_for_arc + EXCLUDED_TOOLS filter)
     const allTools = invocation
