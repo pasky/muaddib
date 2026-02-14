@@ -54,41 +54,51 @@ Files to change:
 
 ## Phase 2: Slim down `CommandHandlerOptions`
 
-### Phase 2a: Split runtime-derived vs per-instance concerns
+### Phase 2a: Handler stores `runtime`, reads config lazily
 
-`CommandHandlerOptions` should only contain things that vary per handler instance
-and can't be derived from runtime:
-- `responseCleaner` — per-room (IRC newline flattening)
-- `runnerFactory` — test injection
-- `rateLimiter` — test injection
-- `contextReducer` — test injection
-- `onProgressReport` — per-room callback
-- `helpToken`, `flagTokens` — if ever per-room
+The handler should store `runtime` as a first-class field and read config from it
+in its methods — not receive 20 pre-extracted values at construction time.
 
-Everything else comes from runtime:
-- `history`, `getApiKey`, `modelAdapter` — from `runtime.*`
-- `autoChronicler`, `chronicleStore` — from `runtime.*`
-- `refusalFallbackModel`, `persistenceSummaryModel` — from `runtime.*`
-- `agentLoop` — from `runtime.config.getActorConfig()`
-- `toolOptions` — from `runtime.config.getToolsConfig()` + `runtime.*`
-- `contextReducerConfig` — from `runtime.config.getContextReducerConfig()`
-- `classifyMode` — derivable from `runtime` + room command config
-- `roomConfig` — from `runtime.config.getRoomConfig(roomName)`
+Production constructor: `(runtime: MuaddibRuntime, roomName: string, overrides?)`
+- `overrides` is a small interface for per-instance concerns:
+  - `responseCleaner` — per-room (IRC newline flattening)
+  - `runnerFactory` — test/prod injection
+  - `rateLimiter` — test injection
+  - `contextReducer` — test injection
+  - `onProgressReport` — per-room callback
 
-### Phase 2b: Shrink `CommandHandlerOptions`, keep one constructor
+The constructor derives everything else from `runtime`:
+- `this.history = runtime.history`
+- `this.modelAdapter = runtime.modelAdapter`
+- `this.commandConfig = runtime.config.getRoomConfig(roomName).command`
+- Builds `classifyMode` from command config + runtime
+- Reads `agentLoop` from `runtime.config.getActorConfig()` when needed
+- Reads `toolOptions` from `runtime.config.getToolsConfig()` when needed
+- Gets `refusalFallbackModel`, `chronicleStore`, etc. from `runtime.*`
 
-- Keep one constructor taking `CommandHandlerOptions` — tests use it directly with
-  only the fields they care about, that's a fine test API
-- Shrink `CommandHandlerOptions` by grouping runtime-derivable fields under an
-  optional `runtime?: MuaddibRuntime` field — constructor pulls defaults from it
-  when individual fields aren't provided
-- `fromRuntime()` stays as production sugar (calls the constructor with `runtime` set)
-- Tests keep working unchanged — they pass `history`, `classifyMode`, `runnerFactory`
-  etc. directly without ever constructing a runtime
+Delete `fromRuntime()` — it becomes the constructor itself.
 
-**Files**: `src/rooms/command/command-handler.ts`
+### Phase 2b: Test-only lightweight construction
 
-**Validation**: same + `CommandHandlerOptions` shrinks but stays backward-compatible.
+Tests don't have a `MuaddibRuntime` and shouldn't need one. Add a static factory:
+
+```ts
+static forTesting(options: TestHandlerOptions): RoomCommandHandlerTs
+```
+
+Where `TestHandlerOptions` is the minimal bag tests actually use:
+`{ roomConfig, history, classifyMode, runnerFactory?, rateLimiter?,
+  logger?, refusalFallbackModel?, persistenceSummaryModel?,
+  contextReducer?, autoChronicler?, chronicleStore?, toolOptions? }`
+
+This builds a minimal runtime internally (or skips it) and calls the real constructor.
+Existing tests change one line: `new RoomCommandHandlerTs({...})` →
+`RoomCommandHandlerTs.forTesting({...})`.
+
+**Files**: `src/rooms/command/command-handler.ts`, all test files that construct handlers
+
+**Validation**: same + `CommandHandlerOptions` interface is deleted,
+replaced by the constructor signature + `TestHandlerOptions`.
 
 ---
 
