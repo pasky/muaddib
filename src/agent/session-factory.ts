@@ -11,6 +11,8 @@ import {
   type ResourceLoader,
 } from "@mariozechner/pi-coding-agent";
 
+import { tmpdir } from "os";
+import { join } from "path";
 import { PiAiModelAdapter, type ResolvedPiAiModel } from "../models/pi-ai-model-adapter.js";
 
 const DEFAULT_MAX_ITERATIONS = 25;
@@ -71,7 +73,15 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
     reload: async () => {},
   };
 
-  const authStorage = new AuthStorage();
+  // Use a non-existent path so AuthStorage starts empty and never touches ~/.pi/agent/auth.json.
+  // All key resolution goes through the fallback resolver backed by muaddib's config.json.
+  // We override set/remove/login/logout to be no-ops so keys are never persisted to disk,
+  // even if upstream pi-coding-agent internals change.
+  const authStorage = new AuthStorage(join(tmpdir(), "muaddib-auth-noop.json"));
+  authStorage.set = () => {};
+  authStorage.remove = () => {};
+  authStorage.login = async () => {};
+  authStorage.logout = () => {};
   const authBridge = new MuaddibConfigBackedAuthBridge(input.getApiKey);
   authStorage.setFallbackResolver((provider) => authBridge.resolveSync(provider));
   const modelRegistry = new ModelRegistry(authStorage);
@@ -152,11 +162,9 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
     session,
     agent,
     ensureProviderKey: async (provider: string) => {
-      const key = await authBridge.resolveAsync(provider);
-      if (!key) {
-        return;
-      }
-      authStorage.set(provider, { type: "api_key", key });
+      // Resolve the key to validate it exists (and warm the bridge cache),
+      // but do NOT persist to AuthStorage — all keys live in config.json only.
+      await authBridge.resolveAsync(provider);
     },
     getVisionFallbackActivated: () => visionFallbackActivated,
     dispose: () => {
