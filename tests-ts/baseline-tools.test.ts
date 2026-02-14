@@ -9,6 +9,7 @@ import {
   createGenerateImageTool,
   createOracleTool,
   ORACLE_EXCLUDED_TOOLS,
+  createMakePlanTool,
   createProgressReportTool,
   createQuestSnoozeTool,
   createQuestStartTool,
@@ -104,14 +105,77 @@ describe("baseline agent tools", () => {
     expect(names).not.toContain("subquest_start");
   });
 
-  it("progress_report tool invokes callback and returns text content", async () => {
+  it("progress_report tool invokes callback and returns OK", async () => {
     const onProgress = vi.fn(async () => {});
     const tool = createProgressReportTool({ onProgressReport: onProgress });
 
     const result = await tool.execute("call-1", { text: "working" }, undefined, undefined);
 
     expect(onProgress).toHaveBeenCalledWith("working");
-    expect(result.content[0]).toEqual({ type: "text", text: "working" });
+    expect(result.content[0]).toEqual({ type: "text", text: "OK" });
+  });
+
+  it("progress_report sanitizes whitespace to single line", async () => {
+    const onProgress = vi.fn(async () => {});
+    const tool = createProgressReportTool({ onProgressReport: onProgress });
+
+    await tool.execute("call-1", { text: "  hello\n  world\t! " }, undefined, undefined);
+
+    expect(onProgress).toHaveBeenCalledWith("hello world !");
+  });
+
+  it("progress_report rate-limits repeated calls", async () => {
+    const onProgress = vi.fn(async () => {});
+    const tool = createProgressReportTool({ onProgressReport: onProgress, minIntervalSeconds: 60 });
+
+    const r1 = await tool.execute("call-1", { text: "first" }, undefined, undefined);
+    expect(r1.content[0]).toEqual({ type: "text", text: "OK" });
+    expect(onProgress).toHaveBeenCalledTimes(1);
+
+    const r2 = await tool.execute("call-2", { text: "second" }, undefined, undefined);
+    expect((r2.content[0] as { text: string }).text).toMatch(/rate-limited/);
+    expect(r2.details.rateLimited).toBe(true);
+    expect(onProgress).toHaveBeenCalledTimes(1);
+  });
+
+  it("progress_report returns OK for empty text without calling callback", async () => {
+    const onProgress = vi.fn(async () => {});
+    const tool = createProgressReportTool({ onProgressReport: onProgress });
+
+    const result = await tool.execute("call-1", { text: "   " }, undefined, undefined);
+
+    expect(result.content[0]).toEqual({ type: "text", text: "OK" });
+    expect(onProgress).not.toHaveBeenCalled();
+  });
+
+  it("make_plan tool returns OK and stores plan details", async () => {
+    const tool = createMakePlanTool();
+
+    const result = await tool.execute("call-1", { plan: "Step 1: research. Step 2: execute." }, undefined, undefined);
+
+    expect(result.content[0]).toEqual({ type: "text", text: "OK, follow this plan" });
+    expect(result.details.plan).toBe("Step 1: research. Step 2: execute.");
+  });
+
+  it("make_plan persists plan to chronicle store when quest is active", async () => {
+    const questSetPlan = vi.fn(async () => true);
+    const fakeStore = { questSetPlan } as any;
+    const tool = createMakePlanTool({ chronicleStore: fakeStore, currentQuestId: "q-123" });
+
+    const result = await tool.execute("call-1", { plan: "my plan" }, undefined, undefined);
+
+    expect(questSetPlan).toHaveBeenCalledWith("q-123", "my plan");
+    expect((result.content[0] as { text: string }).text).toMatch(/stored for future quest steps/);
+  });
+
+  it("make_plan skips persistence when no quest is active", async () => {
+    const questSetPlan = vi.fn(async () => true);
+    const fakeStore = { questSetPlan } as any;
+    const tool = createMakePlanTool({ chronicleStore: fakeStore });
+
+    await tool.execute("call-1", { plan: "my plan" }, undefined, undefined);
+
+    expect(questSetPlan).not.toHaveBeenCalled();
   });
 
   it("web_search tool delegates to configured executor", async () => {

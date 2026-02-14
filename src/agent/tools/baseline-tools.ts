@@ -209,6 +209,9 @@ export function createBaselineAgentTools(options: BaselineToolOptions = {}): Age
   return [
     ...executorBackedTools,
     createProgressReportTool(options),
-    createMakePlanTool(),
+    createMakePlanTool({
+      chronicleStore: options.chronicleStore,
+      currentQuestId: options.currentQuestId,
+    }),
   ];
 }

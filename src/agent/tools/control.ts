@@ -1,11 +1,17 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Type } from "@sinclair/typebox";
+import type { ChronicleStore } from "../../chronicle/chronicle-store.js";
 
 export interface ProgressReportToolOptions {
   onProgressReport?: (text: string) => void | Promise<void>;
+  /** Minimum seconds between delivered reports (default 15). */
+  minIntervalSeconds?: number;
 }
 
 export function createProgressReportTool(options: ProgressReportToolOptions = {}): AgentTool<any> {
+  const minInterval = (options.minIntervalSeconds ?? 15) * 1000;
+  let lastSentAt = 0;
+
   return {
     name: "progress_report",
     label: "Progress Report",
@@ -16,21 +22,42 @@ export function createProgressReportTool(options: ProgressReportToolOptions = {}
       }),
     }),
     execute: async (_toolCallId, params) => {
-      if (options.onProgressReport) {
-        await options.onProgressReport(params.text);
+      const clean = (params.text ?? "").replace(/\s+/g, " ").trim();
+      if (!clean) {
+        return {
+          content: [{ type: "text", text: "OK" }],
+          details: { reported: "" },
+        };
       }
 
+      const now = Date.now();
+      if (now - lastSentAt < minInterval) {
+        const waitSec = Math.ceil((minInterval - (now - lastSentAt)) / 1000);
+        return {
+          content: [{ type: "text", text: `OK (rate-limited, next report available in ~${waitSec}s)` }],
+          details: { reported: clean, rateLimited: true },
+        };
+      }
+
+      if (options.onProgressReport) {
+        await options.onProgressReport(clean);
+      }
+      lastSentAt = Date.now();
+
       return {
-        content: [{ type: "text", text: params.text }],
-        details: {
-          reported: params.text,
-        },
+        content: [{ type: "text", text: "OK" }],
+        details: { reported: clean },
       };
     },
   };
 }
 
-export function createMakePlanTool(): AgentTool<any> {
+export interface MakePlanToolOptions {
+  chronicleStore?: ChronicleStore;
+  currentQuestId?: string | null;
+}
+
+export function createMakePlanTool(options: MakePlanToolOptions = {}): AgentTool<any> {
   return {
     name: "make_plan",
     label: "Make Plan",
@@ -41,8 +68,16 @@ export function createMakePlanTool(): AgentTool<any> {
       }),
     }),
     execute: async (_toolCallId, params) => {
+      if (options.chronicleStore && options.currentQuestId) {
+        await options.chronicleStore.questSetPlan(options.currentQuestId, params.plan);
+      }
+
+      const suffix = options.currentQuestId
+        ? " (stored for future quest steps)"
+        : "";
+
       return {
-        content: [{ type: "text", text: params.plan }],
+        content: [{ type: "text", text: `OK, follow this plan${suffix}` }],
         details: {
           plan: params.plan,
         },
