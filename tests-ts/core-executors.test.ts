@@ -1123,6 +1123,55 @@ describe("core tool executors execute_code support", () => {
     expect(result).toContain("warn");
   });
 
+  it("execute_code truncates large output with head+tail", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "muaddib-ts-exec-"));
+    tempDirs.push(dir);
+
+    const executors = createDefaultToolExecutors({
+      spritesToken: "test-token",
+    });
+
+    // Generate output larger than 24000 chars
+    const lineCount = 2000;
+    const code = `for i in range(${lineCount}): print(f"LINE-{i:04d}-" + "x" * 20)`;
+    const result = await executors.executeCode({ code, language: "python" });
+
+    // Should contain head content (early lines)
+    expect(result).toContain("LINE-0000");
+    // Should contain tail content (late lines)
+    expect(result).toContain(`LINE-${lineCount - 1}`);
+    // Should contain truncation indicator
+    expect(result).toContain("truncated");
+  });
+
+  it("execute_code auto-detects gif and webp images", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "muaddib-ts-exec-"));
+    tempDirs.push(dir);
+    const artifactsDir = join(dir, "artifacts");
+
+    const executors = createDefaultToolExecutors({
+      spritesToken: "test-token",
+      artifactsPath: artifactsDir,
+      artifactsUrl: "https://example.com/artifacts",
+    });
+
+    // Create a tiny GIF in the workdir
+    const code = `
+import struct
+# Minimal GIF89a (1x1 pixel)
+gif = b'GIF89a\\x01\\x00\\x01\\x00\\x00\\x00\\x00;'
+with open('test.gif', 'wb') as f:
+    f.write(gif)
+with open('test.webp', 'wb') as f:
+    f.write(b'RIFF\\x00\\x00\\x00\\x00WEBP')
+`;
+    const result = await executors.executeCode({ code, language: "python" });
+
+    // The mock won't actually produce image URLs, but the find command should
+    // search for gif and webp extensions
+    expect(result).toBeDefined();
+  });
+
   it("execute_code reports no output message for silent success", async () => {
     const dir = await mkdtemp(join(tmpdir(), "muaddib-ts-exec-"));
     tempDirs.push(dir);

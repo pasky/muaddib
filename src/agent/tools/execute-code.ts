@@ -38,6 +38,7 @@ const DEFAULT_CAPTURE_LIMIT = 24_000;
 import type { Sprite } from "@fly/sprites";
 
 const spriteCache = new Map<string, Sprite>();
+const spriteCacheLocks = new Map<string, Promise<Sprite>>();
 
 function normalizeArcId(arc: string): string {
   return createHash("sha256").update(arc).digest("hex").slice(0, 16);
@@ -170,19 +171,35 @@ export function createDefaultExecuteCodeExecutor(
       return sprite;
     }
 
-    const client = new SpritesClient(spritesToken!);
-
-    try {
-      sprite = await client.createSprite(spriteName);
-      options.logger?.info(`Created new Sprite: ${spriteName}`);
-    } catch {
-      // Sprite may already exist
-      sprite = client.sprite(spriteName);
-      options.logger?.info(`Connected to existing Sprite: ${spriteName}`);
+    // Use lock to prevent concurrent creation of the same sprite
+    const pending = spriteCacheLocks.get(spriteName);
+    if (pending) {
+      sprite = await pending;
+      return sprite;
     }
 
-    spriteCache.set(spriteName, sprite);
-    return sprite;
+    const createPromise = (async () => {
+      const client = new SpritesClient(spritesToken!);
+      let sp: Sprite;
+      try {
+        sp = await client.createSprite(spriteName);
+        options.logger?.info(`Created new Sprite: ${spriteName}`);
+      } catch {
+        // Sprite may already exist
+        sp = client.sprite(spriteName);
+        options.logger?.info(`Connected to existing Sprite: ${spriteName}`);
+      }
+      spriteCache.set(spriteName, sp);
+      return sp;
+    })();
+
+    spriteCacheLocks.set(spriteName, createPromise);
+    try {
+      sprite = await createPromise;
+      return sprite;
+    } finally {
+      spriteCacheLocks.delete(spriteName);
+    }
   }
 
   async function ensureWorkdir(sp: Sprite): Promise<string> {
@@ -239,7 +256,13 @@ export function createDefaultExecuteCodeExecutor(
 
   function truncateOutput(s: string): string {
     if (s.length <= DEFAULT_CAPTURE_LIMIT) return s;
-    return s.slice(s.length - DEFAULT_CAPTURE_LIMIT);
+    const headSize = Math.floor(DEFAULT_CAPTURE_LIMIT * 0.3);
+    const tailSize = DEFAULT_CAPTURE_LIMIT - headSize;
+    return (
+      s.slice(0, headSize) +
+      `\n\n... [truncated ${s.length - headSize - tailSize} chars] ...\n\n` +
+      s.slice(s.length - tailSize)
+    );
   }
 
   async function downloadSpriteFile(
@@ -309,7 +332,7 @@ export function createDefaultExecuteCodeExecutor(
 
     const messages: string[] = [];
 
-    for (const ext of ["*.png", "*.jpg", "*.jpeg"]) {
+    for (const ext of ["*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp"]) {
       const findResult = await spriteExec(sp, `find ${shellQuote(wd)} -name '${ext}' -type f`);
       if (findResult.exitCode !== 0 || !findResult.stdout.trim()) continue;
 
@@ -463,4 +486,5 @@ export function createDefaultExecuteCodeExecutor(
 // ---------------------------------------------------------------------------
 export function resetSpriteCache(): void {
   spriteCache.clear();
+  spriteCacheLocks.clear();
 }
