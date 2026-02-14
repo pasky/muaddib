@@ -6,6 +6,7 @@ import type { RoomMessage } from "../message.js";
 import {
   sendWithRateLimitRetry,
   type SendRetryEvent,
+  createSendRetryEventLogger,
 } from "../send-retry.js";
 import { DiscordGatewayTransport } from "./transport.js";
 
@@ -140,7 +141,7 @@ export class DiscordRoomMonitor {
         commandHandler,
         eventSource: transport,
         sender: transport,
-        onSendRetryEvent: createDiscordSendRetryEventLogger(
+        onSendRetryEvent: createSendRetryEventLogger(
           runtime.logger.getLogger("muaddib.send-retry.discord"),
         ),
         logger: runtime.logger.getLogger("muaddib.rooms.discord.monitor"),
@@ -545,65 +546,7 @@ function requireNonEmptyString(value: unknown, message: string): string {
   return value;
 }
 
-interface SendRetryLogger {
-  info(...data: unknown[]): void;
-  warn(...data: unknown[]): void;
-  error(...data: unknown[]): void;
-}
 
-function createDiscordSendRetryEventLogger(
-  logger: SendRetryLogger,
-): (event: SendRetryEvent) => void {
-  return (event: SendRetryEvent): void => {
-    const payload = {
-      event: "send_retry",
-      type: event.type,
-      retryable: event.retryable,
-      platform: event.platform,
-      destination: event.destination,
-      attempt: event.attempt,
-      maxAttempts: event.maxAttempts,
-      retryAfterMs: event.retryAfterMs,
-      error: summarizeRetryError(event.error),
-    };
-
-    const serialized = JSON.stringify(payload);
-
-    if (event.type === "retry") {
-      logger.warn("[muaddib][send-retry]", serialized);
-    } else {
-      logger.error("[muaddib][send-retry]", serialized);
-    }
-
-    logger.info("[muaddib][metric]", serialized);
-  };
-}
-
-function summarizeRetryError(error: unknown): Record<string, unknown> {
-  if (error instanceof Error) {
-    const extra = error as Error & {
-      code?: unknown;
-      status?: unknown;
-      statusCode?: unknown;
-    };
-
-    return {
-      name: error.name,
-      message: error.message,
-      code: extra.code,
-      status: extra.status,
-      statusCode: extra.statusCode,
-    };
-  }
-
-  if (typeof error === "object" && error !== null) {
-    return error as Record<string, unknown>;
-  }
-
-  return {
-    value: String(error),
-  };
-}
 
 async function sendWithDiscordRetryResult<T>(
   destination: string,

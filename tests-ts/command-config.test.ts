@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { deepMergeConfig, getRoomConfig } from "../src/rooms/command/config.js";
+import { deepMergeConfig } from "../src/rooms/command/config.js";
+import { MuaddibConfig } from "../src/config/muaddib-config.js";
 
 describe("deepMergeConfig", () => {
   it("merges nested values, concatenates ignore_users, and concatenates prompt_vars strings", () => {
@@ -55,7 +56,7 @@ describe("deepMergeConfig", () => {
       },
     };
 
-    const merged = getRoomConfig(config, "irc");
+    const merged = MuaddibConfig.inMemory(config).getRoomConfig("irc");
     expect(merged.command?.history_size).toBe(40);
     expect(merged.prompt_vars?.intro).toBe("AB");
     expect(merged.varlink?.socket_path).toBe("/tmp/irc.sock");

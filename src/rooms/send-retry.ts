@@ -148,6 +148,66 @@ function numberValue(value: unknown): number | null {
   return null;
 }
 
+export interface SendRetryLogger {
+  info(...data: unknown[]): void;
+  warn(...data: unknown[]): void;
+  error(...data: unknown[]): void;
+}
+
+export function createSendRetryEventLogger(
+  logger: SendRetryLogger,
+): (event: SendRetryEvent) => void {
+  return (event: SendRetryEvent): void => {
+    const payload = {
+      event: "send_retry",
+      type: event.type,
+      retryable: event.retryable,
+      platform: event.platform,
+      destination: event.destination,
+      attempt: event.attempt,
+      maxAttempts: event.maxAttempts,
+      retryAfterMs: event.retryAfterMs,
+      error: summarizeRetryError(event.error),
+    };
+
+    const serialized = JSON.stringify(payload);
+
+    if (event.type === "retry") {
+      logger.warn("[muaddib][send-retry]", serialized);
+    } else {
+      logger.error("[muaddib][send-retry]", serialized);
+    }
+
+    logger.info("[muaddib][metric]", serialized);
+  };
+}
+
+function summarizeRetryError(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    const extra = error as Error & {
+      code?: unknown;
+      status?: unknown;
+      statusCode?: unknown;
+    };
+
+    return {
+      name: error.name,
+      message: error.message,
+      code: extra.code,
+      status: extra.status,
+      statusCode: extra.statusCode,
+    };
+  }
+
+  if (typeof error === "object" && error !== null) {
+    return error as Record<string, unknown>;
+  }
+
+  return {
+    value: String(error),
+  };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

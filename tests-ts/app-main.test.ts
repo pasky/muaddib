@@ -5,10 +5,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { resolveMuaddibPath } from "../src/app/bootstrap.js";
-import {
-  createSendRetryEventLogger,
-  runMuaddibMain,
-} from "../src/app/main.js";
+import { runMuaddibMain } from "../src/app/main.js";
+import { createSendRetryEventLogger } from "../src/rooms/send-retry.js";
 
 const tempDirs: string[] = [];
 
