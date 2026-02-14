@@ -46,7 +46,7 @@ import type { GenerateImageExecutor } from "./image.js";
 import type { OracleExecutor } from "./oracle.js";
 import type { QuestStartExecutor, SubquestStartExecutor, QuestSnoozeExecutor } from "./quest.js";
 import type { WebSearchExecutor, VisitWebpageExecutor } from "./web.js";
-import type { DefaultToolExecutorOptions, MuaddibTool, ToolPersistType } from "./types.js";
+import type { ToolContext, MuaddibTool, ToolPersistType } from "./types.js";
 
 export interface BaselineToolExecutors {
   webSearch: WebSearchExecutor;
@@ -63,7 +63,7 @@ export interface BaselineToolExecutors {
   questSnooze: QuestSnoozeExecutor;
 }
 
-export type { DefaultToolExecutorOptions, MuaddibTool, ToolPersistType };
+export type { ToolContext, MuaddibTool, ToolPersistType };
 export type { EditArtifactInput, ShareArtifactExecutor, EditArtifactExecutor } from "./artifact.js";
 export type { ChronicleReadInput, ChronicleAppendInput, ChronicleReadExecutor, ChronicleAppendExecutor } from "./chronicle.js";
 export type { ExecuteCodeInput, ExecuteCodeExecutor } from "./execute-code.js";
@@ -90,7 +90,7 @@ export {
   ORACLE_EXCLUDED_TOOLS,
 };
 
-export interface BaselineToolOptions extends DefaultToolExecutorOptions {
+export interface BaselineToolOptions extends ToolContext {
   onProgressReport?: (text: string) => void | Promise<void>;
   executors?: Partial<BaselineToolExecutors>;
 
@@ -158,7 +158,7 @@ const BASELINE_EXECUTOR_TOOL_GROUPS: ReadonlyArray<ReadonlyArray<ExecutorBackedT
 ];
 
 export function createDefaultToolExecutors(
-  options: DefaultToolExecutorOptions = {},
+  options: ToolContext = {},
   oracleInvocation?: OracleInvocationContext,
 ): BaselineToolExecutors {
   return {

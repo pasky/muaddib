@@ -16,7 +16,7 @@ import { basename, extname, posix } from "node:path";
 import { Type } from "@sinclair/typebox";
 
 import { writeArtifactBytes } from "./artifact-storage.js";
-import type { DefaultToolExecutorOptions, MuaddibTool } from "./types.js";
+import type { ToolContext, MuaddibTool } from "./types.js";
 import type { VisitWebpageImageResult } from "./web.js";
 
 export interface ExecuteCodeInput {
@@ -147,11 +147,11 @@ function shellQuote(s: string): string {
 // ---------------------------------------------------------------------------
 
 export function createDefaultExecuteCodeExecutor(
-  options: DefaultToolExecutorOptions,
+  options: ToolContext,
 ): ExecuteCodeExecutor {
-  const timeoutMs = options.executeCodeTimeoutMs ?? DEFAULT_EXECUTE_TIMEOUT_MS;
+  const timeoutMs = options.toolsConfig?.sprites?.executeTimeoutMs ?? DEFAULT_EXECUTE_TIMEOUT_MS;
   const spritesToken = options.toolsConfig?.sprites?.token;
-  const arc = options.spritesArc ?? "default";
+  const arc = options.arc ?? "default";
 
   let sprite: Sprite | null = null;
   let workdir: string | null = null;

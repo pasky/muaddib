@@ -20,18 +20,23 @@ export interface ArtifactsConfig {
 export interface OracleConfig {
   model?: string;
   prompt?: string;
+  maxIterations?: number;
 }
 
 export interface ImageGenConfig {
   model?: string;
+  timeoutMs?: number;
 }
 
 export interface JinaConfig {
   apiKey?: string;
+  maxWebContentLength?: number;
+  maxImageBytes?: number;
 }
 
 export interface SpritesConfig {
   token?: string;
+  executeTimeoutMs?: number;
 }
 
 interface SummaryConfig {
@@ -302,15 +307,20 @@ export class MuaddibConfig {
       oracle: {
         model: stringOrUndefined(oracle?.model),
         prompt: stringOrUndefined(oracle?.prompt),
+        maxIterations: numberOrUndefined(oracle?.max_iterations),
       },
       imageGen: {
         model: stringOrUndefined(imageGen?.model),
+        timeoutMs: numberOrUndefined(imageGen?.timeout_ms),
       },
       jina: {
         apiKey: stringOrUndefined(jina?.api_key),
+        maxWebContentLength: numberOrUndefined(jina?.max_web_content_length),
+        maxImageBytes: numberOrUndefined(jina?.max_image_bytes),
       },
       sprites: {
         token: stringOrUndefined(sprites?.token),
+        executeTimeoutMs: numberOrUndefined(sprites?.execute_timeout_ms),
       },
       summary: {
         model: stringOrUndefined(summary?.model),

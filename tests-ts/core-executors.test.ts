@@ -84,6 +84,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   jinaRetryConfig.delaysMs = [...originalJinaRetryDelays];
   for (const dir of tempDirs.splice(0, tempDirs.length)) {
     await rm(dir, { recursive: true, force: true });
@@ -207,7 +208,7 @@ describe("core tool executors artifact support", () => {
   it("edit_artifact rejects binary remote artifacts", async () => {
     const { artifactsPath } = await makeArtifactsDir();
 
-    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === "https://external.example/photo.png" && init?.method === "HEAD") {
         return new Response("", {
@@ -228,11 +229,9 @@ describe("core tool executors artifact support", () => {
       }
 
       throw new Error(`Unexpected fetch URL in test: ${url}`);
-    }) as typeof fetch;
+    });
 
-    const executors = createDefaultToolExecutors({
-      fetchImpl,
-      toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" } },
+    const executors = createDefaultToolExecutors({ toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" } },
     });
 
     await expect(
@@ -265,7 +264,7 @@ describe("core tool executors webpage secret header support", () => {
   it("visit_webpage uses direct fetch with configured auth headers for matching URL prefixes", async () => {
     const privateUrl = "https://files.slack.com/files-pri/T123/F456/report.txt";
 
-    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const headers = (init?.headers ?? {}) as Record<string, string>;
 
@@ -293,7 +292,6 @@ describe("core tool executors webpage secret header support", () => {
     });
 
     const executors = createDefaultToolExecutors({
-      fetchImpl: fetchImpl as unknown as typeof fetch,
       secrets: {
         http_header_prefixes: {
           "https://files.slack.com/": {
@@ -307,8 +305,8 @@ describe("core tool executors webpage secret header support", () => {
 
     expect(result).toContain("## Content from https://files.slack.com/files-pri/T123/F456/report.txt");
     expect(result).toContain("private file contents");
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
-    expect(fetchImpl.mock.calls.map((call: unknown[]) => String(call[0]))).toEqual([privateUrl, privateUrl]);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    expect((globalThis.fetch as any).mock.calls.map((call: unknown[]) => String(call[0]))).toEqual([privateUrl, privateUrl]);
   });
 });
 
@@ -319,7 +317,7 @@ describe("core tool executors chronicler/quest support", () => {
 
     const executors = createDefaultToolExecutors({
       chronicleStore,
-      chronicleArc: "libera##test",
+      arc: "libera##test",
     });
 
     const appendResult = await executors.chronicleAppend({ text: "Noted." });
@@ -340,7 +338,7 @@ describe("core tool executors chronicler/quest support", () => {
 
     const executors = createDefaultToolExecutors({
       chronicleStore,
-      chronicleArc: "libera##test",
+      arc: "libera##test",
       chronicleLifecycle: {
         appendParagraph,
       },
@@ -609,65 +607,65 @@ describe("oracle executor with invocation context", () => {
 
 describe("core tool executors web_search support", () => {
   it("web_search returns formatted search results", async () => {
-    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       expect(url).toContain("s.jina.ai");
       expect(url).toContain("cats");
       return new Response("Title: Cats\nURL: https://example.com\nSnippet: All about cats", { status: 200 });
-    }) as typeof fetch;
+    });
 
-    const executors = createDefaultToolExecutors({ fetchImpl });
+    const executors = createDefaultToolExecutors({});
     const result = await executors.webSearch("cats");
     expect(result).toContain("## Search Results");
     expect(result).toContain("All about cats");
   });
 
   it("web_search returns friendly message for no results (422)", async () => {
-    const fetchImpl = vi.fn(async () =>
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
       new Response("No search results available for query", { status: 422 }),
-    ) as typeof fetch;
+    );
 
-    const executors = createDefaultToolExecutors({ fetchImpl });
+    const executors = createDefaultToolExecutors({});
     const result = await executors.webSearch("xyznonexistent");
     expect(result).toBe("No search results found. Try a different query.");
   });
 
   it("web_search returns friendly message for empty body", async () => {
-    const fetchImpl = vi.fn(async () => new Response("", { status: 200 })) as typeof fetch;
-    const executors = createDefaultToolExecutors({ fetchImpl });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("", { status: 200 }));
+    const executors = createDefaultToolExecutors({});
     const result = await executors.webSearch("something");
     expect(result).toBe("No search results found. Try a different query.");
   });
 
   it("web_search throws on non-422 error", async () => {
-    const fetchImpl = vi.fn(async () =>
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
       new Response("Server error", { status: 500 }),
-    ) as typeof fetch;
+    );
 
-    const executors = createDefaultToolExecutors({ fetchImpl });
+    const executors = createDefaultToolExecutors({});
     await expect(executors.webSearch("test")).rejects.toThrow("Search failed: Jina HTTP 500");
   });
 
   it("web_search validates non-empty query", async () => {
-    const executors = createDefaultToolExecutors({ fetchImpl: vi.fn() as typeof fetch });
+    const executors = createDefaultToolExecutors({});
     await expect(executors.webSearch("   ")).rejects.toThrow("web_search.query must be non-empty");
   });
 
   it("web_search passes Jina API key as Bearer token when configured", async () => {
-    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const headers = (init?.headers ?? {}) as Record<string, string>;
       expect(headers.Authorization).toBe("Bearer jina-key-123");
       return new Response("results", { status: 200 });
-    }) as typeof fetch;
+    });
 
-    const executors = createDefaultToolExecutors({ fetchImpl, toolsConfig: { jina: { apiKey: "jina-key-123" } }});
+    const executors = createDefaultToolExecutors({ toolsConfig: { jina: { apiKey: "jina-key-123" } }});
     await executors.webSearch("test");
   });
 });
 
 describe("core tool executors visit_webpage support", () => {
   it("visit_webpage fetches page content via Jina reader", async () => {
-    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (init?.method === "HEAD") {
         return new Response("", { status: 200, headers: { "content-type": "text/html" } });
@@ -676,16 +674,16 @@ describe("core tool executors visit_webpage support", () => {
         return new Response("# Page Title\nSome content", { status: 200 });
       }
       throw new Error(`Unexpected URL: ${url}`);
-    }) as typeof fetch;
+    });
 
-    const executors = createDefaultToolExecutors({ fetchImpl });
+    const executors = createDefaultToolExecutors({});
     const result = await executors.visitWebpage("https://example.com/page");
     expect(result).toContain("## Content from https://example.com/page");
     expect(result).toContain("Some content");
   });
 
   it("visit_webpage downloads images and returns binary result", async () => {
-    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "HEAD") {
         return new Response("", { status: 200, headers: { "content-type": "image/png" } });
       }
@@ -693,9 +691,9 @@ describe("core tool executors visit_webpage support", () => {
         status: 200,
         headers: { "content-type": "image/png" },
       });
-    }) as typeof fetch;
+    });
 
-    const executors = createDefaultToolExecutors({ fetchImpl });
+    const executors = createDefaultToolExecutors({});
     const result = await executors.visitWebpage("https://example.com/img.png");
     expect(typeof result).toBe("object");
     expect((result as any).kind).toBe("image");
@@ -703,40 +701,40 @@ describe("core tool executors visit_webpage support", () => {
   });
 
   it("visit_webpage rejects non-http URLs", async () => {
-    const executors = createDefaultToolExecutors({ fetchImpl: vi.fn() as typeof fetch });
+    const executors = createDefaultToolExecutors({});
     await expect(executors.visitWebpage("ftp://example.com/file")).rejects.toThrow("Invalid URL");
   });
 
   it("visit_webpage truncates long content", async () => {
     const longContent = "x".repeat(50000);
-    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "HEAD") {
         return new Response("", { status: 200, headers: { "content-type": "text/html" } });
       }
       return new Response(longContent, { status: 200 });
-    }) as typeof fetch;
+    });
 
-    const executors = createDefaultToolExecutors({ fetchImpl, maxWebContentLength: 1000 });
+    const executors = createDefaultToolExecutors({ toolsConfig: { jina: { maxWebContentLength: 1000 } } });
     const result = await executors.visitWebpage("https://example.com");
     expect(result).toContain("..._Content truncated_...");
     expect((result as string).length).toBeLessThan(5000);
   });
 
   it("visit_webpage returns empty response marker for empty body", async () => {
-    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "HEAD") {
         return new Response("", { status: 200, headers: { "content-type": "text/html" } });
       }
       return new Response("", { status: 200 });
-    }) as typeof fetch;
+    });
 
-    const executors = createDefaultToolExecutors({ fetchImpl });
+    const executors = createDefaultToolExecutors({});
     const result = await executors.visitWebpage("https://example.com");
     expect(result).toContain("(Empty response)");
   });
 
   it("visit_webpage rejects oversized images", async () => {
-    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "HEAD") {
         return new Response("", { status: 200, headers: { "content-type": "image/png" } });
       }
@@ -744,9 +742,9 @@ describe("core tool executors visit_webpage support", () => {
         status: 200,
         headers: { "content-type": "image/png" },
       });
-    }) as typeof fetch;
+    });
 
-    const executors = createDefaultToolExecutors({ fetchImpl, maxImageBytes: 1000 });
+    const executors = createDefaultToolExecutors({ toolsConfig: { jina: { maxImageBytes: 1000 } } });
     await expect(executors.visitWebpage("https://example.com/big.png")).rejects.toThrow("Image too large");
   });
 });
@@ -755,7 +753,7 @@ describe("core tool executors visit_webpage Jina retry support", () => {
   it("visit_webpage retries on Jina HTTP 451 and succeeds on second attempt", async () => {
     jinaRetryConfig.delaysMs = [0, 0, 0];
     let attempt = 0;
-    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (init?.method === "HEAD") {
         return new Response("", { status: 200, headers: { "content-type": "text/html" } });
@@ -768,9 +766,9 @@ describe("core tool executors visit_webpage Jina retry support", () => {
         return new Response("# Retry success", { status: 200 });
       }
       throw new Error(`Unexpected URL: ${url}`);
-    }) as typeof fetch;
+    });
 
-    const executors = createDefaultToolExecutors({ fetchImpl });
+    const executors = createDefaultToolExecutors({});
     const result = await executors.visitWebpage("https://example.com/page");
     expect(result).toContain("Retry success");
     expect(attempt).toBe(2);
@@ -778,14 +776,14 @@ describe("core tool executors visit_webpage Jina retry support", () => {
 
   it("visit_webpage retries on Jina HTTP 500 and throws after exhausting retries", async () => {
     jinaRetryConfig.delaysMs = [0, 0, 0];
-    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "HEAD") {
         return new Response("", { status: 200, headers: { "content-type": "text/html" } });
       }
       return new Response("Server error", { status: 500 });
-    }) as typeof fetch;
+    });
 
-    const executors = createDefaultToolExecutors({ fetchImpl });
+    const executors = createDefaultToolExecutors({});
     await expect(executors.visitWebpage("https://example.com/page")).rejects.toThrow(
       "Jina HTTP 500",
     );
@@ -794,14 +792,14 @@ describe("core tool executors visit_webpage Jina retry support", () => {
 
 describe("core tool executors visit_webpage newline cleanup", () => {
   it("visit_webpage collapses excessive newlines in Jina content", async () => {
-    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "HEAD") {
         return new Response("", { status: 200, headers: { "content-type": "text/html" } });
       }
       return new Response("line1\n\n\n\n\nline2", { status: 200 });
-    }) as typeof fetch;
+    });
 
-    const executors = createDefaultToolExecutors({ fetchImpl });
+    const executors = createDefaultToolExecutors({});
     const result = await executors.visitWebpage("https://example.com/page") as string;
     expect(result).toContain("line1\n\nline2");
     expect(result).not.toContain("\n\n\n");
@@ -814,7 +812,6 @@ describe("core tool executors visit_webpage local artifact support", () => {
     await writeFile(join(artifactsPath, "test.txt"), "local content here");
 
     const executors = createDefaultToolExecutors({
-      fetchImpl: vi.fn(() => { throw new Error("should not fetch"); }) as unknown as typeof fetch,
       toolsConfig: { artifacts: { path: artifactsPath, url: "https://artifacts.example.com/files" } },
     });
 
@@ -828,7 +825,6 @@ describe("core tool executors visit_webpage local artifact support", () => {
     await writeFile(join(artifactsPath, "img.png"), pngHeader);
 
     const executors = createDefaultToolExecutors({
-      fetchImpl: vi.fn(() => { throw new Error("should not fetch"); }) as unknown as typeof fetch,
       toolsConfig: { artifacts: { path: artifactsPath, url: "https://artifacts.example.com/files" } },
     });
 
@@ -842,7 +838,6 @@ describe("core tool executors visit_webpage local artifact support", () => {
     const { artifactsPath } = await makeArtifactsDir();
 
     const executors = createDefaultToolExecutors({
-      fetchImpl: vi.fn(() => { throw new Error("should not fetch"); }) as unknown as typeof fetch,
       toolsConfig: { artifacts: { path: artifactsPath, url: "https://artifacts.example.com/files" } },
     });
 
@@ -855,7 +850,7 @@ describe("core tool executors visit_webpage local artifact support", () => {
 describe("core tool executors visit_webpage exact http_headers support", () => {
   it("visit_webpage uses exact http_headers match for specific URL", async () => {
     const targetUrl = "https://secret.example.com/api/data";
-    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (init?.method === "HEAD") {
         return new Response("", { status: 200, headers: { "content-type": "text/plain" } });
@@ -866,11 +861,9 @@ describe("core tool executors visit_webpage exact http_headers support", () => {
         return new Response("secret data", { status: 200, headers: { "content-type": "text/plain" } });
       }
       throw new Error(`Unexpected URL: ${url}`);
-    }) as typeof fetch;
+    });
 
-    const executors = createDefaultToolExecutors({
-      fetchImpl,
-      secrets: {
+    const executors = createDefaultToolExecutors({ secrets: {
         http_headers: {
           [targetUrl]: { "X-Secret-Key": "exact-match-key" },
         },
@@ -885,7 +878,7 @@ describe("core tool executors visit_webpage exact http_headers support", () => {
 describe("core tool executors visit_webpage binary content support", () => {
   it("visit_webpage returns base64-encoded binary for non-text content types", async () => {
     const binaryData = Buffer.from([0x00, 0x01, 0x02, 0x03]);
-    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "HEAD") {
         return new Response("", { status: 200, headers: { "content-type": "application/octet-stream" } });
       }
@@ -893,11 +886,9 @@ describe("core tool executors visit_webpage binary content support", () => {
         status: 200,
         headers: { "content-type": "application/octet-stream" },
       });
-    }) as typeof fetch;
+    });
 
-    const executors = createDefaultToolExecutors({
-      fetchImpl,
-      secrets: { http_headers: { "https://example.com/file.bin": { Authorization: "Bearer x" } } },
+    const executors = createDefaultToolExecutors({ secrets: { http_headers: { "https://example.com/file.bin": { Authorization: "Bearer x" } } },
     });
 
     const result = await executors.visitWebpage("https://example.com/file.bin") as string;
@@ -1200,8 +1191,7 @@ describe("core tool executors execute_code Sprites sandbox", () => {
 
   it("execute_code applies timeout to execution", async () => {
     const executors = createDefaultToolExecutors({
-      toolsConfig: { sprites: { token: "test-token" } },
-      executeCodeTimeoutMs: 100,
+      toolsConfig: { sprites: { token: "test-token", executeTimeoutMs: 100 } },
     });
 
     const result = await executors.executeCode({
@@ -1295,7 +1285,7 @@ describe("core tool executors generate_image support", () => {
 
     let openRouterRequestBody: any = null;
 
-    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
 
       if (url === "https://assets.example/ref.png") {
@@ -1336,11 +1326,9 @@ describe("core tool executors generate_image support", () => {
       }
 
       throw new Error(`Unexpected fetch URL in test: ${url}`);
-    }) as typeof fetch;
+    });
 
-    const executors = createDefaultToolExecutors({
-      fetchImpl,
-      toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" }, imageGen: { model: "openrouter:google/gemini-3-pro-image-preview" } },
+    const executors = createDefaultToolExecutors({ toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" }, imageGen: { model: "openrouter:google/gemini-3-pro-image-preview" } },
       providersConfig: { openrouter: { baseUrl: "https://openrouter.example/api/v1" } },
       getApiKey: async (provider: string) => {
         return provider === "openrouter" ? "or-key" : undefined;
@@ -1396,7 +1384,7 @@ describe("core tool executors generate_image support", () => {
   it("generate_image errors when OpenRouter returns no images", async () => {
     const { artifactsPath } = await makeArtifactsDir();
 
-    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
 
       if (url === "https://openrouter.example/api/v1/chat/completions") {
@@ -1420,11 +1408,9 @@ describe("core tool executors generate_image support", () => {
       }
 
       throw new Error(`Unexpected fetch URL in test: ${url}`);
-    }) as typeof fetch;
+    });
 
-    const executors = createDefaultToolExecutors({
-      fetchImpl,
-      toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" }, imageGen: { model: "openrouter:google/gemini-3-pro-image-preview" } },
+    const executors = createDefaultToolExecutors({ toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" }, imageGen: { model: "openrouter:google/gemini-3-pro-image-preview" } },
       providersConfig: { openrouter: { baseUrl: "https://openrouter.example/api/v1" } },
       getApiKey: async () => "or-key",
     });

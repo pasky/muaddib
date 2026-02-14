@@ -935,8 +935,7 @@ export class CommandExecutor {
   ): MuaddibTool[] {
     const invocationToolOptions: BaselineToolOptions = {
       ...this.buildToolOptions(),
-      chronicleArc: `${message.serverTag}#${message.channelName}`,
-      spritesArc: `${message.serverTag}#${message.channelName}`,
+      arc: `${message.serverTag}#${message.channelName}`,
       secrets: message.secrets,
     };
 

@@ -1,6 +1,6 @@
 import { Type } from "@sinclair/typebox";
 
-import type { DefaultToolExecutorOptions, MuaddibTool } from "./types.js";
+import type { ToolContext, MuaddibTool } from "./types.js";
 
 export interface ChronicleReadInput {
   relative_chapter_id: number;
@@ -72,7 +72,7 @@ Retain not just critical facts, but also the tone of voice and emotional charge 
 }
 
 export function createDefaultChronicleReadExecutor(
-  options: DefaultToolExecutorOptions,
+  options: ToolContext,
 ): ChronicleReadExecutor {
   return async (input: ChronicleReadInput): Promise<string> => {
     if (!Number.isInteger(input.relative_chapter_id)) {
@@ -80,7 +80,7 @@ export function createDefaultChronicleReadExecutor(
     }
 
     const chronicleStore = options.chronicleStore;
-    const arc = toConfiguredString(options.chronicleArc);
+    const arc = toConfiguredString(options.arc);
 
     if (!chronicleStore || !arc) {
       return "Error: chronicle_read is unavailable because chronicler runtime is deferred in the TypeScript runtime.";
@@ -91,7 +91,7 @@ export function createDefaultChronicleReadExecutor(
 }
 
 export function createDefaultChronicleAppendExecutor(
-  options: DefaultToolExecutorOptions,
+  options: ToolContext,
 ): ChronicleAppendExecutor {
   return async (input: ChronicleAppendInput): Promise<string> => {
     const text = input.text.trim();
@@ -101,7 +101,7 @@ export function createDefaultChronicleAppendExecutor(
 
     const chronicleStore = options.chronicleStore;
     const chronicleLifecycle = options.chronicleLifecycle;
-    const arc = toConfiguredString(options.chronicleArc);
+    const arc = toConfiguredString(options.arc);
 
     if (!chronicleStore || !arc) {
       return "Error: chronicle_append is unavailable because chronicler runtime is deferred in the TypeScript runtime.";

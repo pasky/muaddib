@@ -20,36 +20,29 @@ export interface ToolExecutorLogger {
   info(...data: unknown[]): void;
 }
 
-export interface DefaultToolExecutorOptions {
-  /** Tools configuration — each tool executor resolves its own config from here. */
+/**
+ * Shared context passed to tool executor factories.
+ *
+ * Each tool executor picks the fields it needs — no tool uses all of them.
+ */
+export interface ToolContext {
+  // ── Config (tools resolve their own settings from these) ──
   toolsConfig?: ToolsConfig;
-  /** Provider configuration (base URLs, etc.). */
   providersConfig?: ProvidersConfig;
 
-  fetchImpl?: typeof fetch;
-  secrets?: Record<string, unknown>;
-  logger?: ToolExecutorLogger;
-  maxWebContentLength?: number;
-  maxImageBytes?: number;
-  executeCodeTimeoutMs?: number;
-  executeCodeWorkingDirectory?: string;
-  /** Arc identifier for Sprites sandbox isolation (one sprite per arc). */
-  spritesArc?: string;
+  // ── Runtime services ──
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   modelAdapter?: PiAiModelAdapter;
-  completeSimpleFn?: CompleteSimpleFn;
-  oracleMaxIterations?: number;
-  imageGenTimeoutMs?: number;
+  logger?: ToolExecutorLogger;
   chronicleStore?: ChronicleStore;
   chronicleLifecycle?: {
     appendParagraph: (arc: string, text: string) => Promise<unknown>;
   };
-  chronicleArc?: string;
-  currentQuestId?: string | null;
-}
 
-export type CompleteSimpleFn = (
-  model: import("@mariozechner/pi-ai").Model<any>,
-  context: { messages: import("@mariozechner/pi-ai").UserMessage[]; systemPrompt?: string },
-  options?: import("@mariozechner/pi-ai").SimpleStreamOptions,
-) => Promise<import("@mariozechner/pi-ai").AssistantMessage>;
+  // ── Per-invocation context ──
+  /** Arc identifier (e.g. "libera##test"), used for Sprites isolation and chronicle scoping. */
+  arc?: string;
+  currentQuestId?: string | null;
+  /** HTTP header secrets for authenticated web requests. */
+  secrets?: Record<string, unknown>;
+}

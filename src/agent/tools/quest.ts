@@ -1,6 +1,6 @@
 import { Type } from "@sinclair/typebox";
 
-import type { DefaultToolExecutorOptions, MuaddibTool } from "./types.js";
+import type { ToolContext, MuaddibTool } from "./types.js";
 
 export interface QuestStartInput {
   id: string;
@@ -129,7 +129,7 @@ export function createQuestSnoozeTool(
 }
 
 export function createDefaultQuestStartExecutor(
-  _options: DefaultToolExecutorOptions,
+  _options: ToolContext,
 ): QuestStartExecutor {
   return async (input: QuestStartInput): Promise<string> => {
     const idErr = validateQuestId(input.id);
@@ -148,7 +148,7 @@ export function createDefaultQuestStartExecutor(
 }
 
 export function createDefaultSubquestStartExecutor(
-  options: DefaultToolExecutorOptions,
+  options: ToolContext,
 ): SubquestStartExecutor {
   return async (input: SubquestStartInput): Promise<string> => {
     if (!toConfiguredString(options.currentQuestId)) {
@@ -171,7 +171,7 @@ export function createDefaultSubquestStartExecutor(
 }
 
 export function createDefaultQuestSnoozeExecutor(
-  options: DefaultToolExecutorOptions,
+  options: ToolContext,
 ): QuestSnoozeExecutor {
   return async (input: QuestSnoozeInput): Promise<string> => {
     if (!toConfiguredString(options.currentQuestId)) {

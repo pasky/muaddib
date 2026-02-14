@@ -1,7 +1,7 @@
 import { Type } from "@sinclair/typebox";
 
 import { parseModelSpec } from "../../models/model-spec.js";
-import type { DefaultToolExecutorOptions, MuaddibTool } from "./types.js";
+import type { ToolContext, MuaddibTool } from "./types.js";
 
 export interface GenerateImageInput {
   prompt: string;
@@ -73,12 +73,12 @@ export function createGenerateImageTool(
 }
 
 export function createDefaultGenerateImageExecutor(
-  options: DefaultToolExecutorOptions,
+  options: ToolContext,
 ): GenerateImageExecutor {
-  const fetchImpl = getFetch(options);
+
   const openRouterBaseUrl = (toConfiguredString(options.providersConfig?.openrouter?.baseUrl) ?? DEFAULT_OPENROUTER_BASE_URL).replace(/\/+$/, "");
-  const maxImageBytes = options.maxImageBytes ?? DEFAULT_IMAGE_LIMIT;
-  const timeoutMs = options.imageGenTimeoutMs ?? DEFAULT_IMAGE_GEN_TIMEOUT_MS;
+  const maxImageBytes = options.toolsConfig?.jina?.maxImageBytes ?? DEFAULT_IMAGE_LIMIT;
+  const timeoutMs = options.toolsConfig?.imageGen?.timeoutMs ?? DEFAULT_IMAGE_GEN_TIMEOUT_MS;
 
   return async (input: GenerateImageInput): Promise<GenerateImageResult> => {
     const prompt = input.prompt.trim();
@@ -112,7 +112,7 @@ export function createDefaultGenerateImageExecutor(
         throw new Error("generate_image.image_urls entries must be non-empty URLs.");
       }
 
-      const dataUrl = await fetchImageAsDataUrl(fetchImpl, imageUrl, maxImageBytes);
+      const dataUrl = await fetchImageAsDataUrl(imageUrl, maxImageBytes);
       contentBlocks.push({
         type: "image_url",
         image_url: {
@@ -121,7 +121,7 @@ export function createDefaultGenerateImageExecutor(
       });
     }
 
-    const responsePayload = await callOpenRouterImageGeneration(fetchImpl, {
+    const responsePayload = await callOpenRouterImageGeneration({
       baseUrl: openRouterBaseUrl,
       apiKey,
       modelId: modelSpec.modelId,
@@ -172,7 +172,6 @@ interface OpenRouterImageGenerationRequest {
 }
 
 async function callOpenRouterImageGeneration(
-  fetchImpl: typeof fetch,
   request: OpenRouterImageGenerationRequest,
 ): Promise<unknown> {
   const abortController = new AbortController();
@@ -181,7 +180,7 @@ async function callOpenRouterImageGeneration(
   }, request.timeoutMs);
 
   try {
-    const response = await fetchImpl(`${request.baseUrl}/chat/completions`, {
+    const response = await fetch(`${request.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${request.apiKey}`,
@@ -329,7 +328,6 @@ function parseDataUrlImage(dataUrl: string): ParsedDataUrlImage {
 }
 
 async function fetchImageAsDataUrl(
-  fetchImpl: typeof fetch,
   imageUrl: string,
   maxImageBytes: number,
 ): Promise<string> {
@@ -338,7 +336,7 @@ async function fetchImageAsDataUrl(
     throw new Error(`Failed to fetch reference image ${imageUrl}: URL must use http:// or https://.`);
   }
 
-  const response = await fetchImpl(imageUrl, {
+  const response = await fetch(imageUrl, {
     headers: {
       "User-Agent": "muaddib/1.0",
     },
@@ -366,7 +364,7 @@ async function fetchImageAsDataUrl(
 }
 
 async function resolveProviderApiKey(
-  options: DefaultToolExecutorOptions,
+  options: ToolContext,
   provider: string,
 ): Promise<string | undefined> {
   if (!options.getApiKey) {
@@ -377,7 +375,7 @@ async function resolveProviderApiKey(
   return toConfiguredString(key);
 }
 
-async function resolveOpenRouterApiKey(options: DefaultToolExecutorOptions): Promise<string | undefined> {
+async function resolveOpenRouterApiKey(options: ToolContext): Promise<string | undefined> {
   const fromConfig = await resolveProviderApiKey(options, "openrouter");
   if (fromConfig) {
     return fromConfig;
@@ -446,12 +444,4 @@ function extractErrorMessage(value: unknown): string | undefined {
 
 function isAbortError(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && (error as { name?: unknown }).name === "AbortError");
-}
-
-function getFetch(options: DefaultToolExecutorOptions): typeof fetch {
-  const fetchImpl = options.fetchImpl ?? globalThis.fetch;
-  if (!fetchImpl) {
-    throw new Error("Global fetch API is unavailable.");
-  }
-  return fetchImpl;
 }

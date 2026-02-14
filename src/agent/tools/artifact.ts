@@ -3,7 +3,7 @@ import { isAbsolute, relative, resolve } from "node:path";
 
 import { Type } from "@sinclair/typebox";
 
-import type { DefaultToolExecutorOptions, MuaddibTool } from "./types.js";
+import type { ToolContext, MuaddibTool } from "./types.js";
 
 export interface EditArtifactInput {
   artifact_url: string;
@@ -75,7 +75,7 @@ export function createEditArtifactTool(executors: { editArtifact: EditArtifactEx
 }
 
 export function createDefaultShareArtifactExecutor(
-  options: DefaultToolExecutorOptions,
+  options: ToolContext,
 ): ShareArtifactExecutor {
   return async (content: string): Promise<string> => {
     if (!content.trim()) {
@@ -88,7 +88,7 @@ export function createDefaultShareArtifactExecutor(
 }
 
 export function createDefaultEditArtifactExecutor(
-  options: DefaultToolExecutorOptions,
+  options: ToolContext,
 ): EditArtifactExecutor {
   const visitWebpage = createDefaultVisitWebpageExecutor(options);
 
@@ -137,7 +137,7 @@ export function createDefaultEditArtifactExecutor(
 }
 
 async function loadArtifactContentForEdit(
-  options: DefaultToolExecutorOptions,
+  options: ToolContext,
   artifactUrl: string,
   visitWebpage: VisitWebpageExecutor,
 ): Promise<string> {

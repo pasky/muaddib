@@ -5,7 +5,7 @@ import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { SessionRunner } from "../session-runner.js";
 import type { MuaddibTool } from "./types.js";
 import type { RunnerLogger, SessionFactoryContextMessage } from "../session-factory.js";
-import type { DefaultToolExecutorOptions } from "./types.js";
+import type { ToolContext } from "./types.js";
 
 export interface OracleInput {
   query: string;
@@ -71,14 +71,14 @@ export interface OracleInvocationContext {
    * Injected to break the circular dependency (baseline-tools.ts → oracle.ts).
    * The oracle filters this through ORACLE_EXCLUDED_TOOLS.
    */
-  buildTools: (options: DefaultToolExecutorOptions) => AgentTool<any>[];
+  buildTools: (options: ToolContext) => AgentTool<any>[];
 
   /** Tool options for building oracle's nested tools (arc, secrets, etc.). */
-  toolOptions: DefaultToolExecutorOptions;
+  toolOptions: ToolContext;
 }
 
 export function createDefaultOracleExecutor(
-  options: DefaultToolExecutorOptions,
+  options: ToolContext,
   invocation?: OracleInvocationContext,
 ): OracleExecutor {
   const modelAdapter = options.modelAdapter ?? new PiAiModelAdapter();
@@ -113,7 +113,7 @@ export function createDefaultOracleExecutor(
       tools: oracleTools,
       modelAdapter,
       getApiKey: options.getApiKey,
-      maxIterations: options.oracleMaxIterations,
+      maxIterations: options.toolsConfig?.oracle?.maxIterations,
       logger,
     });
 

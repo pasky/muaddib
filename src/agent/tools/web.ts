@@ -3,7 +3,7 @@ import { resolve, relative, extname } from "node:path";
 
 import { Type } from "@sinclair/typebox";
 
-import type { DefaultToolExecutorOptions, MuaddibTool } from "./types.js";
+import type { ToolContext, MuaddibTool } from "./types.js";
 
 export interface VisitWebpageImageResult {
   kind: "image";
@@ -112,9 +112,9 @@ export function resetWebRateLimiters(): void {
 }
 
 export function createDefaultWebSearchExecutor(
-  options: DefaultToolExecutorOptions,
+  options: ToolContext,
 ): WebSearchExecutor {
-  const fetchImpl = getFetch(options);
+
 
   return async (query: string): Promise<string> => {
     const trimmedQuery = query.trim();
@@ -125,7 +125,7 @@ export function createDefaultWebSearchExecutor(
     await searchRateLimiter.waitIfNeeded();
 
     const url = `https://s.jina.ai/?q=${encodeURIComponent(trimmedQuery)}`;
-    const response = await fetchImpl(url, {
+    const response = await fetch(url, {
       headers: buildJinaHeaders(options.toolsConfig?.jina?.apiKey, {
         "X-Respond-With": "no-content",
       }),
@@ -149,11 +149,11 @@ export function createDefaultWebSearchExecutor(
 }
 
 export function createDefaultVisitWebpageExecutor(
-  options: DefaultToolExecutorOptions,
+  options: ToolContext,
 ): VisitWebpageExecutor {
-  const fetchImpl = getFetch(options);
-  const maxWebContentLength = options.maxWebContentLength ?? DEFAULT_WEB_CONTENT_LIMIT;
-  const maxImageBytes = options.maxImageBytes ?? DEFAULT_IMAGE_LIMIT;
+
+  const maxWebContentLength = options.toolsConfig?.jina?.maxWebContentLength ?? DEFAULT_WEB_CONTENT_LIMIT;
+  const maxImageBytes = options.toolsConfig?.jina?.maxImageBytes ?? DEFAULT_IMAGE_LIMIT;
 
   return async (url: string): Promise<VisitWebpageResult> => {
     const parsedUrl = new URL(url);
@@ -175,7 +175,7 @@ export function createDefaultVisitWebpageExecutor(
 
     let contentType = "";
     try {
-      const headResponse = await fetchImpl(url, {
+      const headResponse = await fetch(url, {
         method: "HEAD",
         headers: requestHeaders,
       });
@@ -187,7 +187,7 @@ export function createDefaultVisitWebpageExecutor(
     }
 
     if (contentType.startsWith("image/") || looksLikeImageUrl(url)) {
-      const imageResponse = await fetchImpl(url, {
+      const imageResponse = await fetch(url, {
         headers: requestHeaders,
       });
       if (!imageResponse.ok) {
@@ -215,7 +215,7 @@ export function createDefaultVisitWebpageExecutor(
     );
 
     if (hasAuthHeaders) {
-      const response = await fetchImpl(url, {
+      const response = await fetch(url, {
         headers: requestHeaders,
       });
 
@@ -252,7 +252,7 @@ export function createDefaultVisitWebpageExecutor(
 
     // Use Jina reader with retry/backoff.
     const readerUrl = `https://r.jina.ai/${url}`;
-    const body = await fetchJinaWithRetry(fetchImpl, readerUrl, options.toolsConfig?.jina?.apiKey, options.logger);
+    const body = await fetchJinaWithRetry(readerUrl, options.toolsConfig?.jina?.apiKey, options.logger);
 
     if (!body) {
       return `## Content from ${url}\n\n(Empty response)`;
@@ -267,7 +267,7 @@ export function createDefaultVisitWebpageExecutor(
  * does not match the configured artifacts URL.
  */
 async function tryReadLocalArtifact(
-  options: DefaultToolExecutorOptions,
+  options: ToolContext,
   url: string,
   maxContentLength: number,
   maxImageBytes: number,
@@ -361,10 +361,9 @@ function extractFilenameFromQuery(query: string): string | null {
  * Fetch from Jina reader with backoff retries on HTTP 451 and 5xx errors.
  */
 async function fetchJinaWithRetry(
-  fetchImpl: typeof fetch,
   readerUrl: string,
   jinaApiKey: string | undefined,
-  logger: DefaultToolExecutorOptions["logger"],
+  logger: ToolContext["logger"],
 ): Promise<string> {
   for (let attempt = 0; attempt < jinaRetryConfig.delaysMs.length; attempt++) {
     const delay = jinaRetryConfig.delaysMs[attempt];
@@ -373,7 +372,7 @@ async function fetchJinaWithRetry(
       await new Promise((r) => setTimeout(r, delay));
     }
 
-    const response = await fetchImpl(readerUrl, {
+    const response = await fetch(readerUrl, {
       headers: buildJinaHeaders(jinaApiKey),
     });
 
@@ -426,13 +425,6 @@ function toolResultFromVisitWebpageOutput(url: string, output: VisitWebpageResul
   };
 }
 
-function getFetch(options: DefaultToolExecutorOptions): typeof fetch {
-  const fetchImpl = options.fetchImpl ?? globalThis.fetch;
-  if (!fetchImpl) {
-    throw new Error("Global fetch API is unavailable.");
-  }
-  return fetchImpl;
-}
 
 function buildJinaHeaders(apiKey?: string, extras: Record<string, string> = {}): Record<string, string> {
   const headers: Record<string, string> = {
@@ -449,7 +441,7 @@ function buildJinaHeaders(apiKey?: string, extras: Record<string, string> = {}):
 }
 
 function buildVisitHeaders(
-  options: DefaultToolExecutorOptions,
+  options: ToolContext,
   url: string,
   extras: Record<string, string> = {},
 ): Record<string, string> {
