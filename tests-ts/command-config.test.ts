@@ -37,16 +37,27 @@ describe("deepMergeConfig", () => {
           command: {
             history_size: 20,
           },
+          prompt_vars: {
+            intro: "A",
+          },
         },
         irc: {
           command: {
             history_size: 40,
+          },
+          prompt_vars: {
+            intro: "B",
+          },
+          varlink: {
+            socket_path: "/tmp/irc.sock",
           },
         },
       },
     };
 
     const merged = getRoomConfig(config, "irc");
-    expect((merged.command as any).history_size).toBe(40);
+    expect(merged.command?.history_size).toBe(40);
+    expect(merged.prompt_vars?.intro).toBe("AB");
+    expect(merged.varlink?.socket_path).toBe("/tmp/irc.sock");
   });
 });

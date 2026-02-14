@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { getMuaddibHome, resolveMuaddibPath } from "../app/bootstrap.js";
+import type { CommandConfig } from "../rooms/command/resolver.js";
 
 // ── Config section interfaces ──────────────────────────────────────────
 
@@ -82,6 +83,31 @@ export interface HistoryConfig {
 
 export interface RouterConfig {
   refusalFallbackModel?: string;
+}
+
+export interface RoomVarlinkConfig {
+  socket_path?: string;
+}
+
+export interface RoomConfig {
+  enabled?: boolean;
+  command?: CommandConfig;
+  prompt_vars?: Record<string, string>;
+  varlink?: RoomVarlinkConfig;
+  token?: string;
+  bot_name?: string;
+  app_token?: string;
+  workspaces?: Record<string, Record<string, unknown>>;
+  reply_start_thread?: {
+    channel?: boolean;
+    dm?: boolean;
+  };
+  reply_edit_debounce_seconds?: number;
+  reconnect?: {
+    enabled?: boolean;
+    delay_ms?: number;
+    max_attempts?: number;
+  };
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
@@ -341,10 +367,38 @@ export class MuaddibConfig {
     };
   }
 
-  getRoomConfig(roomName: string): Record<string, unknown> {
+  getRoomConfig(roomName: string): RoomConfig {
     const rooms = asRecord(this.data.rooms) ?? {};
     const common = asRecord(rooms.common) ?? {};
     const room = asRecord(rooms[roomName]) ?? {};
-    return deepMergeConfig(common, room);
+    const merged = deepMergeConfig(common, room);
+
+    const command = asRecord(merged.command);
+    const varlink = asRecord(merged.varlink);
+    const replyStartThread = asRecord(merged.reply_start_thread);
+    const reconnect = asRecord(merged.reconnect);
+
+    return {
+      enabled: typeof merged.enabled === "boolean" ? merged.enabled : undefined,
+      command: command as CommandConfig | undefined,
+      prompt_vars: toStringRecord(merged.prompt_vars),
+      varlink: {
+        socket_path: stringOrUndefined(varlink?.socket_path),
+      },
+      token: stringOrUndefined(merged.token),
+      bot_name: stringOrUndefined(merged.bot_name),
+      app_token: stringOrUndefined(merged.app_token),
+      workspaces: asRecord(merged.workspaces) as Record<string, Record<string, unknown>> | undefined,
+      reply_start_thread: {
+        channel: typeof replyStartThread?.channel === "boolean" ? replyStartThread.channel : undefined,
+        dm: typeof replyStartThread?.dm === "boolean" ? replyStartThread.dm : undefined,
+      },
+      reply_edit_debounce_seconds: numberOrUndefined(merged.reply_edit_debounce_seconds),
+      reconnect: {
+        enabled: typeof reconnect?.enabled === "boolean" ? reconnect.enabled : undefined,
+        delay_ms: numberOrUndefined(reconnect?.delay_ms),
+        max_attempts: numberOrUndefined(reconnect?.max_attempts),
+      },
+    };
   }
 }

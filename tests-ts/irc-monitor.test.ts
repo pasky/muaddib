@@ -5,8 +5,11 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { RuntimeLogWriter } from "../src/app/logging.js";
+import { MuaddibConfig } from "../src/config/muaddib-config.js";
 import { ChatHistoryStore } from "../src/history/chat-history-store.js";
+import { PiAiModelAdapter } from "../src/models/pi-ai-model-adapter.js";
 import { IrcRoomMonitor } from "../src/rooms/irc/monitor.js";
+import type { MuaddibRuntime } from "../src/runtime.js";
 
 class FakeEventsClient {
   async connect(): Promise<void> {}
@@ -47,7 +50,101 @@ function createDeferred<T = void>() {
   };
 }
 
+function baseCommandConfig() {
+  return {
+    history_size: 40,
+    default_mode: "classifier:serious",
+    modes: {
+      serious: {
+        model: "openai:gpt-4o-mini",
+        prompt: "You are {mynick}",
+        triggers: {
+          "!s": {},
+        },
+      },
+    },
+    mode_classifier: {
+      model: "openai:gpt-4o-mini",
+      labels: {
+        EASY_SERIOUS: "!s",
+      },
+      fallback_label: "EASY_SERIOUS",
+    },
+  };
+}
+
+function buildRuntime(configData: Record<string, unknown>, history: ChatHistoryStore): MuaddibRuntime {
+  return {
+    config: MuaddibConfig.inMemory(configData),
+    history,
+    modelAdapter: new PiAiModelAdapter(),
+    getApiKey: () => undefined,
+    logger: new RuntimeLogWriter({
+      muaddibHome: process.cwd(),
+      stdout: { write: () => true } as unknown as NodeJS.WriteStream,
+    }),
+  };
+}
+
 describe("IrcRoomMonitor", () => {
+  it("fromRuntime returns [] when IRC is disabled", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    const monitors = IrcRoomMonitor.fromRuntime(buildRuntime({
+      rooms: {
+        common: {
+          command: baseCommandConfig(),
+        },
+        irc: {
+          enabled: false,
+        },
+      },
+    }, history));
+
+    expect(monitors).toEqual([]);
+    await history.close();
+  });
+
+  it("fromRuntime validates varlink.socket_path when IRC is enabled", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    expect(() => IrcRoomMonitor.fromRuntime(buildRuntime({
+      rooms: {
+        common: {
+          command: baseCommandConfig(),
+        },
+        irc: {
+          enabled: true,
+        },
+      },
+    }, history))).toThrow("IRC room is enabled but rooms.irc.varlink.socket_path is missing.");
+
+    await history.close();
+  });
+
+  it("fromRuntime enables IRC by default and builds monitor", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    const monitors = IrcRoomMonitor.fromRuntime(buildRuntime({
+      rooms: {
+        common: {
+          command: baseCommandConfig(),
+        },
+        irc: {
+          varlink: {
+            socket_path: "/tmp/muaddib-varlink.sock",
+          },
+        },
+      },
+    }, history));
+
+    expect(monitors).toHaveLength(1);
+    await history.close();
+  });
+
   it("routes direct message events into command handler and sender", async () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();

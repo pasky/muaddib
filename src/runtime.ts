@@ -62,8 +62,8 @@ export async function createMuaddibRuntime(
     join(muaddibHome, "chat_history.db"),
   );
 
-  const defaultRoomConfig = config.getRoomConfig("irc") as any;
-  const defaultHistorySize = Number(defaultRoomConfig?.command?.history_size ?? 40);
+  const defaultRoomConfig = config.getRoomConfig("irc");
+  const defaultHistorySize = Number(defaultRoomConfig.command?.history_size ?? 40);
 
   log.info("Initializing history storage", `path=${historyDbPath}`, `history_size=${defaultHistorySize}`);
 

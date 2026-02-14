@@ -145,8 +145,12 @@ export class RoomCommandHandlerTs {
       logger?: CommandHandlerLogger;
     },
   ): RoomCommandHandlerTs {
-    const roomConfig = runtime.config.getRoomConfig(roomName) as any;
-    const commandConfig = roomConfig.command ?? {};
+    const roomConfig = runtime.config.getRoomConfig(roomName);
+    if (!roomConfig.command) {
+      throw new Error(`rooms.${roomName}.command is missing.`);
+    }
+
+    const commandConfig = roomConfig.command;
     const actorConfig = runtime.config.getActorConfig();
     const toolsConfig = runtime.config.getToolsConfig();
     const contextReducerConfig = runtime.config.getContextReducerConfig();
@@ -155,7 +159,10 @@ export class RoomCommandHandlerTs {
       runtime.logger.getLogger(`muaddib.rooms.command.${roomName}`);
 
     return new RoomCommandHandlerTs({
-      roomConfig,
+      roomConfig: {
+        command: roomConfig.command,
+        prompt_vars: roomConfig.prompt_vars,
+      },
       history: runtime.history,
       classifyMode: createModeClassifier(commandConfig, {
         getApiKey: runtime.getApiKey,

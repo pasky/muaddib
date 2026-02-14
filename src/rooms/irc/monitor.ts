@@ -1,7 +1,8 @@
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { createConsoleLogger, type RuntimeLogger } from "../../app/logging.js";
+import type { MuaddibRuntime } from "../../runtime.js";
 import type { RoomMessage } from "../message.js";
-import type { RoomCommandHandlerTs } from "../command/command-handler.js";
+import { RoomCommandHandlerTs } from "../command/command-handler.js";
 import { VarlinkClient, VarlinkSender } from "./varlink.js";
 
 export interface IrcMonitorRoomConfig {
@@ -57,6 +58,36 @@ export class IrcRoomMonitor {
   private readonly responseCleaner: (text: string, nick: string) => string;
   private readonly logger: RuntimeLogger;
   private readonly serverNicks = new Map<string, string>();
+
+  static fromRuntime(runtime: MuaddibRuntime): IrcRoomMonitor[] {
+    const roomConfig = runtime.config.getRoomConfig("irc");
+    const enabled = roomConfig.enabled ?? true;
+    if (!enabled) {
+      return [];
+    }
+
+    const socketPath = requireNonEmptyString(
+      roomConfig.varlink?.socket_path,
+      "IRC room is enabled but rooms.irc.varlink.socket_path is missing.",
+    );
+
+    const commandHandler = RoomCommandHandlerTs.fromRuntime(runtime, "irc", {
+      responseCleaner: (text) => text.replace(/\n/g, "; ").trim(),
+    });
+
+    return [
+      new IrcRoomMonitor({
+        roomConfig: {
+          varlink: {
+            socket_path: socketPath,
+          },
+        },
+        history: runtime.history,
+        commandHandler,
+        logger: runtime.logger.getLogger("muaddib.rooms.irc.monitor"),
+      }),
+    ];
+  }
 
   constructor(private readonly options: IrcRoomMonitorOptions) {
     this.varlinkEvents =
@@ -294,4 +325,11 @@ function escapeRegExp(input: string): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function requireNonEmptyString(value: unknown, message: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(message);
+  }
+  return value;
 }

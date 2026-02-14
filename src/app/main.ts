@@ -49,33 +49,7 @@ function createMonitors(runtime: MuaddibRuntime): RunnableMonitor[] {
   const logger = runtime.logger.getLogger("muaddib.app.main");
 
   // IRC
-  const ircRoomConfig = runtime.config.getRoomConfig("irc") as any;
-  if (isRoomEnabled(ircRoomConfig, true)) {
-    const socketPath = requireNonEmptyString(
-      ircRoomConfig?.varlink?.socket_path,
-      "IRC room is enabled but rooms.irc.varlink.socket_path is missing.",
-    );
-
-    const commandHandler = RoomCommandHandlerTs.fromRuntime(runtime, "irc", {
-      responseCleaner: (text) => text.replace(/\n/g, "; ").trim(),
-    });
-
-    logger.info("Enabling IRC room monitor", `socket_path=${socketPath}`);
-    monitors.push(
-      new IrcRoomMonitor({
-        roomConfig: {
-          ...ircRoomConfig,
-          varlink: {
-            ...(ircRoomConfig?.varlink ?? {}),
-            socket_path: socketPath,
-          },
-        },
-        history: runtime.history,
-        commandHandler,
-        logger: runtime.logger.getLogger("muaddib.rooms.irc.monitor"),
-      }),
-    );
-  }
+  monitors.push(...IrcRoomMonitor.fromRuntime(runtime));
 
   // Discord
   const discordRoomConfig = runtime.config.getRoomConfig("discord") as any;
