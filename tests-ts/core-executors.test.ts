@@ -2,9 +2,10 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createDefaultToolExecutors } from "../src/agent/tools/baseline-tools.js";
+import { createDefaultOracleExecutor } from "../src/agent/tools/oracle.js";
 import { ChronicleStore } from "../src/chronicle/chronicle-store.js";
 
 const tempDirs: string[] = [];
@@ -375,6 +376,192 @@ describe("core tool executors oracle support", () => {
         query: "   ",
       }),
     ).rejects.toThrow("oracle.query must be non-empty.");
+  });
+});
+
+// Module-level state for SessionRunner mock (vi.mock hoists, so these must be at module scope)
+const oracleMock = {
+  promptFn: vi.fn(),
+  capturedOptions: undefined as any,
+};
+
+vi.mock("../src/agent/session-runner.js", () => {
+  return {
+    SessionRunner: class MockSessionRunner {
+      constructor(options: any) {
+        oracleMock.capturedOptions = options;
+      }
+      async prompt(query: string, opts?: any) {
+        return oracleMock.promptFn(query, opts);
+      }
+    },
+  };
+});
+
+describe("oracle executor with invocation context", () => {
+  beforeEach(() => {
+    oracleMock.capturedOptions = undefined;
+    oracleMock.promptFn = vi.fn();
+  });
+
+  it("calls buildTools with toolOptions and filters excluded tools", async () => {
+    oracleMock.promptFn.mockResolvedValue({ text: "oracle answer", stopReason: "stop", usage: {} });
+
+    const buildTools = vi.fn(() => [
+      { name: "web_search" },
+      { name: "oracle" },
+      { name: "execute_code" },
+      { name: "progress_report" },
+      { name: "quest_start" },
+      { name: "subquest_start" },
+      { name: "quest_snooze" },
+      { name: "visit_webpage" },
+    ] as any[]);
+
+    const toolOptions = { oracleModel: "openai:gpt-4o-mini" };
+
+    const executor = createDefaultOracleExecutor(
+      { oracleModel: "openai:gpt-4o-mini", logger: { info: vi.fn() } },
+      {
+        conversationContext: [{ role: "user", content: "prior context" }],
+        toolOptions,
+        buildTools,
+      },
+    );
+
+    const result = await executor({ query: "test query" });
+
+    expect(result).toBe("oracle answer");
+    expect(buildTools).toHaveBeenCalledWith(toolOptions);
+
+    // Verify excluded tools were filtered out
+    const toolNames = oracleMock.capturedOptions.tools.map((t: any) => t.name);
+    expect(toolNames).toContain("web_search");
+    expect(toolNames).toContain("execute_code");
+    expect(toolNames).toContain("visit_webpage");
+    expect(toolNames).not.toContain("oracle");
+    expect(toolNames).not.toContain("progress_report");
+    expect(toolNames).not.toContain("quest_start");
+    expect(toolNames).not.toContain("subquest_start");
+    expect(toolNames).not.toContain("quest_snooze");
+  });
+
+  it("passes conversation context and thinkingLevel high to SessionRunner.prompt", async () => {
+    oracleMock.promptFn.mockResolvedValue({ text: "deep answer", stopReason: "stop", usage: {} });
+
+    const context = [
+      { role: "user" as const, content: "earlier message" },
+      { role: "assistant" as const, content: "earlier reply" },
+    ];
+
+    const executor = createDefaultOracleExecutor(
+      { oracleModel: "openai:gpt-4o-mini", logger: { info: vi.fn() } },
+      {
+        conversationContext: context,
+        toolOptions: {},
+        buildTools: () => [],
+      },
+    );
+
+    await executor({ query: "analyze this" });
+
+    expect(oracleMock.promptFn).toHaveBeenCalledWith("analyze this", {
+      contextMessages: context,
+      thinkingLevel: "high",
+    });
+  });
+
+  it("logs CONSULTING ORACLE on entry and Oracle response on success", async () => {
+    oracleMock.promptFn.mockResolvedValue({ text: "sage wisdom", stopReason: "stop", usage: {} });
+
+    const infoLog = vi.fn();
+    const logger = { info: infoLog, debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    const executor = createDefaultOracleExecutor(
+      { oracleModel: "openai:gpt-4o-mini", logger },
+      { conversationContext: [], toolOptions: {}, buildTools: () => [] },
+    );
+
+    await executor({ query: "deep question" });
+
+    expect(infoLog).toHaveBeenCalledWith(
+      expect.stringContaining("CONSULTING ORACLE: deep question"),
+    );
+    expect(infoLog).toHaveBeenCalledWith(
+      expect.stringContaining("Oracle response: sage wisdom"),
+    );
+  });
+
+  it("returns soft error string and logs Oracle failed on runtime failure", async () => {
+    oracleMock.promptFn.mockRejectedValue(new Error("connection refused"));
+
+    const infoLog = vi.fn();
+    const logger = { info: infoLog, debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    const executor = createDefaultOracleExecutor(
+      { oracleModel: "openai:gpt-4o-mini", logger },
+      { conversationContext: [], toolOptions: {}, buildTools: () => [] },
+    );
+
+    const result = await executor({ query: "will fail" });
+
+    expect(result).toBe("Oracle error: connection refused");
+    expect(infoLog).toHaveBeenCalledWith(
+      expect.stringContaining("Oracle failed: connection refused"),
+    );
+  });
+
+  it("returns iteration exhaustion message instead of throwing", async () => {
+    oracleMock.promptFn.mockRejectedValue(new Error("Exceeded max iteration limit"));
+
+    const infoLog = vi.fn();
+    const logger = { info: infoLog, debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    const executor = createDefaultOracleExecutor(
+      { oracleModel: "openai:gpt-4o-mini", logger },
+      { conversationContext: [], toolOptions: {}, buildTools: () => [] },
+    );
+
+    const result = await executor({ query: "complex task" });
+
+    expect(result).toMatch(/^Oracle exhausted iterations:/);
+    expect(infoLog).toHaveBeenCalledWith(
+      expect.stringContaining("Oracle exhausted:"),
+    );
+  });
+
+  it("works without invocation context (zero tools, no conversation context)", async () => {
+    oracleMock.promptFn.mockResolvedValue({ text: "bare answer", stopReason: "stop", usage: {} });
+
+    const logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    const executor = createDefaultOracleExecutor(
+      { oracleModel: "openai:gpt-4o-mini", logger },
+    );
+
+    const result = await executor({ query: "no context" });
+
+    expect(result).toBe("bare answer");
+    expect(oracleMock.capturedOptions.tools).toEqual([]);
+    expect(oracleMock.promptFn).toHaveBeenCalledWith("no context", {
+      contextMessages: undefined,
+      thinkingLevel: "high",
+    });
+  });
+
+  it("passes logger to SessionRunner for nested LLM I/O visibility", async () => {
+    oracleMock.promptFn.mockResolvedValue({ text: "ok", stopReason: "stop", usage: {} });
+
+    const logger = { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    const executor = createDefaultOracleExecutor(
+      { oracleModel: "openai:gpt-4o-mini", logger },
+      { conversationContext: [], toolOptions: {}, buildTools: () => [] },
+    );
+
+    await executor({ query: "test" });
+
+    expect(oracleMock.capturedOptions.logger).toBe(logger);
   });
 });
 

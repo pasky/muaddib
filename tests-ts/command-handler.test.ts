@@ -669,6 +669,49 @@ describe("RoomCommandHandlerTs", () => {
     await history.close();
   });
 
+  it("passes oracle tool with invocation context containing conversation history", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    // Add prior conversation context
+    await history.addMessage({ ...makeMessage("first context line"), nick: "bob" });
+    await history.addMessage(
+      { ...makeMessage("bot reply"), nick: "muaddib" },
+      { role: "assistant" },
+    );
+
+    const incoming = makeMessage("!s ask the oracle");
+    let oracleTool: any = null;
+    let seenContextMessages: any[] = [];
+
+    const handler = new RoomCommandHandlerTs({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: (input) => {
+        // Find the oracle tool among the tools passed to the runner
+        oracleTool = input.tools.find((t) => t.name === "oracle");
+        return {
+          prompt: async (_prompt: string, opts?: { contextMessages?: any[] }) => {
+            seenContextMessages = opts?.contextMessages ?? [];
+            return makeRunnerResult("done");
+          },
+        };
+      },
+    });
+
+    const result = await handler.execute(incoming);
+
+    expect(result.response).toBe("done");
+    // Oracle tool should be present in the tool set
+    expect(oracleTool).toBeDefined();
+    expect(oracleTool.name).toBe("oracle");
+    // Context messages should include prior conversation (not just the trigger)
+    expect(seenContextMessages.length).toBeGreaterThan(0);
+
+    await history.close();
+  });
+
   it("merges debounced same-user followups into the runner prompt", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();
