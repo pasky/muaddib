@@ -91,10 +91,10 @@ export class CommandExecutor {
   readonly resolver: CommandResolver;
   readonly commandConfig: CommandConfig;
   readonly classifyMode: (context: Array<{ role: string; content: string }>) => Promise<string>;
-  readonly history: ChatHistoryStore;
-  readonly modelAdapter: PiAiModelAdapter;
-  readonly logger: CommandExecutorLogger;
-  readonly getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+  private readonly history: ChatHistoryStore;
+  private readonly modelAdapter: PiAiModelAdapter;
+  private readonly logger: CommandExecutorLogger;
+  private readonly getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
 
   private readonly runtime: MuaddibRuntime;
   private readonly roomName: string;

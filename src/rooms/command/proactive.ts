@@ -1,11 +1,29 @@
 /**
- * Proactive interjection evaluator.
+ * Proactive interjection — evaluation and lifecycle runner.
  *
- * Uses configured validation models to score whether the bot should
- * interject in a conversation.  Returns a simple yes/no + reason.
+ * The evaluator uses configured validation models to score whether the bot
+ * should interject in a conversation.  The runner owns the full proactive
+ * lifecycle: config resolution, channel matching, rate limiting, debounce
+ * loop, evaluation, and delegation to the executor for actual interjection.
  */
 
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
+import type { ChatHistoryStore } from "../../history/chat-history-store.js";
+import type { ProactiveRoomConfig } from "../../config/muaddib-config.js";
+import type { CommandConfig } from "./resolver.js";
+import { CommandResolver } from "./resolver.js";
+import { RateLimiter } from "./rate-limiter.js";
+import type {
+  CommandExecutor,
+  CommandRateLimiter,
+  CommandExecutorLogger,
+  SteeringContextDrainer,
+} from "./command-executor.js";
+import { pickModeModel } from "./command-executor.js";
+import type { SteeringQueue, QueuedInboundMessage, SteeringKey } from "./steering-queue.js";
+import type { RoomMessage } from "../message.js";
+
+// ── ProactiveConfig (resolved, all fields required) ──
 
 export interface ProactiveConfig {
   /** Channels where proactive interjection is enabled (e.g. "irc.libera.chat#channel"). */
@@ -52,6 +70,265 @@ export interface ProactiveEvaluatorOptions {
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   logger?: ProactiveEvalLogger;
 }
+
+// ── Config builder ──
+
+/**
+ * Build a resolved ProactiveConfig from raw room config, or return null
+ * if proactive interjection is not configured.
+ */
+export function buildProactiveConfig(
+  rawProactive: ProactiveRoomConfig | undefined,
+  commandConfig: CommandConfig,
+): ProactiveConfig | null {
+  const interjecting = rawProactive?.interjecting;
+  if (!rawProactive || !interjecting || interjecting.length === 0) {
+    return null;
+  }
+  return {
+    interjecting,
+    debounce_seconds: rawProactive.debounce_seconds ?? 15,
+    history_size: rawProactive.history_size ?? commandConfig.history_size,
+    rate_limit: rawProactive.rate_limit ?? 10,
+    rate_period: rawProactive.rate_period ?? 3600,
+    interject_threshold: rawProactive.interject_threshold ?? 7,
+    models: {
+      validation: rawProactive.models?.validation ?? [],
+      serious: rawProactive.models?.serious ?? pickModeModel(commandConfig.modes.serious?.model) ?? "",
+    },
+    prompts: {
+      interject: rawProactive.prompts?.interject ?? "",
+      serious_extra: rawProactive.prompts?.serious_extra ?? "",
+    },
+  };
+}
+
+// ── ProactiveRunner ──
+
+/**
+ * Owns the full proactive interjection lifecycle: config, channel matching,
+ * rate limiting, debounce loop, scoring evaluation, and delegation to the
+ * executor for the actual agent run.
+ */
+export class ProactiveRunner {
+  private readonly config: ProactiveConfig;
+  private readonly channels: Set<string>;
+  private readonly rateLimiter: CommandRateLimiter;
+  private readonly history: ChatHistoryStore;
+  private readonly modelAdapter: PiAiModelAdapter;
+  private readonly getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+  private readonly classifyMode: (context: Array<{ role: string; content: string }>) => Promise<string>;
+  private readonly logger: CommandExecutorLogger;
+  private readonly executor: CommandExecutor;
+  private readonly resolver: CommandResolver;
+  private readonly steeringQueue: SteeringQueue;
+
+  constructor(opts: {
+    config: ProactiveConfig;
+    history: ChatHistoryStore;
+    modelAdapter: PiAiModelAdapter;
+    getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+    classifyMode: (context: Array<{ role: string; content: string }>) => Promise<string>;
+    logger: CommandExecutorLogger;
+    executor: CommandExecutor;
+    resolver: CommandResolver;
+    steeringQueue: SteeringQueue;
+  }) {
+    this.config = opts.config;
+    this.channels = new Set(opts.config.interjecting);
+    this.rateLimiter = new RateLimiter(opts.config.rate_limit, opts.config.rate_period);
+    this.history = opts.history;
+    this.modelAdapter = opts.modelAdapter;
+    this.getApiKey = opts.getApiKey;
+    this.classifyMode = opts.classifyMode;
+    this.logger = opts.logger;
+    this.executor = opts.executor;
+    this.resolver = opts.resolver;
+    this.steeringQueue = opts.steeringQueue;
+  }
+
+  /** Check whether a channel key is proactive-enabled. */
+  isProactiveChannel(channelKey: string): boolean {
+    return this.channels.has(channelKey);
+  }
+
+  /**
+   * Run a proactive session: debounce, evaluate, and possibly interject.
+   * Takes ownership of the steering session lifecycle.
+   */
+  async runSession(
+    steeringKey: SteeringKey,
+    triggerItem: QueuedInboundMessage,
+    createSteeringContextDrainer: (key: SteeringKey) => SteeringContextDrainer,
+  ): Promise<void> {
+    const debounceMs = this.config.debounce_seconds * 1000;
+    this.steeringQueue.finishItem(triggerItem);
+
+    let activeItem: QueuedInboundMessage | null = null;
+
+    try {
+      // ── Debounce loop: wait for silence ──
+      while (true) {
+        const result = await this.steeringQueue.waitForNewItem(steeringKey, debounceMs);
+
+        if (result === "timeout") {
+          break;
+        }
+
+        if (this.steeringQueue.hasQueuedCommands(steeringKey)) {
+          break;
+        }
+
+        this.steeringQueue.drainSteeringContextMessages(steeringKey);
+      }
+
+      // ── Take next work item via compaction ──
+      const { dropped, nextItem } = this.steeringQueue.takeNextWorkCompacted(steeringKey);
+      for (const droppedItem of dropped) {
+        droppedItem.result = null;
+        this.steeringQueue.finishItem(droppedItem);
+      }
+
+      if (!nextItem) {
+        await this.evaluateAndMaybeInterject(
+          steeringKey, triggerItem.message, triggerItem.sendResponse, createSteeringContextDrainer,
+        );
+        return;
+      }
+
+      activeItem = nextItem;
+
+      if (activeItem.kind === "command") {
+        if (activeItem.triggerMessageId === null) {
+          throw new Error("Queued command item is missing trigger message id.");
+        }
+        activeItem.result = await this.executor.execute(
+          activeItem.message,
+          activeItem.triggerMessageId,
+          activeItem.sendResponse,
+          createSteeringContextDrainer(steeringKey),
+        );
+      } else {
+        await this.evaluateAndMaybeInterject(
+          steeringKey, activeItem.message, activeItem.sendResponse, createSteeringContextDrainer,
+        );
+        activeItem.result = null;
+      }
+
+      this.steeringQueue.finishItem(activeItem);
+
+      // Drain remaining items in the session
+      while (true) {
+        const { dropped: moreDropped, nextItem: moreNext } =
+          this.steeringQueue.takeNextWorkCompacted(steeringKey);
+        for (const droppedItem of moreDropped) {
+          droppedItem.result = null;
+          this.steeringQueue.finishItem(droppedItem);
+        }
+
+        if (!moreNext) {
+          return;
+        }
+
+        if (moreNext.kind === "command") {
+          if (moreNext.triggerMessageId === null) {
+            throw new Error("Queued command item is missing trigger message id.");
+          }
+          moreNext.result = await this.executor.execute(
+            moreNext.message,
+            moreNext.triggerMessageId,
+            moreNext.sendResponse,
+            createSteeringContextDrainer(steeringKey),
+          );
+        } else {
+          await this.executor.triggerAutoChronicler(moreNext.message, this.config.history_size);
+          moreNext.result = null;
+        }
+
+        this.steeringQueue.finishItem(moreNext);
+      }
+    } catch (error) {
+      this.steeringQueue.abortSession(steeringKey, error);
+      if (activeItem) {
+        this.steeringQueue.failItem(activeItem, error);
+      }
+      throw error;
+    }
+  }
+
+  private async evaluateAndMaybeInterject(
+    steeringKey: SteeringKey,
+    message: RoomMessage,
+    sendResponse: ((text: string) => Promise<void>) | undefined,
+    createSteeringContextDrainer: (key: SteeringKey) => SteeringContextDrainer,
+  ): Promise<void> {
+    if (!this.rateLimiter.checkLimit()) {
+      this.logger.debug(
+        "Proactive interjection rate limited",
+        `arc=${message.serverTag}#${message.channelName}`,
+        `nick=${message.nick}`,
+      );
+      return;
+    }
+
+    const context = await this.history.getContextForMessage(
+      message,
+      this.config.history_size,
+    );
+
+    const evalResult = await evaluateProactiveInterjection(
+      this.config,
+      context,
+      {
+        modelAdapter: this.modelAdapter,
+        getApiKey: this.getApiKey,
+        logger: this.logger,
+      },
+    );
+
+    if (!evalResult.shouldInterject) {
+      this.logger.debug(
+        "Proactive interjection declined",
+        `arc=${message.serverTag}#${message.channelName}`,
+        `reason=${evalResult.reason}`,
+      );
+      return;
+    }
+
+    const classifiedLabel = await this.classifyMode(context);
+    const classifiedTrigger = this.resolver.triggerForLabel(classifiedLabel);
+    const [classifiedModeKey, classifiedRuntime] = this.resolver.runtimeForTrigger(classifiedTrigger);
+
+    if (classifiedModeKey !== "serious") {
+      this.logger.warn(
+        "Proactive interjection suggested but not serious mode",
+        `label=${classifiedLabel}`,
+        `trigger=${classifiedTrigger}`,
+        `reason=${evalResult.reason}`,
+      );
+      return;
+    }
+
+    this.logger.info(
+      "Interjecting proactively",
+      `arc=${message.serverTag}#${message.channelName}`,
+      `nick=${message.nick}`,
+      `message=${message.content.slice(0, 150)}`,
+      `reason=${evalResult.reason}`,
+    );
+
+    await this.executor.executeProactive(
+      message,
+      sendResponse,
+      this.config,
+      classifiedTrigger,
+      classifiedRuntime,
+      createSteeringContextDrainer(steeringKey),
+    );
+  }
+}
+
+// ── Evaluation function ──
 
 /**
  * Evaluate whether the bot should proactively interject based on conversation
