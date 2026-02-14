@@ -6,39 +6,39 @@ import type { CommandConfig } from "../rooms/command/resolver.js";
 
 // ── Config section interfaces ──────────────────────────────────────────
 
-export interface ActorConfig {
+interface ActorConfig {
   maxIterations?: number;
   maxCompletionRetries?: number;
   llmDebugMaxChars?: number;
 }
 
-export interface ArtifactsConfig {
+interface ArtifactsConfig {
   path?: string;
   url?: string;
 }
 
-export interface OracleConfig {
+interface OracleConfig {
   model?: string;
   prompt?: string;
 }
 
-export interface ImageGenConfig {
+interface ImageGenConfig {
   model?: string;
 }
 
-export interface JinaConfig {
+interface JinaConfig {
   apiKey?: string;
 }
 
-export interface SpritesConfig {
+interface SpritesConfig {
   token?: string;
 }
 
-export interface SummaryConfig {
+interface SummaryConfig {
   model?: string;
 }
 
-export interface ToolsConfig {
+interface ToolsConfig {
   artifacts?: ArtifactsConfig;
   oracle?: OracleConfig;
   imageGen?: ImageGenConfig;
@@ -47,49 +47,49 @@ export interface ToolsConfig {
   summary?: SummaryConfig;
 }
 
-export interface ContextReducerConfig {
+interface ContextReducerConfig {
   model?: string;
   prompt?: string;
 }
 
-export interface ChroniclerConfig {
+interface ChroniclerConfig {
   model?: string;
   database?: { path?: string };
   paragraphsPerChapter?: number;
   arcModels?: Record<string, string>;
 }
 
-export interface OpenRouterProviderConfig {
+interface OpenRouterProviderConfig {
   baseUrl?: string;
 }
 
-export interface DeepSeekProviderConfig {
+interface DeepSeekProviderConfig {
   baseUrl?: string;
 }
 
-export interface ProvidersConfig {
+interface ProvidersConfig {
   openrouter?: OpenRouterProviderConfig;
   deepseek?: DeepSeekProviderConfig;
 }
 
-export interface HistoryConfig {
+interface HistoryConfig {
   database?: { path?: string };
 }
 
-export interface RouterConfig {
+interface RouterConfig {
   refusalFallbackModel?: string;
 }
 
-export interface RoomVarlinkConfig {
+interface RoomVarlinkConfig {
   socket_path?: string;
 }
 
-export interface SlackWorkspaceConfig {
+interface SlackWorkspaceConfig {
   bot_token?: string;
   name?: string;
 }
 
-export interface RoomConfig {
+interface RoomConfig {
   enabled?: boolean;
   command?: CommandConfig;
   prompt_vars?: Record<string, string>;

@@ -1,5 +1,3 @@
-import { type UserMessage } from "@mariozechner/pi-ai";
-
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 
 export interface ContextReducerConfig {

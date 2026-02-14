@@ -108,31 +108,6 @@ function extractFilenameFromViewerUrl(url: string): string {
   return decodeURIComponent(parsed.search.slice(1));
 }
 
-function assistantTextMessage(text: string) {
-  return {
-    role: "assistant" as const,
-    content: [{ type: "text" as const, text }],
-    api: "openai-completions",
-    provider: "openai",
-    model: "gpt-4o-mini",
-    usage: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      totalTokens: 0,
-      cost: {
-        input: 0,
-        output: 0,
-        cacheRead: 0,
-        cacheWrite: 0,
-        total: 0,
-      },
-    },
-    stopReason: "stop" as const,
-    timestamp: Date.now(),
-  };
-}
 
 describe("core tool executors artifact support", () => {
   it("share_artifact writes text artifact and returns viewer URL", async () => {

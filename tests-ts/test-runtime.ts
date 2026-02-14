@@ -7,7 +7,7 @@ import type { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { PiAiModelAdapter } from "../src/models/pi-ai-model-adapter.js";
 import type { MuaddibRuntime } from "../src/runtime.js";
 
-export interface CreateTestRuntimeOptions {
+interface CreateTestRuntimeOptions {
   history: ChatHistoryStore;
   configData?: Record<string, unknown>;
   refusalFallbackModel?: string;

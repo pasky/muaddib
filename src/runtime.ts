@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 import { assertNoDeferredFeatureConfig } from "./config/deferred-features.js";
 import { getMuaddibHome, resolveMuaddibPath } from "./config/paths.js";
-import { RuntimeLogWriter, type RuntimeLogger } from "./app/logging.js";
+import { RuntimeLogWriter } from "./app/logging.js";
 import { ChronicleStore } from "./chronicle/chronicle-store.js";
 import {
   ChronicleLifecycleTs,
@@ -30,7 +30,7 @@ export interface MuaddibRuntime {
   autoChronicler?: AutoChronicler;
 }
 
-export interface CreateMuaddibRuntimeOptions {
+interface CreateMuaddibRuntimeOptions {
   configPath: string;
   muaddibHome?: string;
   dbPath?: string;

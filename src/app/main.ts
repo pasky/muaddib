@@ -5,7 +5,6 @@ import { RuntimeLogWriter } from "./logging.js";
 import { DiscordRoomMonitor } from "../rooms/discord/monitor.js";
 import { IrcRoomMonitor } from "../rooms/irc/monitor.js";
 import { SlackRoomMonitor } from "../rooms/slack/monitor.js";
-import { createSendRetryEventLogger } from "../rooms/send-retry.js";
 import { getMuaddibHome } from "../config/paths.js";
 import { createMuaddibRuntime, shutdownRuntime, type MuaddibRuntime } from "../runtime.js";
 

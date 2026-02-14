@@ -11,7 +11,7 @@
     "build": "tsc -p tsconfig.build.json && cp src/agent/tools/artifact-viewer.html dist/agent/tools/artifact-viewer.html",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint \"{src,tests-ts,scripts}/**/*.ts\"",
-    "test": "vitest run --testTimeout=20000",
+    "test": "vitest run --testTimeout=20000 --coverage",
     "cli:message": "node ./dist/cli/main.js",
     "start": "node ./dist/app/main.js",
     "start:irc": "node ./dist/app/main.js"

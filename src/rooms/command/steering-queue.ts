@@ -2,7 +2,7 @@ import { roomArc, type RoomMessage } from "../message.js";
 
 export type SteeringKey = readonly [arc: string, nick: string, threadId: string | null];
 
-export interface SteeringContextMessage {
+interface SteeringContextMessage {
   role: "user";
   content: string;
 }

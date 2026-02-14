@@ -39,13 +39,13 @@ import {
   createEditArtifactTool,
   createShareArtifactTool,
 } from "./artifact.js";
-import type { EditArtifactInput, ShareArtifactExecutor, EditArtifactExecutor } from "./artifact.js";
-import type { ChronicleReadInput, ChronicleAppendInput, ChronicleReadExecutor, ChronicleAppendExecutor } from "./chronicle.js";
-import type { ExecuteCodeInput, ExecuteCodeExecutor } from "./execute-code.js";
-import type { GenerateImageInput, GenerateImageResult, GeneratedImageResultItem, GenerateImageExecutor } from "./image.js";
-import type { OracleInput, OracleExecutor } from "./oracle.js";
-import type { QuestStartInput, SubquestStartInput, QuestSnoozeInput, QuestStartExecutor, SubquestStartExecutor, QuestSnoozeExecutor } from "./quest.js";
-import type { VisitWebpageImageResult, VisitWebpageResult, WebSearchExecutor, VisitWebpageExecutor } from "./web.js";
+import type { ShareArtifactExecutor, EditArtifactExecutor } from "./artifact.js";
+import type { ChronicleReadExecutor, ChronicleAppendExecutor } from "./chronicle.js";
+import type { ExecuteCodeExecutor } from "./execute-code.js";
+import type { GenerateImageExecutor } from "./image.js";
+import type { OracleExecutor } from "./oracle.js";
+import type { QuestStartExecutor, SubquestStartExecutor, QuestSnoozeExecutor } from "./quest.js";
+import type { WebSearchExecutor, VisitWebpageExecutor } from "./web.js";
 import type { DefaultToolExecutorOptions, MuaddibTool, ToolPersistType } from "./types.js";
 
 export interface BaselineToolExecutors {

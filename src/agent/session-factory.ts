@@ -1,5 +1,5 @@
 import { Agent, type AgentMessage, type AgentTool, type StreamFn, type ThinkingLevel } from "@mariozechner/pi-agent-core";
-import { streamSimple, type AssistantMessage, type ToolResultMessage, type Usage, type UserMessage } from "@mariozechner/pi-ai";
+import { streamSimple, type AssistantMessage, type Usage, type UserMessage } from "@mariozechner/pi-ai";
 import {
   AgentSession,
   AuthStorage,
@@ -29,7 +29,7 @@ export interface SessionFactoryContextMessage {
   content: string;
 }
 
-export interface CreateAgentSessionInput {
+interface CreateAgentSessionInput {
   model: string;
   systemPrompt: string;
   tools: AgentTool<any>[];
@@ -43,7 +43,7 @@ export interface CreateAgentSessionInput {
   logger?: RunnerLogger;
 }
 
-export interface CreateAgentSessionResult {
+interface CreateAgentSessionResult {
   session: AgentSession;
   agent: Agent;
   ensureProviderKey: (provider: string) => Promise<void>;

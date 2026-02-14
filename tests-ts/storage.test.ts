@@ -1,6 +1,6 @@
 
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ChronicleStore } from "../src/chronicle/chronicle-store.js";
 import { ChronicleLifecycleTs } from "../src/chronicle/lifecycle.js";

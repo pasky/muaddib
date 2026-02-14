@@ -1552,7 +1552,7 @@ describe("RoomCommandHandlerTs", () => {
       }),
     });
 
-    const t1 = handler.handleIncomingMessage(makeMessage("!s first"), {
+    handler.handleIncomingMessage(makeMessage("!s first"), {
       isDirect: true,
       sendResponse: async (text) => {
         sent.push(text);

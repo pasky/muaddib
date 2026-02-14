@@ -1121,13 +1121,6 @@ function normalizeModelSpec(model: string): string {
   return `${spec.provider}:${spec.modelId}`;
 }
 
-function stringifyError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
-}
-
 function numberWithDefault(value: unknown, fallback: number): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) {

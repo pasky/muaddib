@@ -2,7 +2,7 @@ import { Type } from "@sinclair/typebox";
 import type { ChronicleStore } from "../../chronicle/chronicle-store.js";
 import type { MuaddibTool } from "./types.js";
 
-export interface ProgressReportToolOptions {
+interface ProgressReportToolOptions {
   onProgressReport?: (text: string) => void | Promise<void>;
   /** Minimum seconds between delivered reports (default 15). */
   minIntervalSeconds?: number;
@@ -53,7 +53,7 @@ export function createProgressReportTool(options: ProgressReportToolOptions = {}
   };
 }
 
-export interface MakePlanToolOptions {
+interface MakePlanToolOptions {
   chronicleStore?: ChronicleStore;
   currentQuestId?: string | null;
 }

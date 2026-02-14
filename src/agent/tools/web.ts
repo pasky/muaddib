@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { join, resolve, relative, extname } from "node:path";
+import { resolve, relative, extname } from "node:path";
 
 import { Type } from "@sinclair/typebox";
 
@@ -309,7 +309,7 @@ async function tryReadLocalArtifact(
  * Extract the artifact-relative path from a URL that matches the artifacts base URL.
  * Handles both raw paths and `?filename` / `index.html?filename` query styles.
  */
-export function extractLocalArtifactPath(url: string, artifactsUrl: string): string | null {
+function extractLocalArtifactPath(url: string, artifactsUrl: string): string | null {
   const base = artifactsUrl.replace(/\/+$/, "");
   if (url !== base && !url.startsWith(base + "/") && !url.startsWith(base + "?")) {
     return null;

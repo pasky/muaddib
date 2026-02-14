@@ -148,7 +148,7 @@ function numberValue(value: unknown): number | null {
   return null;
 }
 
-export interface SendRetryLogger {
+interface SendRetryLogger {
   info(...data: unknown[]): void;
   warn(...data: unknown[]): void;
   error(...data: unknown[]): void;

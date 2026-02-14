@@ -20,17 +20,20 @@ function isExplicitlyEnabled(value: unknown): boolean {
   return false;
 }
 
-interface DeferredFeatureConfigPaths {
-  blockingPaths: string[];
-  ignoredPaths: string[];
+interface DeferredFeatureLogger {
+  warn(message: string): void;
 }
 
-export function collectDeferredFeatureConfigPaths(config: Record<string, unknown>): DeferredFeatureConfigPaths {
+export function assertNoDeferredFeatureConfig(
+  config: MuaddibConfig,
+  logger: DeferredFeatureLogger = console,
+): void {
   const blockingPaths: string[] = [];
   const ignoredPaths: string[] = [];
+  const raw = config.toObject();
 
-  if (hasOwn(config, "chronicler")) {
-    const chroniclerConfig = config.chronicler;
+  if (hasOwn(raw, "chronicler")) {
+    const chroniclerConfig = raw.chronicler;
     if (isObject(chroniclerConfig) && hasOwn(chroniclerConfig, "quests")) {
       if (isExplicitlyEnabled(chroniclerConfig.quests)) {
         blockingPaths.push("chronicler.quests");
@@ -40,15 +43,15 @@ export function collectDeferredFeatureConfigPaths(config: Record<string, unknown
     }
   }
 
-  if (hasOwn(config, "quests")) {
-    if (isExplicitlyEnabled(config.quests)) {
+  if (hasOwn(raw, "quests")) {
+    if (isExplicitlyEnabled(raw.quests)) {
       blockingPaths.push("quests");
     } else {
       ignoredPaths.push("quests");
     }
   }
 
-  const rooms = config.rooms;
+  const rooms = raw.rooms;
   if (isObject(rooms)) {
     for (const [roomName, roomConfig] of Object.entries(rooms)) {
       if (isObject(roomConfig) && hasOwn(roomConfig, "proactive")) {
@@ -62,33 +65,20 @@ export function collectDeferredFeatureConfigPaths(config: Record<string, unknown
     }
   }
 
-  return {
-    blockingPaths: [...new Set(blockingPaths)].sort((a, b) => a.localeCompare(b)),
-    ignoredPaths: [...new Set(ignoredPaths)].sort((a, b) => a.localeCompare(b)),
-  };
-}
+  const uniqueIgnored = [...new Set(ignoredPaths)].sort((a, b) => a.localeCompare(b));
+  const uniqueBlocking = [...new Set(blockingPaths)].sort((a, b) => a.localeCompare(b));
 
-interface DeferredFeatureLogger {
-  warn(message: string): void;
-}
-
-export function assertNoDeferredFeatureConfig(
-  config: MuaddibConfig,
-  logger: DeferredFeatureLogger = console,
-): void {
-  const { blockingPaths, ignoredPaths } = collectDeferredFeatureConfigPaths(config.toObject());
-
-  if (ignoredPaths.length > 0) {
+  if (uniqueIgnored.length > 0) {
     logger.warn(
-      `Deferred features are not supported in the TypeScript runtime and will be ignored unless explicitly enabled: ${ignoredPaths.join(", ")}.`,
+      `Deferred features are not supported in the TypeScript runtime and will be ignored unless explicitly enabled: ${uniqueIgnored.join(", ")}.`,
     );
   }
 
-  if (blockingPaths.length === 0) {
+  if (uniqueBlocking.length === 0) {
     return;
   }
 
   throw new Error(
-    `Deferred features are not supported in the TypeScript runtime. Disable or remove unsupported config keys: ${blockingPaths.join(", ")}.`,
+    `Deferred features are not supported in the TypeScript runtime. Disable or remove unsupported config keys: ${uniqueBlocking.join(", ")}.`,
   );
 }
