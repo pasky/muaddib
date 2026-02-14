@@ -60,7 +60,7 @@ const TYPING_LOADING_MESSAGES = [
  */
 export class SlackSocketTransport implements SlackEventSource, SlackSender {
   private readonly queue = new AsyncQueue<SlackIncomingEvent | SlackTransportSignal | null>();
-  private readonly app: App;
+  private app: App | null = null;
   private connected = false;
   private botUserId: string | null = null;
   private botDisplayName: string | null = null;
@@ -68,10 +68,23 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
   private readonly userIdByDisplayNameCache = new Map<string, string>();
   private readonly channelNameCache = new Map<string, string>();
 
-  constructor(private readonly options: SlackSocketTransportOptions) {
+  constructor(private readonly options: SlackSocketTransportOptions) {}
+
+  private getApp(): App {
+    if (!this.app) {
+      throw new Error("SlackSocketTransport not connected");
+    }
+    return this.app;
+  }
+
+  async connect(): Promise<void> {
+    if (this.connected) {
+      return;
+    }
+
     this.app = new App({
-      token: options.botToken,
-      appToken: options.appToken,
+      token: this.options.botToken,
+      appToken: this.options.appToken,
       socketMode: true,
     });
 
@@ -88,17 +101,11 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
         reason: stringifyError(error),
       });
     });
-  }
-
-  async connect(): Promise<void> {
-    if (this.connected) {
-      return;
-    }
 
     await this.app.start();
     this.connected = true;
 
-    const auth = await this.app.client.auth.test({
+    const auth = await this.getApp().client.auth.test({
       token: this.options.botToken,
     });
 
@@ -115,7 +122,7 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
     }
 
     this.connected = false;
-    await this.app.stop();
+    await this.getApp().stop();
     this.queue.push(null);
   }
 
@@ -132,7 +139,7 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
     message: string,
     options?: SlackSendOptions,
   ): Promise<SlackSendResult> {
-    const response = await this.app.client.chat.postMessage({
+    const response = await this.getApp().client.chat.postMessage({
       channel: channelId,
       text: message,
       thread_ts: options?.threadTs,
@@ -150,7 +157,7 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
     messageTs: string,
     message: string,
   ): Promise<SlackSendResult> {
-    const response = await this.app.client.chat.update({
+    const response = await this.getApp().client.chat.update({
       channel: channelId,
       ts: messageTs,
       text: message,
@@ -197,7 +204,7 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
     }
 
     try {
-      await this.app.client.apiCall("assistant.threads.setStatus", {
+      await this.getApp().client.apiCall("assistant.threads.setStatus", {
         channel_id: channelId,
         thread_ts: threadTs,
         status: "is thinking...",
@@ -220,7 +227,7 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
     }
 
     try {
-      await this.app.client.apiCall("assistant.threads.setStatus", {
+      await this.getApp().client.apiCall("assistant.threads.setStatus", {
         channel_id: channelId,
         thread_ts: threadTs,
         status: "",
@@ -359,7 +366,7 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
     }
 
     try {
-      const response = await this.app.client.users.info({
+      const response = await this.getApp().client.users.info({
         user: userId,
         token: this.options.botToken,
       });
@@ -388,7 +395,7 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
     }
 
     try {
-      const response = await this.app.client.conversations.info({
+      const response = await this.getApp().client.conversations.info({
         channel: channelId,
         token: this.options.botToken,
       });
