@@ -1,8 +1,8 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 
-import type { MuaddibTool, ToolPersistType } from "../agent/tools/baseline-tools.js";
-import type { PromptResult } from "../agent/session-runner.js";
-import type { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
+import type { MuaddibTool, ToolPersistType } from "../../agent/tools/baseline-tools.js";
+import type { PromptResult } from "../../agent/session-runner.js";
+import type { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 
 interface ToolSummaryLogger {
   debug(message: string, ...data: unknown[]): void;

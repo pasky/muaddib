@@ -37,7 +37,7 @@ import {
   type ResolvedCommand,
 } from "./resolver.js";
 import type { ProactiveConfig } from "./proactive.js";
-import { generateToolSummaryFromSession } from "../tool-summary.js";
+import { generateToolSummaryFromSession } from "./tool-summary.js";
 
 // ── Public types ──
 

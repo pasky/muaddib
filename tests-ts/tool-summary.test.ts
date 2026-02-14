@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { generateToolSummaryFromSession } from "../src/rooms/tool-summary.js";
+import { generateToolSummaryFromSession } from "../src/rooms/command/tool-summary.js";
 
 describe("generateToolSummaryFromSession", () => {
   it("returns a summary for summary/artifact tools", async () => {
