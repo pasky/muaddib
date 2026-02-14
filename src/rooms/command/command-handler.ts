@@ -174,8 +174,16 @@ export class RoomCommandHandlerTs {
       modelAdapter: runtime.modelAdapter,
       responseCleaner: overrides?.responseCleaner,
       logger: loggerInstance,
-      refusalFallbackModel: runtime.refusalFallbackModel,
-      persistenceSummaryModel: runtime.persistenceSummaryModel,
+      refusalFallbackModel: resolveConfigModelSpec(
+        runtime.config.getRouterConfig().refusalFallbackModel,
+        "router.refusal_fallback_model",
+        runtime.modelAdapter,
+      ),
+      persistenceSummaryModel: resolveConfigModelSpec(
+        runtime.config.getToolsConfig().summary?.model,
+        "tools.summary.model",
+        runtime.modelAdapter,
+      ),
       contextReducerConfig: {
         model: contextReducerConfig.model,
         prompt: contextReducerConfig.prompt,
@@ -1220,6 +1228,24 @@ function formatLogPreview(text: string, maxChars = 180): string {
     return singleLine;
   }
   return `${singleLine.slice(0, maxChars)}...`;
+}
+
+function resolveConfigModelSpec(
+  raw: unknown,
+  configKey: string,
+  _modelAdapter: PiAiModelAdapter,
+): string | undefined {
+  if (raw === undefined || raw === null) {
+    return undefined;
+  }
+
+  if (typeof raw !== "string" || raw.trim().length === 0) {
+    throw new Error(`${configKey} must be a non-empty string fully qualified as provider:model.`);
+  }
+
+  const trimmed = raw.trim();
+  const spec = parseModelSpec(trimmed);
+  return `${spec.provider}:${spec.modelId}`;
 }
 
 function extractSharedArtifactUrl(result: string): string {

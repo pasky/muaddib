@@ -61,8 +61,6 @@ function createHandler(options: {
   contextReducer?: ContextReducer;
   responseCleaner?: (text: string, nick: string) => string;
   onProgressReport?: (text: string) => void | Promise<void>;
-  refusalFallbackModel?: string;
-  persistenceSummaryModel?: string;
   autoChronicler?: any;
   chronicleStore?: any;
   classifyMode?: unknown;
@@ -79,8 +77,6 @@ function createHandler(options: {
       ...(options.configData ?? {}),
       rooms: { irc: options.roomConfig ?? roomConfig },
     },
-    refusalFallbackModel: options.refusalFallbackModel,
-    persistenceSummaryModel: options.persistenceSummaryModel,
     logger: options.runtimeLogger,
   });
 
@@ -440,7 +436,7 @@ describe("RoomCommandHandlerTs", () => {
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      refusalFallbackModel: "anthropic:claude-3-5-haiku",
+      configData: { router: { refusal_fallback_model: "anthropic:claude-3-5-haiku" } },
       logger,
       runnerFactory: () => ({
         prompt: async () =>
@@ -1201,7 +1197,7 @@ describe("RoomCommandHandlerTs", () => {
       } as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      refusalFallbackModel: "anthropic:claude-3-5-haiku",
+      configData: { router: { refusal_fallback_model: "anthropic:claude-3-5-haiku" } },
       runnerFactory: () => ({
         prompt: async () =>
           makeRunnerResult("The AI refused to respond to this request", {
@@ -1262,7 +1258,7 @@ describe("RoomCommandHandlerTs", () => {
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      refusalFallbackModel: "anthropic:claude-3-5-haiku",
+      configData: { router: { refusal_fallback_model: "anthropic:claude-3-5-haiku" } },
       runnerFactory: (input) => {
         runnerModels.push(input.model);
         return {
@@ -1302,7 +1298,7 @@ describe("RoomCommandHandlerTs", () => {
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      refusalFallbackModel: "anthropic:claude-3-5-haiku",
+      configData: { router: { refusal_fallback_model: "anthropic:claude-3-5-haiku" } },
       runnerFactory: () => ({
         prompt: async () => {
           throw new Error("Agent run failed: invalid_prompt blocked for safety reasons.");
@@ -1328,7 +1324,7 @@ describe("RoomCommandHandlerTs", () => {
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      refusalFallbackModel: "anthropic:claude-3-5-haiku",
+      configData: { router: { refusal_fallback_model: "anthropic:claude-3-5-haiku" } },
       runnerFactory: (input) => {
         runnerModels.push(input.model);
         return {

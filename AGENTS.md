@@ -36,6 +36,7 @@
 - **Naming**: camelCase for variables/functions, PascalCase for classes/types
 - **Imports**: Node built-ins, then third-party, then local modules
 - **Error Handling**: fail fast; catch only where a concrete recovery strategy exists
+- **Loose Coupling**: config values should be resolved and validated at the point of use, not threaded through intermediary structures. Avoid putting fields on shared runtime objects just to pass them to a single consumer.
 - **Logging**: keep stdout concise, preserve structured/runtime detail in file logs
 
 ## Testing

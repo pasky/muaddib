@@ -10,8 +10,6 @@ import type { MuaddibRuntime } from "../src/runtime.js";
 interface CreateTestRuntimeOptions {
   history: ChatHistoryStore;
   configData?: Record<string, unknown>;
-  refusalFallbackModel?: string;
-  persistenceSummaryModel?: string;
   logger?: RuntimeLogWriter;
 }
 
@@ -27,7 +25,5 @@ export function createTestRuntime(options: CreateTestRuntimeOptions): MuaddibRun
         write: () => true,
       } as unknown as NodeJS.WriteStream,
     }),
-    refusalFallbackModel: options.refusalFallbackModel,
-    persistenceSummaryModel: options.persistenceSummaryModel,
   };
 }
