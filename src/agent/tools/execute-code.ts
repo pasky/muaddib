@@ -1,11 +1,23 @@
-import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+/**
+ * Code execution tool using Fly.io Sprites sandbox.
+ *
+ * Architecture (matching Python parity):
+ * - One Sprite per arc (persisted, reused across executor calls)
+ * - Per-executor-call isolated workdir in /tmp/actor-{uuid}/
+ * - Shared workspace in /workspace/ (persists across calls)
+ * - Input artifacts downloaded into /artifacts/ inside the sprite
+ * - Auto-detection of generated images (matplotlib etc.)
+ * - Explicit output_files uploaded as artifacts
+ */
+
+import { createHash, randomUUID } from "node:crypto";
+import { basename, extname, posix } from "node:path";
 
 import { Type } from "@sinclair/typebox";
 
+import { writeArtifactBytes } from "./artifact-storage.js";
 import type { DefaultToolExecutorOptions, MuaddibTool } from "./types.js";
+import type { VisitWebpageImageResult } from "./web.js";
 
 export interface ExecuteCodeInput {
   code: string;
@@ -16,8 +28,28 @@ export interface ExecuteCodeInput {
 
 export type ExecuteCodeExecutor = (input: ExecuteCodeInput) => Promise<string>;
 
-const DEFAULT_EXECUTE_TIMEOUT_MS = 60_000;
+const DEFAULT_EXECUTE_TIMEOUT_MS = 600_000;
 const DEFAULT_CAPTURE_LIMIT = 24_000;
+
+// ---------------------------------------------------------------------------
+// Sprite cache: one sprite per arc, reused across calls (matches Python)
+// ---------------------------------------------------------------------------
+
+import type { Sprite } from "@fly/sprites";
+
+const spriteCache = new Map<string, Sprite>();
+
+function normalizeArcId(arc: string): string {
+  return createHash("sha256").update(arc).digest("hex").slice(0, 16);
+}
+
+function getSpriteName(arc: string): string {
+  return `arc-${normalizeArcId(arc)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Tool definition
+// ---------------------------------------------------------------------------
 
 export function createExecuteCodeTool(executors: { executeCode: ExecuteCodeExecutor }): MuaddibTool {
   return {
@@ -25,10 +57,11 @@ export function createExecuteCodeTool(executors: { executeCode: ExecuteCodeExecu
     persistType: "artifact",
     label: "Execute Code",
     description:
-      "Execute code and return output. Supports python and bash. Input/output artifact features are incremental in TS.",
+      "Execute code in a sandbox environment and return the output. The sandbox environment is persisted to follow-up calls of this tool within this thread. Use /workspace/ to store files that should persist across conversations. Use output_files to download any generated files from the sandbox.",
     parameters: Type.Object({
       code: Type.String({
-        description: "The code to execute.",
+        description:
+          "The code to execute in the sandbox. Each execution is auto-saved to /tmp/_v{n}.py (or .sh for bash) - the exact path is returned in the response. You can re-run previous code with 'python /tmp/_v1.py' after fixing issues (e.g., pip install missing module).",
       }),
       language: Type.Optional(
         Type.Union([Type.Literal("python"), Type.Literal("bash")], {
@@ -38,12 +71,14 @@ export function createExecuteCodeTool(executors: { executeCode: ExecuteCodeExecu
       ),
       input_artifacts: Type.Optional(
         Type.Array(Type.String(), {
-          description: "Optional list of artifact URLs to preload.",
+          description:
+            "Optional list of artifact URLs to download into the sandbox at /artifacts/ before execution (e.g., ['https://example.com/artifacts/?abc123.csv'] -> /artifacts/abc123.csv).",
         }),
       ),
       output_files: Type.Optional(
         Type.Array(Type.String(), {
-          description: "Optional list of output files to export.",
+          description:
+            "Optional list of file paths in the sandbox to download and share as artifacts (e.g., ['/tmp/report.csv']).",
         }),
       ),
     }),
@@ -59,28 +94,261 @@ export function createExecuteCodeTool(executors: { executeCode: ExecuteCodeExecu
   };
 }
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function extractFilenameFromUrl(url: string): string | undefined {
+  try {
+    const parsed = new URL(url);
+    const query = parsed.search.slice(1);
+    if (query) {
+      if (!query.includes("=")) {
+        const decoded = decodeURIComponent(query.trim());
+        return decoded || undefined;
+      }
+      const params = new URLSearchParams(query);
+      const fromKey = params.get("file") ?? params.get("filename");
+      if (fromKey?.trim()) return fromKey.trim();
+    }
+    const decodedPath = decodeURIComponent(parsed.pathname);
+    if (!decodedPath || decodedPath.endsWith("/")) return undefined;
+    const leaf = decodedPath.split("/").pop();
+    if (!leaf || leaf === "index.html") return undefined;
+    return leaf;
+  } catch {
+    return undefined;
+  }
+}
+
+function extractImageDataFromResult(result: VisitWebpageImageResult): Buffer | undefined {
+  if (result.kind === "image" && result.data) {
+    return Buffer.from(result.data, "base64");
+  }
+  return undefined;
+}
+
+function suffixFromFilename(filename: string): string {
+  const ext = extname(filename);
+  return ext || ".bin";
+}
+
+// ---------------------------------------------------------------------------
+// Executor
+// ---------------------------------------------------------------------------
+
 export function createDefaultExecuteCodeExecutor(
   options: DefaultToolExecutorOptions,
 ): ExecuteCodeExecutor {
   const timeoutMs = options.executeCodeTimeoutMs ?? DEFAULT_EXECUTE_TIMEOUT_MS;
-  let workDirPromise: Promise<string> | null = null;
+  const spritesToken = options.spritesToken;
+  const arc = options.spritesArc ?? "default";
+
+  let sprite: Sprite | null = null;
+  let workdir: string | null = null;
   let versionCounter = 0;
 
-  async function ensureWorkDir(): Promise<string> {
-    if (!workDirPromise) {
-      workDirPromise = (async () => {
-        if (options.executeCodeWorkingDirectory) {
-          const fixedDir = resolve(options.executeCodeWorkingDirectory);
-          await mkdir(fixedDir, { recursive: true });
-          return fixedDir;
-        }
+  async function ensureSprite(): Promise<Sprite> {
+    if (sprite) return sprite;
 
-        return await mkdtemp(join(tmpdir(), "muaddib-ts-exec-"));
-      })();
+    const { SpritesClient } = await import("@fly/sprites");
+
+    const spriteName = getSpriteName(arc);
+
+    // Check cache first
+    const cached = spriteCache.get(spriteName);
+    if (cached) {
+      sprite = cached;
+      return sprite;
     }
 
-    return await workDirPromise;
+    const client = new SpritesClient(spritesToken!);
+
+    try {
+      sprite = await client.createSprite(spriteName);
+      options.logger?.info(`Created new Sprite: ${spriteName}`);
+    } catch {
+      // Sprite may already exist
+      sprite = client.sprite(spriteName);
+      options.logger?.info(`Connected to existing Sprite: ${spriteName}`);
+    }
+
+    spriteCache.set(spriteName, sprite);
+    return sprite;
   }
+
+  async function ensureWorkdir(sp: Sprite): Promise<string> {
+    if (workdir) return workdir;
+
+    const actorId = randomUUID().slice(0, 8);
+    workdir = `/tmp/actor-${actorId}`;
+
+    await spriteExec(sp, `mkdir -p ${workdir} /workspace /artifacts`);
+    options.logger?.info(`Created actor workdir: ${workdir}`);
+    return workdir;
+  }
+
+  /**
+   * Execute a command on the sprite, capturing stdout/stderr and exit code.
+   * The JS SDK's exec() throws ExecError on non-zero exit which already
+   * includes stdout/stderr — no need for the Python capture_on_error wrapper.
+   */
+  async function spriteExec(
+    sp: Sprite,
+    command: string,
+    execOptions?: { cwd?: string },
+  ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+    const { ExecError } = await import("@fly/sprites");
+
+    try {
+      const result = await sp.exec(command, {
+        cwd: execOptions?.cwd,
+      });
+      return {
+        exitCode: 0,
+        stdout: truncateOutput(String(result.stdout ?? "")),
+        stderr: truncateOutput(String(result.stderr ?? "")),
+      };
+    } catch (err) {
+      if (err instanceof ExecError) {
+        return {
+          exitCode: err.exitCode ?? 1,
+          stdout: truncateOutput(String(err.stdout ?? "")),
+          stderr: truncateOutput(String(err.stderr ?? "")),
+        };
+      }
+      throw err;
+    }
+  }
+
+  function truncateOutput(s: string): string {
+    if (s.length <= DEFAULT_CAPTURE_LIMIT) return s;
+    return s.slice(s.length - DEFAULT_CAPTURE_LIMIT);
+  }
+
+  async function downloadSpriteFile(
+    sp: Sprite,
+    path: string,
+  ): Promise<{ data: string; filename: string } | null> {
+    const result = await spriteExec(sp, `cat ${path}`);
+    if (result.exitCode !== 0) {
+      options.logger?.info(`Failed to read file ${path}: ${result.stderr}`);
+      return null;
+    }
+    return { data: result.stdout, filename: posix.basename(path) };
+  }
+
+  async function uploadInputArtifacts(
+    sp: Sprite,
+    artifactUrls: string[],
+  ): Promise<string[]> {
+    const { createDefaultVisitWebpageExecutor } = await import("./web.js");
+    const visitWebpage = createDefaultVisitWebpageExecutor(options);
+    const messages: string[] = [];
+
+    for (const url of artifactUrls) {
+      let filename = extractFilenameFromUrl(url);
+      if (filename) filename = basename(filename);
+
+      if (!filename) {
+        messages.push(`**Error: Invalid artifact URL (no filename): ${url}**`);
+        continue;
+      }
+
+      try {
+        const content = await visitWebpage(url);
+        const spritePath = `/artifacts/${filename}`;
+
+        if (typeof content === "string") {
+          // Write text via echo/cat to avoid shell escaping issues — use base64
+          const b64 = Buffer.from(content, "utf-8").toString("base64");
+          await spriteExec(sp, `echo '${b64}' | base64 -d > ${spritePath}`);
+          messages.push(`**Uploaded text: ${spritePath}**`);
+        } else {
+          const imageData = extractImageDataFromResult(content);
+          if (!imageData) {
+            messages.push(`**Error: Unsupported image format: ${url}**`);
+            continue;
+          }
+          const b64 = imageData.toString("base64");
+          await spriteExec(sp, `echo '${b64}' | base64 -d > ${spritePath}`);
+          messages.push(`**Uploaded image: ${spritePath}**`);
+        }
+
+        options.logger?.info(`Uploaded artifact to sprite: ${url} -> /artifacts/${filename}`);
+      } catch (err) {
+        messages.push(`**Error: Failed to upload ${url}: ${err}**`);
+      }
+    }
+
+    return messages;
+  }
+
+  async function detectGeneratedImages(
+    sp: Sprite,
+    wd: string,
+  ): Promise<string[]> {
+    if (!options.artifactsPath || !options.artifactsUrl) return [];
+
+    const messages: string[] = [];
+
+    for (const ext of ["*.png", "*.jpg", "*.jpeg"]) {
+      const findResult = await spriteExec(sp, `find ${wd} -name '${ext}' -type f`);
+      if (findResult.exitCode !== 0 || !findResult.stdout.trim()) continue;
+
+      for (const imgPath of findResult.stdout.trim().split("\n")) {
+        if (!imgPath) continue;
+
+        const fileResult = await downloadSpriteFile(sp, imgPath);
+        if (!fileResult) continue;
+
+        try {
+          const data = Buffer.from(fileResult.data, "binary");
+          const suffix = suffixFromFilename(fileResult.filename);
+          const url = await writeArtifactBytes(options, data, suffix);
+          messages.push(`**Generated image:** ${url}`);
+        } catch (err) {
+          options.logger?.info(`Failed to upload generated image ${imgPath}: ${err}`);
+        }
+      }
+    }
+
+    return messages;
+  }
+
+  async function downloadOutputFiles(
+    sp: Sprite,
+    outputFiles: string[],
+  ): Promise<string[]> {
+    if (!options.artifactsPath || !options.artifactsUrl) {
+      return ["**Warning:** output_files requested but artifact store not configured."];
+    }
+
+    const messages: string[] = [];
+
+    for (const filePath of outputFiles) {
+      const fileResult = await downloadSpriteFile(sp, filePath);
+      if (!fileResult) {
+        messages.push(`**Error:** Could not download ${filePath}`);
+        continue;
+      }
+
+      try {
+        const data = Buffer.from(fileResult.data, "binary");
+        const suffix = suffixFromFilename(fileResult.filename);
+        const url = await writeArtifactBytes(options, data, suffix);
+        messages.push(`**Downloaded file (${fileResult.filename}):** ${url}`);
+      } catch (err) {
+        messages.push(`**Error uploading ${fileResult.filename}:** ${err}`);
+      }
+    }
+
+    return messages;
+  }
+
+  // -------------------------------------------------------------------------
+  // Main executor
+  // -------------------------------------------------------------------------
 
   return async (input: ExecuteCodeInput): Promise<string> => {
     const language = input.language ?? "python";
@@ -93,124 +361,91 @@ export function createDefaultExecuteCodeExecutor(
       throw new Error("execute_code.code must be non-empty.");
     }
 
-    const workDir = await ensureWorkDir();
-    versionCounter += 1;
-
-    const extension = language === "python" ? ".py" : ".sh";
-    const savedFile = join(workDir, `_v${versionCounter}${extension}`);
-    await writeFile(savedFile, input.code, "utf-8");
-
-    const command = language === "python" ? "python3" : "bash";
-    const args = [savedFile];
-
-    const execution = await runCommand(command, args, {
-      cwd: workDir,
-      timeoutMs,
-      captureLimit: DEFAULT_CAPTURE_LIMIT,
-    });
-
-    const output: string[] = [];
-
-    if (input.input_artifacts && input.input_artifacts.length > 0) {
-      output.push("**Warning:** input_artifacts are not yet supported in the TypeScript runtime.");
-    }
-
-    if (execution.timedOut) {
-      output.push(`**Execution error:** Timed out after ${timeoutMs}ms.`);
-    } else if (execution.exitCode !== 0) {
-      const stderr = execution.stderr.trim();
-      output.push(
-        stderr
-          ? `**Execution error (exit ${execution.exitCode}):**\n\`\`\`\n${stderr}\n\`\`\``
-          : `**Execution error:** Exit code ${execution.exitCode}`,
+    if (!spritesToken) {
+      throw new Error(
+        "execute_code requires tools.sprites.token configuration for sandboxed execution.",
       );
     }
 
-    if (execution.stdout.trim()) {
-      output.push(`**Output:**\n\`\`\`\n${execution.stdout.trim()}\n\`\`\``);
+    let sp: Sprite;
+    try {
+      sp = await ensureSprite();
+    } catch (err) {
+      return `Error initializing sandbox: ${err}`;
     }
 
-    if (execution.exitCode === 0 && execution.stderr.trim()) {
-      output.push(`**Warnings:**\n\`\`\`\n${execution.stderr.trim()}\n\`\`\``);
+    try {
+      const wd = await ensureWorkdir(sp);
+      const output: string[] = [];
+
+      // Upload input artifacts
+      if (input.input_artifacts && input.input_artifacts.length > 0) {
+        const msgs = await uploadInputArtifacts(sp, input.input_artifacts);
+        output.push(...msgs);
+      }
+
+      // Save code to file for re-runs
+      versionCounter += 1;
+      const ext = language === "python" ? ".py" : ".sh";
+      const savedFile = `${wd}/_v${versionCounter}${ext}`;
+
+      // Write code via base64 to avoid shell escaping issues
+      const codeB64 = Buffer.from(input.code, "utf-8").toString("base64");
+      await spriteExec(sp, `echo '${codeB64}' | base64 -d > ${savedFile}`);
+
+      // Execute
+      const cmd = language === "python" ? `python3 ${savedFile}` : `bash ${savedFile}`;
+      const execution = await spriteExec(sp, cmd, { cwd: wd });
+
+      // Process results (matching Python output format exactly)
+      if (execution.exitCode !== 0) {
+        const stderr = execution.stderr.trim();
+        output.push(
+          stderr
+            ? `**Execution error (exit ${execution.exitCode}):**\n\`\`\`\n${stderr}\n\`\`\``
+            : `**Execution error:** Exit code ${execution.exitCode}`,
+        );
+      }
+
+      if (execution.stdout.trim()) {
+        output.push(`**Output:**\n\`\`\`\n${execution.stdout.trim()}\n\`\`\``);
+      }
+
+      if (execution.exitCode === 0 && execution.stderr.trim()) {
+        output.push(`**Warnings:**\n\`\`\`\n${execution.stderr.trim()}\n\`\`\``);
+      }
+
+      // Auto-detect generated images
+      const imageMessages = await detectGeneratedImages(sp, wd);
+      output.push(...imageMessages);
+
+      // Download output files
+      if (input.output_files && input.output_files.length > 0) {
+        const fileMessages = await downloadOutputFiles(sp, input.output_files);
+        output.push(...fileMessages);
+      }
+
+      if (output.length === 0) {
+        output.push("Code executed successfully with no output.");
+      }
+
+      output.push(`_Code saved to \`${savedFile}\` for re-run._`);
+
+      options.logger?.info(
+        `Executed ${language} code in Sprite ${getSpriteName(arc)}: ${code.slice(0, 512)}...`,
+      );
+
+      return output.join("\n\n");
+    } catch (err) {
+      options.logger?.info(`Sprites execution failed: ${err}`);
+      return `Error executing code: ${err}`;
     }
-
-    if (input.output_files && input.output_files.length > 0) {
-      output.push("**Warning:** output_files are not yet supported in the TypeScript runtime.");
-    }
-
-    if (output.length === 0) {
-      output.push("Code executed successfully with no output.");
-    }
-
-    output.push(`_Code saved to \`${savedFile}\` for re-run._`);
-
-    return output.join("\n\n");
   };
 }
 
-interface RunCommandOptions {
-  cwd: string;
-  timeoutMs: number;
-  captureLimit: number;
-}
-
-interface RunCommandResult {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-  timedOut: boolean;
-}
-
-async function runCommand(
-  command: string,
-  args: string[],
-  options: RunCommandOptions,
-): Promise<RunCommandResult> {
-  return await new Promise<RunCommandResult>((resolvePromise, rejectPromise) => {
-    const child = spawn(command, args, {
-      cwd: options.cwd,
-      env: process.env,
-    });
-
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-
-    const timeoutId = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGKILL");
-    }, options.timeoutMs);
-
-    child.stdout.on("data", (chunk: Buffer | string) => {
-      stdout = appendCapturedOutput(stdout, chunk.toString(), options.captureLimit);
-    });
-
-    child.stderr.on("data", (chunk: Buffer | string) => {
-      stderr = appendCapturedOutput(stderr, chunk.toString(), options.captureLimit);
-    });
-
-    child.once("error", (error) => {
-      clearTimeout(timeoutId);
-      rejectPromise(error);
-    });
-
-    child.once("close", (code) => {
-      clearTimeout(timeoutId);
-      resolvePromise({
-        exitCode: code ?? (timedOut ? 124 : 1),
-        stdout,
-        stderr,
-        timedOut,
-      });
-    });
-  });
-}
-
-function appendCapturedOutput(current: string, chunk: string, captureLimit: number): string {
-  const combined = current + chunk;
-  if (combined.length <= captureLimit) {
-    return combined;
-  }
-
-  return combined.slice(combined.length - captureLimit);
+// ---------------------------------------------------------------------------
+// Exported for testing: reset sprite cache
+// ---------------------------------------------------------------------------
+export function resetSpriteCache(): void {
+  spriteCache.clear();
 }

@@ -17,6 +17,7 @@
     "start:irc": "node ./dist/app/main.js"
   },
   "dependencies": {
+    "@fly/sprites": "^0.0.1",
     "@mariozechner/pi-agent-core": "^0.52.10",
     "@mariozechner/pi-ai": "^0.52.10",
     "@mariozechner/pi-coding-agent": "^0.52.10",
@@ -27,11 +28,11 @@
     "sqlite3": "^5.1.7"
   },
   "devDependencies": {
-    "@types/node": "^24.3.0",
-    "@vitest/coverage-v8": "^3.2.4",
     "@eslint/js": "^9.34.0",
+    "@types/node": "^24.3.0",
     "@typescript-eslint/eslint-plugin": "^8.46.0",
     "@typescript-eslint/parser": "^8.46.0",
+    "@vitest/coverage-v8": "^3.2.4",
     "eslint": "^9.34.0",
     "typescript": "^5.7.3",
     "vitest": "^3.2.4"

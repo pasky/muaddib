@@ -13,6 +13,7 @@
 - NEVER use `git add -A` blindly, there may be untracked files that must not be committed; use `git add -u` instead
 
 ## Architecture
+- **Built on**: [`pi-coding-agent`](https://github.com/badlogic/pi-mono) SDK (`@mariozechner/pi-agent-core` and `@mariozechner/pi-ai`). Muaddib uses the `Agent` class from pi-agent-core but overrides all built-in tools via `baseToolsOverride` — pi's default read/write/bash tools are **not** exposed to the agent. All tools (execute_code, web_search, etc.) are muaddib's own, defined in `src/agent/tools/`.
 - **Main Service**: `src/app/main.ts` - core service coordinator (config, history, rooms, chronicler lifecycle)
 - **CLI Message Mode**: `src/cli/main.ts` + `src/cli/message-mode.ts`
 - **Room Isolation**:

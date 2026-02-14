@@ -28,6 +28,10 @@ export interface DefaultToolExecutorOptions {
   maxImageBytes?: number;
   executeCodeTimeoutMs?: number;
   executeCodeWorkingDirectory?: string;
+  /** Fly.io Sprites API token for sandboxed code execution. */
+  spritesToken?: string;
+  /** Arc identifier for Sprites sandbox isolation (one sprite per arc). */
+  spritesArc?: string;
   artifactsPath?: string;
   artifactsUrl?: string;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;

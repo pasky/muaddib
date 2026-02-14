@@ -110,6 +110,10 @@ Manual for IRC ("bring your own irssi"):
 - `mynick: message` - Automatic mode
 - `mynick: !h` - Show help and info about other modes
 
+## Architecture
+
+Muaddib is built on the [`pi-coding-agent`](https://github.com/badlogic/pi-mono) SDK (`@mariozechner/pi-agent-core` and `@mariozechner/pi-ai`) for its agent runtime, but defines its own complete tool set (code execution, web search, artifacts, etc.) — pi's built-in tools are not used.
+
 ## Development
 
 ```bash

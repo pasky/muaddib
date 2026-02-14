@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,14 +7,80 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createDefaultToolExecutors } from "../src/agent/tools/baseline-tools.js";
 import { createDefaultOracleExecutor } from "../src/agent/tools/oracle.js";
+import { resetSpriteCache } from "../src/agent/tools/execute-code.js";
 import { resetWebRateLimiters, jinaRetryConfig } from "../src/agent/tools/web.js";
 import { ChronicleStore } from "../src/chronicle/chronicle-store.js";
+
+/**
+ * Mock @fly/sprites to execute commands locally for testing.
+ * This simulates the Sprites API surface used by execute-code.ts.
+ */
+class MockExecError extends Error {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  constructor(message: string, result: { exitCode: number; stdout: string; stderr: string }) {
+    super(message);
+    this.exitCode = result.exitCode;
+    this.stdout = result.stdout;
+    this.stderr = result.stderr;
+  }
+}
+
+class MockSprite {
+  name: string;
+  constructor(name: string) {
+    this.name = name;
+  }
+
+  async exec(
+    command: string,
+    options?: { cwd?: string },
+  ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+    const cwd = options?.cwd ?? "/tmp";
+    const result = spawnSync("bash", ["-c", command], {
+      cwd,
+      timeout: 10_000,
+      encoding: "utf-8",
+      maxBuffer: 1024 * 1024,
+    });
+    const exitCode = result.status ?? 1;
+    const stdout = (result.stdout ?? "").toString();
+    const stderr = (result.stderr ?? "").toString();
+    if (exitCode !== 0) {
+      throw new MockExecError(`Command failed with exit code ${exitCode}`, {
+        exitCode,
+        stdout,
+        stderr,
+      });
+    }
+    return { stdout, stderr, exitCode: 0 };
+  }
+}
+
+class MockSpritesClient {
+  constructor(_token: string) {}
+
+  sprite(name: string): MockSprite {
+    return new MockSprite(name);
+  }
+
+  async createSprite(name: string): Promise<MockSprite> {
+    return new MockSprite(name);
+  }
+}
+
+vi.mock("@fly/sprites", () => ({
+  SpritesClient: MockSpritesClient,
+  ExecError: MockExecError,
+}));
 
 const tempDirs: string[] = [];
 const originalJinaRetryDelays = [...jinaRetryConfig.delaysMs];
 
 beforeEach(() => {
   resetWebRateLimiters();
+  resetSpriteCache();
 });
 
 afterEach(async () => {
@@ -880,7 +947,7 @@ describe("core tool executors execute_code support", () => {
     tempDirs.push(dir);
 
     const executors = createDefaultToolExecutors({
-      executeCodeWorkingDirectory: join(dir, "work"),
+      spritesToken: "test-token",
     });
 
     const result = await executors.executeCode({
@@ -897,7 +964,7 @@ describe("core tool executors execute_code support", () => {
     tempDirs.push(dir);
 
     const executors = createDefaultToolExecutors({
-      executeCodeWorkingDirectory: join(dir, "work"),
+      spritesToken: "test-token",
     });
 
     const result = await executors.executeCode({
@@ -913,7 +980,7 @@ describe("core tool executors execute_code support", () => {
     tempDirs.push(dir);
 
     const executors = createDefaultToolExecutors({
-      executeCodeWorkingDirectory: join(dir, "work"),
+      spritesToken: "test-token",
     });
 
     const result = await executors.executeCode({
@@ -937,49 +1004,113 @@ describe("core tool executors execute_code support", () => {
     await expect(executors.executeCode({ code: "   " })).rejects.toThrow("execute_code.code must be non-empty");
   });
 
-  it("execute_code warns about unsupported input/output artifacts", async () => {
+  it("execute_code input_artifacts reports error for invalid URLs", async () => {
     const dir = await mkdtemp(join(tmpdir(), "muaddib-ts-exec-"));
     tempDirs.push(dir);
 
     const executors = createDefaultToolExecutors({
-      executeCodeWorkingDirectory: join(dir, "work"),
+      spritesToken: "test-token",
     });
 
     const result = await executors.executeCode({
       code: 'echo "ok"',
       language: "bash",
-      input_artifacts: ["file.txt"],
-      output_files: ["out.txt"],
+      input_artifacts: ["not-a-url"],
     });
 
-    expect(result).toContain("input_artifacts are not yet supported");
-    expect(result).toContain("output_files are not yet supported");
+    expect(result).toContain("Error:");
+    expect(result).toContain("ok");
   });
 
-  it("execute_code handles timeout", async () => {
+  it("execute_code output_files warns when no artifact store configured", async () => {
     const dir = await mkdtemp(join(tmpdir(), "muaddib-ts-exec-"));
     tempDirs.push(dir);
 
     const executors = createDefaultToolExecutors({
-      executeCodeWorkingDirectory: join(dir, "work"),
-      executeCodeTimeoutMs: 200,
+      spritesToken: "test-token",
     });
 
-    // Use a bash busy-wait that responds to SIGKILL immediately
     const result = await executors.executeCode({
-      code: "while true; do :; done",
+      code: 'echo "ok"',
+      language: "bash",
+      output_files: ["out.txt"],
+    });
+
+    expect(result).toContain("artifact store not configured");
+  });
+
+  it("execute_code output_files uploads generated files as artifacts", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "muaddib-ts-exec-"));
+    tempDirs.push(dir);
+
+    const artifactsDir = join(dir, "artifacts");
+
+    const executors = createDefaultToolExecutors({
+      spritesToken: "test-token",
+      artifactsPath: artifactsDir,
+      artifactsUrl: "https://example.com/artifacts",
+    });
+
+    const result = await executors.executeCode({
+      code: 'echo "report data" > /tmp/test-output-file.txt',
+      language: "bash",
+      output_files: ["/tmp/test-output-file.txt"],
+    });
+
+    expect(result).toContain("Downloaded file");
+    expect(result).toContain("test-output-file.txt");
+    expect(result).toContain("https://example.com/artifacts");
+  });
+
+  it("execute_code output_files reports error for missing files", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "muaddib-ts-exec-"));
+    tempDirs.push(dir);
+
+    const executors = createDefaultToolExecutors({
+      spritesToken: "test-token",
+      artifactsPath: join(dir, "artifacts"),
+      artifactsUrl: "https://example.com/artifacts",
+    });
+
+    const result = await executors.executeCode({
+      code: 'echo "ok"',
+      language: "bash",
+      output_files: ["/nonexistent/file.txt"],
+    });
+
+    expect(result).toContain("Error:");
+    expect(result).toContain("/nonexistent/file.txt");
+  });
+
+  it("execute_code auto-detects generated images", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "muaddib-ts-exec-"));
+    tempDirs.push(dir);
+
+    const artifactsDir = join(dir, "artifacts");
+
+    const executors = createDefaultToolExecutors({
+      spritesToken: "test-token",
+      artifactsPath: artifactsDir,
+      artifactsUrl: "https://example.com/artifacts",
+    });
+
+    // Create a minimal PNG file (1x1 pixel) via bash
+    const result = await executors.executeCode({
+      code: 'printf "\\x89PNG\\r\\n\\x1a\\n" > output.png',
       language: "bash",
     });
 
-    expect(result).toContain("Timed out");
-  }, 10_000);
+    expect(result).toContain("Generated image");
+    expect(result).toContain("https://example.com/artifacts");
+  });
+
 
   it("execute_code captures stderr warnings on success", async () => {
     const dir = await mkdtemp(join(tmpdir(), "muaddib-ts-exec-"));
     tempDirs.push(dir);
 
     const executors = createDefaultToolExecutors({
-      executeCodeWorkingDirectory: join(dir, "work"),
+      spritesToken: "test-token",
     });
 
     const result = await executors.executeCode({
@@ -997,7 +1128,7 @@ describe("core tool executors execute_code support", () => {
     tempDirs.push(dir);
 
     const executors = createDefaultToolExecutors({
-      executeCodeWorkingDirectory: join(dir, "work"),
+      spritesToken: "test-token",
     });
 
     const result = await executors.executeCode({
@@ -1006,6 +1137,16 @@ describe("core tool executors execute_code support", () => {
     });
 
     expect(result).toContain("Code executed successfully with no output");
+  });
+});
+
+describe("core tool executors execute_code Sprites sandbox", () => {
+  it("execute_code requires spritesToken", async () => {
+    const executors = createDefaultToolExecutors({});
+
+    await expect(
+      executors.executeCode({ code: 'echo "hi"', language: "bash" }),
+    ).rejects.toThrow("tools.sprites.token");
   });
 });
 

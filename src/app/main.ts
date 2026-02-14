@@ -374,6 +374,7 @@ function createRoomCommandHandler(
   const llmDebugMaxChars = numberOrUndefined(actorConfig?.llm_debug_max_chars);
   const contextReducerModel = stringOrUndefined(contextReducerConfig?.model);
   const contextReducerPrompt = stringOrUndefined(contextReducerConfig?.prompt);
+  const spritesToken = stringOrUndefined(asRecord(toolsConfig?.sprites)?.token);
   const jinaApiKey = stringOrUndefined(asRecord(toolsConfig?.jina)?.api_key);
   const artifactsPathRaw = stringOrUndefined(artifactsConfig?.path);
   const artifactsPath = artifactsPathRaw
@@ -411,6 +412,7 @@ function createRoomCommandHandler(
       llmDebugMaxChars,
     },
     toolOptions: {
+      spritesToken,
       jinaApiKey,
       artifactsPath,
       artifactsUrl,

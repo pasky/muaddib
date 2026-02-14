@@ -914,6 +914,7 @@ export class RoomCommandHandlerTs {
     const invocationToolOptions: BaselineToolOptions = {
       ...this.options.toolOptions,
       chronicleArc: `${message.serverTag}#${message.channelName}`,
+      spritesArc: `${message.serverTag}#${message.channelName}`,
       secrets: message.secrets,
     };
 
