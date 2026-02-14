@@ -23,6 +23,7 @@ export interface SessionRunnerOptions {
   emptyCompletionRetryPrompt?: string;
   llmDebugMaxChars?: number;
   logger?: RunnerLogger;
+  steeringMessageProvider?: () => SessionFactoryContextMessage[];
 }
 
 export interface PromptOptions {
@@ -57,6 +58,7 @@ export class SessionRunner {
   private readonly logger: RunnerLogger;
   private readonly emptyCompletionRetryPrompt: string;
   private readonly llmDebugMaxChars: number;
+  private readonly steeringMessageProvider?: () => SessionFactoryContextMessage[];
 
   constructor(options: SessionRunnerOptions) {
     this.model = options.model;
@@ -69,6 +71,7 @@ export class SessionRunner {
     this.emptyCompletionRetryPrompt =
       options.emptyCompletionRetryPrompt ?? DEFAULT_EMPTY_COMPLETION_RETRY_PROMPT;
     this.llmDebugMaxChars = Math.max(500, Math.floor(options.llmDebugMaxChars ?? 120_000));
+    this.steeringMessageProvider = options.steeringMessageProvider;
   }
 
   async prompt(prompt: string, options: PromptOptions = {}): Promise<PromptResult> {
@@ -84,6 +87,7 @@ export class SessionRunner {
       visionFallbackModel: options.visionFallbackModel,
       llmDebugMaxChars: this.llmDebugMaxChars,
       logger: this.logger,
+      steeringMessageProvider: this.steeringMessageProvider,
     });
 
     const { session, agent } = sessionCtx;

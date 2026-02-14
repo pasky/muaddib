@@ -53,6 +53,7 @@ export interface CommandRunnerFactoryInput {
   model: string;
   systemPrompt: string;
   tools: AgentTool<any>[];
+  steeringMessageProvider?: () => SessionFactoryContextMessage[];
   logger?: {
     debug(message: string, ...data: unknown[]): void;
     info(message: string, ...data: unknown[]): void;
@@ -242,6 +243,7 @@ export class RoomCommandHandlerTs {
           emptyCompletionRetryPrompt: options.agentLoop?.emptyCompletionRetryPrompt,
           llmDebugMaxChars: options.agentLoop?.llmDebugMaxChars,
           logger: input.logger,
+          steeringMessageProvider: input.steeringMessageProvider,
         }));
 
     this.refusalFallbackModel = options.refusalFallbackModel
@@ -446,10 +448,12 @@ export class RoomCommandHandlerTs {
       `context_disabled=${resolvedWithFollowups.noContext}`,
     );
 
-    const steeringMessages =
-      resolvedWithFollowups.runtime.steering && !resolvedWithFollowups.noContext
-        ? this.steeringQueue.drainSteeringContextMessages(steeringKey)
-        : [];
+    const steeringEnabled =
+      Boolean(resolvedWithFollowups.runtime.steering) && !resolvedWithFollowups.noContext;
+
+    const steeringMessages = steeringEnabled
+      ? this.steeringQueue.drainSteeringContextMessages(steeringKey)
+      : [];
 
     const systemPrompt = this.buildSystemPrompt(
       resolvedWithFollowups.modeKey,
@@ -497,10 +501,18 @@ export class RoomCommandHandlerTs {
 
     const tools = this.selectTools(message, resolvedWithFollowups.runtime.allowedTools, runnerContext);
 
+    const steeringMessageProvider = steeringEnabled
+      ? () => this.steeringQueue.drainSteeringContextMessages(steeringKey).map((msg) => ({
+          role: "user" as const,
+          content: msg.content,
+        }))
+      : undefined;
+
     const runner = this.runnerFactory({
       model: modelSpec,
       systemPrompt,
       tools,
+      steeringMessageProvider,
       logger: this.logger,
     });
 

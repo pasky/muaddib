@@ -1598,4 +1598,82 @@ describe("RoomCommandHandlerTs", () => {
 
     await history.close();
   });
+
+  it("passes steeringMessageProvider to runner factory when steering is enabled", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    let capturedProvider: (() => any) | undefined;
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: (input) => {
+        capturedProvider = input.steeringMessageProvider;
+        return {
+          prompt: async () => makeRunnerResult("ok"),
+        };
+      },
+    });
+
+    await handler.handleIncomingMessage(makeMessage("!s hello"), { isDirect: true });
+
+    expect(capturedProvider).toBeDefined();
+    // Provider should return empty when nothing is queued
+    expect(capturedProvider!()).toEqual([]);
+
+    await history.close();
+  });
+
+  it("steeringMessageProvider drains queued messages mid-run", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const firstStarted = createDeferred<void>();
+    const releaseFirst = createDeferred<void>();
+
+    let capturedProvider: (() => any) | undefined;
+    let midRunDrain: any[] = [];
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: (input) => {
+        capturedProvider = input.steeringMessageProvider;
+        return {
+          prompt: async () => {
+            firstStarted.resolve();
+            await releaseFirst.promise;
+            // Simulate mid-run drain like the agent loop would do
+            if (capturedProvider) {
+              midRunDrain = capturedProvider();
+            }
+            return makeRunnerResult("done");
+          },
+        };
+      },
+    });
+
+    const t1 = handler.handleIncomingMessage(makeMessage("!s first"), {
+      isDirect: true,
+      sendResponse: async () => {},
+    });
+
+    await firstStarted.promise;
+
+    // Queue a passive message while agent is running
+    handler.handleIncomingMessage(makeMessage("interrupt me"), { isDirect: false });
+
+    await new Promise((resolve) => { setTimeout(resolve, 50); });
+
+    releaseFirst.resolve();
+    await t1;
+
+    expect(midRunDrain).toHaveLength(1);
+    expect(midRunDrain[0].content).toContain("interrupt me");
+
+    await history.close();
+  });
 });

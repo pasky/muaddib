@@ -41,6 +41,7 @@ interface CreateAgentSessionInput {
   visionFallbackModel?: string;
   llmDebugMaxChars?: number;
   logger?: RunnerLogger;
+  steeringMessageProvider?: () => SessionFactoryContextMessage[];
 }
 
 interface CreateAgentSessionResult {
@@ -99,6 +100,7 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
     convertToLlm,
     getApiKey: input.getApiKey,
     streamFn,
+    steeringMode: "all",
   });
 
   if (input.contextMessages) {
@@ -127,6 +129,7 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
 
   let turnCount = 0;
   let visionFallbackActivated = false;
+  const steeringMessageProvider = input.steeringMessageProvider;
 
   const unsubscribe = session.subscribe((event) => {
     if (event.type === "turn_end") {
@@ -148,6 +151,22 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
         logger.warn("Exceeding max iterations, aborting session prompt loop.");
         void session.abort();
       }
+
+      // Drain external steering messages (e.g. user messages arriving mid-run)
+      if (steeringMessageProvider) {
+        const messages = steeringMessageProvider();
+        for (const msg of messages) {
+          agent.steer({
+            role: "user",
+            content: [{ type: "text", text: msg.content }],
+            timestamp: Date.now(),
+          });
+        }
+        if (messages.length > 0) {
+          logger.info(`Injected ${messages.length} steering message(s) at turn ${turnCount}`);
+        }
+      }
+
       return;
     }
 
