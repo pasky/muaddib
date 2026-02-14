@@ -78,27 +78,37 @@ The constructor derives everything else from `runtime`:
 
 Delete `fromRuntime()` — it becomes the constructor itself.
 
-### Phase 2b: Test-only lightweight construction
+### Phase 2b: Test helper builds a minimal runtime
 
-Tests don't have a `MuaddibRuntime` and shouldn't need one. Add a static factory:
+Tests construct a `MuaddibRuntime` via a shared test helper in `tests-ts/`:
 
 ```ts
-static forTesting(options: TestHandlerOptions): RoomCommandHandlerTs
+// tests-ts/test-runtime.ts
+function createTestRuntime(opts: {
+  roomConfig: any;
+  history: ChatHistoryStore;
+  runnerFactory?: CommandRunnerFactory;
+  ...
+}): MuaddibRuntime {
+  return {
+    config: MuaddibConfig.inMemory({ rooms: { common: opts.roomConfig } }),
+    history: opts.history,
+    modelAdapter: new PiAiModelAdapter(),
+    getApiKey: () => undefined,
+    logger: ...,
+  };
+}
 ```
 
-Where `TestHandlerOptions` is the minimal bag tests actually use:
-`{ roomConfig, history, classifyMode, runnerFactory?, rateLimiter?,
-  logger?, refusalFallbackModel?, persistenceSummaryModel?,
-  contextReducer?, autoChronicler?, chronicleStore?, toolOptions? }`
+Existing tests change from `new RoomCommandHandlerTs({ roomConfig, history, ... })`
+to `new RoomCommandHandlerTs(createTestRuntime({ ... }), "irc", { ... })`.
 
-This builds a minimal runtime internally (or skips it) and calls the real constructor.
-Existing tests change one line: `new RoomCommandHandlerTs({...})` →
-`RoomCommandHandlerTs.forTesting({...})`.
+No test-only code in production. The handler has one constructor, one API.
 
-**Files**: `src/rooms/command/command-handler.ts`, all test files that construct handlers
+**Files**: new `tests-ts/test-runtime.ts`, all test files that construct handlers
 
-**Validation**: same + `CommandHandlerOptions` interface is deleted,
-replaced by the constructor signature + `TestHandlerOptions`.
+**Validation**: same + `CommandHandlerOptions` interface deleted,
+no `forTesting` / test-only paths in `src/`.
 
 ---
 
