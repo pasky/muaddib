@@ -3,7 +3,6 @@ import { pathToFileURL } from "node:url";
 import { RuntimeLogWriter, type RuntimeLogger } from "./logging.js";
 import { RoomCommandHandlerTs } from "../rooms/command/command-handler.js";
 import { DiscordRoomMonitor } from "../rooms/discord/monitor.js";
-import { DiscordGatewayTransport } from "../rooms/discord/transport.js";
 import { IrcRoomMonitor } from "../rooms/irc/monitor.js";
 import { SlackRoomMonitor } from "../rooms/slack/monitor.js";
 import { SlackSocketTransport } from "../rooms/slack/transport.js";
@@ -52,32 +51,7 @@ function createMonitors(runtime: MuaddibRuntime): RunnableMonitor[] {
   monitors.push(...IrcRoomMonitor.fromRuntime(runtime));
 
   // Discord
-  const discordRoomConfig = runtime.config.getRoomConfig("discord") as any;
-  if (isRoomEnabled(discordRoomConfig, false)) {
-    const commandHandler = RoomCommandHandlerTs.fromRuntime(runtime, "discord");
-    const discordToken = requireNonEmptyString(
-      discordRoomConfig?.token,
-      "Discord room is enabled but rooms.discord.token is missing.",
-    );
-
-    const transport = new DiscordGatewayTransport({
-      token: discordToken,
-      botNameFallback: discordRoomConfig?.bot_name,
-    });
-
-    logger.info("Enabling Discord room monitor");
-    monitors.push(
-      new DiscordRoomMonitor({
-        roomConfig: discordRoomConfig,
-        history: runtime.history,
-        commandHandler,
-        eventSource: transport,
-        sender: transport,
-        onSendRetryEvent: createSendRetryEventLogger(runtime.logger.getLogger("muaddib.send-retry.discord")),
-        logger: runtime.logger.getLogger("muaddib.rooms.discord.monitor"),
-      }),
-    );
-  }
+  monitors.push(...DiscordRoomMonitor.fromRuntime(runtime));
 
   // Slack
   const slackRoomConfig = runtime.config.getRoomConfig("slack") as any;

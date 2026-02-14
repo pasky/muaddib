@@ -304,6 +304,7 @@ describe("runMuaddibMain", () => {
           },
           discord: {
             enabled: true,
+            token: "discord-token",
           },
           slack: {
             enabled: false,

@@ -1,6 +1,6 @@
 # Config & Runtime Refactoring Plan
 
-Status: Steps 1-6 done. Step 7 next.
+Status: Steps 1-7 done. Step 8 next.
 
 ## Context
 

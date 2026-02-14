@@ -1,10 +1,13 @@
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { createConsoleLogger, type RuntimeLogger } from "../../app/logging.js";
+import type { MuaddibRuntime } from "../../runtime.js";
+import { RoomCommandHandlerTs } from "../command/command-handler.js";
 import type { RoomMessage } from "../message.js";
 import {
   sendWithRateLimitRetry,
   type SendRetryEvent,
 } from "../send-retry.js";
+import { DiscordGatewayTransport } from "./transport.js";
 
 interface CommandLike {
   shouldIgnoreUser(nick: string): boolean;
@@ -111,6 +114,39 @@ export interface DiscordRoomMonitorOptions {
 
 export class DiscordRoomMonitor {
   private readonly logger: RuntimeLogger;
+
+  static fromRuntime(runtime: MuaddibRuntime): DiscordRoomMonitor[] {
+    const roomConfig = runtime.config.getRoomConfig("discord");
+    const enabled = roomConfig.enabled ?? false;
+    if (!enabled) {
+      return [];
+    }
+
+    const token = requireNonEmptyString(
+      roomConfig.token,
+      "Discord room is enabled but rooms.discord.token is missing.",
+    );
+
+    const commandHandler = RoomCommandHandlerTs.fromRuntime(runtime, "discord");
+    const transport = new DiscordGatewayTransport({
+      token,
+      botNameFallback: roomConfig.bot_name,
+    });
+
+    return [
+      new DiscordRoomMonitor({
+        roomConfig,
+        history: runtime.history,
+        commandHandler,
+        eventSource: transport,
+        sender: transport,
+        onSendRetryEvent: createDiscordSendRetryEventLogger(
+          runtime.logger.getLogger("muaddib.send-retry.discord"),
+        ),
+        logger: runtime.logger.getLogger("muaddib.rooms.discord.monitor"),
+      }),
+    ];
+  }
 
   constructor(private readonly options: DiscordRoomMonitorOptions) {
     this.logger = options.logger ?? createConsoleLogger("muaddib.rooms.discord.monitor");
@@ -500,6 +536,73 @@ function resolveReplyEditDebounceSeconds(value: unknown): number {
 
 function nowMonotonicSeconds(): number {
   return Date.now() / 1_000;
+}
+
+function requireNonEmptyString(value: unknown, message: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(message);
+  }
+  return value;
+}
+
+interface SendRetryLogger {
+  info(...data: unknown[]): void;
+  warn(...data: unknown[]): void;
+  error(...data: unknown[]): void;
+}
+
+function createDiscordSendRetryEventLogger(
+  logger: SendRetryLogger,
+): (event: SendRetryEvent) => void {
+  return (event: SendRetryEvent): void => {
+    const payload = {
+      event: "send_retry",
+      type: event.type,
+      retryable: event.retryable,
+      platform: event.platform,
+      destination: event.destination,
+      attempt: event.attempt,
+      maxAttempts: event.maxAttempts,
+      retryAfterMs: event.retryAfterMs,
+      error: summarizeRetryError(event.error),
+    };
+
+    const serialized = JSON.stringify(payload);
+
+    if (event.type === "retry") {
+      logger.warn("[muaddib][send-retry]", serialized);
+    } else {
+      logger.error("[muaddib][send-retry]", serialized);
+    }
+
+    logger.info("[muaddib][metric]", serialized);
+  };
+}
+
+function summarizeRetryError(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    const extra = error as Error & {
+      code?: unknown;
+      status?: unknown;
+      statusCode?: unknown;
+    };
+
+    return {
+      name: error.name,
+      message: error.message,
+      code: extra.code,
+      status: extra.status,
+      statusCode: extra.statusCode,
+    };
+  }
+
+  if (typeof error === "object" && error !== null) {
+    return error as Record<string, unknown>;
+  }
+
+  return {
+    value: String(error),
+  };
 }
 
 async function sendWithDiscordRetryResult<T>(
