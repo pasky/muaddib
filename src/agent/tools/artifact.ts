@@ -1,10 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 
-import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 
-import type { DefaultToolExecutorOptions } from "./types.js";
+import type { DefaultToolExecutorOptions, MuaddibTool } from "./types.js";
 
 export interface EditArtifactInput {
   artifact_url: string;
@@ -19,9 +18,10 @@ import { createDefaultVisitWebpageExecutor, type VisitWebpageExecutor } from "./
 
 export function createShareArtifactTool(
   executors: { shareArtifact: ShareArtifactExecutor },
-): AgentTool<any> {
+): MuaddibTool {
   return {
     name: "share_artifact",
+    persistType: "none",
     label: "Share Artifact",
     description:
       "Share additional content as an artifact and return a public URL. Use for scripts, reports, or large outputs.",
@@ -42,9 +42,10 @@ export function createShareArtifactTool(
   };
 }
 
-export function createEditArtifactTool(executors: { editArtifact: EditArtifactExecutor }): AgentTool<any> {
+export function createEditArtifactTool(executors: { editArtifact: EditArtifactExecutor }): MuaddibTool {
   return {
     name: "edit_artifact",
+    persistType: "artifact",
     label: "Edit Artifact",
     description:
       "Edit an existing artifact by replacing a unique old_string with new_string and return a new artifact URL.",

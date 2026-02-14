@@ -3,10 +3,9 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 
-import type { DefaultToolExecutorOptions } from "./types.js";
+import type { DefaultToolExecutorOptions, MuaddibTool } from "./types.js";
 
 export interface ExecuteCodeInput {
   code: string;
@@ -20,9 +19,10 @@ export type ExecuteCodeExecutor = (input: ExecuteCodeInput) => Promise<string>;
 const DEFAULT_EXECUTE_TIMEOUT_MS = 60_000;
 const DEFAULT_CAPTURE_LIMIT = 24_000;
 
-export function createExecuteCodeTool(executors: { executeCode: ExecuteCodeExecutor }): AgentTool<any> {
+export function createExecuteCodeTool(executors: { executeCode: ExecuteCodeExecutor }): MuaddibTool {
   return {
     name: "execute_code",
+    persistType: "artifact",
     label: "Execute Code",
     description:
       "Execute code and return output. Supports python and bash. Input/output artifact features are incremental in TS.",

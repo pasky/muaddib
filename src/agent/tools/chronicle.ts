@@ -1,7 +1,6 @@
-import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 
-import type { DefaultToolExecutorOptions } from "./types.js";
+import type { DefaultToolExecutorOptions, MuaddibTool } from "./types.js";
 
 export interface ChronicleReadInput {
   relative_chapter_id: number;
@@ -16,9 +15,10 @@ export type ChronicleAppendExecutor = (input: ChronicleAppendInput) => Promise<s
 
 export function createChronicleReadTool(
   executors: { chronicleRead: ChronicleReadExecutor },
-): AgentTool<any> {
+): MuaddibTool {
   return {
     name: "chronicle_read",
+    persistType: "summary",
     label: "Chronicle Read",
     description:
       "Read from a chapter in the Chronicle. You maintain a Chronicle (arcs → chapters → paragraphs) of your experiences, plans, thoughts and observations, forming the backbone of your consciousness. Use this to come back to your recent memories, observations and events of what has been happening. Since the current chapter is always included in context, use relative offsets to access previous chapters.",
@@ -43,9 +43,10 @@ export function createChronicleReadTool(
 
 export function createChronicleAppendTool(
   executors: { chronicleAppend: ChronicleAppendExecutor },
-): AgentTool<any> {
+): MuaddibTool {
   return {
     name: "chronicle_append",
+    persistType: "summary",
     label: "Chronicle Append",
     description:
       `Append a short paragraph to the current chapter in the Chronicle.

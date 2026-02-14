@@ -1,8 +1,7 @@
-import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 
 import { parseModelSpec } from "../../models/model-spec.js";
-import type { DefaultToolExecutorOptions } from "./types.js";
+import type { DefaultToolExecutorOptions, MuaddibTool } from "./types.js";
 
 export interface GenerateImageInput {
   prompt: string;
@@ -35,9 +34,10 @@ const IMAGE_SUFFIX_BY_MIME_TYPE: Record<string, string> = {
 
 export function createGenerateImageTool(
   executors: { generateImage: GenerateImageExecutor },
-): AgentTool<any> {
+): MuaddibTool {
   return {
     name: "generate_image",
+    persistType: "artifact",
     label: "Generate Image",
     description:
       "Generate image(s) using tools.image_gen.model. Optionally include reference image URLs for edits or variations.",

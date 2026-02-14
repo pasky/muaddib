@@ -1,6 +1,6 @@
-import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 import type { ChronicleStore } from "../../chronicle/chronicle-store.js";
+import type { MuaddibTool } from "./types.js";
 
 export interface ProgressReportToolOptions {
   onProgressReport?: (text: string) => void | Promise<void>;
@@ -8,12 +8,13 @@ export interface ProgressReportToolOptions {
   minIntervalSeconds?: number;
 }
 
-export function createProgressReportTool(options: ProgressReportToolOptions = {}): AgentTool<any> {
+export function createProgressReportTool(options: ProgressReportToolOptions = {}): MuaddibTool {
   const minInterval = (options.minIntervalSeconds ?? 15) * 1000;
   let lastSentAt = 0;
 
   return {
     name: "progress_report",
+    persistType: "none",
     label: "Progress Report",
     description: "Send a short progress update while working on a response.",
     parameters: Type.Object({
@@ -57,9 +58,10 @@ export interface MakePlanToolOptions {
   currentQuestId?: string | null;
 }
 
-export function createMakePlanTool(options: MakePlanToolOptions = {}): AgentTool<any> {
+export function createMakePlanTool(options: MakePlanToolOptions = {}): MuaddibTool {
   return {
     name: "make_plan",
+    persistType: "none",
     label: "Make Plan",
     description: "Capture a brief plan before continuing with work.",
     parameters: Type.Object({

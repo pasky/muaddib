@@ -1,5 +1,3 @@
-import type { AgentTool } from "@mariozechner/pi-agent-core";
-
 import { createMakePlanTool, createProgressReportTool } from "./control.js";
 import {
   createChronicleAppendTool,
@@ -48,7 +46,7 @@ import type { GenerateImageInput, GenerateImageResult, GeneratedImageResultItem,
 import type { OracleInput, OracleExecutor } from "./oracle.js";
 import type { QuestStartInput, SubquestStartInput, QuestSnoozeInput, QuestStartExecutor, SubquestStartExecutor, QuestSnoozeExecutor } from "./quest.js";
 import type { VisitWebpageImageResult, VisitWebpageResult, WebSearchExecutor, VisitWebpageExecutor } from "./web.js";
-import type { DefaultToolExecutorOptions } from "./types.js";
+import type { DefaultToolExecutorOptions, MuaddibTool, ToolPersistType } from "./types.js";
 
 export interface BaselineToolExecutors {
   webSearch: WebSearchExecutor;
@@ -65,7 +63,7 @@ export interface BaselineToolExecutors {
   questSnooze: QuestSnoozeExecutor;
 }
 
-export type { DefaultToolExecutorOptions };
+export type { DefaultToolExecutorOptions, MuaddibTool, ToolPersistType };
 export type { EditArtifactInput, ShareArtifactExecutor, EditArtifactExecutor } from "./artifact.js";
 export type { ChronicleReadInput, ChronicleAppendInput, ChronicleReadExecutor, ChronicleAppendExecutor } from "./chronicle.js";
 export type { ExecuteCodeInput, ExecuteCodeExecutor } from "./execute-code.js";
@@ -105,7 +103,7 @@ export interface BaselineToolOptions extends DefaultToolExecutorOptions {
   oracleInvocation?: OracleInvocationContext;
 }
 
-type ExecutorBackedToolFactory = (executors: BaselineToolExecutors) => AgentTool<any>;
+type ExecutorBackedToolFactory = (executors: BaselineToolExecutors) => MuaddibTool;
 
 const WEB_TOOL_GROUP: ReadonlyArray<ExecutorBackedToolFactory> = [
   createWebSearchTool,
@@ -183,7 +181,7 @@ export function createDefaultToolExecutors(
  * Baseline tool set for command-path parity.
  * Grouped by tool domains (web, execution, artifacts, images, oracle, chronicle, quests).
  */
-export function createBaselineAgentTools(options: BaselineToolOptions = {}): AgentTool<any>[] {
+export function createBaselineAgentTools(options: BaselineToolOptions = {}): MuaddibTool[] {
   const defaultExecutors = createDefaultToolExecutors(options, options.oracleInvocation);
   const executors: BaselineToolExecutors = {
     webSearch: options.executors?.webSearch ?? defaultExecutors.webSearch,

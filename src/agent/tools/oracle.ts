@@ -3,6 +3,7 @@ import { Type } from "@sinclair/typebox";
 
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { SessionRunner } from "../session-runner.js";
+import type { MuaddibTool } from "./types.js";
 import type { RunnerLogger, SessionFactoryContextMessage } from "../session-factory.js";
 import type { DefaultToolExecutorOptions } from "./types.js";
 
@@ -29,9 +30,10 @@ export const ORACLE_EXCLUDED_TOOLS = new Set([
 
 const ORACLE_LOG_SEPARATOR = "----------------------------------------------";
 
-export function createOracleTool(executors: { oracle: OracleExecutor }): AgentTool<any> {
+export function createOracleTool(executors: { oracle: OracleExecutor }): MuaddibTool {
   return {
     name: "oracle",
+    persistType: "none",
     label: "Oracle",
     description:
       "Consult the oracle - a more powerful reasoning model that may be consulted for complex analysis and creative work. " +

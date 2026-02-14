@@ -55,6 +55,46 @@ describe("baseline agent tools", () => {
     ]);
   });
 
+  it("every tool has a colocated persistType matching Python parity", () => {
+    const tools = createBaselineAgentTools({
+      executors: {
+        webSearch: async () => "",
+        visitWebpage: async () => "",
+        executeCode: async () => "",
+        shareArtifact: async () => "",
+        editArtifact: async () => "",
+        generateImage: async () => ({ summaryText: "", images: [] }),
+        oracle: async () => "",
+        chronicleRead: async () => "",
+        chronicleAppend: async () => "",
+        questStart: async () => "",
+        subquestStart: async () => "",
+        questSnooze: async () => "",
+      },
+    });
+
+    const byName = Object.fromEntries(tools.map((t) => [t.name, (t as any).persistType]));
+
+    // Match Python's tool persist values exactly
+    expect(byName.web_search).toBe("summary");
+    expect(byName.visit_webpage).toBe("summary");
+    expect(byName.execute_code).toBe("artifact");
+    expect(byName.share_artifact).toBe("none");
+    expect(byName.edit_artifact).toBe("artifact");
+    expect(byName.generate_image).toBe("artifact");
+    expect(byName.oracle).toBe("none");
+    expect(byName.chronicle_read).toBe("summary");
+    expect(byName.chronicle_append).toBe("summary");
+    expect(byName.quest_start).toBe("summary");
+    expect(byName.progress_report).toBe("none");
+    expect(byName.make_plan).toBe("none");
+
+    // Every tool must have a persistType
+    for (const tool of tools) {
+      expect((tool as any).persistType, `${tool.name} missing persistType`).toBeDefined();
+    }
+  });
+
   it("includes subquest_start and quest_snooze for top-level quest", () => {
     const tools = createBaselineAgentTools({
       currentQuestId: "my-quest",

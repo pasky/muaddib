@@ -1,7 +1,6 @@
-import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 
-import type { DefaultToolExecutorOptions } from "./types.js";
+import type { DefaultToolExecutorOptions, MuaddibTool } from "./types.js";
 
 export interface QuestStartInput {
   id: string;
@@ -38,9 +37,10 @@ const DEFERRED_QUEST_TOOL_MESSAGE =
 
 export function createQuestStartTool(
   executors: { questStart: QuestStartExecutor },
-): AgentTool<any> {
+): MuaddibTool {
   return {
     name: "quest_start",
+    persistType: "summary",
     label: "Quest Start",
     description:
       "Start a new quest for yourself. Only use on explicit user request for a multi-step autonomous task. The quest system will periodically advance the quest until success criteria are met. MUST be called alongside final_answer in the same turn.",
@@ -70,9 +70,10 @@ export function createQuestStartTool(
 
 export function createSubquestStartTool(
   executors: { subquestStart: SubquestStartExecutor },
-): AgentTool<any> {
+): MuaddibTool {
   return {
     name: "subquest_start",
+    persistType: "summary",
     label: "Subquest Start",
     description:
       "Start a subquest to fully focus on a particular task of the current quest. When the subquest finishes, the parent quest resumes. BEFORE starting subquests, call make_plan to outline your approach - the plan will be included in context for all future quest steps and can be updated via subsequent make_plan calls. If starting multiple subquests, do not call this tool in parallel for subquests that depend on each other. MUST be called alongside final_answer in the same turn.",
@@ -102,9 +103,10 @@ export function createSubquestStartTool(
 
 export function createQuestSnoozeTool(
   executors: { questSnooze: QuestSnoozeExecutor },
-): AgentTool<any> {
+): MuaddibTool {
   return {
     name: "quest_snooze",
+    persistType: "summary",
     label: "Quest Snooze",
     description:
       "Snooze the current quest until a specified time. MUST be called alongside final_answer in the same turn - you will be pinged to resume the quest at the specified time.",

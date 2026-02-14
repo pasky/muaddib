@@ -12,6 +12,8 @@ import {
   createBaselineAgentTools,
   createDefaultToolExecutors,
   type BaselineToolOptions,
+  type MuaddibTool,
+  type ToolPersistType,
 } from "../../agent/tools/baseline-tools.js";
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
@@ -427,7 +429,7 @@ export class RoomCommandHandlerTs {
         refusalFallbackModel: this.refusalFallbackModel ?? undefined,
       });
 
-      await this.persistToolSummaryFromSession(message, agentResult);
+      await this.persistToolSummaryFromSession(message, agentResult, tools as MuaddibTool[]);
       agentResult.session?.dispose();
     } catch (error) {
       this.logger.error("Error during agent execution", error);
@@ -835,6 +837,7 @@ export class RoomCommandHandlerTs {
   private async persistToolSummaryFromSession(
     message: RoomMessage,
     result: PromptResult,
+    tools: MuaddibTool[],
   ): Promise<void> {
     if (!this.options.persistenceSummaryModel) {
       return;
@@ -844,7 +847,7 @@ export class RoomCommandHandlerTs {
       return;
     }
 
-    const calls = collectPersistentToolCalls(result.session.messages);
+    const calls = collectPersistentToolCalls(result.session.messages, tools);
     if (calls.length === 0) {
       return;
     }
@@ -906,7 +909,7 @@ export class RoomCommandHandlerTs {
     message: RoomMessage,
     allowedTools: string[] | null,
     conversationContext?: SessionFactoryContextMessage[],
-  ): AgentTool<any>[] {
+  ): MuaddibTool[] {
     // Build tool options for this invocation (arc + secrets, like Python's per-invocation setup)
     const invocationToolOptions: BaselineToolOptions = {
       ...this.options.toolOptions,
@@ -939,26 +942,6 @@ export class RoomCommandHandlerTs {
 const PERSISTENCE_SUMMARY_SYSTEM_PROMPT =
   "As an AI agent, you need to remember in the future what tools you used when generating a response, and what the tools told you. Summarize all tool uses in a single concise paragraph. If artifact links are included, include every artifact link and tie each link to the corresponding tool call.";
 
-type ToolPersistType = "summary" | "artifact";
-
-const TOOL_PERSISTENCE_POLICY: Readonly<Record<string, ToolPersistType | "none">> = {
-  web_search: "summary",
-  visit_webpage: "summary",
-  execute_code: "artifact",
-  progress_report: "none",
-  make_plan: "none",
-  share_artifact: "none",
-  edit_artifact: "artifact",
-  generate_image: "artifact",
-  oracle: "none",
-  chronicle_read: "summary",
-  chronicle_append: "summary",
-  quest_start: "summary",
-  subquest_start: "summary",
-  quest_snooze: "summary",
-};
-
-
 interface PersistentToolCall {
   toolName: string;
   input: unknown;
@@ -967,7 +950,12 @@ interface PersistentToolCall {
   artifactUrls: string[];
 }
 
-function collectPersistentToolCalls(messages: AgentMessage[]): PersistentToolCall[] {
+function collectPersistentToolCalls(messages: AgentMessage[], tools: MuaddibTool[]): PersistentToolCall[] {
+  const toolPersistMap = new Map<string, ToolPersistType>();
+  for (const tool of tools) {
+    toolPersistMap.set(tool.name, tool.persistType);
+  }
+
   return messages
     .filter((message) => message.role === "toolResult")
     .flatMap((message) => {
@@ -979,7 +967,7 @@ function collectPersistentToolCalls(messages: AgentMessage[]): PersistentToolCal
       if (toolResult.isError) {
         return [];
       }
-      const policy = TOOL_PERSISTENCE_POLICY[toolResult.toolName];
+      const policy = toolPersistMap.get(toolResult.toolName) ?? "none";
       if (policy !== "summary" && policy !== "artifact") {
         return [];
       }

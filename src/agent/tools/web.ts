@@ -1,7 +1,6 @@
-import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 
-import type { DefaultToolExecutorOptions } from "./types.js";
+import type { DefaultToolExecutorOptions, MuaddibTool } from "./types.js";
 
 export interface VisitWebpageImageResult {
   kind: "image";
@@ -17,9 +16,10 @@ export type VisitWebpageExecutor = (url: string) => Promise<VisitWebpageResult>;
 const DEFAULT_WEB_CONTENT_LIMIT = 40_000;
 const DEFAULT_IMAGE_LIMIT = 3_500_000;
 
-export function createWebSearchTool(executors: { webSearch: WebSearchExecutor }): AgentTool<any> {
+export function createWebSearchTool(executors: { webSearch: WebSearchExecutor }): MuaddibTool {
   return {
     name: "web_search",
+    persistType: "summary",
     label: "Web Search",
     description: "Search the web and return top results with titles, URLs, and descriptions.",
     parameters: Type.Object({
@@ -41,9 +41,10 @@ export function createWebSearchTool(executors: { webSearch: WebSearchExecutor })
 
 export function createVisitWebpageTool(
   executors: { visitWebpage: VisitWebpageExecutor },
-): AgentTool<any> {
+): MuaddibTool {
   return {
     name: "visit_webpage",
+    persistType: "summary",
     label: "Visit Webpage",
     description:
       "Visit the given URL and return content as markdown text, or as image content for image URLs.",

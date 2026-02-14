@@ -1,5 +1,19 @@
+import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { ChronicleStore } from "../../chronicle/chronicle-store.js";
 import type { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
+
+/** How a tool's I/O is persisted for future context recall. */
+export type ToolPersistType = "none" | "summary" | "artifact";
+
+/**
+ * Extension of AgentTool with muaddib-specific metadata.
+ * The `persistType` field controls how tool call results are summarised
+ * and stored in the chronicle for future recall (matching the Python
+ * tool `persist` field).
+ */
+export interface MuaddibTool<T = any> extends AgentTool<any, T> {
+  persistType: ToolPersistType;
+}
 
 export interface ToolExecutorLogger {
   info(...data: unknown[]): void;
