@@ -57,17 +57,10 @@ export interface ProactiveEvalResult {
   reason: string;
 }
 
-interface ProactiveEvalLogger {
-  debug(message: string, ...data: unknown[]): void;
-  info(message: string, ...data: unknown[]): void;
-  warn(message: string, ...data: unknown[]): void;
-  error(message: string, ...data: unknown[]): void;
-}
-
 export interface ProactiveEvaluatorOptions {
   modelAdapter?: PiAiModelAdapter;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
-  logger?: ProactiveEvalLogger;
+  logger?: CommandExecutorLogger;
 }
 
 // ── Config builder ──

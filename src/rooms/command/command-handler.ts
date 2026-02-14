@@ -25,20 +25,8 @@ export type {
   CommandRunnerFactory,
   CommandRunnerFactoryInput,
   CommandRateLimiter,
-  CommandExecutorLogger as CommandHandlerLogger,
-  SteeringContextDrainer,
-  CommandRunner,
   CommandExecutorOverrides,
 } from "./command-executor.js";
-
-export { CommandExecutor } from "./command-executor.js";
-
-export type RoomCommandHandlerOverrides = CommandExecutorOverrides;
-
-export interface HandleIncomingMessageOptions {
-  isDirect: boolean;
-  sendResponse?: (text: string) => Promise<void>;
-}
 
 /**
  * Shared TS command execution path with proactive interjection support.
@@ -59,7 +47,7 @@ export class RoomCommandHandlerTs {
   constructor(
     runtime: MuaddibRuntime,
     roomName: string,
-    overrides?: RoomCommandHandlerOverrides,
+    overrides?: CommandExecutorOverrides,
   ) {
     this.executor = new CommandExecutor(runtime, roomName, overrides);
     this.resolver = this.executor.resolver;
@@ -87,7 +75,7 @@ export class RoomCommandHandlerTs {
 
   async handleIncomingMessage(
     message: RoomMessage,
-    options: HandleIncomingMessageOptions,
+    options: { isDirect: boolean; sendResponse?: (text: string) => Promise<void> },
   ): Promise<CommandExecutionResult | null> {
     const triggerMessageId = await this.history.addMessage(message);
 
@@ -127,11 +115,6 @@ export class RoomCommandHandlerTs {
       undefined,
       this.steeringQueue.createContextDrainer(SteeringQueue.keyForMessage(message)),
     );
-  }
-
-  /** Expose buildSystemPrompt for tests. */
-  buildSystemPrompt(mode: string, mynick: string, modelOverride?: string): string {
-    return this.executor.buildSystemPrompt(mode, mynick, modelOverride);
   }
 
   // ── Session lifecycle: commands ──

@@ -49,10 +49,6 @@ export interface CommandExecutionResult {
   toolCallsCount: number;
 }
 
-export interface CommandRunner {
-  prompt(prompt: string, options?: PromptOptions): Promise<PromptResult>;
-}
-
 export interface CommandRunnerFactoryInput {
   model: string;
   systemPrompt: string;
@@ -61,7 +57,9 @@ export interface CommandRunnerFactoryInput {
   logger?: CommandExecutorLogger;
 }
 
-export type CommandRunnerFactory = (input: CommandRunnerFactoryInput) => CommandRunner;
+export type CommandRunnerFactory = (input: CommandRunnerFactoryInput) => {
+  prompt(prompt: string, options?: PromptOptions): Promise<PromptResult>;
+};
 
 export interface CommandRateLimiter {
   checkLimit(): boolean;
@@ -164,13 +162,11 @@ export class CommandExecutor {
     this.refusalFallbackModel = resolveConfigModelSpec(
       runtime.config.getRouterConfig().refusalFallbackModel,
       "router.refusal_fallback_model",
-      this.modelAdapter,
     ) ?? null;
 
     this.persistenceSummaryModel = resolveConfigModelSpec(
       runtime.config.getToolsConfig().summary?.model,
       "tools.summary.model",
-      this.modelAdapter,
     ) ?? null;
 
     this.responseMaxBytes = parseResponseMaxBytes(this.commandConfig.response_max_bytes);
@@ -1082,14 +1078,14 @@ export function pickModeModel(model: string | string[] | undefined): string | nu
   return model;
 }
 
-export function toRunnerContextMessage(message: { role: string; content: string }): SessionFactoryContextMessage {
+function toRunnerContextMessage(message: { role: string; content: string }): SessionFactoryContextMessage {
   return {
     role: message.role === "assistant" ? "assistant" : "user",
     content: message.content,
   };
 }
 
-export function normalizeThinkingLevel(reasoningEffort: string): ThinkingLevel {
+function normalizeThinkingLevel(reasoningEffort: string): ThinkingLevel {
   switch (reasoningEffort) {
     case "off":
     case "minimal":
@@ -1103,7 +1099,7 @@ export function normalizeThinkingLevel(reasoningEffort: string): ThinkingLevel {
   }
 }
 
-export function numberWithDefault(value: unknown, fallback: number): number {
+function numberWithDefault(value: unknown, fallback: number): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) {
     return fallback;
@@ -1111,7 +1107,7 @@ export function numberWithDefault(value: unknown, fallback: number): number {
   return parsed;
 }
 
-export function parseResponseMaxBytes(value: unknown): number {
+function parseResponseMaxBytes(value: unknown): number {
   if (value === undefined || value === null) {
     return 600;
   }
@@ -1124,10 +1120,9 @@ export function parseResponseMaxBytes(value: unknown): number {
   return parsed;
 }
 
-export function resolveConfigModelSpec(
+function resolveConfigModelSpec(
   raw: unknown,
   configKey: string,
-  _modelAdapter: PiAiModelAdapter,
 ): string | undefined {
   if (raw === undefined || raw === null) {
     return undefined;

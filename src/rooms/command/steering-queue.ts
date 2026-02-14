@@ -144,17 +144,6 @@ export class SteeringQueue {
     return { queued: false, isProactiveRunner: false, steeringKey, item };
   }
 
-  /**
-   * @deprecated Use `enqueuePassive` instead.
-   */
-  enqueuePassiveIfSessionExists(
-    message: RoomMessage,
-    sendResponse?: (text: string) => Promise<void>,
-  ): QueuedInboundMessage | null {
-    const result = this.enqueuePassive(message, sendResponse, false);
-    return result.queued ? result.item : null;
-  }
-
   drainSteeringContextMessages(key: SteeringKey): SteeringContextMessage[] {
     const session = this.sessions.get(this.steeringKeyId(key));
     if (!session || session.queue.length === 0) {
