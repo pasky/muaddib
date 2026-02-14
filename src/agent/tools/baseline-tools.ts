@@ -134,11 +134,21 @@ const CHRONICLE_TOOL_GROUP: ReadonlyArray<ExecutorBackedToolFactory> = [
   createChronicleAppendTool,
 ];
 
-const QUEST_TOOL_GROUP: ReadonlyArray<ExecutorBackedToolFactory> = [
-  createQuestStartTool,
-  createSubquestStartTool,
-  createQuestSnoozeTool,
-];
+/**
+ * Select quest tools based on active quest context, matching Python parity:
+ * - No active quest → quest_start only
+ * - Top-level quest (no dots) → subquest_start + quest_snooze
+ * - Sub-quest (has dots) → quest_snooze only
+ */
+function getQuestToolGroup(currentQuestId?: string | null): ReadonlyArray<ExecutorBackedToolFactory> {
+  if (!currentQuestId) {
+    return [createQuestStartTool];
+  }
+  if (!currentQuestId.includes(".")) {
+    return [createSubquestStartTool, createQuestSnoozeTool];
+  }
+  return [createQuestSnoozeTool];
+}
 
 const BASELINE_EXECUTOR_TOOL_GROUPS: ReadonlyArray<ReadonlyArray<ExecutorBackedToolFactory>> = [
   WEB_TOOL_GROUP,
@@ -147,7 +157,6 @@ const BASELINE_EXECUTOR_TOOL_GROUPS: ReadonlyArray<ReadonlyArray<ExecutorBackedT
   IMAGE_TOOL_GROUP,
   ORACLE_TOOL_GROUP,
   CHRONICLE_TOOL_GROUP,
-  QUEST_TOOL_GROUP,
 ];
 
 export function createDefaultToolExecutors(
@@ -191,7 +200,9 @@ export function createBaselineAgentTools(options: BaselineToolOptions = {}): Age
     questSnooze: options.executors?.questSnooze ?? defaultExecutors.questSnooze,
   };
 
-  const executorBackedTools = BASELINE_EXECUTOR_TOOL_GROUPS.flatMap((group) =>
+  const questToolGroup = getQuestToolGroup(options.currentQuestId);
+
+  const executorBackedTools = [...BASELINE_EXECUTOR_TOOL_GROUPS, questToolGroup].flatMap((group) =>
     group.map((factory) => factory(executors)),
   );
 

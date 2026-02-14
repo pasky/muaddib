@@ -37,6 +37,7 @@ describe("baseline agent tools", () => {
       },
     });
 
+    // No currentQuestId → only quest_start (no subquest_start or quest_snooze)
     expect(tools.map((tool) => tool.name)).toEqual([
       "web_search",
       "visit_webpage",
@@ -48,11 +49,59 @@ describe("baseline agent tools", () => {
       "chronicle_read",
       "chronicle_append",
       "quest_start",
-      "subquest_start",
-      "quest_snooze",
       "progress_report",
       "make_plan",
     ]);
+  });
+
+  it("includes subquest_start and quest_snooze for top-level quest", () => {
+    const tools = createBaselineAgentTools({
+      currentQuestId: "my-quest",
+      executors: {
+        webSearch: async () => "",
+        visitWebpage: async () => "",
+        executeCode: async () => "",
+        shareArtifact: async () => "",
+        editArtifact: async () => "",
+        generateImage: async () => ({ summaryText: "", images: [] }),
+        oracle: async () => "",
+        chronicleRead: async () => "",
+        chronicleAppend: async () => "",
+        questStart: async () => "",
+        subquestStart: async () => "",
+        questSnooze: async () => "",
+      },
+    });
+
+    const names = tools.map((t) => t.name);
+    expect(names).toContain("subquest_start");
+    expect(names).toContain("quest_snooze");
+    expect(names).not.toContain("quest_start");
+  });
+
+  it("includes only quest_snooze for sub-quest (dotted ID)", () => {
+    const tools = createBaselineAgentTools({
+      currentQuestId: "my-quest.sub1",
+      executors: {
+        webSearch: async () => "",
+        visitWebpage: async () => "",
+        executeCode: async () => "",
+        shareArtifact: async () => "",
+        editArtifact: async () => "",
+        generateImage: async () => ({ summaryText: "", images: [] }),
+        oracle: async () => "",
+        chronicleRead: async () => "",
+        chronicleAppend: async () => "",
+        questStart: async () => "",
+        subquestStart: async () => "",
+        questSnooze: async () => "",
+      },
+    });
+
+    const names = tools.map((t) => t.name);
+    expect(names).toContain("quest_snooze");
+    expect(names).not.toContain("quest_start");
+    expect(names).not.toContain("subquest_start");
   });
 
   it("progress_report tool invokes callback and returns text content", async () => {
