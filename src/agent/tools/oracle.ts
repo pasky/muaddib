@@ -81,7 +81,7 @@ export function createDefaultOracleExecutor(
   options: ToolContext,
   invocation?: OracleInvocationContext,
 ): OracleExecutor {
-  const modelAdapter = options.modelAdapter ?? new PiAiModelAdapter();
+  const modelAdapter = options.modelAdapter as PiAiModelAdapter;
   // Cast to RunnerLogger — callers (command handler, CLI) pass full loggers;
   // the ToolExecutorLogger type is just narrower than what's actually provided.
   const logger = (options.logger ?? console) as RunnerLogger;

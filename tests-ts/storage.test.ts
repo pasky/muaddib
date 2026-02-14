@@ -374,7 +374,7 @@ describe("AutoChroniclerTs", () => {
       modelAdapter: { completeSimple: vi.fn(async () => makeAssistantText("summary")) } as any,
     });
 
-    const completeFn = vi.fn(async () => makeAssistantText("should not be called"));
+    const modelAdapter = { completeSimple: vi.fn(async () => makeAssistantText("should not be called")) } as any;
 
     const autoChronicler = new AutoChroniclerTs({
       history,
@@ -383,7 +383,7 @@ describe("AutoChroniclerTs", () => {
       config: {
         model: "openai:gpt-4o-mini",
       },
-      completeFn,
+      modelAdapter,
       logger: {
         debug: () => {},
         info: () => {},
@@ -395,7 +395,7 @@ describe("AutoChroniclerTs", () => {
     const triggered = await autoChronicler.checkAndChronicle("muaddib", "libera", "#test", 2);
 
     expect(triggered).toBe(false);
-    expect(completeFn).not.toHaveBeenCalled();
+    expect(modelAdapter.completeSimple).not.toHaveBeenCalled();
 
     await history.close();
     await chronicleStore.close();
@@ -434,7 +434,7 @@ describe("AutoChroniclerTs", () => {
       } as any,
     });
 
-    const completeFn = vi.fn(async () => makeAssistantText("Auto chronicled paragraph."));
+    const modelAdapter = { completeSimple: vi.fn(async () => makeAssistantText("Auto chronicled paragraph.")) } as any;
 
     const autoChronicler = new AutoChroniclerTs({
       history,
@@ -443,7 +443,7 @@ describe("AutoChroniclerTs", () => {
       config: {
         model: "openai:gpt-4o-mini",
       },
-      completeFn,
+      modelAdapter,
       logger: {
         debug: () => {},
         info: () => {},
@@ -455,7 +455,7 @@ describe("AutoChroniclerTs", () => {
     const triggered = await autoChronicler.checkAndChronicle("muaddib", "libera", "#test", 2);
 
     expect(triggered).toBe(true);
-    expect(completeFn).toHaveBeenCalledTimes(1);
+    expect(modelAdapter.completeSimple).toHaveBeenCalledTimes(1);
     expect(await history.countRecentUnchronicled("libera", "#test", 7)).toBe(0);
 
     const currentChapter = await chronicleStore.renderChapter("libera##test");

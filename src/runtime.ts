@@ -102,7 +102,6 @@ export async function createMuaddibRuntime(
         arc_models: chroniclerConfig.arcModels,
       },
       modelAdapter,
-      getApiKey,
       logger: runtimeLogger.getLogger("muaddib.rooms.autochronicler"),
     });
   }

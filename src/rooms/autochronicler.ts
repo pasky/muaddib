@@ -1,21 +1,8 @@
-import {
-  completeSimple,
-  type AssistantMessage,
-  type Model,
-  type SimpleStreamOptions,
-  type UserMessage,
-} from "@mariozechner/pi-ai";
 
 import type { ChronicleStore } from "../chronicle/chronicle-store.js";
 import type { ChronicleLifecycle } from "../chronicle/lifecycle.js";
 import type { ChatHistoryStore } from "../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
-
-type CompleteSimpleFn = (
-  model: Model<any>,
-  context: { messages: UserMessage[]; systemPrompt?: string },
-  options?: SimpleStreamOptions,
-) => Promise<AssistantMessage>;
 
 interface AutoChroniclerLogger {
   debug(...args: unknown[]): void;
@@ -43,9 +30,7 @@ export interface AutoChroniclerTsOptions {
   chronicleStore: ChronicleStore;
   lifecycle: ChronicleLifecycle;
   config: AutoChroniclerConfig;
-  modelAdapter?: PiAiModelAdapter;
-  completeFn?: CompleteSimpleFn;
-  getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+  modelAdapter: PiAiModelAdapter;
   logger?: AutoChroniclerLogger;
 }
 
@@ -64,8 +49,6 @@ const DEFAULT_LOGGER: AutoChroniclerLogger = {
 
 export class AutoChroniclerTs implements AutoChronicler {
   private readonly modelAdapter: PiAiModelAdapter;
-  private readonly completeFn: CompleteSimpleFn;
-  private readonly getApiKey: (provider: string) => Promise<string | undefined>;
   private readonly logger: AutoChroniclerLogger;
   private readonly arcQueues = new Map<string, Promise<void>>();
 
@@ -74,14 +57,7 @@ export class AutoChroniclerTs implements AutoChronicler {
   static readonly MESSAGE_OVERLAP = 5;
 
   constructor(private readonly options: AutoChroniclerTsOptions) {
-    this.modelAdapter = options.modelAdapter ?? new PiAiModelAdapter();
-    this.completeFn = options.completeFn ?? completeSimple;
-    this.getApiKey = async (provider: string) => {
-      if (!options.getApiKey) {
-        return undefined;
-      }
-      return await options.getApiKey(provider);
-    };
+    this.modelAdapter = options.modelAdapter;
     this.logger = options.logger ?? DEFAULT_LOGGER;
   }
 
@@ -175,10 +151,10 @@ export class AutoChroniclerTs implements AutoChronicler {
       "Respond only with the paragraph, no preamble.";
 
     const contextMessages = await this.options.chronicleStore.getChapterContextMessages(arc);
-    const resolvedModel = this.modelAdapter.resolve(this.resolveChroniclerModel(arc)).model;
+    const modelSpec = this.resolveChroniclerModel(arc);
 
-    const response = await this.completeFn(
-      resolvedModel,
+    const response = await this.modelAdapter.completeSimple(
+      modelSpec,
       {
         systemPrompt: CHRONICLE_APPEND_SYSTEM_PROMPT,
         messages: [
@@ -195,8 +171,9 @@ export class AutoChroniclerTs implements AutoChronicler {
         ],
       },
       {
-        apiKey: await this.getApiKey(resolvedModel.provider),
-        maxTokens: 1024,
+        callType: "autochronicler_append",
+        logger: this.logger,
+        streamOptions: { maxTokens: 1024 },
       },
     );
 

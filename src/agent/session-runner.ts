@@ -17,7 +17,7 @@ export interface SessionRunnerOptions {
   model: string;
   systemPrompt: string;
   tools?: AgentTool<any>[];
-  modelAdapter?: PiAiModelAdapter;
+  modelAdapter: PiAiModelAdapter;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   maxIterations?: number;
   emptyCompletionRetryPrompt?: string;
@@ -64,7 +64,7 @@ export class SessionRunner {
     this.model = options.model;
     this.systemPrompt = options.systemPrompt;
     this.tools = options.tools ?? [];
-    this.modelAdapter = options.modelAdapter ?? new PiAiModelAdapter();
+    this.modelAdapter = options.modelAdapter;
     this.getApiKey = options.getApiKey;
     this.maxIterations = options.maxIterations;
     this.logger = options.logger ?? console;
