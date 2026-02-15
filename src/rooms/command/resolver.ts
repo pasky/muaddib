@@ -1,4 +1,7 @@
+import type { CommandConfig, ModeConfig } from "../../config/muaddib-config.js";
 import type { RoomMessage } from "../message.js";
+
+export type { CommandConfig, ModeConfig };
 
 export interface ParsedPrefix {
   noContext: boolean;
@@ -31,39 +34,6 @@ export interface RuntimeSettings {
   model: string | null;
   visionModel: string | null;
   historySize: number;
-}
-
-export interface ModeConfig {
-  model?: string | string[];
-  history_size?: number;
-  reasoning_effort?: string;
-  allowed_tools?: string[];
-  steering?: boolean;
-  auto_reduce_context?: boolean;
-  include_chapter_summary?: boolean;
-  vision_model?: string;
-  prompt?: string;
-  triggers: Record<string, Record<string, unknown>>;
-}
-
-export interface ModeClassifierConfig {
-  labels: Record<string, string>;
-  fallback_label?: string;
-  model: string;
-  prompt?: string;
-}
-
-export interface CommandConfig {
-  history_size: number;
-  response_max_bytes?: number;
-  debounce?: number;
-  rate_limit?: number;
-  rate_period?: number;
-  default_mode?: string;
-  channel_modes?: Record<string, string>;
-  ignore_users?: string[];
-  modes: Record<string, ModeConfig>;
-  mode_classifier: ModeClassifierConfig;
 }
 
 export class CommandResolver {
@@ -102,9 +72,9 @@ export class CommandResolver {
       }
     }
 
-    this.classifierLabelToTrigger = commandConfig.mode_classifier.labels;
+    this.classifierLabelToTrigger = commandConfig.modeClassifier.labels;
     if (Object.keys(this.classifierLabelToTrigger).length === 0) {
-      throw new Error("command.mode_classifier.labels must not be empty");
+      throw new Error("command.modeClassifier.labels must not be empty");
     }
 
     for (const [label, trigger] of Object.entries(this.classifierLabelToTrigger)) {
@@ -114,7 +84,7 @@ export class CommandResolver {
     }
 
     this.fallbackClassifierLabel =
-      commandConfig.mode_classifier.fallback_label ?? Object.keys(this.classifierLabelToTrigger)[0];
+      commandConfig.modeClassifier.fallbackLabel ?? Object.keys(this.classifierLabelToTrigger)[0];
 
     if (!this.classifierLabelToTrigger[this.fallbackClassifierLabel]) {
       throw new Error(
@@ -194,22 +164,22 @@ export class CommandResolver {
       modeKey,
       {
         reasoningEffort:
-          (overrides.reasoning_effort as string | undefined) ?? modeConfig.reasoning_effort ?? "minimal",
+          (overrides.reasoningEffort as string | undefined) ?? modeConfig.reasoningEffort ?? "minimal",
         allowedTools:
-          (overrides.allowed_tools as string[] | undefined) ?? modeConfig.allowed_tools ?? null,
+          (overrides.allowedTools as string[] | undefined) ?? modeConfig.allowedTools ?? null,
         steering: (overrides.steering as boolean | undefined) ?? modeConfig.steering ?? true,
         autoReduceContext:
-          (overrides.auto_reduce_context as boolean | undefined) ??
-          modeConfig.auto_reduce_context ??
+          (overrides.autoReduceContext as boolean | undefined) ??
+          modeConfig.autoReduceContext ??
           false,
         includeChapterSummary:
-          (overrides.include_chapter_summary as boolean | undefined) ??
-          modeConfig.include_chapter_summary ??
+          (overrides.includeChapterSummary as boolean | undefined) ??
+          modeConfig.includeChapterSummary ??
           true,
         model: (overrides.model as string | undefined) ?? null,
         visionModel:
-          (overrides.vision_model as string | undefined) ?? modeConfig.vision_model ?? null,
-        historySize: Number(modeConfig.history_size ?? this.commandConfig.history_size),
+          (overrides.visionModel as string | undefined) ?? modeConfig.visionModel ?? null,
+        historySize: Number(modeConfig.historySize ?? this.commandConfig.historySize),
       },
     ];
   }
@@ -233,9 +203,9 @@ export class CommandResolver {
   }
 
   getChannelMode(serverTag: string, channelName: string): string {
-    const channelModes = this.commandConfig.channel_modes ?? {};
+    const channelModes = this.commandConfig.channelModes ?? {};
     const key = CommandResolver.channelKey(serverTag, channelName);
-    return channelModes[key] ?? this.commandConfig.default_mode ?? "classifier";
+    return channelModes[key] ?? this.commandConfig.defaultMode ?? "classifier";
   }
 
   shouldBypassSteeringQueue(message: RoomMessage): boolean {
@@ -271,7 +241,7 @@ export class CommandResolver {
 
   buildHelpMessage(serverTag: string, channelName: string): string {
     const channelMode = this.getChannelMode(serverTag, channelName);
-    const classifierModel = this.commandConfig.mode_classifier.model;
+    const classifierModel = this.commandConfig.modeClassifier.model;
 
     const defaultDescription = this.describeDefaultMode(channelMode, classifierModel);
 

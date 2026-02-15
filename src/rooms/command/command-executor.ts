@@ -156,8 +156,8 @@ export class CommandExecutor {
     this.rateLimiter =
       overrides?.rateLimiter ??
       new RateLimiter(
-        numberWithDefault(this.commandConfig.rate_limit, 30),
-        numberWithDefault(this.commandConfig.rate_period, 900),
+        numberWithDefault(this.commandConfig.rateLimit, 30),
+        numberWithDefault(this.commandConfig.ratePeriod, 900),
       );
 
     this.refusalFallbackModel = resolveConfigModelSpec(
@@ -170,7 +170,7 @@ export class CommandExecutor {
       "tools.summary.model",
     ) ?? null;
 
-    this.responseMaxBytes = parseResponseMaxBytes(this.commandConfig.response_max_bytes);
+    this.responseMaxBytes = parseResponseMaxBytes(this.commandConfig.responseMaxBytes);
 
     this.contextReducer =
       overrides?.contextReducer ??
@@ -207,10 +207,10 @@ export class CommandExecutor {
     steeringContextDrainer?: SteeringContextDrainer,
   ): Promise<CommandExecutionResult> {
     const { commandConfig, logger } = this;
-    const defaultSize = commandConfig.history_size;
+    const defaultSize = commandConfig.historySize;
     const maxSize = Math.max(
       defaultSize,
-      ...Object.values(commandConfig.modes).map((mode) => Number(mode.history_size ?? 0)),
+      ...Object.values(commandConfig.modes).map((mode) => Number(mode.historySize ?? 0)),
     );
 
     // ── Rate limit ──
@@ -412,7 +412,7 @@ export class CommandExecutor {
     const result = await this.deliverResult(message, triggerMessageId, sendResponse, {
       response: responseText || null, resolved, model: modelSpec, usage, toolCallsCount,
     });
-    await this.triggerAutoChronicler(message, this.commandConfig.history_size);
+    await this.triggerAutoChronicler(message, this.commandConfig.historySize);
 
     return result;
   }
@@ -433,11 +433,11 @@ export class CommandExecutor {
     const modelSpec = proactiveConfig.models.serious;
     const systemPrompt =
       this.buildSystemPrompt("serious", message.mynick) +
-      " " + proactiveConfig.prompts.serious_extra;
+      " " + proactiveConfig.prompts.seriousExtra;
 
     const context = await this.history.getContextForMessage(
       message,
-      proactiveConfig.history_size,
+      proactiveConfig.historySize,
     );
 
     const steeringEnabled = Boolean(classifiedRuntime.steering);
@@ -511,7 +511,7 @@ export class CommandExecutor {
       { mode: classifiedTrigger },
     );
 
-    await this.triggerAutoChronicler(message, this.commandConfig.history_size);
+    await this.triggerAutoChronicler(message, this.commandConfig.historySize);
     return true;
   }
 
@@ -726,7 +726,7 @@ export class CommandExecutor {
       (_full, key: string) => triggerModelVars[key] ?? _full,
     );
 
-    const promptVars = this.runtime.config.getRoomConfig(this.roomName).prompt_vars ?? {};
+    const promptVars = this.runtime.config.getRoomConfig(this.roomName).promptVars ?? {};
     const vars: Record<string, string> = {
       ...promptVars,
       mynick,
@@ -737,7 +737,7 @@ export class CommandExecutor {
   }
 
   async triggerAutoChronicler(message: RoomMessage, maxSize?: number): Promise<void> {
-    maxSize ??= this.commandConfig.history_size;
+    maxSize ??= this.commandConfig.historySize;
     if (!this.runtime.autoChronicler) {
       return;
     }

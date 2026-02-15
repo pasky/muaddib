@@ -2,9 +2,24 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { getMuaddibHome, resolveMuaddibPath } from "./paths.js";
-import type { CommandConfig } from "../rooms/command/resolver.js";
 
-// ── Config section interfaces ──────────────────────────────────────────
+// ── snake_case → camelCase recursive key transform ─────────────────────
+
+function camelCaseKey(key: string): string {
+  return key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+}
+
+function camelCaseKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(camelCaseKeys);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [camelCaseKey(k), camelCaseKeys(v)]),
+    );
+  }
+  return value;
+}
+
+// ── Config interfaces (camelCase) ──────────────────────────────────────
 
 interface ActorConfig {
   maxIterations?: number;
@@ -39,17 +54,13 @@ export interface SpritesConfig {
   executeTimeoutMs?: number;
 }
 
-interface SummaryConfig {
-  model?: string;
-}
-
 export interface ToolsConfig {
   artifacts?: ArtifactsConfig;
   oracle?: OracleConfig;
   imageGen?: ImageGenConfig;
   jina?: JinaConfig;
   sprites?: SpritesConfig;
-  summary?: SummaryConfig;
+  summary?: { model?: string };
 }
 
 interface ContextReducerConfig {
@@ -85,121 +96,95 @@ interface RouterConfig {
   refusalFallbackModel?: string;
 }
 
-interface RoomVarlinkConfig {
-  socket_path?: string;
+// ── Mode / Command config ──────────────────────────────────────────────
+
+export interface ModeConfig {
+  model?: string | string[];
+  historySize?: number;
+  reasoningEffort?: string;
+  allowedTools?: string[];
+  steering?: boolean;
+  autoReduceContext?: boolean;
+  includeChapterSummary?: boolean;
+  visionModel?: string;
+  prompt?: string;
+  triggers: Record<string, Record<string, unknown>>;
 }
 
+export interface ModeClassifierConfig {
+  labels: Record<string, string>;
+  fallbackLabel?: string;
+  model: string;
+  prompt?: string;
+}
+
+export interface CommandConfig {
+  historySize: number;
+  responseMaxBytes?: number;
+  debounce?: number;
+  rateLimit?: number;
+  ratePeriod?: number;
+  defaultMode?: string;
+  channelModes?: Record<string, string>;
+  ignoreUsers?: string[];
+  modes: Record<string, ModeConfig>;
+  modeClassifier: ModeClassifierConfig;
+}
+
+// ── Room config ────────────────────────────────────────────────────────
+
 interface SlackWorkspaceConfig {
-  bot_token?: string;
+  botToken?: string;
   name?: string;
 }
 
 export interface ProactiveRoomConfig {
   interjecting?: string[];
-  debounce_seconds?: number;
-  history_size?: number;
-  rate_limit?: number;
-  rate_period?: number;
-  interject_threshold?: number;
+  debounceSeconds?: number;
+  historySize?: number;
+  rateLimit?: number;
+  ratePeriod?: number;
+  interjectThreshold?: number;
   models?: {
     validation?: string[];
     serious?: string;
   };
   prompts?: {
     interject?: string;
-    serious_extra?: string;
+    seriousExtra?: string;
   };
 }
 
-interface RoomConfig {
+export interface RoomConfig {
   enabled?: boolean;
   command?: CommandConfig;
   proactive?: ProactiveRoomConfig;
-  prompt_vars?: Record<string, string>;
-  varlink?: RoomVarlinkConfig;
+  promptVars?: Record<string, string>;
+  varlink?: { socketPath?: string };
   token?: string;
-  bot_name?: string;
-  app_token?: string;
+  botName?: string;
+  appToken?: string;
   workspaces?: Record<string, SlackWorkspaceConfig>;
-  reply_start_thread?: {
-    channel?: boolean;
-    dm?: boolean;
-  };
-  reply_edit_debounce_seconds?: number;
-  reconnect?: {
-    enabled?: boolean;
-    delay_ms?: number;
-    max_attempts?: number;
-  };
+  replyStartThread?: { channel?: boolean; dm?: boolean };
+  replyEditDebounceSeconds?: number;
+  reconnect?: { enabled?: boolean; delayMs?: number; maxAttempts?: number };
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────
+// ── Internal typed settings shape ──────────────────────────────────────
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-  return value as Record<string, unknown>;
+interface MuaddibSettings {
+  actor?: ActorConfig;
+  tools?: ToolsConfig;
+  contextReducer?: ContextReducerConfig;
+  chronicler?: ChroniclerConfig;
+  providers?: Record<string, { baseUrl?: string; key?: string }>;
+  history?: HistoryConfig;
+  router?: RouterConfig;
+  rooms?: Record<string, RoomConfig>;
+  quests?: unknown;
 }
 
-function stringOrUndefined(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function numberOrUndefined(value: unknown): number | undefined {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return undefined;
-  }
-  return parsed;
-}
-
-function toStringRecord(value: unknown): Record<string, string> | undefined {
-  const record = asRecord(value);
-  if (!record) {
-    return undefined;
-  }
-
-  const result: Record<string, string> = {};
-  for (const [key, entry] of Object.entries(record)) {
-    const normalized = stringOrUndefined(entry);
-    if (!normalized) {
-      continue;
-    }
-    result[key] = normalized;
-  }
-
-  return Object.keys(result).length > 0 ? result : undefined;
-}
-
-function toSlackWorkspaces(value: unknown): Record<string, SlackWorkspaceConfig> | undefined {
-  const record = asRecord(value);
-  if (!record) {
-    return undefined;
-  }
-
-  const result: Record<string, SlackWorkspaceConfig> = {};
-  for (const [workspaceId, rawWorkspace] of Object.entries(record)) {
-    const workspace = asRecord(rawWorkspace);
-    if (!workspace) {
-      result[workspaceId] = {};
-      continue;
-    }
-
-    result[workspaceId] = {
-      bot_token: stringOrUndefined(workspace.bot_token),
-      name: stringOrUndefined(workspace.name),
-    };
-  }
-
-  return Object.keys(result).length > 0 ? result : undefined;
-}
-
-// ── Deep merge (moved from rooms/command/config.ts) ────────────────────
+// ── Deep merge with room-specific semantics ────────────────────────────
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -207,8 +192,8 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 /**
  * Deep-merges two room config objects with room-specific semantics:
- * - `ignore_users` arrays are concatenated (not replaced)
- * - `prompt_vars` string values are concatenated (not replaced)
+ * - `ignoreUsers` arrays are concatenated (not replaced)
+ * - `promptVars` string values are concatenated (not replaced)
  */
 export function mergeRoomConfigs(
   base: Record<string, unknown>,
@@ -227,13 +212,13 @@ export function mergeRoomConfigs(
   }
 
   for (const [key, value] of Object.entries(override)) {
-    if (key === "ignore_users" && Array.isArray(value)) {
+    if (key === "ignoreUsers" && Array.isArray(value)) {
       const baseList = (result[key] as unknown[] | undefined) ?? [];
       result[key] = [...baseList, ...value];
       continue;
     }
 
-    if (key === "prompt_vars" && isObject(value)) {
+    if (key === "promptVars" && isObject(value)) {
       const baseVars = (result[key] as Record<string, unknown> | undefined) ?? {};
       const mergedVars: Record<string, unknown> = { ...baseVars };
       for (const [varKey, varValue] of Object.entries(value)) {
@@ -266,205 +251,85 @@ export function mergeRoomConfigs(
 // ── MuaddibConfig ──────────────────────────────────────────────────────
 
 export class MuaddibConfig {
-  constructor(private readonly data: Record<string, unknown>) {}
+  private readonly data: MuaddibSettings;
+
+  private constructor(data: MuaddibSettings) {
+    this.data = data;
+  }
 
   static load(path: string): MuaddibConfig {
-    const raw = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
-    return new MuaddibConfig(raw);
+    const raw = JSON.parse(readFileSync(path, "utf-8"));
+    return new MuaddibConfig(camelCaseKeys(raw) as MuaddibSettings);
   }
 
   static inMemory(overrides?: Record<string, unknown>): MuaddibConfig {
-    return new MuaddibConfig(overrides ?? {});
+    return new MuaddibConfig(camelCaseKeys(overrides ?? {}) as MuaddibSettings);
   }
 
   toObject(): Record<string, unknown> {
-    return this.data;
+    return this.data as unknown as Record<string, unknown>;
   }
 
   getActorConfig(): ActorConfig {
-    const actor = asRecord(this.data.actor);
-    return {
-      maxIterations: numberOrUndefined(actor?.max_iterations),
-      maxCompletionRetries: numberOrUndefined(actor?.max_completion_retries),
-      llmDebugMaxChars: numberOrUndefined(actor?.llm_debug_max_chars),
-    };
+    return this.data.actor ?? {};
   }
 
   getToolsConfig(): ToolsConfig {
-    const tools = asRecord(this.data.tools);
-    const artifacts = asRecord(tools?.artifacts);
-    const oracle = asRecord(tools?.oracle);
-    const imageGen = asRecord(tools?.image_gen);
-    const jina = asRecord(tools?.jina);
-    const sprites = asRecord(tools?.sprites);
-    const summary = asRecord(tools?.summary);
-
-    const artifactsPathRaw = stringOrUndefined(artifacts?.path);
+    const t = this.data.tools ?? {};
+    const artifactsPathRaw = t.artifacts?.path;
     const resolvedArtifactsPath = artifactsPathRaw
       ? resolveMuaddibPath(artifactsPathRaw, join(getMuaddibHome(), "artifacts"))
       : undefined;
 
     return {
+      ...t,
       artifacts: {
+        ...t.artifacts,
         path: resolvedArtifactsPath,
-        url: stringOrUndefined(artifacts?.url),
-      },
-      oracle: {
-        model: stringOrUndefined(oracle?.model),
-        prompt: stringOrUndefined(oracle?.prompt),
-        maxIterations: numberOrUndefined(oracle?.max_iterations),
-      },
-      imageGen: {
-        model: stringOrUndefined(imageGen?.model),
-        timeoutMs: numberOrUndefined(imageGen?.timeout_ms),
-      },
-      jina: {
-        apiKey: stringOrUndefined(jina?.api_key),
-        maxWebContentLength: numberOrUndefined(jina?.max_web_content_length),
-        maxImageBytes: numberOrUndefined(jina?.max_image_bytes),
-      },
-      sprites: {
-        token: stringOrUndefined(sprites?.token),
-        executeTimeoutMs: numberOrUndefined(sprites?.execute_timeout_ms),
-      },
-      summary: {
-        model: stringOrUndefined(summary?.model),
       },
     };
   }
 
   getContextReducerConfig(): ContextReducerConfig {
-    const cr = asRecord(this.data.context_reducer);
-    return {
-      model: stringOrUndefined(cr?.model),
-      prompt: stringOrUndefined(cr?.prompt),
-    };
+    return this.data.contextReducer ?? {};
   }
 
   getChroniclerConfig(): ChroniclerConfig {
-    const chronicler = asRecord(this.data.chronicler);
-    if (!chronicler) {
-      return {};
-    }
-    const db = asRecord(chronicler.database);
-    return {
-      model: stringOrUndefined(chronicler.model),
-      database: { path: stringOrUndefined(db?.path) },
-      paragraphsPerChapter: numberOrUndefined(chronicler.paragraphs_per_chapter),
-      arcModels: toStringRecord(chronicler.arc_models),
-    };
+    return this.data.chronicler ?? {};
   }
 
   getProvidersConfig(): ProvidersConfig {
-    const providers = asRecord(this.data.providers);
-    const openrouter = asRecord(providers?.openrouter);
-    const deepseek = asRecord(providers?.deepseek);
-
+    const p = this.data.providers;
     return {
-      openrouter: {
-        baseUrl: stringOrUndefined(openrouter?.base_url),
-      },
-      deepseek: {
-        baseUrl: stringOrUndefined(deepseek?.base_url),
-      },
+      openrouter: { baseUrl: p?.openrouter?.baseUrl },
+      deepseek: { baseUrl: p?.deepseek?.baseUrl },
     };
   }
 
   getProviderStaticKeys(): Record<string, string> {
-    const providers = asRecord(this.data.providers) ?? {};
+    const providers = this.data.providers ?? {};
     const keys: Record<string, string> = {};
-
-    for (const [provider, rawProviderConfig] of Object.entries(providers)) {
-      const providerConfig = asRecord(rawProviderConfig);
-      if (!providerConfig) {
-        continue;
-      }
-
-      const key = providerConfig.key;
-      if (typeof key === "string") {
-        const trimmed = key.trim();
-        if (trimmed.length > 0) {
-          keys[provider] = trimmed;
-        }
+    for (const [provider, config] of Object.entries(providers)) {
+      const key = config?.key;
+      if (typeof key === "string" && key.trim().length > 0) {
+        keys[provider] = key.trim();
       }
     }
-
     return keys;
   }
 
   getHistoryConfig(): HistoryConfig {
-    const history = asRecord(this.data.history);
-    const db = asRecord(history?.database);
-    return {
-      database: { path: stringOrUndefined(db?.path) },
-    };
+    return this.data.history ?? {};
   }
 
   getRouterConfig(): RouterConfig {
-    const router = asRecord(this.data.router);
-    return {
-      refusalFallbackModel: stringOrUndefined(router?.refusal_fallback_model),
-    };
+    return this.data.router ?? {};
   }
 
   getRoomConfig(roomName: string): RoomConfig {
-    const rooms = asRecord(this.data.rooms) ?? {};
-    const common = asRecord(rooms.common) ?? {};
-    const room = asRecord(rooms[roomName]) ?? {};
-    const merged = mergeRoomConfigs(common, room);
-
-    const command = asRecord(merged.command);
-    const proactive = asRecord(merged.proactive);
-    const varlink = asRecord(merged.varlink);
-    const replyStartThread = asRecord(merged.reply_start_thread);
-    const reconnect = asRecord(merged.reconnect);
-
-    const proactiveModels = asRecord(proactive?.models);
-    const proactivePrompts = asRecord(proactive?.prompts);
-
-    return {
-      enabled: typeof merged.enabled === "boolean" ? merged.enabled : undefined,
-      command: command as CommandConfig | undefined,
-      proactive: proactive
-        ? {
-            interjecting: Array.isArray(proactive.interjecting) ? (proactive.interjecting as string[]) : undefined,
-            debounce_seconds: numberOrUndefined(proactive.debounce_seconds),
-            history_size: numberOrUndefined(proactive.history_size),
-            rate_limit: numberOrUndefined(proactive.rate_limit),
-            rate_period: numberOrUndefined(proactive.rate_period),
-            interject_threshold: numberOrUndefined(proactive.interject_threshold),
-            models: proactiveModels
-              ? {
-                  validation: Array.isArray(proactiveModels.validation) ? (proactiveModels.validation as string[]) : undefined,
-                  serious: stringOrUndefined(proactiveModels.serious),
-                }
-              : undefined,
-            prompts: proactivePrompts
-              ? {
-                  interject: stringOrUndefined(proactivePrompts.interject),
-                  serious_extra: stringOrUndefined(proactivePrompts.serious_extra),
-                }
-              : undefined,
-          }
-        : undefined,
-      prompt_vars: toStringRecord(merged.prompt_vars),
-      varlink: {
-        socket_path: stringOrUndefined(varlink?.socket_path),
-      },
-      token: stringOrUndefined(merged.token),
-      bot_name: stringOrUndefined(merged.bot_name),
-      app_token: stringOrUndefined(merged.app_token),
-      workspaces: toSlackWorkspaces(merged.workspaces),
-      reply_start_thread: {
-        channel: typeof replyStartThread?.channel === "boolean" ? replyStartThread.channel : undefined,
-        dm: typeof replyStartThread?.dm === "boolean" ? replyStartThread.dm : undefined,
-      },
-      reply_edit_debounce_seconds: numberOrUndefined(merged.reply_edit_debounce_seconds),
-      reconnect: {
-        enabled: typeof reconnect?.enabled === "boolean" ? reconnect.enabled : undefined,
-        delay_ms: numberOrUndefined(reconnect?.delay_ms),
-        max_attempts: numberOrUndefined(reconnect?.max_attempts),
-      },
-    };
+    const rooms = this.data.rooms ?? {};
+    const common = (rooms.common ?? {}) as Record<string, unknown>;
+    const room = (rooms[roomName] ?? {}) as Record<string, unknown>;
+    return mergeRoomConfigs(common, room) as unknown as RoomConfig;
   }
 }

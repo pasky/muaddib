@@ -18,17 +18,17 @@ import { createTestRuntime } from "./test-runtime.js";
 
 const roomConfig = {
   command: {
-    history_size: 40,
-    default_mode: "classifier:serious",
+    historySize: 40,
+    defaultMode: "classifier:serious",
     modes: {
       serious: {
         model: "openai:gpt-4o-mini",
         prompt: "You are {mynick}. Time={current_time}.",
-        reasoning_effort: "low",
+        reasoningEffort: "low",
         steering: true,
         triggers: {
           "!s": {},
-          "!a": { reasoning_effort: "medium" },
+          "!a": { reasoningEffort: "medium" },
         },
       },
       sarcastic: {
@@ -40,16 +40,16 @@ const roomConfig = {
         },
       },
     },
-    mode_classifier: {
+    modeClassifier: {
       model: "openai:gpt-4o-mini",
       labels: {
         EASY_SERIOUS: "!s",
         SARCASTIC: "!d",
       },
-      fallback_label: "EASY_SERIOUS",
+      fallbackLabel: "EASY_SERIOUS",
     },
   },
-  prompt_vars: {
+  promptVars: {
     output: "",
   },
 } as const;
@@ -569,7 +569,7 @@ describe("RoomMessageHandler", () => {
             ...roomConfig.command.modes,
             serious: {
               ...roomConfig.command.modes.serious,
-              auto_reduce_context: true,
+              autoReduceContext: true,
             },
           },
         },
@@ -649,7 +649,7 @@ describe("RoomMessageHandler", () => {
             ...roomConfig.command.modes,
             serious: {
               ...roomConfig.command.modes.serious,
-              include_chapter_summary: false,
+              includeChapterSummary: false,
             },
           },
         },
@@ -684,7 +684,7 @@ describe("RoomMessageHandler", () => {
             ...roomConfig.command.modes,
             serious: {
               ...roomConfig.command.modes.serious,
-              allowed_tools: ["chronicle_read", "quest_start", "make_plan"],
+              allowedTools: ["chronicle_read", "quest_start", "make_plan"],
             },
           },
         },
@@ -1092,7 +1092,7 @@ describe("RoomMessageHandler", () => {
         ...roomConfig,
         command: {
           ...roomConfig.command,
-          response_max_bytes: 120,
+          responseMaxBytes: 120,
         },
       } as any,
       history,
@@ -1142,7 +1142,7 @@ describe("RoomMessageHandler", () => {
         ...roomConfig,
         command: {
           ...roomConfig.command,
-          response_max_bytes: 500,
+          responseMaxBytes: 500,
         },
       } as any,
       history,
@@ -1170,7 +1170,7 @@ describe("RoomMessageHandler", () => {
         ...roomConfig,
         command: {
           ...roomConfig.command,
-          response_max_bytes: 120,
+          responseMaxBytes: 120,
         },
       } as any,
       history,
@@ -1214,7 +1214,7 @@ describe("RoomMessageHandler", () => {
             ...roomConfig,
             command: {
               ...roomConfig.command,
-              response_max_bytes: 0,
+              responseMaxBytes: 0,
             },
           } as any,
           history,
@@ -1667,18 +1667,18 @@ describe("RoomMessageHandler", () => {
       ...roomConfig,
       proactive: {
         interjecting: ["libera##test"],
-        debounce_seconds: 0.05,
-        history_size: 10,
-        rate_limit: 10,
-        rate_period: 60,
-        interject_threshold: 100, // Set impossibly high so it never actually interjects
+        debounceSeconds: 0.05,
+        historySize: 10,
+        rateLimit: 10,
+        ratePeriod: 60,
+        interjectThreshold: 100, // Set impossibly high so it never actually interjects
         models: {
           validation: ["openai:gpt-4o-mini"],
           serious: "openai:gpt-4o-mini",
         },
         prompts: {
           interject: "Score this: {message}",
-          serious_extra: "Be proactive.",
+          seriousExtra: "Be proactive.",
         },
       },
     };
@@ -1744,18 +1744,18 @@ describe("RoomMessageHandler", () => {
       ...roomConfig,
       proactive: {
         interjecting: ["libera##test"],
-        debounce_seconds: 5, // Long debounce — command should preempt
-        history_size: 10,
-        rate_limit: 10,
-        rate_period: 60,
-        interject_threshold: 1,
+        debounceSeconds: 5, // Long debounce — command should preempt
+        historySize: 10,
+        rateLimit: 10,
+        ratePeriod: 60,
+        interjectThreshold: 1,
         models: {
           validation: ["openai:gpt-4o-mini"],
           serious: "openai:gpt-4o-mini",
         },
         prompts: {
           interject: "Score: {message}",
-          serious_extra: "",
+          seriousExtra: "",
         },
       },
     };

@@ -18,8 +18,8 @@ export function createModeClassifier(
 
   return async (context: Array<{ role: string; content: string }>): Promise<string> => {
     const fallbackLabel =
-      commandConfig.mode_classifier.fallback_label ??
-      Object.keys(commandConfig.mode_classifier.labels)[0];
+      commandConfig.modeClassifier.fallbackLabel ??
+      Object.keys(commandConfig.modeClassifier.labels)[0];
 
     if (context.length === 0) {
       logger.error("Error classifying mode", "context is empty");
@@ -35,15 +35,15 @@ export function createModeClassifier(
       }));
 
       const currentMessage = extractCurrentMessage(context[context.length - 1].content);
-      const labels = Object.keys(commandConfig.mode_classifier.labels);
+      const labels = Object.keys(commandConfig.modeClassifier.labels);
       const classifierPrompt =
-        commandConfig.mode_classifier.prompt ??
+        commandConfig.modeClassifier.prompt ??
         `Analyze the latest message and pick exactly one label: ${labels.join(", ")}. Message: {message}`;
 
       const prompt = classifierPrompt.replace("{message}", currentMessage);
 
       const response = await adapter.completeSimple(
-        commandConfig.mode_classifier.model,
+        commandConfig.modeClassifier.model,
         {
           messages: llmMessages,
           systemPrompt: `${prompt}\n\nReturn exactly one classifier label token. No explanation. If uncertain, pick the best label.`,

@@ -9,8 +9,8 @@ import { createTestRuntime } from "./test-runtime.js";
 function buildRoomConfig() {
   return {
     command: {
-      history_size: 40,
-      default_mode: "classifier:serious",
+      historySize: 40,
+      defaultMode: "classifier:serious",
       modes: {
         serious: {
           model: "openai:gpt-4o-mini",
@@ -20,12 +20,12 @@ function buildRoomConfig() {
           },
         },
       },
-      mode_classifier: {
+      modeClassifier: {
         model: "openai:gpt-4o-mini",
         labels: {
           EASY_SERIOUS: "!s",
         },
-        fallback_label: "EASY_SERIOUS",
+        fallbackLabel: "EASY_SERIOUS",
       },
     },
   };

@@ -8,7 +8,7 @@ import { VarlinkClient, VarlinkSender } from "./varlink.js";
 
 export interface IrcMonitorRoomConfig {
   varlink: {
-    socket_path: string;
+    socketPath: string;
   };
 }
 
@@ -70,7 +70,7 @@ export class IrcRoomMonitor {
     }
 
     const socketPath = requireNonEmptyString(
-      roomConfig.varlink?.socket_path,
+      roomConfig.varlink?.socketPath,
       "IRC room is enabled but rooms.irc.varlink.socket_path is missing.",
     );
 
@@ -82,10 +82,10 @@ export class IrcRoomMonitor {
       new IrcRoomMonitor({
         roomConfig: {
           varlink: {
-            socket_path: socketPath,
+            socketPath,
           },
         },
-        ignoreUsers: roomConfig.command?.ignore_users?.map(String),
+        ignoreUsers: roomConfig.command?.ignoreUsers?.map(String),
         history: runtime.history,
         commandHandler,
         logger: runtime.logger.getLogger("muaddib.rooms.irc.monitor"),
@@ -96,9 +96,9 @@ export class IrcRoomMonitor {
 
   constructor(private readonly options: IrcRoomMonitorOptions) {
     this.varlinkEvents =
-      options.varlinkEvents ?? new VarlinkClient(options.roomConfig.varlink.socket_path);
+      options.varlinkEvents ?? new VarlinkClient(options.roomConfig.varlink.socketPath);
     this.varlinkSender =
-      options.varlinkSender ?? new VarlinkSender(options.roomConfig.varlink.socket_path);
+      options.varlinkSender ?? new VarlinkSender(options.roomConfig.varlink.socketPath);
     this.responseCleaner = options.responseCleaner ?? defaultResponseCleaner;
     this.logger = options.logger ?? CONSOLE_LOGGER;
     this.logWriter = options.logWriter;

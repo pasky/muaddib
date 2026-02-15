@@ -4,31 +4,31 @@ import { mergeRoomConfigs } from "../src/rooms/command/config.js";
 import { MuaddibConfig } from "../src/config/muaddib-config.js";
 
 describe("mergeRoomConfigs", () => {
-  it("merges nested values, concatenates ignore_users, and concatenates prompt_vars strings", () => {
+  it("merges nested values, concatenates ignoreUsers, and concatenates promptVars strings", () => {
     const base = {
       command: {
-        ignore_users: ["bot1"],
-        history_size: 10,
+        ignoreUsers: ["bot1"],
+        historySize: 10,
       },
-      prompt_vars: {
+      promptVars: {
         output: "A",
       },
     };
 
     const override = {
       command: {
-        ignore_users: ["bot2"],
+        ignoreUsers: ["bot2"],
       },
-      prompt_vars: {
+      promptVars: {
         output: "B",
       },
     };
 
     const merged = mergeRoomConfigs(base, override);
 
-    expect((merged.command as any).ignore_users).toEqual(["bot1", "bot2"]);
-    expect((merged.command as any).history_size).toBe(10);
-    expect((merged.prompt_vars as any).output).toBe("AB");
+    expect((merged.command as any).ignoreUsers).toEqual(["bot1", "bot2"]);
+    expect((merged.command as any).historySize).toBe(10);
+    expect((merged.promptVars as any).output).toBe("AB");
   });
 
   it("merges room config from common + room override", () => {
@@ -57,8 +57,8 @@ describe("mergeRoomConfigs", () => {
     };
 
     const merged = MuaddibConfig.inMemory(config).getRoomConfig("irc");
-    expect(merged.command?.history_size).toBe(40);
-    expect(merged.prompt_vars?.intro).toBe("AB");
-    expect(merged.varlink?.socket_path).toBe("/tmp/irc.sock");
+    expect(merged.command?.historySize).toBe(40);
+    expect(merged.promptVars?.intro).toBe("AB");
+    expect(merged.varlink?.socketPath).toBe("/tmp/irc.sock");
   });
 });

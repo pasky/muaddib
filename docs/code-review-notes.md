@@ -187,7 +187,7 @@ review these, some might be out of date, anything still relevant and really a go
 
 5. **`command-executor.ts` — `numberWithDefault`** — silent defensive normalization. `numberWithDefault(this.commandConfig.rate_limit, 30)` silently falls back to 30 if config has `"rate_limit": "banana"`. Should throw on bad config, not silently fix it. Same pattern as Phase 1 findings.
 
-6. **`command-executor.ts` — `normalizeThinkingLevel`** — silently maps unknown strings to `"minimal"`. Should throw on invalid `reasoningEffort` values from config. The valid values are known and finite.
+6. **`command-executor.ts` — `normalizeThinkingLevel`** — silently maps unknown strings to `"minimal"`. Should throw on invalid `reasoningEffort` values from config. The valid values are known and finite. <- also, why do we even *need* this function????
 
 7. **`command-executor.ts` — `trimToMaxBytes`** — O(n²) algorithm. Removes one character at a time, recalculating `Buffer.byteLength` each iteration. Use `Buffer.from(text).subarray(0, maxBytes).toString()` (with boundary fixup) or binary search.
 

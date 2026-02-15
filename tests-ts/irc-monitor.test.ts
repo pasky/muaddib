@@ -52,8 +52,8 @@ function createDeferred<T = void>() {
 
 function baseCommandConfig() {
   return {
-    history_size: 40,
-    default_mode: "classifier:serious",
+    historySize: 40,
+    defaultMode: "classifier:serious",
     modes: {
       serious: {
         model: "openai:gpt-4o-mini",
@@ -63,12 +63,12 @@ function baseCommandConfig() {
         },
       },
     },
-    mode_classifier: {
+    modeClassifier: {
       model: "openai:gpt-4o-mini",
       labels: {
         EASY_SERIOUS: "!s",
       },
-      fallback_label: "EASY_SERIOUS",
+      fallbackLabel: "EASY_SERIOUS",
     },
   };
 }
@@ -135,7 +135,7 @@ describe("IrcRoomMonitor", () => {
         },
         irc: {
           varlink: {
-            socket_path: "/tmp/muaddib-varlink.sock",
+            socketPath: "/tmp/muaddib-varlink.sock",
           },
         },
       },
@@ -155,7 +155,7 @@ describe("IrcRoomMonitor", () => {
     const monitor = new IrcRoomMonitor({
       roomConfig: {
         varlink: {
-          socket_path: "/tmp/varlink.sock",
+          socketPath: "/tmp/varlink.sock",
         },
       },
       history,
@@ -211,7 +211,7 @@ describe("IrcRoomMonitor", () => {
     const monitor = new IrcRoomMonitor({
       roomConfig: {
         varlink: {
-          socket_path: "/tmp/varlink.sock",
+          socketPath: "/tmp/varlink.sock",
         },
       },
       history,
@@ -299,7 +299,7 @@ describe("IrcRoomMonitor", () => {
     const monitor = new IrcRoomMonitor({
       roomConfig: {
         varlink: {
-          socket_path: "/tmp/varlink.sock",
+          socketPath: "/tmp/varlink.sock",
         },
       },
       history,
@@ -355,7 +355,7 @@ describe("IrcRoomMonitor", () => {
     const monitor = new IrcRoomMonitor({
       roomConfig: {
         varlink: {
-          socket_path: "/tmp/varlink.sock",
+          socketPath: "/tmp/varlink.sock",
         },
       },
       history,
@@ -403,7 +403,7 @@ describe("IrcRoomMonitor", () => {
     const monitor = new IrcRoomMonitor({
       roomConfig: {
         varlink: {
-          socket_path: "/tmp/varlink.sock",
+          socketPath: "/tmp/varlink.sock",
         },
       },
       history,
@@ -448,7 +448,7 @@ describe("IrcRoomMonitor", () => {
     const monitor = new IrcRoomMonitor({
       roomConfig: {
         varlink: {
-          socket_path: "/tmp/varlink.sock",
+          socketPath: "/tmp/varlink.sock",
         },
       },
       history,
@@ -510,7 +510,7 @@ describe("IrcRoomMonitor", () => {
     const monitor = new IrcRoomMonitor({
       roomConfig: {
         varlink: {
-          socket_path: "/tmp/varlink.sock",
+          socketPath: "/tmp/varlink.sock",
         },
       },
       history,
@@ -598,7 +598,7 @@ describe("IrcRoomMonitor", () => {
     const monitor = new IrcRoomMonitor({
       roomConfig: {
         varlink: {
-          socket_path: "/tmp/varlink.sock",
+          socketPath: "/tmp/varlink.sock",
         },
       },
       history,
@@ -672,7 +672,7 @@ describe("IrcRoomMonitor", () => {
     const monitor = new IrcRoomMonitor({
       roomConfig: {
         varlink: {
-          socket_path: "/tmp/varlink.sock",
+          socketPath: "/tmp/varlink.sock",
         },
       },
       history,

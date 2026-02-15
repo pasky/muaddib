@@ -20,8 +20,8 @@ afterEach(async () => {
 
 function baseCommandConfig() {
   return {
-    history_size: 40,
-    default_mode: "classifier:serious",
+    historySize: 40,
+    defaultMode: "classifier:serious",
     modes: {
       serious: {
         model: "openai:gpt-4o-mini",
@@ -31,12 +31,12 @@ function baseCommandConfig() {
         },
       },
     },
-    mode_classifier: {
+    modeClassifier: {
       model: "openai:gpt-4o-mini",
       labels: {
         EASY_SERIOUS: "!s",
       },
-      fallback_label: "EASY_SERIOUS",
+      fallbackLabel: "EASY_SERIOUS",
     },
   };
 }
@@ -249,7 +249,7 @@ describe("runMuaddibMain", () => {
             enabled: true,
             workspaces: {
               T123: {
-                bot_token: "xoxb-demo",
+                botToken: "xoxb-demo",
               },
             },
           },
@@ -296,7 +296,7 @@ describe("runMuaddibMain", () => {
           common: {
             command: {
               ...baseCommandConfig(),
-              response_max_bytes: 0,
+              responseMaxBytes: 0,
             },
           },
           irc: {

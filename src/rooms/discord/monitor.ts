@@ -20,14 +20,14 @@ interface CommandLike {
 
 export interface DiscordReconnectConfig {
   enabled?: boolean;
-  delay_ms?: number;
-  max_attempts?: number;
+  delayMs?: number;
+  maxAttempts?: number;
 }
 
 export interface DiscordMonitorRoomConfig {
   enabled?: boolean;
-  bot_name?: string;
-  reply_edit_debounce_seconds?: number;
+  botName?: string;
+  replyEditDebounceSeconds?: number;
   reconnect?: DiscordReconnectConfig;
 }
 
@@ -134,13 +134,13 @@ export class DiscordRoomMonitor {
     const commandHandler = new RoomMessageHandler(runtime, "discord");
     const transport = new DiscordGatewayTransport({
       token,
-      botNameFallback: roomConfig.bot_name,
+      botNameFallback: roomConfig.botName,
     });
 
     return [
       new DiscordRoomMonitor({
         roomConfig,
-        ignoreUsers: roomConfig.command?.ignore_users?.map(String),
+        ignoreUsers: roomConfig.command?.ignoreUsers?.map(String),
         history: runtime.history,
         commandHandler,
         eventSource: transport,
@@ -297,7 +297,7 @@ export class DiscordRoomMonitor {
 
     const sender = this.options.sender;
     const replyEditDebounceSeconds = resolveReplyEditDebounceSeconds(
-      this.options.roomConfig.reply_edit_debounce_seconds,
+      this.options.roomConfig.replyEditDebounceSeconds,
     );
     let lastReplyMessageId: string | undefined;
     let lastReplyText: string | undefined;
@@ -516,9 +516,9 @@ function resolveReconnectPolicy(config: DiscordReconnectConfig | undefined): {
   maxAttempts: number;
 } {
   const enabled = config?.enabled ?? false;
-  const delayMs = Number.isFinite(Number(config?.delay_ms)) ? Math.max(0, Number(config?.delay_ms)) : 1_000;
-  const maxAttempts = Number.isFinite(Number(config?.max_attempts))
-    ? Math.max(1, Math.trunc(Number(config?.max_attempts)))
+  const delayMs = Number.isFinite(Number(config?.delayMs)) ? Math.max(0, Number(config?.delayMs)) : 1_000;
+  const maxAttempts = Number.isFinite(Number(config?.maxAttempts))
+    ? Math.max(1, Math.trunc(Number(config?.maxAttempts)))
     : 5;
 
   return {

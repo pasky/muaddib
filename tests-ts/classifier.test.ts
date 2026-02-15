@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createModeClassifier } from "../src/rooms/command/classifier.js";
 
 const commandConfig = {
-  history_size: 40,
+  historySize: 40,
   modes: {
     serious: {
       model: "openai:gpt-4o-mini",
@@ -12,13 +12,13 @@ const commandConfig = {
       },
     },
   },
-  mode_classifier: {
+  modeClassifier: {
     model: "openai:gpt-4o-mini",
     labels: {
       EASY_SERIOUS: "!s",
       SARCASTIC: "!d",
     },
-    fallback_label: "EASY_SERIOUS",
+    fallbackLabel: "EASY_SERIOUS",
     prompt: "Classify: {message}",
   },
 };

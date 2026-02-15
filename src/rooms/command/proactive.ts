@@ -29,15 +29,15 @@ export interface ProactiveConfig {
   /** Channels where proactive interjection is enabled (e.g. "irc.libera.chat#channel"). */
   interjecting: string[];
   /** Debounce period in seconds — wait for silence before evaluating. */
-  debounce_seconds: number;
+  debounceSeconds: number;
   /** History size for proactive context. */
-  history_size: number;
-  /** Rate limit: max interjections per rate_period. */
-  rate_limit: number;
+  historySize: number;
+  /** Rate limit: max interjections per ratePeriod. */
+  rateLimit: number;
   /** Rate period in seconds. */
-  rate_period: number;
+  ratePeriod: number;
   /** Minimum score (out of 10) to trigger interjection. */
-  interject_threshold: number;
+  interjectThreshold: number;
   /** Model to use when interjecting (for "serious" mode). */
   models: {
     /** Validation models — scored in sequence, early-exit on low score. */
@@ -49,7 +49,7 @@ export interface ProactiveConfig {
     /** Prompt template for interject evaluation. Use {message} placeholder. */
     interject: string;
     /** Extra prompt appended to the serious system prompt for proactive runs. */
-    serious_extra: string;
+    seriousExtra: string;
   };
 }
 
@@ -79,18 +79,18 @@ export function buildProactiveConfig(
   }
   return {
     interjecting,
-    debounce_seconds: rawProactive.debounce_seconds ?? 15,
-    history_size: rawProactive.history_size ?? commandConfig.history_size,
-    rate_limit: rawProactive.rate_limit ?? 10,
-    rate_period: rawProactive.rate_period ?? 3600,
-    interject_threshold: rawProactive.interject_threshold ?? 7,
+    debounceSeconds: rawProactive.debounceSeconds ?? 15,
+    historySize: rawProactive.historySize ?? commandConfig.historySize,
+    rateLimit: rawProactive.rateLimit ?? 10,
+    ratePeriod: rawProactive.ratePeriod ?? 3600,
+    interjectThreshold: rawProactive.interjectThreshold ?? 7,
     models: {
       validation: rawProactive.models?.validation ?? [],
       serious: rawProactive.models?.serious ?? pickModeModel(commandConfig.modes.serious?.model) ?? "",
     },
     prompts: {
       interject: rawProactive.prompts?.interject ?? "",
-      serious_extra: rawProactive.prompts?.serious_extra ?? "",
+      seriousExtra: rawProactive.prompts?.seriousExtra ?? "",
     },
   };
 }
@@ -122,7 +122,7 @@ export class ProactiveRunner {
   }) {
     this.config = opts.config;
     this.channels = new Set(opts.config.interjecting);
-    this.rateLimiter = new RateLimiter(opts.config.rate_limit, opts.config.rate_period);
+    this.rateLimiter = new RateLimiter(opts.config.rateLimit, opts.config.ratePeriod);
     this.runtime = opts.runtime;
     this.logger = opts.logger;
     this.executor = opts.executor;
@@ -143,7 +143,7 @@ export class ProactiveRunner {
     steeringKey: SteeringKey,
     triggerItem: QueuedInboundMessage,
   ): Promise<void> {
-    const debounceMs = this.config.debounce_seconds * 1000;
+    const debounceMs = this.config.debounceSeconds * 1000;
     const contextDrainer = this.steeringQueue.createContextDrainer(steeringKey);
     this.steeringQueue.finishItem(triggerItem);
 
@@ -192,7 +192,7 @@ export class ProactiveRunner {
 
     const context = await this.runtime.history.getContextForMessage(
       message,
-      this.config.history_size,
+      this.config.historySize,
     );
 
     const evalResult = await evaluateProactiveInterjection(
@@ -322,7 +322,7 @@ export async function evaluateProactiveInterjection(
         `score=${score}`,
       );
 
-      if (score < config.interject_threshold - 1) {
+      if (score < config.interjectThreshold - 1) {
         if (i > 0) {
           logger?.info(
             "Proactive interjection rejected",
@@ -344,7 +344,7 @@ export async function evaluateProactiveInterjection(
       }
     }
 
-    if (finalScore !== null && finalScore >= config.interject_threshold) {
+    if (finalScore !== null && finalScore >= config.interjectThreshold) {
       logger?.debug(
         "Proactive interjection triggered",
         `message=${currentMessage.slice(0, 150)}`,

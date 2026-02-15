@@ -28,12 +28,12 @@ describe("PiAiModelAdapter", () => {
     expect(resolved.model.baseUrl).toBe("https://api.deepseek.com/anthropic");
   });
 
-  it("normalizes providers.deepseek.url into base URL when creating adapter from config", () => {
+  it("normalizes providers.deepseek.base_url into base URL when creating adapter from config", () => {
     const withConfig = createPiAiModelAdapterFromConfig(
       MuaddibConfig.inMemory({
         providers: {
           deepseek: {
-            url: "https://api.deepseek.com/anthropic/v1/messages",
+            base_url: "https://api.deepseek.com/anthropic/v1/messages",
           },
         },
       }),
@@ -48,7 +48,7 @@ describe("PiAiModelAdapter", () => {
       MuaddibConfig.inMemory({
         providers: {
           deepseek: {
-            url: "https://api.deepseek.com/anthropic/messages",
+            base_url: "https://api.deepseek.com/anthropic/messages",
           },
         },
       }),

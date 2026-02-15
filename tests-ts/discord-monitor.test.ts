@@ -13,8 +13,8 @@ import type { MuaddibRuntime } from "../src/runtime.js";
 
 function baseCommandConfig() {
   return {
-    history_size: 40,
-    default_mode: "classifier:serious",
+    historySize: 40,
+    defaultMode: "classifier:serious",
     modes: {
       serious: {
         model: "openai:gpt-4o-mini",
@@ -24,12 +24,12 @@ function baseCommandConfig() {
         },
       },
     },
-    mode_classifier: {
+    modeClassifier: {
       model: "openai:gpt-4o-mini",
       labels: {
         EASY_SERIOUS: "!s",
       },
-      fallback_label: "EASY_SERIOUS",
+      fallbackLabel: "EASY_SERIOUS",
     },
   };
 }
@@ -97,7 +97,7 @@ describe("DiscordRoomMonitor", () => {
         discord: {
           enabled: true,
           token: "discord-token",
-          bot_name: "muaddib",
+          botName: "muaddib",
         },
       },
     }, history));
@@ -422,7 +422,7 @@ describe("DiscordRoomMonitor", () => {
     const editCalls: Array<{ messageId: string; text: string }> = [];
 
     const monitor = new DiscordRoomMonitor({
-      roomConfig: { enabled: true, reply_edit_debounce_seconds: 15 },
+      roomConfig: { enabled: true, replyEditDebounceSeconds: 15 },
       history,
       sender: {
         sendMessage: async (_channelId, text, options) => {
@@ -483,7 +483,7 @@ describe("DiscordRoomMonitor", () => {
     const sendCalls: Array<{ text: string; options?: { replyToMessageId?: string; mentionAuthor?: boolean } }> = [];
 
     const monitor = new DiscordRoomMonitor({
-      roomConfig: { enabled: true, reply_edit_debounce_seconds: 0 },
+      roomConfig: { enabled: true, replyEditDebounceSeconds: 0 },
       history,
       sender: {
         sendMessage: async (_channelId, text, options) => {
@@ -752,8 +752,8 @@ describe("DiscordRoomMonitor", () => {
         enabled: true,
         reconnect: {
           enabled: true,
-          delay_ms: 0,
-          max_attempts: 2,
+          delayMs: 0,
+          maxAttempts: 2,
         },
       },
       history,
@@ -811,8 +811,8 @@ describe("DiscordRoomMonitor", () => {
         enabled: true,
         reconnect: {
           enabled: true,
-          delay_ms: 0,
-          max_attempts: 3,
+          delayMs: 0,
+          maxAttempts: 3,
         },
       },
       history,
@@ -849,8 +849,8 @@ describe("DiscordRoomMonitor", () => {
         enabled: true,
         reconnect: {
           enabled: true,
-          delay_ms: 0,
-          max_attempts: 2,
+          delayMs: 0,
+          maxAttempts: 2,
         },
       },
       history,
@@ -889,8 +889,8 @@ describe("DiscordRoomMonitor", () => {
         enabled: true,
         reconnect: {
           enabled: false,
-          delay_ms: 0,
-          max_attempts: 2,
+          delayMs: 0,
+          maxAttempts: 2,
         },
       },
       history,

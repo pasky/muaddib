@@ -37,8 +37,8 @@ describe("runCliMessageMode", () => {
       rooms: {
         common: {
           command: {
-            history_size: 40,
-            default_mode: "classifier:serious",
+            historySize: 40,
+            defaultMode: "classifier:serious",
             modes: {
               serious: {
                 model: "openai:gpt-4o-mini",
@@ -48,18 +48,18 @@ describe("runCliMessageMode", () => {
                 },
               },
             },
-            mode_classifier: {
+            modeClassifier: {
               model: "openai:gpt-4o-mini",
               labels: {
                 EASY_SERIOUS: "!s",
               },
-              fallback_label: "EASY_SERIOUS",
+              fallbackLabel: "EASY_SERIOUS",
             },
           },
         },
         irc: {
           command: {
-            history_size: 40,
+            historySize: 40,
           },
         },
       },
@@ -121,8 +121,8 @@ describe("runCliMessageMode", () => {
       rooms: {
         common: {
           command: {
-            history_size: 40,
-            default_mode: "classifier:serious",
+            historySize: 40,
+            defaultMode: "classifier:serious",
             modes: {
               serious: {
                 model: "openai:gpt-4o-mini",
@@ -132,12 +132,12 @@ describe("runCliMessageMode", () => {
                 },
               },
             },
-            mode_classifier: {
+            modeClassifier: {
               model: "openai:gpt-4o-mini",
               labels: {
                 EASY_SERIOUS: "!s",
               },
-              fallback_label: "EASY_SERIOUS",
+              fallbackLabel: "EASY_SERIOUS",
             },
           },
           proactive: {
@@ -203,9 +203,9 @@ describe("runCliMessageMode", () => {
       rooms: {
         common: {
           command: {
-            history_size: 40,
-            response_max_bytes: 0,
-            default_mode: "classifier:serious",
+            historySize: 40,
+            responseMaxBytes: 0,
+            defaultMode: "classifier:serious",
             modes: {
               serious: {
                 model: "openai:gpt-4o-mini",
@@ -215,12 +215,12 @@ describe("runCliMessageMode", () => {
                 },
               },
             },
-            mode_classifier: {
+            modeClassifier: {
               model: "openai:gpt-4o-mini",
               labels: {
                 EASY_SERIOUS: "!s",
               },
-              fallback_label: "EASY_SERIOUS",
+              fallbackLabel: "EASY_SERIOUS",
             },
           },
         },
@@ -249,8 +249,8 @@ describe("runCliMessageMode", () => {
       rooms: {
         common: {
           command: {
-            history_size: 40,
-            default_mode: "classifier:serious",
+            historySize: 40,
+            defaultMode: "classifier:serious",
             modes: {
               serious: {
                 model: "openai:gpt-4o-mini",
@@ -260,12 +260,12 @@ describe("runCliMessageMode", () => {
                 },
               },
             },
-            mode_classifier: {
+            modeClassifier: {
               model: "openai:gpt-4o-mini",
               labels: {
                 EASY_SERIOUS: "!s",
               },
-              fallback_label: "EASY_SERIOUS",
+              fallbackLabel: "EASY_SERIOUS",
             },
           },
         },
@@ -302,8 +302,8 @@ describe("runCliMessageMode", () => {
       rooms: {
         common: {
           command: {
-            history_size: 40,
-            default_mode: "classifier:serious",
+            historySize: 40,
+            defaultMode: "classifier:serious",
             modes: {
               serious: {
                 model: "openai:gpt-4o-mini",
@@ -313,12 +313,12 @@ describe("runCliMessageMode", () => {
                 },
               },
             },
-            mode_classifier: {
+            modeClassifier: {
               model: "openai:gpt-4o-mini",
               labels: {
                 EASY_SERIOUS: "!s",
               },
-              fallback_label: "EASY_SERIOUS",
+              fallbackLabel: "EASY_SERIOUS",
             },
           },
         },
@@ -380,8 +380,8 @@ describe("runCliMessageMode", () => {
       rooms: {
         common: {
           command: {
-            history_size: 40,
-            default_mode: "classifier:serious",
+            historySize: 40,
+            defaultMode: "classifier:serious",
             modes: {
               serious: {
                 model: "openai:gpt-4o-mini",
@@ -391,12 +391,12 @@ describe("runCliMessageMode", () => {
                 },
               },
             },
-            mode_classifier: {
+            modeClassifier: {
               model: "openai:gpt-4o-mini",
               labels: {
                 EASY_SERIOUS: "!s",
               },
-              fallback_label: "EASY_SERIOUS",
+              fallbackLabel: "EASY_SERIOUS",
             },
           },
         },

@@ -3,39 +3,39 @@ import { describe, expect, it } from "vitest";
 import { CommandResolver } from "../src/rooms/command/resolver.js";
 
 const commandConfig = {
-  history_size: 40,
-  default_mode: "classifier:serious",
-  channel_modes: {
+  historySize: 40,
+  defaultMode: "classifier:serious",
+  channelModes: {
     "libera##sarcasm": "!d",
   },
   modes: {
     serious: {
       model: "openai:gpt-4o-mini",
-      reasoning_effort: "low",
+      reasoningEffort: "low",
       steering: true,
       triggers: {
         "!s": {},
         "!a": {
-          reasoning_effort: "medium",
+          reasoningEffort: "medium",
         },
       },
     },
     sarcastic: {
       model: "anthropic:claude-3-5-haiku-20241022",
-      reasoning_effort: "minimal",
+      reasoningEffort: "minimal",
       steering: false,
       triggers: {
         "!d": {},
       },
     },
   },
-  mode_classifier: {
+  modeClassifier: {
     model: "openai:gpt-4o-mini",
     labels: {
       EASY_SERIOUS: "!s",
       SARCASTIC: "!d",
     },
-    fallback_label: "EASY_SERIOUS",
+    fallbackLabel: "EASY_SERIOUS",
   },
 } as const;
 

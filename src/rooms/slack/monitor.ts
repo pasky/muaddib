@@ -20,17 +20,17 @@ interface CommandLike {
 
 export interface SlackReconnectConfig {
   enabled?: boolean;
-  delay_ms?: number;
-  max_attempts?: number;
+  delayMs?: number;
+  maxAttempts?: number;
 }
 
 export interface SlackMonitorRoomConfig {
   enabled?: boolean;
-  reply_start_thread?: {
+  replyStartThread?: {
     channel?: boolean;
     dm?: boolean;
   };
-  reply_edit_debounce_seconds?: number;
+  replyEditDebounceSeconds?: number;
   reconnect?: SlackReconnectConfig;
 }
 
@@ -138,7 +138,7 @@ export class SlackRoomMonitor {
     }
 
     const appToken = requireNonEmptyString(
-      roomConfig.app_token,
+      roomConfig.appToken,
       "Slack room is enabled but rooms.slack.app_token is missing.",
     );
 
@@ -151,7 +151,7 @@ export class SlackRoomMonitor {
 
     return workspaceEntries.map(([workspaceId, workspaceConfig]) => {
       const botToken = requireNonEmptyString(
-        workspaceConfig.bot_token,
+        workspaceConfig.botToken,
         `Slack room is enabled but rooms.slack.workspaces.${workspaceId}.bot_token is missing.`,
       );
 
@@ -165,7 +165,7 @@ export class SlackRoomMonitor {
 
       return new SlackRoomMonitor({
         roomConfig,
-        ignoreUsers: roomConfig.command?.ignore_users?.map(String),
+        ignoreUsers: roomConfig.command?.ignoreUsers?.map(String),
         history: runtime.history,
         commandHandler,
         eventSource: transport,
@@ -324,7 +324,7 @@ export class SlackRoomMonitor {
 
     const sender = this.options.sender;
     const replyEditDebounceSeconds = resolveReplyEditDebounceSeconds(
-      this.options.roomConfig.reply_edit_debounce_seconds,
+      this.options.roomConfig.replyEditDebounceSeconds,
     );
     let lastReplyTs: string | undefined;
     let lastReplyText: string | undefined;
@@ -503,7 +503,7 @@ function resolveReplyThreadTs(
     return undefined;
   }
 
-  const replyStartThread = roomConfig.reply_start_thread;
+  const replyStartThread = roomConfig.replyStartThread;
   const channelEnabled = replyStartThread?.channel ?? true;
   const dmEnabled = replyStartThread?.dm ?? false;
 
@@ -563,9 +563,9 @@ function resolveReconnectPolicy(config: SlackReconnectConfig | undefined): {
   maxAttempts: number;
 } {
   const enabled = config?.enabled ?? false;
-  const delayMs = Number.isFinite(Number(config?.delay_ms)) ? Math.max(0, Number(config?.delay_ms)) : 1_000;
-  const maxAttempts = Number.isFinite(Number(config?.max_attempts))
-    ? Math.max(1, Math.trunc(Number(config?.max_attempts)))
+  const delayMs = Number.isFinite(Number(config?.delayMs)) ? Math.max(0, Number(config?.delayMs)) : 1_000;
+  const maxAttempts = Number.isFinite(Number(config?.maxAttempts))
+    ? Math.max(1, Math.trunc(Number(config?.maxAttempts)))
     : 5;
 
   return {
