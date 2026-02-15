@@ -1,4 +1,5 @@
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
+import type { RoomConfig } from "../../config/muaddib-config.js";
 import { CONSOLE_LOGGER, RuntimeLogWriter, type Logger } from "../../app/logging.js";
 import { escapeRegExp, requireNonEmptyString, sleep } from "../../utils/index.js";
 import type { MuaddibRuntime } from "../../runtime.js";
@@ -16,19 +17,6 @@ interface CommandLike {
     message: RoomMessage,
     options: { isDirect: boolean; sendResponse?: (text: string) => Promise<void> },
   ): Promise<{ response: string | null } | null>;
-}
-
-export interface DiscordReconnectConfig {
-  enabled?: boolean;
-  delayMs?: number;
-  maxAttempts?: number;
-}
-
-export interface DiscordMonitorRoomConfig {
-  enabled?: boolean;
-  botName?: string;
-  replyEditDebounceSeconds?: number;
-  reconnect?: DiscordReconnectConfig;
 }
 
 export interface DiscordAttachment {
@@ -104,7 +92,7 @@ export interface DiscordSender {
 }
 
 export interface DiscordRoomMonitorOptions {
-  roomConfig: DiscordMonitorRoomConfig;
+  roomConfig: RoomConfig;
   ignoreUsers?: string[];
   history: ChatHistoryStore;
   commandHandler: CommandLike;
@@ -510,7 +498,7 @@ function normalizeDirectContent(content: string, mynick: string, botUserId?: str
   return normalizeContent(cleaned || content.trim());
 }
 
-function resolveReconnectPolicy(config: DiscordReconnectConfig | undefined): {
+function resolveReconnectPolicy(config: RoomConfig['reconnect']): {
   enabled: boolean;
   delayMs: number;
   maxAttempts: number;

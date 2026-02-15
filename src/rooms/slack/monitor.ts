@@ -1,4 +1,5 @@
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
+import type { RoomConfig } from "../../config/muaddib-config.js";
 import { CONSOLE_LOGGER, RuntimeLogWriter, type Logger } from "../../app/logging.js";
 import { escapeRegExp, requireNonEmptyString, sleep } from "../../utils/index.js";
 import type { MuaddibRuntime } from "../../runtime.js";
@@ -16,22 +17,6 @@ interface CommandLike {
     message: RoomMessage,
     options: { isDirect: boolean; sendResponse?: (text: string) => Promise<void> },
   ): Promise<{ response: string | null } | null>;
-}
-
-export interface SlackReconnectConfig {
-  enabled?: boolean;
-  delayMs?: number;
-  maxAttempts?: number;
-}
-
-export interface SlackMonitorRoomConfig {
-  enabled?: boolean;
-  replyStartThread?: {
-    channel?: boolean;
-    dm?: boolean;
-  };
-  replyEditDebounceSeconds?: number;
-  reconnect?: SlackReconnectConfig;
 }
 
 export interface SlackFileAttachment {
@@ -115,7 +100,7 @@ export interface SlackSender {
 }
 
 export interface SlackRoomMonitorOptions {
-  roomConfig: SlackMonitorRoomConfig;
+  roomConfig: RoomConfig;
   ignoreUsers?: string[];
   history: ChatHistoryStore;
   commandHandler: CommandLike;
@@ -492,7 +477,7 @@ function appendAttachmentBlock(content: string, attachmentBlock: string): string
 }
 
 function resolveReplyThreadTs(
-  roomConfig: SlackMonitorRoomConfig,
+  roomConfig: RoomConfig,
   event: Pick<SlackMessageEvent, "threadTs" | "messageTs" | "channelType" | "isDirectMessage">,
 ): string | undefined {
   if (event.threadTs) {
@@ -557,7 +542,7 @@ function normalizeName(name: string): string {
   return name.trim().split(/\s+/u).join("_");
 }
 
-function resolveReconnectPolicy(config: SlackReconnectConfig | undefined): {
+function resolveReconnectPolicy(config: RoomConfig['reconnect']): {
   enabled: boolean;
   delayMs: number;
   maxAttempts: number;

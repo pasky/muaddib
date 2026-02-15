@@ -1,16 +1,11 @@
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
+import type { RoomConfig } from "../../config/muaddib-config.js";
 import { CONSOLE_LOGGER, RuntimeLogWriter, type Logger } from "../../app/logging.js";
 import { escapeRegExp, requireNonEmptyString, sleep } from "../../utils/index.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import type { RoomMessage } from "../message.js";
 import { RoomMessageHandler } from "../command/message-handler.js";
 import { VarlinkClient, VarlinkSender } from "./varlink.js";
-
-export interface IrcMonitorRoomConfig {
-  varlink: {
-    socketPath: string;
-  };
-}
 
 export interface IrcEvent {
   type?: string;
@@ -43,7 +38,7 @@ interface CommandLike {
 }
 
 export interface IrcRoomMonitorOptions {
-  roomConfig: IrcMonitorRoomConfig;
+  roomConfig: RoomConfig;
   ignoreUsers?: string[];
   history: ChatHistoryStore;
   commandHandler: CommandLike;
@@ -96,9 +91,9 @@ export class IrcRoomMonitor {
 
   constructor(private readonly options: IrcRoomMonitorOptions) {
     this.varlinkEvents =
-      options.varlinkEvents ?? new VarlinkClient(options.roomConfig.varlink.socketPath);
+      options.varlinkEvents ?? new VarlinkClient(options.roomConfig.varlink!.socketPath!);
     this.varlinkSender =
-      options.varlinkSender ?? new VarlinkSender(options.roomConfig.varlink.socketPath);
+      options.varlinkSender ?? new VarlinkSender(options.roomConfig.varlink!.socketPath!);
     this.responseCleaner = options.responseCleaner ?? defaultResponseCleaner;
     this.logger = options.logger ?? CONSOLE_LOGGER;
     this.logWriter = options.logWriter;
