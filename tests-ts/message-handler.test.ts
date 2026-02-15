@@ -13,6 +13,7 @@ import {
 } from "../src/rooms/command/message-handler.js";
 import type { ContextReducer } from "../src/rooms/command/context-reducer.js";
 import type { RoomMessage } from "../src/rooms/message.js";
+import { createDeferred, waitForPersistedMessage } from "./test-helpers.js";
 import { createTestRuntime } from "./test-runtime.js";
 
 const roomConfig = {
@@ -156,40 +157,6 @@ function makeRunnerResult(
     refusalFallbackActivated: options.refusalFallbackActivated,
     refusalFallbackModel: options.refusalFallbackModel,
   };
-}
-
-function createDeferred<T>() {
-  let resolve: ((value: T | PromiseLike<T>) => void) | undefined;
-  let reject: ((reason?: unknown) => void) | undefined;
-  const promise = new Promise<T>((promiseResolve, promiseReject) => {
-    resolve = promiseResolve;
-    reject = promiseReject;
-  });
-
-  return {
-    promise,
-    resolve: resolve ?? (() => {}),
-    reject: reject ?? (() => {}),
-  };
-}
-
-function waitForPersistedMessage(
-  history: ChatHistoryStore,
-  predicate: (message: RoomMessage) => boolean,
-): Promise<void> {
-  const persisted = createDeferred<void>();
-  const originalAddMessage = history.addMessage.bind(history);
-
-  vi.spyOn(history, "addMessage").mockImplementation(async (...args) => {
-    const [message] = args;
-    const result = await originalAddMessage(...(args as Parameters<typeof history.addMessage>));
-    if (predicate(message as RoomMessage)) {
-      persisted.resolve();
-    }
-    return result;
-  });
-
-  return persisted.promise;
 }
 
 describe("RoomMessageHandler", () => {
