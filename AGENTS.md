@@ -38,6 +38,7 @@
 - **Error Handling**: fail fast; catch only where a concrete recovery strategy exists
 - **Loose Coupling**: config values should be resolved and validated at the point of use, not threaded through intermediary structures. Avoid putting fields on shared runtime objects just to pass them to a single consumer.
 - **Logging**: keep stdout concise, preserve structured/runtime detail in file logs
+- **Dependency Injection**: core runtime dependencies (especially `modelAdapter`/auth) must be explicitly injected and required in types; no hidden local fallback instantiation (`?? new ...`) in internal services.
 
 ## Testing
 - Vitest behavioral tests in `tests-ts/`
