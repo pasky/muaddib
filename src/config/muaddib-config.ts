@@ -205,7 +205,12 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function deepMergeConfig(
+/**
+ * Deep-merges two room config objects with room-specific semantics:
+ * - `ignore_users` arrays are concatenated (not replaced)
+ * - `prompt_vars` string values are concatenated (not replaced)
+ */
+export function mergeRoomConfigs(
   base: Record<string, unknown>,
   override: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -215,7 +220,7 @@ export function deepMergeConfig(
     if (Array.isArray(value)) {
       result[key] = [...value];
     } else if (isObject(value)) {
-      result[key] = deepMergeConfig(value, {});
+      result[key] = mergeRoomConfigs(value, {});
     } else {
       result[key] = value;
     }
@@ -248,7 +253,7 @@ export function deepMergeConfig(
     }
 
     if (isObject(value) && isObject(result[key])) {
-      result[key] = deepMergeConfig(result[key] as Record<string, unknown>, value);
+      result[key] = mergeRoomConfigs(result[key] as Record<string, unknown>, value);
       continue;
     }
 
@@ -360,7 +365,7 @@ export class MuaddibConfig {
         baseUrl: stringOrUndefined(openrouter?.base_url),
       },
       deepseek: {
-        baseUrl: stringOrUndefined(deepseek?.url) ?? stringOrUndefined(deepseek?.base_url),
+        baseUrl: stringOrUndefined(deepseek?.base_url),
       },
     };
   }
@@ -406,7 +411,7 @@ export class MuaddibConfig {
     const rooms = asRecord(this.data.rooms) ?? {};
     const common = asRecord(rooms.common) ?? {};
     const room = asRecord(rooms[roomName]) ?? {};
-    const merged = deepMergeConfig(common, room);
+    const merged = mergeRoomConfigs(common, room);
 
     const command = asRecord(merged.command);
     const proactive = asRecord(merged.proactive);

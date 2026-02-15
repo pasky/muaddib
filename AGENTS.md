@@ -39,6 +39,9 @@
 - **Loose Coupling**: config values should be resolved and validated at the point of use, not threaded through intermediary structures. Avoid putting fields on shared runtime objects just to pass them to a single consumer.
 - **Logging**: keep stdout concise, preserve structured/runtime detail in file logs
 - **Dependency Injection**: core runtime dependencies (especially `modelAdapter`/auth) must be explicitly injected and required in types; no hidden local fallback instantiation (`?? new ...`) in internal services.
+- **Search before creating**: Before writing any helper function, interface, error class, or abstraction, search the codebase for existing equivalents. If found, import and reuse (narrow with `Pick<>` if needed). If the same logic already exists in another file, extract to a shared module first.
+- **No silent normalization**: If a config/input value is present but has the wrong type or range, throw — don't silently coerce to a default. Use `?? default` only for genuinely absent values, never to paper over invalid ones.
+- **No over-engineering for single use cases**: If a function, class, or abstraction has exactly one call site and adds no testability or clarity, inline it. This includes: single-re-export barrel files, identity wrapper functions, custom error classes with no discriminant fields, normalize wrappers that just set one default.
 
 ## Testing
 - Vitest behavioral tests in `tests-ts/`

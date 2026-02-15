@@ -41,6 +41,7 @@ Goal: identify (a) coding standards to formalize, (b) concrete cleanup opportuni
 
 2. **Avoid "normalize" functions that silently fix bad input.** `normalizeProviderOverrideOptions` and `normalizeDeepSeekBaseUrl` silently clean up whatever they receive. If a config value is malformed, that should be an error at config load time, not silently patched at use time.
 
+review these, some might be out of date, anything still relevant and really a good idea?
 ### (b) Concrete cleanup opportunities
 
 1. **`normalizeProviderOverrideOptions`** — This function exists solely to apply a default to `deepseekBaseUrl`. It introduces a `NormalizedProviderOverrideOptions` type that's identical to `ProviderOverrideOptions` except fields are non-optional. This is unnecessary indirection. The default should be applied at the single point of use (`resolveDeepSeekModel`), or the `ProviderOverrideOptions` type should just have a required field with the default set at construction. Kill `NormalizedProviderOverrideOptions` and `normalizeProviderOverrideOptions`.
@@ -71,6 +72,7 @@ Goal: identify (a) coding standards to formalize, (b) concrete cleanup opportuni
 
 3. **Don't silently normalize bad input; fail fast.** `normalizePositiveInteger` silently converts garbage to a fallback (same pattern flagged in Phase 1). `normalizeApiKey` trims and returns undefined for empty — fine for trimming whitespace, but the name suggests something bigger than it is. **Standard: validate at config boundaries, crash on invalid values.**
 
+review these, some might be out of date, anything still relevant and really a good idea?
 ### (b) Concrete cleanup opportunities
 
 1. **`emptyUsage()` — duplicated.** Identical function in `session-factory.ts` and `session-runner.ts`. Extract to a shared utility or import from one.
@@ -119,6 +121,7 @@ Goal: identify (a) coding standards to formalize, (b) concrete cleanup opportuni
 
 5. **Tool executor pattern is consistent and good.** The `createXxxTool(executors) → MuaddibTool` + `createDefaultXxxExecutor(options) → Executor` separation is clean and testable. Formalize this as the standard tool pattern.
 
+review these, some might be out of date, anything still relevant and really a good idea?
 ### (b) Concrete cleanup opportunities
 
 1. **`toConfiguredString` × 4** — Extract to `types.ts` or a shared utils module. It's 5 lines, defined 4 times.
@@ -171,6 +174,7 @@ Goal: identify (a) coding standards to formalize, (b) concrete cleanup opportuni
 
 4. **Noop logger factories duplicated.** `noopModeClassifierLogger()` in `classifier.ts`, inline `{ debug(){}, info(){}, warn(){}, error(){} }` in `proactive.ts`. **Standard: one shared noop logger.**
 
+review these, some might be out of date, anything still relevant and really a good idea?
 ### (b) Concrete cleanup opportunities
 
 1. **`config.ts`** — Single re-export line: `export { deepMergeConfig } from "../../config/muaddib-config.js"`. **Delete this file.** Consumers should import directly from the source. A re-export barrel for a single symbol is pure indirection.
@@ -241,6 +245,7 @@ Goal: identify (a) coding standards to formalize, (b) concrete cleanup opportuni
 
 5. **`CommandLike` interface defined independently in both discord/monitor.ts and slack/monitor.ts and irc/monitor.ts** — three identical copies. Should be a shared type.
 
+review these, some might be out of date, anything still relevant and really a good idea?
 ### (b) Concrete cleanup opportunities
 
 #### `src/rooms/message.ts`
@@ -361,6 +366,7 @@ The Discord and Slack monitors are ~70% identical code. The most impactful clean
 
 **What it is**: Entry point for the main service. Parses `--config`, creates runtime, launches room monitors.
 
+review these, some might be out of date, anything still relevant and really a good idea?
 **(b) Cleanup**:
 
 1. **`RunnableMonitor` interface**: Defines `{ run(): Promise<void> }` locally. Used only in this file, for a single array. Unnecessary — just use the concrete types or inline.
@@ -375,6 +381,7 @@ The Discord and Slack monitors are ~70% identical code. The most impactful clean
 
 **What it is**: CLI entry point for `--message` mode.
 
+review these, some might be out of date, anything still relevant and really a good idea?
 **(b) Cleanup**:
 
 1. **`parseArgs` is another hand-rolled arg parser** — same pattern as `parseAppArgs` in `src/app/main.ts`. Minor duplication but not worth unifying for 2 uses.
@@ -385,6 +392,7 @@ The Discord and Slack monitors are ~70% identical code. The most impactful clean
 
 **What it is**: Core CLI message-mode logic. Creates runtime, constructs `RoomMessageHandler`, sends a single message, returns result.
 
+review these, some might be out of date, anything still relevant and really a good idea?
 **(b) Cleanup**:
 
 1. **Creates its own `RuntimeLogWriter`** then also gets one from `createMuaddibRuntime` (which accepts `logger` option). This is fine — it passes its logger in. No issue.
@@ -397,6 +405,7 @@ The Discord and Slack monitors are ~70% identical code. The most impactful clean
 
 **What it is**: `MuaddibRuntime` interface + factory function + shutdown. Central god-object that holds config, history, model adapter, chronicle subsystem, logger.
 
+review these, some might be out of date, anything still relevant and really a good idea?
 **(b) Cleanup**:
 
 1. **`MuaddibRuntime` is a grab-bag god-object**: It holds 8 fields, 3 of which are optional (`chronicleStore`, `chronicleLifecycle`, `autoChronicler`). Every consumer imports it but uses only 2-3 fields. This is the classic "pass the world" anti-pattern. The AGENTS.md says "Loose Coupling: config values should be resolved and validated at the point of use, not threaded through intermediary structures." `MuaddibRuntime` violates this principle — it exists primarily to thread values through `fromRuntime` static methods.
@@ -405,7 +414,7 @@ The Discord and Slack monitors are ~70% identical code. The most impactful clean
 
 3. **`defaultHistorySize` derived from `getRoomConfig("irc")`**: Hardcodes "irc" as the default room for history size. If no IRC room is configured, this silently uses whatever fallback `getRoomConfig` returns. Fragile.
 
-4. **Chronicle initialization is ~30 lines of conditional setup** inside the factory. This could be extracted to a `createChronicleSubsystem(config, modelAdapter, logger, muaddibHome)` function for clarity.
+4. **Chronicle initialization is ~30 lines of conditional setup** inside the factory. This could be extracted to a `createChronicleSubsystem(config, modelAdapter, logger, muaddibHome)` function for clarity. <- also shouldn't this be in chronicle/ code instead?
 
 5. **`shutdownRuntime`** is a standalone function rather than a method — fine for the functional style, but it only closes history and chronicle store. If more cleanup is added later, this becomes a maintenance risk.
 
@@ -444,6 +453,7 @@ The codebase has **12 independent logger interface definitions** that are all su
 
 2. **`requireDb()` pattern is fine.** Both stores use it identically — acceptable.
 
+review these, some might be out of date, anything still relevant and really a good idea?
 #### (b) Cleanup
 
 1. **`renderChapter` and `renderChapterRelative` are ~80% identical.** Both query paragraphs, slice by `lastN`, build a title string, and format lines. They differ only in how the title is constructed. Extract a shared `formatChapterParagraphs(chapter, rows, lastN, titleExtra)` helper. ~40 lines removable.
@@ -464,6 +474,7 @@ The codebase has **12 independent logger interface definitions** that are all su
 
 2. **`ChronicleQuestRuntimeHook` interface is defined locally** rather than imported from quest-runtime.ts. The quest runtime's `onChronicleAppend` method signature is the implementation. This is an acceptable structural typing pattern in TS but worth noting — if the signatures ever drift, there's no compile-time link.
 
+review these, some might be out of date, anything still relevant and really a good idea?
 #### (b) Cleanup
 
 1. **Response text extraction pattern** in `generateChapterSummary`: `response.content.filter(e => e.type === "text").map(e => e.text).join("\n").trim()` — this is the 6th+ copy of this pattern across the codebase. Extract to a shared `extractResponseText(response)` utility.
@@ -484,6 +495,7 @@ The codebase has **12 independent logger interface definitions** that are all su
 
 2. **`DEFAULT_LOGGER`** is a console-forwarding logger factory defined inline — another instance of the duplicated noop/console logger pattern found in 4+ files.
 
+review these, some might be out of date, anything still relevant and really a good idea?
 #### (b) Cleanup
 
 1. **`sleep` is defined locally at the bottom of the file.** This is the 5th+ copy. Extract to a shared `src/utils/sleep.ts`.
@@ -504,6 +516,7 @@ The codebase has **12 independent logger interface definitions** that are all su
 
 2. **Content template system** (`"<{nick}> {message}"`) is a simple string replace with no escaping. If a nick contains `{message}`, it'll be double-replaced. Low risk but fragile.
 
+review these, some might be out of date, anything still relevant and really a good idea?
 #### (b) Cleanup
 
 1. **`getContext` has 3 SQL query branches** for thread handling (with threadStarterId, with threadId only, without threadId). The queries are nearly identical — they differ only in the WHERE clause. Extract the shared parts.

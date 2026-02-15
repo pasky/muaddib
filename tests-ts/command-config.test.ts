@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { deepMergeConfig } from "../src/rooms/command/config.js";
+import { mergeRoomConfigs } from "../src/rooms/command/config.js";
 import { MuaddibConfig } from "../src/config/muaddib-config.js";
 
-describe("deepMergeConfig", () => {
+describe("mergeRoomConfigs", () => {
   it("merges nested values, concatenates ignore_users, and concatenates prompt_vars strings", () => {
     const base = {
       command: {
@@ -24,7 +24,7 @@ describe("deepMergeConfig", () => {
       },
     };
 
-    const merged = deepMergeConfig(base, override);
+    const merged = mergeRoomConfigs(base, override);
 
     expect((merged.command as any).ignore_users).toEqual(["bot1", "bot2"]);
     expect((merged.command as any).history_size).toBe(10);

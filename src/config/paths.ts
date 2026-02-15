@@ -1,14 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
-
-export function loadConfig(configPath: string): Record<string, unknown> {
-  if (!existsSync(configPath)) {
-    throw new Error(`Config file not found at ${configPath}`);
-  }
-
-  return JSON.parse(readFileSync(configPath, "utf-8")) as Record<string, unknown>;
-}
 
 export function resolveMuaddibPath(path: string | undefined, fallback: string): string {
   if (!path) {
