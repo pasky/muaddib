@@ -777,8 +777,19 @@ describe("RoomMessageHandler", () => {
       ...makeMessage("!s first line"),
       threadId: "thread-1",
     };
-    await history.addMessage(incoming);
 
+    const firstTriggerPersisted = createDeferred<void>();
+    const originalAddMessage = history.addMessage.bind(history);
+    vi.spyOn(history, "addMessage").mockImplementation(async (...args) => {
+      const [message] = args;
+      const result = await originalAddMessage(...(args as Parameters<typeof history.addMessage>));
+      if ((message as RoomMessage).content === "!s first line") {
+        firstTriggerPersisted.resolve();
+      }
+      return result;
+    });
+
+    let promptCallCount = 0;
     let runnerPrompt = "";
     let runnerContextContents: string[] = [];
 
@@ -787,7 +798,7 @@ describe("RoomMessageHandler", () => {
         ...roomConfig,
         command: {
           ...roomConfig.command,
-          debounce: 0.05,
+          debounce: 0.2,
           modes: {
             ...roomConfig.command.modes,
             serious: {
@@ -801,63 +812,39 @@ describe("RoomMessageHandler", () => {
       classifyMode: async () => "EASY_SERIOUS",
       runnerFactory: () => ({
         prompt: async (prompt, options) => {
+          promptCallCount += 1;
           runnerPrompt = prompt;
           runnerContextContents = (options?.contextMessages ?? []).map((entry) => entry.content);
-          return {
-            assistantMessage: {
-              role: "assistant",
-              content: [{ type: "text", text: "done" }],
-              api: "openai-completions",
-              provider: "openai",
-              model: "gpt-4o-mini",
-              usage: {
-                input: 1,
-                output: 1,
-                cacheRead: 0,
-                cacheWrite: 0,
-                totalTokens: 2,
-                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-              },
-              stopReason: "stop",
-              timestamp: Date.now(),
-            },
-            text: "done",
-            stopReason: "stop",
-            usage: {
-              input: 1,
-              output: 1,
-              cacheRead: 0,
-              cacheWrite: 0,
-              totalTokens: 2,
-              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-            },
-          };
+          return makeRunnerResult("done");
         },
       }),
     });
 
-    // Start the command — it will sleep during debounce
     const resultPromise = handler.handleIncomingMessage(incoming, {
       isDirect: true,
       sendResponse: async () => {},
     });
 
-    // Enqueue a followup during the debounce window
+    await firstTriggerPersisted.promise;
+
     const followup: RoomMessage = {
       ...makeMessage("!s second line"),
       threadId: "thread-1",
     };
-    // Send the followup through the handler so it lands in the steering queue
-    handler.handleIncomingMessage(followup, {
+
+    const followupPromise = handler.handleIncomingMessage(followup, {
       isDirect: true,
       sendResponse: async () => {},
     });
 
-    const result = await resultPromise;
+    expect(promptCallCount).toBe(0);
 
-    expect(result!.response).toBe("done");
+    const [result, followupResult] = await Promise.all([resultPromise, followupPromise]);
+
+    expect(result?.response).toBe("done");
+    expect(followupResult).toBeNull();
+    expect(promptCallCount).toBe(1);
     expect(runnerPrompt).toBe("first line");
-    // The followup should appear as a steering context message
     expect(runnerContextContents.some((entry) => entry.includes("second line"))).toBe(true);
 
     await history.close();
