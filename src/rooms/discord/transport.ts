@@ -8,15 +8,17 @@ import {
 } from "discord.js";
 
 import { AsyncQueue } from "../../utils/async-queue.js";
-import type {
-  DiscordEventSource,
-  DiscordAttachment,
-  DiscordIncomingEvent,
-  DiscordMessageEditEvent,
-  DiscordMessageEvent,
-  DiscordSendOptions,
-  DiscordSendResult,
-  DiscordSender,
+import { normalizeName } from "../../utils/index.js";
+import {
+  normalizeDiscordEmoji,
+  type DiscordEventSource,
+  type DiscordAttachment,
+  type DiscordIncomingEvent,
+  type DiscordMessageEditEvent,
+  type DiscordMessageEvent,
+  type DiscordSendOptions,
+  type DiscordSendResult,
+  type DiscordSender,
 } from "./monitor.js";
 
 interface DiscordTransportSignal {
@@ -200,19 +202,7 @@ export class DiscordGatewayTransport implements DiscordEventSource, DiscordSende
     const username =
       message.member?.displayName ?? message.author.displayName ?? message.author.username;
 
-    let channelName: string | undefined;
-    let threadId: string | undefined;
-
-    if (isDirectMessage) {
-      channelName = `${normalizeName(username)}_${message.author.id}`;
-    } else if (isThreadChannel(message.channel)) {
-      threadId = message.channel.id;
-      const parentName = typeof message.channel.parent?.name === "string" ? message.channel.parent.name : "";
-      channelName = normalizeName(parentName || message.channel.name);
-    } else {
-      const rawChannelName = "name" in message.channel ? String(message.channel.name ?? "") : "";
-      channelName = normalizeName(rawChannelName);
-    }
+    const { channelName, threadId } = this.resolveChannel(message, isDirectMessage, username);
 
     return {
       kind: "message",
@@ -223,7 +213,7 @@ export class DiscordGatewayTransport implements DiscordEventSource, DiscordSende
       messageId: message.id,
       threadId,
       username,
-      content: normalizeDiscordContent(message.cleanContent || message.content),
+      content: normalizeDiscordEmoji(message.cleanContent || message.content),
       mynick,
       attachments: mapDiscordAttachments(message.attachments),
       botUserId: this.client.user?.id,
@@ -238,7 +228,7 @@ export class DiscordGatewayTransport implements DiscordEventSource, DiscordSende
       return null;
     }
 
-    const content = normalizeDiscordContent(message.cleanContent || message.content || "").trim();
+    const content = normalizeDiscordEmoji(message.cleanContent || message.content || "").trim();
     if (!content) {
       return null;
     }
@@ -246,16 +236,7 @@ export class DiscordGatewayTransport implements DiscordEventSource, DiscordSende
     const username =
       message.member?.displayName ?? message.author.displayName ?? message.author.username;
 
-    let channelName: string | undefined;
-    if (message.guildId === null) {
-      channelName = `${normalizeName(username)}_${message.author.id}`;
-    } else if (isThreadChannel(message.channel)) {
-      const parentName = typeof message.channel.parent?.name === "string" ? message.channel.parent.name : "";
-      channelName = normalizeName(parentName || message.channel.name);
-    } else {
-      const rawChannelName = "name" in message.channel ? String(message.channel.name ?? "") : "";
-      channelName = normalizeName(rawChannelName);
-    }
+    const { channelName } = this.resolveChannel(message, message.guildId === null, username);
 
     return {
       kind: "message_edit",
@@ -268,6 +249,27 @@ export class DiscordGatewayTransport implements DiscordEventSource, DiscordSende
       content,
       isFromSelf: this.client.user ? message.author.id === this.client.user.id : false,
     };
+  }
+
+  private resolveChannel(
+    message: Message,
+    isDirectMessage: boolean,
+    username: string,
+  ): { channelName: string; threadId?: string } {
+    if (isDirectMessage) {
+      return { channelName: `${normalizeName(username)}_${message.author.id}` };
+    }
+
+    if (isThreadChannel(message.channel)) {
+      const parentName = typeof message.channel.parent?.name === "string" ? message.channel.parent.name : "";
+      return {
+        channelName: normalizeName(parentName || message.channel.name),
+        threadId: message.channel.id,
+      };
+    }
+
+    const rawChannelName = "name" in message.channel ? String(message.channel.name ?? "") : "";
+    return { channelName: normalizeName(rawChannelName) };
   }
 
   private async resolveMessage(message: Message | PartialMessage): Promise<Message | null> {
@@ -285,14 +287,6 @@ export class DiscordGatewayTransport implements DiscordEventSource, DiscordSende
       return null;
     }
   }
-}
-
-function normalizeDiscordContent(content: string): string {
-  return content.replace(/<a?:([0-9A-Za-z_]+):\d+>/g, ":$1:");
-}
-
-function normalizeName(name: string): string {
-  return name.trim().split(/\s+/u).join("_");
 }
 
 function isFullMessage(message: Message | PartialMessage): message is Message {

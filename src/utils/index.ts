@@ -55,3 +55,26 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 export function asRecord(value: unknown): Record<string, unknown> | null {
   return isRecord(value) ? value : null;
 }
+
+/** Normalize a display name to an underscore-separated identifier. */
+export function normalizeName(name: string): string {
+  return name.trim().split(/\s+/u).join("_");
+}
+
+/** Current wall-clock time in fractional seconds (for debounce comparisons). */
+export function nowMonotonicSeconds(): number {
+  return Date.now() / 1_000;
+}
+
+/** Combine message content with an attachment block, handling empty cases. */
+export function appendAttachmentBlock(content: string, attachmentBlock: string): string {
+  if (!attachmentBlock) {
+    return content.trim();
+  }
+
+  if (!content.trim()) {
+    return attachmentBlock;
+  }
+
+  return `${content.trim()}\n\n${attachmentBlock}`;
+}

@@ -1,12 +1,12 @@
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import type { RoomConfig } from "../../config/muaddib-config.js";
 import { CONSOLE_LOGGER, RuntimeLogWriter, type Logger } from "../../app/logging.js";
-import { escapeRegExp, requireNonEmptyString, sleep } from "../../utils/index.js";
+import { appendAttachmentBlock, escapeRegExp, normalizeName, nowMonotonicSeconds, requireNonEmptyString, sleep } from "../../utils/index.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import { RoomMessageHandler } from "../command/message-handler.js";
 import type { RoomMessage } from "../message.js";
 import {
-  sendWithRateLimitRetry,
+  sendWithRetryResult,
   type SendRetryEvent,
   createSendRetryEventLogger,
 } from "../send-retry.js";
@@ -333,8 +333,9 @@ export class SlackRoomMonitor {
                 const combined = lastReplyText ? `${lastReplyText}\n${formattedText}` : formattedText;
                 const targetMessageTs = lastReplyTs;
 
-                const updateResult = await sendWithSlackRetryResult<SlackSendResult>(
+                const updateResult = await sendWithRetryResult<SlackSendResult>(
                   event.channelId,
+                  "slack",
                   this.options.onSendRetryEvent,
                   async () => await sender.updateMessage!(event.channelId, targetMessageTs, combined),
                 );
@@ -345,8 +346,9 @@ export class SlackRoomMonitor {
                 lastReplyText = combined;
                 lastReplyAtSeconds = nowSeconds;
               } else {
-                const sendResult = await sendWithSlackRetryResult<SlackSendResult>(
+                const sendResult = await sendWithRetryResult<SlackSendResult>(
                   event.channelId,
+                  "slack",
                   this.options.onSendRetryEvent,
                   async () =>
                     await sender.sendMessage(event.channelId, formattedText, {
@@ -462,18 +464,6 @@ function buildSlackAttachmentBlock(files: SlackFileAttachment[]): string {
   return ["[Attachments]", ...lines, "[/Attachments]"].join("\n");
 }
 
-function appendAttachmentBlock(content: string, attachmentBlock: string): string {
-  if (!attachmentBlock) {
-    return content.trim();
-  }
-
-  if (!content.trim()) {
-    return attachmentBlock;
-  }
-
-  return `${content.trim()}\n\n${attachmentBlock}`;
-}
-
 function resolveReplyThreadTs(
   roomConfig: RoomConfig,
   event: Pick<SlackMessageEvent, "threadTs" | "messageTs" | "channelType" | "isDirectMessage">,
@@ -534,36 +524,4 @@ function normalizeDirectContent(content: string, mynick: string, botUserId?: str
   }
 
   return cleaned || content.trim();
-}
-
-function normalizeName(name: string): string {
-  return name.trim().split(/\s+/u).join("_");
-}
-
-function nowMonotonicSeconds(): number {
-  return Date.now() / 1_000;
-}
-
-async function sendWithSlackRetryResult<T>(
-  destination: string,
-  onEvent: ((event: SendRetryEvent) => void) | undefined,
-  send: () => Promise<T | void>,
-): Promise<T | undefined> {
-  let result: T | undefined;
-
-  await sendWithRateLimitRetry(
-    async () => {
-      const next = await send();
-      if (next !== undefined) {
-        result = next;
-      }
-    },
-    {
-      platform: "slack",
-      destination,
-      onEvent,
-    },
-  );
-
-  return result;
 }

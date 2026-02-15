@@ -125,6 +125,34 @@ function numberValue(value: unknown): number | null {
   return null;
 }
 
+/**
+ * Wraps `sendWithRateLimitRetry`, capturing a typed result from the send callback.
+ */
+export async function sendWithRetryResult<T>(
+  destination: string,
+  platform: "discord" | "slack",
+  onEvent: ((event: SendRetryEvent) => void) | undefined,
+  send: () => Promise<T | void>,
+): Promise<T | undefined> {
+  let result: T | undefined;
+
+  await sendWithRateLimitRetry(
+    async () => {
+      const next = await send();
+      if (next !== undefined) {
+        result = next;
+      }
+    },
+    {
+      platform,
+      destination,
+      onEvent,
+    },
+  );
+
+  return result;
+}
+
 export function createSendRetryEventLogger(
   logger: Logger,
 ): (event: SendRetryEvent) => void {

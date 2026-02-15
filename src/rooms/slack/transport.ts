@@ -1,7 +1,7 @@
 import { App } from "@slack/bolt";
 
 import { AsyncQueue } from "../../utils/async-queue.js";
-import { asRecord, escapeRegExp, stringifyError } from "../../utils/index.js";
+import { asRecord, escapeRegExp, normalizeName, stringifyError } from "../../utils/index.js";
 import type {
   SlackEventSource,
   SlackFileAttachment,
@@ -247,13 +247,7 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
     const username = await this.getUserDisplayName(userId);
     const normalizedText = await this.normalizeIncomingText(rawText);
 
-    let channelName: string;
-    if (isDirectMessage) {
-      channelName = `${normalizeName(username)}_${userId}`;
-    } else {
-      const name = await this.getChannelName(channelId);
-      channelName = `#${name}`;
-    }
+    const channelName = await this.resolveChannelName(channelId, isDirectMessage, username, userId);
 
     return {
       kind: "message",
@@ -296,13 +290,8 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
     const username = await this.getUserDisplayName(userId);
     const normalizedText = await this.normalizeIncomingText(rawText);
 
-    let channelName: string;
-    if (channelType === "im" || channelId.startsWith("D")) {
-      channelName = `${normalizeName(username)}_${userId}`;
-    } else {
-      const name = await this.getChannelName(channelId);
-      channelName = `#${name}`;
-    }
+    const isDirectMessage = channelType === "im" || channelId.startsWith("D");
+    const channelName = await this.resolveChannelName(channelId, isDirectMessage, username, userId);
 
     return {
       kind: "message_edit",
@@ -319,6 +308,19 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
         (this.botUserId ? userId === this.botUserId : false) ||
         typeof message.bot_id === "string",
     };
+  }
+
+  private async resolveChannelName(
+    channelId: string,
+    isDirectMessage: boolean,
+    username: string,
+    userId: string,
+  ): Promise<string> {
+    if (isDirectMessage) {
+      return `${normalizeName(username)}_${userId}`;
+    }
+    const name = await this.getChannelName(channelId);
+    return `#${name}`;
   }
 
   private async normalizeIncomingText(text: string): Promise<string> {
@@ -388,10 +390,6 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
       return channelId;
     }
   }
-}
-
-function normalizeName(name: string): string {
-  return name.trim().split(/\s+/u).join("_");
 }
 
 function decodeSlackEntities(text: string): string {

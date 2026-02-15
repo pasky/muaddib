@@ -1,12 +1,12 @@
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import type { RoomConfig } from "../../config/muaddib-config.js";
 import { CONSOLE_LOGGER, RuntimeLogWriter, type Logger } from "../../app/logging.js";
-import { escapeRegExp, requireNonEmptyString, sleep } from "../../utils/index.js";
+import { appendAttachmentBlock, escapeRegExp, nowMonotonicSeconds, requireNonEmptyString, sleep } from "../../utils/index.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import { RoomMessageHandler } from "../command/message-handler.js";
 import type { RoomMessage } from "../message.js";
 import {
-  sendWithRateLimitRetry,
+  sendWithRetryResult,
   type SendRetryEvent,
   createSendRetryEventLogger,
 } from "../send-retry.js";
@@ -243,7 +243,7 @@ export class DiscordRoomMonitor {
     }
 
     const isDirect = Boolean(event.isDirectMessage || event.mentionsBot);
-    const baseContent = normalizeContent(event.content).trim();
+    const baseContent = normalizeDiscordEmoji(event.content).trim();
     const directOrPassiveContent = isDirect
       ? normalizeDirectContent(baseContent, event.mynick, event.botUserId)
       : baseContent;
@@ -305,8 +305,9 @@ export class DiscordRoomMonitor {
                 const combined = lastReplyText ? `${lastReplyText}\n${text}` : text;
                 const targetMessageId = lastReplyMessageId;
 
-                const editResult = await sendWithDiscordRetryResult<DiscordSendResult>(
+                const editResult = await sendWithRetryResult<DiscordSendResult>(
                   event.channelId,
+                  "discord",
                   this.options.onSendRetryEvent,
                   async () => await sender.editMessage!(event.channelId, targetMessageId, combined),
                 );
@@ -321,8 +322,9 @@ export class DiscordRoomMonitor {
 
               const replyToMessageId = lastReplyMessageId ?? event.messageId;
 
-              const sendResult = await sendWithDiscordRetryResult<DiscordSendResult>(
+              const sendResult = await sendWithRetryResult<DiscordSendResult>(
                 event.channelId,
+                "discord",
                 this.options.onSendRetryEvent,
                 async () =>
                   await sender.sendMessage(event.channelId, text, {
@@ -397,7 +399,7 @@ export class DiscordRoomMonitor {
       return;
     }
 
-    const newContent = normalizeContent(event.content).trim();
+    const newContent = normalizeDiscordEmoji(event.content).trim();
     if (!newContent) {
       return;
     }
@@ -422,7 +424,8 @@ function isDiscordMessageEditEvent(event: DiscordIncomingEvent): event is Discor
   return event.kind === "message_edit";
 }
 
-function normalizeContent(content: string): string {
+/** Strip custom Discord emoji markup to plain :name: form. */
+export function normalizeDiscordEmoji(content: string): string {
   if (!content) {
     return content;
   }
@@ -456,18 +459,6 @@ function buildDiscordAttachmentBlock(attachments: DiscordAttachment[]): string {
   return ["[Attachments]", ...lines, "[/Attachments]"].join("\n");
 }
 
-function appendAttachmentBlock(content: string, attachmentBlock: string): string {
-  if (!attachmentBlock) {
-    return content.trim();
-  }
-
-  if (!content.trim()) {
-    return attachmentBlock;
-  }
-
-  return `${content.trim()}\n\n${attachmentBlock}`;
-}
-
 function normalizeDirectContent(content: string, mynick: string, botUserId?: string): string {
   let cleaned = content.trimStart();
 
@@ -493,33 +484,5 @@ function normalizeDirectContent(content: string, mynick: string, botUserId?: str
     cleaned = nameMatch[1]?.trim() ?? "";
   }
 
-  return normalizeContent(cleaned || content.trim());
-}
-
-function nowMonotonicSeconds(): number {
-  return Date.now() / 1_000;
-}
-
-async function sendWithDiscordRetryResult<T>(
-  destination: string,
-  onEvent: ((event: SendRetryEvent) => void) | undefined,
-  send: () => Promise<T | void>,
-): Promise<T | undefined> {
-  let result: T | undefined;
-
-  await sendWithRateLimitRetry(
-    async () => {
-      const next = await send();
-      if (next !== undefined) {
-        result = next;
-      }
-    },
-    {
-      platform: "discord",
-      destination,
-      onEvent,
-    },
-  );
-
-  return result;
+  return normalizeDiscordEmoji(cleaned || content.trim());
 }

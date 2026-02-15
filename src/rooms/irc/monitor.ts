@@ -286,10 +286,6 @@ export class IrcRoomMonitor {
   }
 }
 
-export function createIrcCommandHandlerOptions(commandHandler: RoomMessageHandler): CommandLike {
-  return commandHandler;
-}
-
 function inputMatchForMynick(mynick: string, message: string): RegExpMatchArray | null {
   const pattern = new RegExp(`^\\s*(?<nick><?.*?>\\s*)?${escapeRegExp(mynick)}[,:]\\s*(?<content>.*)$`, "i");
   return message.match(pattern);
@@ -316,6 +312,5 @@ function normalizeSenderAndMessage(nick: string, message: string): [string, stri
 }
 
 function defaultResponseCleaner(text: string): string {
-  const cleaned = text.replace(/\n/g, "; ").trim();
-  return cleaned || text;
+  return text.replace(/\n/g, "; ").trim();
 }
