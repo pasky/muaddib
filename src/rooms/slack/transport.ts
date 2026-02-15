@@ -1,7 +1,7 @@
 import { App } from "@slack/bolt";
 
 import { AsyncQueue } from "../../utils/async-queue.js";
-import { escapeRegExp, stringifyError } from "../../utils/index.js";
+import { asRecord, escapeRegExp, stringifyError } from "../../utils/index.js";
 import type {
   SlackEventSource,
   SlackFileAttachment,
@@ -392,14 +392,6 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
 
 function normalizeName(name: string): string {
   return name.trim().split(/\s+/u).join("_");
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return null;
-  }
-
-  return value as Record<string, unknown>;
 }
 
 function decodeSlackEntities(text: string): string {

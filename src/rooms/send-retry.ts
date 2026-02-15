@@ -1,5 +1,5 @@
 import type { Logger } from "../app/logging.js";
-import { sleep } from "../utils/index.js";
+import { isRecord, sleep, stringifyError } from "../utils/index.js";
 
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_RETRY_AFTER_MS = 1_000;
@@ -71,10 +71,7 @@ export async function sendWithRateLimitRetry(
 }
 
 function normalizeMaxAttempts(value: number | undefined): number {
-  if (typeof value === "number" && Number.isFinite(value) && value >= 1) {
-    return Math.floor(value);
-  }
-  return DEFAULT_MAX_ATTEMPTS;
+  return value ?? DEFAULT_MAX_ATTEMPTS;
 }
 
 function extractRetryAfterMs(error: unknown): number | null {
@@ -82,46 +79,23 @@ function extractRetryAfterMs(error: unknown): number | null {
     return null;
   }
 
-  const directMs = numberValue(error.retryAfterMs) ?? numberValue(error.retry_after_ms);
+  // Discord RateLimitError: .retryAfter in ms
+  const directMs = numberValue(error.retryAfter);
   if (directMs !== null) {
     return normalizeRetryAfterMs(directMs);
   }
 
-  const secondsValue = numberValue(error.retry_after) ?? retryAfterHeaderSeconds(error.response);
+  // Slack: .retry_after in seconds
+  const secondsValue = numberValue(error.retry_after);
   if (secondsValue !== null) {
     return normalizeRetryAfterMs(secondsValue * 1_000);
   }
 
-  const code = String(error.code ?? "").toLowerCase();
-  const status = numberValue(error.status) ?? numberValue(error.statusCode) ?? numberValue(error.code);
-  if (status === 429 || code === "rate_limited" || code === "too_many_requests") {
+  // Fallback: detect rate-limit by status/code without a timing hint
+  const status = numberValue(error.status) ?? numberValue(error.statusCode);
+  const code = typeof error.code === "string" ? error.code.toLowerCase() : "";
+  if (status === 429 || code === "rate_limited") {
     return DEFAULT_RETRY_AFTER_MS;
-  }
-
-  return null;
-}
-
-function retryAfterHeaderSeconds(response: unknown): number | null {
-  if (!isRecord(response)) {
-    return null;
-  }
-
-  const headers = response.headers;
-  if (headers instanceof Headers) {
-    return numberValue(headers.get("retry-after"));
-  }
-
-  if (!isRecord(headers)) {
-    return null;
-  }
-
-  const value = headers["retry-after"] ?? headers["Retry-After"];
-  if (typeof value === "string") {
-    return numberValue(value);
-  }
-
-  if (Array.isArray(value) && value.length > 0 && typeof value[0] === "string") {
-    return numberValue(value[0]);
   }
 
   return null;
@@ -196,15 +170,9 @@ function summarizeRetryError(error: unknown): Record<string, unknown> {
     };
   }
 
-  if (typeof error === "object" && error !== null) {
-    return error as Record<string, unknown>;
+  if (isRecord(error)) {
+    return error;
   }
 
-  return {
-    value: String(error),
-  };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return { value: stringifyError(error) };
 }

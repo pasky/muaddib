@@ -266,6 +266,9 @@ review these, some might be out of date, anything still relevant and really a go
 11. **`withArcLock`** — custom promise-based mutex. Same concept as `PromiseMutex` in varlink.ts. Two different mutex implementations in the same codebase. The autochronicler version is more complex (tracks per-arc queues) but the core locking primitive is the same.
 12. **Response text extraction** — `response.content.filter(entry => entry.type === "text").map(entry => entry.text).join("\n").trim()` — another copy of the pattern flagged in Phase 3 (now 5+ copies).
 
+review these, some might be out of date, anything still relevant and really a good idea?
+### (b) Concrete cleanup opportunities
+
 #### `src/rooms/irc/monitor.ts`
 13. **`createIrcCommandHandlerOptions`** — function that takes a `RoomMessageHandler` and returns it. Pure identity function, completely useless. Dead code.
 14. **`defaultResponseCleaner`** — `text.replace(/\n/g, "; ").trim()` then `return cleaned || text`. The fallback `|| text` is defensive nonsense — if `trim()` returns empty, the original was whitespace-only, returning it unchanged is wrong. And the same lambda is already defined inline in `fromRuntime`. So this default is both buggy and redundant.

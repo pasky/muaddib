@@ -45,3 +45,13 @@ export function stringifyError(error: unknown): string {
   }
   return String(error);
 }
+
+/** Type guard: is the value a non-array plain object? */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Cast to Record if it's a non-array plain object, otherwise null. */
+export function asRecord(value: unknown): Record<string, unknown> | null {
+  return isRecord(value) ? value : null;
+}
