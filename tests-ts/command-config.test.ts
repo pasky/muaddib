@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { mergeRoomConfigs } from "../src/rooms/command/config.js";
+import { mergeRoomConfigs } from "../src/config/muaddib-config.js";
 import { MuaddibConfig } from "../src/config/muaddib-config.js";
 
 describe("mergeRoomConfigs", () => {

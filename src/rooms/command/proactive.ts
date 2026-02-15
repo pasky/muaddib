@@ -215,7 +215,7 @@ export class ProactiveRunner {
 
     const classifiedLabel = await this.executor.classifyMode(context);
     const classifiedTrigger = this.resolver.triggerForLabel(classifiedLabel);
-    const [classifiedModeKey, classifiedRuntime] = this.resolver.runtimeForTrigger(classifiedTrigger);
+    const { modeKey: classifiedModeKey, runtime: classifiedRuntime } = this.resolver.runtimeForTrigger(classifiedTrigger);
 
     if (classifiedModeKey !== "serious") {
       this.logger.warn(

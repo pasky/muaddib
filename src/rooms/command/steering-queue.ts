@@ -22,16 +22,16 @@ export class QueuedInboundMessage {
     readonly triggerMessageId: number | null,
     readonly sendResponse?: (text: string) => Promise<void>,
   ) {
-    let resolve: (() => void) | undefined;
-    let reject: ((reason?: unknown) => void) | undefined;
+    let resolve!: () => void;
+    let reject!: (reason?: unknown) => void;
 
     this.completion = new Promise<void>((promiseResolve, promiseReject) => {
       resolve = promiseResolve;
       reject = promiseReject;
     });
 
-    this.resolveCompletion = resolve ?? (() => {});
-    this.rejectCompletion = reject ?? (() => {});
+    this.resolveCompletion = resolve;
+    this.rejectCompletion = reject;
   }
 
   finish(): void {

@@ -24,9 +24,11 @@ export interface ContextReducerTsOptions {
 export class ContextReducerTs implements ContextReducer {
   private readonly config: ContextReducerConfig;
   private readonly modelAdapter: PiAiModelAdapter;
-  constructor(private readonly options: ContextReducerTsOptions) {
+  private readonly logger?: Logger;
+  constructor(options: ContextReducerTsOptions) {
     this.config = options.config ?? {};
     this.modelAdapter = options.modelAdapter;
+    this.logger = options.logger;
   }
 
   get isConfigured(): boolean {
@@ -65,7 +67,7 @@ export class ContextReducerTs implements ContextReducer {
         },
         {
           callType: "context_reducer",
-          logger: this.options.logger,
+          logger: this.logger,
           streamOptions: { maxTokens: 2_048 },
         },
       );
@@ -81,7 +83,8 @@ export class ContextReducerTs implements ContextReducer {
       }
 
       return this.parseReducedContext(reducedText);
-    } catch {
+    } catch (error) {
+      this.logger?.error?.("Context reduction failed, returning unreduced context", error);
       return contextToReduce;
     }
   }

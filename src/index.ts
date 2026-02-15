@@ -3,7 +3,7 @@ export * from "./models/pi-ai-model-adapter.js";
 export * from "./agent/session-runner.js";
 export * from "./agent/tools/baseline-tools.js";
 export * from "./rooms/message.js";
-export * from "./rooms/command/config.js";
+export * from "./config/muaddib-config.js";
 export * from "./rooms/command/resolver.js";
 export * from "./rooms/command/classifier.js";
 export * from "./rooms/command/context-reducer.js";

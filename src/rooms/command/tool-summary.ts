@@ -4,6 +4,7 @@ import type { MuaddibTool, ToolPersistType } from "../../agent/tools/baseline-to
 import type { PromptResult } from "../../agent/session-runner.js";
 import type { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import type { Logger } from "../../app/logging.js";
+import { truncateForDebug } from "../../agent/debug-utils.js";
 
 const PERSISTENCE_SUMMARY_SYSTEM_PROMPT =
   "As an AI agent, you need to remember in the future what tools you used when generating a response, and what the tools told you. Summarize all tool uses in a single concise paragraph. If artifact links are included, include every artifact link and tie each link to the corresponding tool call.";
@@ -120,8 +121,8 @@ function buildPersistenceSummaryInput(persistentToolCalls: PersistentToolCall[])
 
   for (const call of persistentToolCalls) {
     lines.push(`\n\n# Calling tool **${call.toolName}** (persist: ${call.persistType})`);
-    lines.push(`## **Input:**\n${renderPersistenceValue(call.input)}\n`);
-    lines.push(`## **Output:**\n${renderPersistenceValue(call.output)}\n`);
+    lines.push(`## **Input:**\n${typeof call.input === "string" ? call.input : JSON.stringify(call.input, null, 2)}\n`);
+    lines.push(`## **Output:**\n${typeof call.output === "string" ? call.output : JSON.stringify(call.output, null, 2)}\n`);
 
     for (const artifactUrl of call.artifactUrls) {
       lines.push(`(Tool call I/O stored as artifact: ${artifactUrl})\n`);
@@ -130,18 +131,6 @@ function buildPersistenceSummaryInput(persistentToolCalls: PersistentToolCall[])
 
   lines.push("\nPlease provide a concise summary of what was accomplished in these tool calls.");
   return lines.join("\n");
-}
-
-function renderPersistenceValue(value: unknown): string {
-  if (typeof value === "string") {
-    return value;
-  }
-
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
 }
 
 function extractArtifactUrls(result: unknown): string[] {
@@ -166,9 +155,5 @@ function extractArtifactUrls(result: unknown): string[] {
 }
 
 export function formatToolSummaryLogPreview(text: string, maxChars = 180): string {
-  const singleLine = text.replace(/\s+/gu, " ").trim();
-  if (singleLine.length <= maxChars) {
-    return singleLine;
-  }
-  return `${singleLine.slice(0, maxChars)}...`;
+  return truncateForDebug(text.replace(/\s+/gu, " ").trim(), maxChars);
 }

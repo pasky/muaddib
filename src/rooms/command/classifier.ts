@@ -62,14 +62,19 @@ export function createModeClassifier(
         .trim();
       const normalizedText = responseText.toUpperCase();
 
-      const counts = new Map<string, number>();
+      // Try exact match first (the prompt asks for exactly one token).
       for (const label of labels) {
-        counts.set(label, countOccurrences(normalizedText, label.toUpperCase()));
+        if (normalizedText === label.toUpperCase()) {
+          return label;
+        }
       }
 
+      // Fall back to whole-word boundary matching.
       let bestLabel = fallbackLabel;
       let bestCount = 0;
-      for (const [label, count] of counts.entries()) {
+      for (const label of labels) {
+        const pattern = new RegExp(`\\b${label.toUpperCase()}\\b`, "g");
+        const count = (normalizedText.match(pattern) ?? []).length;
         if (count > bestCount) {
           bestLabel = label;
           bestCount = count;
@@ -92,21 +97,4 @@ export function createModeClassifier(
 function extractCurrentMessage(content: string): string {
   const match = content.match(/<[^>]+>\s*(.*)$/);
   return match ? match[1].trim() : content;
-}
-
-function countOccurrences(text: string, token: string): number {
-  if (!token) {
-    return 0;
-  }
-
-  let count = 0;
-  let index = 0;
-  while (true) {
-    index = text.indexOf(token, index);
-    if (index < 0) {
-      return count;
-    }
-    count += 1;
-    index += token.length;
-  }
 }

@@ -189,6 +189,4 @@ export class RoomMessageHandler {
 
     await this.executor.triggerAutoChronicler(message);
   }
-
-
 }

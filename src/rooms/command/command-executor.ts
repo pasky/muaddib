@@ -750,10 +750,6 @@ export class CommandExecutor {
     );
   }
 
-  private isRateLimitedResult(result: CommandExecutionResult): boolean {
-    return Boolean(result.response?.includes("(rate limiting)")) && !result.model;
-  }
-
   private cleanResponseText(text: string, nick: string): string {
     const cleaned = stripLeadingIrcContextEchoPrefixes(text.trim());
     if (!this.overrides?.responseCleaner) {
@@ -859,7 +855,7 @@ export class CommandExecutor {
   }
 }
 
-const EMPTY_RESOLVED: ResolvedCommand = {
+const EMPTY_RESOLVED: ResolvedCommand = Object.freeze({
   noContext: false,
   queryText: "",
   modelOverride: null,
@@ -869,7 +865,7 @@ const EMPTY_RESOLVED: ResolvedCommand = {
   runtime: null,
   helpRequested: false,
   selectedAutomatically: false,
-};
+});
 
 // ── Module-level helpers ──
 
@@ -889,24 +885,24 @@ export function pickModeModel(model: string | string[] | undefined): string | nu
   return model;
 }
 
+const VALID_THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh"]);
+
 function normalizeThinkingLevel(reasoningEffort: string): ThinkingLevel {
-  switch (reasoningEffort) {
-    case "off":
-    case "minimal":
-    case "low":
-    case "medium":
-    case "high":
-    case "xhigh":
-      return reasoningEffort;
-    default:
-      return "minimal";
+  if (VALID_THINKING_LEVELS.has(reasoningEffort as ThinkingLevel)) {
+    return reasoningEffort as ThinkingLevel;
   }
+  throw new Error(
+    `Invalid reasoningEffort '${reasoningEffort}'. Valid values: ${[...VALID_THINKING_LEVELS].join(", ")}`,
+  );
 }
 
 function numberWithDefault(value: unknown, fallback: number): number {
+  if (value === undefined || value === null) {
+    return fallback;
+  }
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) {
-    return fallback;
+    throw new Error(`Expected a number but got ${JSON.stringify(value)}`);
   }
   return parsed;
 }
@@ -941,8 +937,17 @@ function resolveConfigModelSpec(
   return `${spec.provider}:${spec.modelId}`;
 }
 
+/**
+ * Matches leading IRC-style context echo prefixes that LLMs sometimes parrot back.
+ * These are sequences of timestamp / mode-trigger / nick patterns, e.g.:
+ *   "[12:34] <SomeUser>"
+ *   "[claude-sonnet-4] !s <SomeUser>"
+ *   "[15:00] <Bot> !q <User>"
+ * The negative lookahead `(?!\/?quest)` avoids stripping quest markers.
+ */
 const LEADING_IRC_CONTEXT_ECHO_PREFIX_RE = /^(?:\s*(?:\[[^\]]+\]\s*)?(?:![A-Za-z][\w-]*\s+)?(?:\[?\d{1,2}:\d{2}\]?\s*)?(?:<(?!\/?quest(?:_finished)?\b)[^>]+>))*\s*/iu;
 
+/** Strip leading IRC context echo prefixes that LLMs sometimes parrot from conversation history. */
 function stripLeadingIrcContextEchoPrefixes(text: string): string {
   return text.replace(LEADING_IRC_CONTEXT_ECHO_PREFIX_RE, "");
 }
@@ -950,12 +955,12 @@ function stripLeadingIrcContextEchoPrefixes(text: string): string {
 
 
 function formatCurrentTime(date = new Date()): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hour = String(date.getHours()).padStart(2, "0");
-  const minute = String(date.getMinutes()).padStart(2, "0");
-  return `${year}-${month}-${day} ${hour}:${minute}`;
+  // Intl produces locale-aware "YYYY-MM-DD HH:MM" in local time.
+  const fmt = new Intl.DateTimeFormat("sv-SE", {
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  });
+  return fmt.format(date);
 }
 
 function byteLengthUtf8(text: string): number {
@@ -963,11 +968,13 @@ function byteLengthUtf8(text: string): number {
 }
 
 function trimToMaxBytes(text: string, maxBytes: number): string {
-  let trimmed = text;
-  while (trimmed.length > 0 && byteLengthUtf8(trimmed) > maxBytes) {
-    trimmed = trimmed.slice(0, -1);
+  if (byteLengthUtf8(text) <= maxBytes) {
+    return text;
   }
-  return trimmed;
+  // Slice the buffer and decode; the decoder drops any incomplete trailing character.
+  return new TextDecoder("utf-8", { fatal: false }).decode(
+    Buffer.from(text, "utf-8").subarray(0, maxBytes),
+  ).replace(/\uFFFD$/, "");
 }
 
 function extractSharedArtifactUrl(result: string): string {

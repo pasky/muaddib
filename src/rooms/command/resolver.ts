@@ -151,7 +151,7 @@ export class CommandResolver {
     return { noContext, modeToken, modelOverride, queryText, error };
   }
 
-  runtimeForTrigger(trigger: string): [string, RuntimeSettings] {
+  runtimeForTrigger(trigger: string): { modeKey: string; runtime: RuntimeSettings } {
     const modeKey = this.triggerToMode[trigger];
     if (!modeKey) {
       throw new Error(`Unknown trigger '${trigger}'`);
@@ -160,9 +160,9 @@ export class CommandResolver {
     const modeConfig = this.commandConfig.modes[modeKey];
     const overrides = this.triggerOverrides[trigger] ?? {};
 
-    return [
+    return {
       modeKey,
-      {
+      runtime: {
         reasoningEffort:
           (overrides.reasoningEffort as string | undefined) ?? modeConfig.reasoningEffort ?? "minimal",
         allowedTools:
@@ -181,7 +181,7 @@ export class CommandResolver {
           (overrides.visionModel as string | undefined) ?? modeConfig.visionModel ?? null,
         historySize: Number(modeConfig.historySize ?? this.commandConfig.historySize),
       },
-    ];
+    };
   }
 
   triggerForLabel(label: string): string {
@@ -220,7 +220,7 @@ export class CommandResolver {
     }
 
     if (parsed.modeToken) {
-      const [, runtime] = this.runtimeForTrigger(parsed.modeToken);
+      const { runtime } = this.runtimeForTrigger(parsed.modeToken);
       return !runtime.steering;
     }
 
@@ -232,7 +232,7 @@ export class CommandResolver {
     }
 
     if (this.triggerToMode[trigger]) {
-      const [, runtime] = this.runtimeForTrigger(trigger);
+      const { runtime } = this.runtimeForTrigger(trigger);
       return !runtime.steering;
     }
 
@@ -298,7 +298,7 @@ export class CommandResolver {
     }
 
     if (parsed.modeToken) {
-      const [modeKey, runtime] = this.runtimeForTrigger(parsed.modeToken);
+      const { modeKey, runtime } = this.runtimeForTrigger(parsed.modeToken);
       return {
         noContext: parsed.noContext,
         queryText: parsed.queryText,
@@ -340,7 +340,7 @@ export class CommandResolver {
 
       selectedLabel = await this.classifyMode(input.context.slice(-input.defaultSize));
       selectedTrigger = this.triggerForLabel(selectedLabel);
-      const [selectedMode] = this.runtimeForTrigger(selectedTrigger);
+      const { modeKey: selectedMode } = this.runtimeForTrigger(selectedTrigger);
       if (selectedMode !== constrainedMode) {
         selectedTrigger = this.defaultTriggerByMode[constrainedMode];
         selectedLabel = selectedTrigger;
@@ -367,7 +367,7 @@ export class CommandResolver {
       };
     }
 
-    const [modeKey, runtime] = this.runtimeForTrigger(selectedTrigger);
+    const { modeKey, runtime } = this.runtimeForTrigger(selectedTrigger);
 
     return {
       noContext: parsed.noContext,
