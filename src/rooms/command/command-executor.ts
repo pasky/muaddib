@@ -185,6 +185,7 @@ export class CommandExecutor {
       toolsConfig: this.runtime.config.getToolsConfig(),
       providersConfig: this.runtime.config.getProvidersConfig(),
       getApiKey: this.runtime.getApiKey,
+      modelAdapter: this.modelAdapter,
       logger: this.logger,
       chronicleStore: this.runtime.chronicleStore,
       chronicleLifecycle: this.runtime.chronicleLifecycle,

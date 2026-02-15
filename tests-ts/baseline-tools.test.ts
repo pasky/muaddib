@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { PiAiModelAdapter } from "../src/models/pi-ai-model-adapter.js";
 import {
   createBaselineAgentTools,
   createChronicleAppendTool,
@@ -19,9 +20,16 @@ import {
   createWebSearchTool,
 } from "../src/agent/tools/baseline-tools.js";
 
+function createTools(options: Record<string, unknown>) {
+  return createBaselineAgentTools({
+    modelAdapter: new PiAiModelAdapter(),
+    ...(options as any),
+  });
+}
+
 describe("baseline agent tools", () => {
   it("creates expected baseline tool names", () => {
-    const tools = createBaselineAgentTools({
+    const tools = createTools({
       executors: {
         webSearch: async () => "",
         visitWebpage: async () => "",
@@ -56,7 +64,7 @@ describe("baseline agent tools", () => {
   });
 
   it("every tool has a colocated persistType matching Python parity", () => {
-    const tools = createBaselineAgentTools({
+    const tools = createTools({
       executors: {
         webSearch: async () => "",
         visitWebpage: async () => "",
@@ -96,7 +104,7 @@ describe("baseline agent tools", () => {
   });
 
   it("includes subquest_start and quest_snooze for top-level quest", () => {
-    const tools = createBaselineAgentTools({
+    const tools = createTools({
       currentQuestId: "my-quest",
       executors: {
         webSearch: async () => "",
@@ -121,7 +129,7 @@ describe("baseline agent tools", () => {
   });
 
   it("includes only quest_snooze for sub-quest (dotted ID)", () => {
-    const tools = createBaselineAgentTools({
+    const tools = createTools({
       currentQuestId: "my-quest.sub1",
       executors: {
         webSearch: async () => "",

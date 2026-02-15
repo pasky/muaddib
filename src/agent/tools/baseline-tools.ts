@@ -158,7 +158,7 @@ const BASELINE_EXECUTOR_TOOL_GROUPS: ReadonlyArray<ReadonlyArray<ExecutorBackedT
 ];
 
 export function createDefaultToolExecutors(
-  options: ToolContext = {},
+  options: ToolContext,
   oracleInvocation?: OracleInvocationContext,
 ): BaselineToolExecutors {
   return {
@@ -181,7 +181,7 @@ export function createDefaultToolExecutors(
  * Baseline tool set for command-path parity.
  * Grouped by tool domains (web, execution, artifacts, images, oracle, chronicle, quests).
  */
-export function createBaselineAgentTools(options: BaselineToolOptions = {}): MuaddibTool[] {
+export function createBaselineAgentTools(options: BaselineToolOptions): MuaddibTool[] {
   const defaultExecutors = createDefaultToolExecutors(options, options.oracleInvocation);
   const executors: BaselineToolExecutors = {
     webSearch: options.executors?.webSearch ?? defaultExecutors.webSearch,

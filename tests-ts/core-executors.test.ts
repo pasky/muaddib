@@ -5,8 +5,9 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createDefaultToolExecutors } from "../src/agent/tools/baseline-tools.js";
-import { createDefaultOracleExecutor } from "../src/agent/tools/oracle.js";
+import { createDefaultToolExecutors as createDefaultToolExecutorsRaw } from "../src/agent/tools/baseline-tools.js";
+import { createDefaultOracleExecutor as createDefaultOracleExecutorRaw } from "../src/agent/tools/oracle.js";
+import { PiAiModelAdapter } from "../src/models/pi-ai-model-adapter.js";
 import { resetSpriteCache } from "../src/agent/tools/execute-code.js";
 import { resetWebRateLimiters, jinaRetryConfig } from "../src/agent/tools/web.js";
 import { ChronicleStore } from "../src/chronicle/chronicle-store.js";
@@ -109,6 +110,19 @@ function extractFilenameFromViewerUrl(url: string): string {
   return decodeURIComponent(parsed.search.slice(1));
 }
 
+function createDefaultToolExecutors(options: Record<string, unknown> = {}) {
+  return createDefaultToolExecutorsRaw({
+    modelAdapter: new PiAiModelAdapter(),
+    ...(options as any),
+  });
+}
+
+function createDefaultOracleExecutor(options: Record<string, unknown> = {}, invocation?: any) {
+  return createDefaultOracleExecutorRaw({
+    modelAdapter: new PiAiModelAdapter(),
+    ...(options as any),
+  } as any, invocation);
+}
 
 describe("core tool executors artifact support", () => {
   it("share_artifact writes text artifact and returns viewer URL", async () => {

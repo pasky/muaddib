@@ -32,7 +32,7 @@ export interface ToolContext {
 
   // ── Runtime services ──
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
-  modelAdapter?: PiAiModelAdapter;
+  modelAdapter: PiAiModelAdapter;
   logger?: ToolExecutorLogger;
   chronicleStore?: ChronicleStore;
   chronicleLifecycle?: {
