@@ -413,23 +413,11 @@ export class SlackRoomMonitor {
       }
     };
 
-    const withMessageContext =
-      this.logWriter?.withMessageContext.bind(this.logWriter) ??
-      (this.logger as { withMessageContext?: RuntimeLogWriter["withMessageContext"] }).withMessageContext?.bind(this.logger as object);
-
-    if (withMessageContext) {
-      await withMessageContext(
-        {
-          arc,
-          nick: message.nick,
-          message: message.content,
-        },
-        runDirectMessage,
-      );
-      return;
+    if (this.logWriter) {
+      await this.logWriter.withMessageContext({ arc, nick: message.nick, message: message.content }, runDirectMessage);
+    } else {
+      await runDirectMessage();
     }
-
-    await runDirectMessage();
   }
 
   async processMessageEditEvent(event: SlackMessageEditEvent): Promise<void> {

@@ -368,23 +368,11 @@ export class DiscordRoomMonitor {
       });
     };
 
-    const withMessageContext =
-      this.logWriter?.withMessageContext.bind(this.logWriter) ??
-      (this.logger as { withMessageContext?: RuntimeLogWriter["withMessageContext"] }).withMessageContext?.bind(this.logger as object);
-
-    if (withMessageContext) {
-      await withMessageContext(
-        {
-          arc,
-          nick: message.nick,
-          message: event.content,
-        },
-        runDirectMessage,
-      );
-      return;
+    if (this.logWriter) {
+      await this.logWriter.withMessageContext({ arc, nick: message.nick, message: event.content }, runDirectMessage);
+    } else {
+      await runDirectMessage();
     }
-
-    await runDirectMessage();
   }
 
   private async withTypingIndicator(

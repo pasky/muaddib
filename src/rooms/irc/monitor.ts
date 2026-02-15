@@ -234,23 +234,11 @@ export class IrcRoomMonitor {
       await handleIncoming();
     };
 
-    const withMessageContext =
-      this.logWriter?.withMessageContext.bind(this.logWriter) ??
-      (this.logger as { withMessageContext?: RuntimeLogWriter["withMessageContext"] }).withMessageContext?.bind(this.logger as object);
-
-    if (withMessageContext) {
-      await withMessageContext(
-        {
-          arc,
-          nick: effectiveNick,
-          message: normalizedMessage,
-        },
-        runDirectMessage,
-      );
-      return;
+    if (this.logWriter) {
+      await this.logWriter.withMessageContext({ arc, nick: effectiveNick, message: normalizedMessage }, runDirectMessage);
+    } else {
+      await runDirectMessage();
     }
-
-    await runDirectMessage();
   }
 
   private async connectWithRetry(maxRetries = 5): Promise<boolean> {

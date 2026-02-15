@@ -251,6 +251,7 @@ describe("DiscordRoomMonitor", () => {
       roomConfig: { enabled: true },
       history,
       logger: runtimeLogs.getLogger("muaddib.rooms.discord.monitor"),
+      logWriter: runtimeLogs,
       commandHandler: {
         handleIncomingMessage: async () => {
           runtimeLogs.getLogger("muaddib.tests.command").debug("inside discord direct handler");

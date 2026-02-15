@@ -515,6 +515,7 @@ describe("IrcRoomMonitor", () => {
       },
       history,
       logger: runtimeLogs.getLogger("muaddib.rooms.irc.monitor"),
+      logWriter: runtimeLogs,
       commandHandler: {
         handleIncomingMessage: async () => {
           runtimeLogs.getLogger("muaddib.tests.command").debug("inside direct handler marker");
