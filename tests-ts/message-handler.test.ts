@@ -1568,6 +1568,8 @@ describe("RoomMessageHandler", () => {
 
     await firstStarted.promise;
 
+    const p3Persisted = waitForPersistedMessage(history, (message) => message.content === "p3");
+
     const p1 = handler.handleIncomingMessage(makeMessage("p1"), {
       isDirect: false,
     });
@@ -1584,9 +1586,7 @@ describe("RoomMessageHandler", () => {
       isDirect: false,
     });
 
-    await new Promise((resolve) => {
-      setTimeout(resolve, 80);
-    });
+    await p3Persisted;
 
     releaseFirst.resolve();
 
@@ -1675,9 +1675,13 @@ describe("RoomMessageHandler", () => {
     await firstStarted.promise;
 
     // Queue a passive message while agent is running
+    const interruptPersisted = waitForPersistedMessage(
+      history,
+      (message) => message.content === "interrupt me",
+    );
     handler.handleIncomingMessage(makeMessage("interrupt me"), { isDirect: false });
 
-    await new Promise((resolve) => { setTimeout(resolve, 50); });
+    await interruptPersisted;
 
     releaseFirst.resolve();
     await t1;
@@ -1736,9 +1740,6 @@ describe("RoomMessageHandler", () => {
     await handler.handleIncomingMessage(makeMessage("just chatting"), {
       isDirect: false,
     });
-
-    // Wait for debounce + evaluation to finish
-    await new Promise((resolve) => { setTimeout(resolve, 200); });
 
     // Runner should NOT be called since score is below threshold
     expect(runnerCalled).toBe(false);
@@ -1808,12 +1809,15 @@ describe("RoomMessageHandler", () => {
     });
 
     // Start proactive session with a passive message
+    const passivePersisted = waitForPersistedMessage(
+      history,
+      (message) => message.content === "background chatter",
+    );
     const passivePromise = handler.handleIncomingMessage(makeMessage("background chatter"), {
       isDirect: false,
     });
 
-    // Give it a tick to start the proactive session
-    await new Promise((resolve) => { setTimeout(resolve, 20); });
+    await passivePersisted;
 
     // Now send a command — should preempt the proactive debounce
     const commandResult = await handler.handleIncomingMessage(makeMessage("!s direct question"), {
@@ -2064,12 +2068,16 @@ describe("RoomMessageHandler", () => {
 
     await firstStarted.promise;
 
+    const secondPersisted = waitForPersistedMessage(
+      history,
+      (message) => message.content === "!s second",
+    );
     const t2 = handler.handleIncomingMessage(makeMessage("!s second"), {
       isDirect: true,
       sendResponse: async (text) => { sent.push(text); },
     });
 
-    await new Promise((resolve) => { setTimeout(resolve, 50); });
+    await secondPersisted;
 
     releaseFirst.resolve();
 
