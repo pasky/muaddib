@@ -173,6 +173,25 @@ function createDeferred<T>() {
   };
 }
 
+function waitForPersistedMessage(
+  history: ChatHistoryStore,
+  predicate: (message: RoomMessage) => boolean,
+): Promise<void> {
+  const persisted = createDeferred<void>();
+  const originalAddMessage = history.addMessage.bind(history);
+
+  vi.spyOn(history, "addMessage").mockImplementation(async (...args) => {
+    const [message] = args;
+    const result = await originalAddMessage(...(args as Parameters<typeof history.addMessage>));
+    if (predicate(message as RoomMessage)) {
+      persisted.resolve();
+    }
+    return result;
+  });
+
+  return persisted.promise;
+}
+
 describe("RoomMessageHandler", () => {
   it("routes command to runner without duplicating trigger message and propagates reasoning level", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
@@ -778,16 +797,10 @@ describe("RoomMessageHandler", () => {
       threadId: "thread-1",
     };
 
-    const firstTriggerPersisted = createDeferred<void>();
-    const originalAddMessage = history.addMessage.bind(history);
-    vi.spyOn(history, "addMessage").mockImplementation(async (...args) => {
-      const [message] = args;
-      const result = await originalAddMessage(...(args as Parameters<typeof history.addMessage>));
-      if ((message as RoomMessage).content === "!s first line") {
-        firstTriggerPersisted.resolve();
-      }
-      return result;
-    });
+    const firstTriggerPersisted = waitForPersistedMessage(
+      history,
+      (message) => message.content === "!s first line",
+    );
 
     let promptCallCount = 0;
     let runnerPrompt = "";
@@ -825,7 +838,7 @@ describe("RoomMessageHandler", () => {
       sendResponse: async () => {},
     });
 
-    await firstTriggerPersisted.promise;
+    await firstTriggerPersisted;
 
     const followup: RoomMessage = {
       ...makeMessage("!s second line"),
