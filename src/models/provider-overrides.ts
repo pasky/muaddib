@@ -19,18 +19,6 @@ export interface ProviderOverrideOptions {
   deepseekBaseUrl?: string;
 }
 
-export interface NormalizedProviderOverrideOptions {
-  deepseekBaseUrl: string;
-}
-
-export function normalizeProviderOverrideOptions(
-  options: ProviderOverrideOptions = {},
-): NormalizedProviderOverrideOptions {
-  return {
-    deepseekBaseUrl: normalizeDeepSeekBaseUrl(options.deepseekBaseUrl),
-  };
-}
-
 export function getOverriddenProviders(): string[] {
   return [DEEPSEEK_PROVIDER];
 }
@@ -38,7 +26,7 @@ export function getOverriddenProviders(): string[] {
 export function resolveProviderOverrideModel(
   provider: string,
   modelId: string,
-  options: NormalizedProviderOverrideOptions,
+  options: ProviderOverrideOptions = {},
 ): Model<Api> | undefined {
   if (provider === DEEPSEEK_PROVIDER) {
     return resolveDeepSeekModel(modelId, options.deepseekBaseUrl);
@@ -47,46 +35,32 @@ export function resolveProviderOverrideModel(
   return undefined;
 }
 
-function resolveDeepSeekModel(modelId: string, baseUrl: string): Model<Api> {
-  const pricing = DEEPSEEK_PRICING_BY_MODEL[modelId] ?? {
-    input: 0,
-    output: 0,
-  };
+function resolveDeepSeekModel(modelId: string, baseUrl?: string): Model<Api> {
+  const pricing = DEEPSEEK_PRICING_BY_MODEL[modelId];
+  if (!pricing) {
+    const known = Object.keys(DEEPSEEK_PRICING_BY_MODEL).join(", ");
+    console.warn(
+      `Unknown DeepSeek model '${modelId}': pricing unavailable (known models: ${known}). Cost tracking will report zero.`,
+    );
+  }
+
+  const normalizedUrl = (baseUrl ?? DEFAULT_DEEPSEEK_BASE_URL).trim().replace(/\/+$/u, "");
 
   return {
     id: modelId,
     name: modelId,
     api: "anthropic-messages",
     provider: DEEPSEEK_PROVIDER,
-    baseUrl,
+    baseUrl: normalizedUrl,
     reasoning: modelId.includes("reasoner"),
     input: ["text"],
     cost: {
-      input: pricing.input,
-      output: pricing.output,
+      input: pricing?.input ?? 0,
+      output: pricing?.output ?? 0,
       cacheRead: 0,
       cacheWrite: 0,
     },
     contextWindow: 128_000,
     maxTokens: 32_000,
   };
-}
-
-function normalizeDeepSeekBaseUrl(url: string | undefined): string {
-  const raw = (url ?? DEFAULT_DEEPSEEK_BASE_URL).trim();
-  if (!raw) {
-    return DEFAULT_DEEPSEEK_BASE_URL;
-  }
-
-  const withoutTrailingSlash = raw.replace(/\/+$/u, "");
-
-  if (withoutTrailingSlash.endsWith("/v1/messages")) {
-    return withoutTrailingSlash.slice(0, -"/v1/messages".length);
-  }
-
-  if (withoutTrailingSlash.endsWith("/messages")) {
-    return withoutTrailingSlash.slice(0, -"/messages".length);
-  }
-
-  return withoutTrailingSlash;
 }

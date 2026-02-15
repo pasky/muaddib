@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { MuaddibConfig } from "../src/config/muaddib-config.js";
 import {
-  createPiAiModelAdapterFromConfig,
   PiAiModelAdapter,
   PiAiModelResolutionError,
 } from "../src/models/pi-ai-model-adapter.js";
@@ -28,34 +26,22 @@ describe("PiAiModelAdapter", () => {
     expect(resolved.model.baseUrl).toBe("https://api.deepseek.com/anthropic");
   });
 
-  it("normalizes providers.deepseek.base_url into base URL when creating adapter from config", () => {
-    const withConfig = createPiAiModelAdapterFromConfig(
-      MuaddibConfig.inMemory({
-        providers: {
-          deepseek: {
-            base_url: "https://api.deepseek.com/anthropic/v1/messages",
-          },
-        },
-      }),
-    );
+  it("strips trailing slash from deepseek base URL", () => {
+    const a = new PiAiModelAdapter({
+      deepseekBaseUrl: "https://api.deepseek.com/anthropic/",
+    });
 
-    const resolved = withConfig.resolve("deepseek:deepseek-chat");
+    const resolved = a.resolve("deepseek:deepseek-chat");
     expect(resolved.model.baseUrl).toBe("https://api.deepseek.com/anthropic");
   });
 
-  it("normalizes deepseek base URL suffix from /messages too", () => {
-    const withConfig = createPiAiModelAdapterFromConfig(
-      MuaddibConfig.inMemory({
-        providers: {
-          deepseek: {
-            base_url: "https://api.deepseek.com/anthropic/messages",
-          },
-        },
-      }),
-    );
+  it("uses custom deepseek base URL as-is (no silent suffix stripping)", () => {
+    const a = new PiAiModelAdapter({
+      deepseekBaseUrl: "https://custom.example.com/v1",
+    });
 
-    const resolved = withConfig.resolve("deepseek:deepseek-chat");
-    expect(resolved.model.baseUrl).toBe("https://api.deepseek.com/anthropic");
+    const resolved = a.resolve("deepseek:deepseek-chat");
+    expect(resolved.model.baseUrl).toBe("https://custom.example.com/v1");
   });
 
   it("throws explicit error for unknown provider", () => {

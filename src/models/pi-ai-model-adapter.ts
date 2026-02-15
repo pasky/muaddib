@@ -11,11 +11,9 @@ import {
 } from "@mariozechner/pi-ai";
 
 import type { Logger } from "../app/logging.js";
-import { MuaddibConfig } from "../config/muaddib-config.js";
 import { parseModelSpec, type ModelSpec } from "./model-spec.js";
 import {
   getOverriddenProviders,
-  normalizeProviderOverrideOptions,
   resolveProviderOverrideModel,
   type ProviderOverrideOptions,
 } from "./provider-overrides.js";
@@ -44,16 +42,26 @@ export interface CompleteSimpleOptions {
   streamOptions?: Omit<SimpleStreamOptions, "apiKey" | "onPayload">;
 }
 
+let supportedProviders: Set<string> | undefined;
+
+function getSupportedProviders(): Set<string> {
+  if (!supportedProviders) {
+    supportedProviders = new Set<string>(getProviders() as string[]);
+    for (const provider of getOverriddenProviders()) {
+      supportedProviders.add(provider);
+    }
+  }
+  return supportedProviders;
+}
+
 /**
  * Adapter that enforces strict provider:model specs and resolves them via pi-ai's model registry.
  */
 export class PiAiModelAdapter {
-  private readonly providerOverrideOptions;
-  private readonly getApiKey;
+  private readonly options: PiAiModelAdapterOptions;
 
   constructor(options: PiAiModelAdapterOptions = {}) {
-    this.providerOverrideOptions = normalizeProviderOverrideOptions(options);
-    this.getApiKey = options.getApiKey;
+    this.options = options;
   }
 
   resolve(modelSpec: string): ResolvedPiAiModel {
@@ -70,13 +78,10 @@ export class PiAiModelAdapter {
     const providerOverrideModel = resolveProviderOverrideModel(
       spec.provider,
       spec.modelId,
-      this.providerOverrideOptions,
+      this.options,
     );
     if (providerOverrideModel) {
-      return {
-        spec,
-        model: providerOverrideModel,
-      };
+      return { spec, model: providerOverrideModel };
     }
 
     const model = getModel(spec.provider as KnownProvider, spec.modelId as never) as
@@ -106,59 +111,28 @@ export class PiAiModelAdapter {
           ...(options.streamOptions ?? {}),
           apiKey: options.getApiKey
             ? await options.getApiKey(resolved.spec.provider)
-            : this.getApiKey
-              ? await this.getApiKey(resolved.spec.provider)
+            : this.options.getApiKey
+              ? await this.options.getApiKey(resolved.spec.provider)
               : undefined,
           onPayload: (payload: unknown) => {
-            logger?.debug(`llm_io payload ${callType}`, safeJson(payload, maxChars));
+            logger?.debug(`llm_io payload ${callType}`, truncateJson(payload, maxChars));
           },
         },
       );
 
-      logger?.debug(`llm_io response ${callType}`, safeJson(response, maxChars));
+      logger?.debug(`llm_io response ${callType}`, truncateJson(response, maxChars));
       return response;
     } catch (error) {
-      logger?.error(`llm_io error ${callType}`, safeJson({ error: String(error) }, maxChars));
+      logger?.error(`llm_io error ${callType}`, truncateJson({ error: String(error) }, maxChars));
       throw error;
     }
   }
 }
 
-export function createPiAiModelAdapterFromConfig(
-  config: MuaddibConfig,
-  getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined,
-): PiAiModelAdapter {
-  return new PiAiModelAdapter({
-    deepseekBaseUrl: config.getProvidersConfig().deepseek?.baseUrl,
-    getApiKey,
-  });
-}
-
-export function resolvePiAiModel(modelSpec: string): Model<Api> {
-  return new PiAiModelAdapter().resolve(modelSpec).model;
-}
-
-function getSupportedProviders(): Set<string> {
-  const providers = new Set<string>(getProviders() as string[]);
-  for (const provider of getOverriddenProviders()) {
-    providers.add(provider);
+function truncateJson(value: unknown, maxChars: number): string {
+  const json = JSON.stringify(value, null, 2) ?? "[unserializable]";
+  if (json.length <= maxChars) {
+    return json;
   }
-
-  return providers;
-}
-
-function safeJson(value: unknown, maxChars: number): string {
-  try {
-    return truncateForDebug(JSON.stringify(value, null, 2), maxChars);
-  } catch {
-    return "[unserializable payload]";
-  }
-}
-
-function truncateForDebug(value: string, maxChars: number): string {
-  if (value.length <= maxChars) {
-    return value;
-  }
-
-  return `${value.slice(0, Math.max(0, maxChars - 24))}...[truncated ${value.length - maxChars} chars]`;
+  return `${json.slice(0, maxChars)}...[truncated ${json.length - maxChars} chars]`;
 }

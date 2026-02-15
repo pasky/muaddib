@@ -10,8 +10,7 @@ import {
 } from "./chronicle/lifecycle.js";
 import { ChatHistoryStore } from "./history/chat-history-store.js";
 import {
-  createPiAiModelAdapterFromConfig,
-  type PiAiModelAdapter,
+  PiAiModelAdapter,
 } from "./models/pi-ai-model-adapter.js";
 import { AutoChroniclerTs, type AutoChronicler } from "./rooms/autochronicler.js";
 import { MuaddibConfig } from "./config/muaddib-config.js";
@@ -47,7 +46,10 @@ export async function createMuaddibRuntime(
 
   const staticKeys = config.getProviderStaticKeys();
   const getApiKey = (provider: string): string | undefined => staticKeys[provider];
-  const modelAdapter = createPiAiModelAdapterFromConfig(config, getApiKey);
+  const modelAdapter = new PiAiModelAdapter({
+    deepseekBaseUrl: config.getProvidersConfig().deepseek?.baseUrl,
+    getApiKey,
+  });
 
   const historyConfig = config.getHistoryConfig();
   const historyDbPath = options.dbPath ?? resolveMuaddibPath(
