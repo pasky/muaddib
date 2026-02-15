@@ -1,5 +1,5 @@
 import { Agent, type AgentMessage, type AgentTool, type StreamFn, type ThinkingLevel } from "@mariozechner/pi-agent-core";
-import { streamSimple, type AssistantMessage, type Usage, type UserMessage } from "@mariozechner/pi-ai";
+import { streamSimple, type AssistantMessage, type UserMessage } from "@mariozechner/pi-ai";
 import {
   AgentSession,
   AuthStorage,
@@ -15,8 +15,20 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { PiAiModelAdapter, type ResolvedPiAiModel } from "../models/pi-ai-model-adapter.js";
 import type { Logger } from "../app/logging.js";
+import { emptyUsage, safeJson } from "./debug-utils.js";
 
 const DEFAULT_MAX_ITERATIONS = 25;
+
+const EMPTY_RESOURCE_LOADER_BASE: Omit<ResourceLoader, "getExtensions" | "getSystemPrompt"> = {
+  getSkills: () => ({ skills: [], diagnostics: [] }),
+  getPrompts: () => ({ prompts: [], diagnostics: [] }),
+  getThemes: () => ({ themes: [], diagnostics: [] }),
+  getAgentsFiles: () => ({ agentsFiles: [] }),
+  getAppendSystemPrompt: () => [],
+  getPathMetadata: () => new Map(),
+  extendResources: () => {},
+  reload: async () => {},
+};
 
 export type RunnerLogger = Logger;
 
@@ -58,16 +70,9 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
   });
 
   const resourceLoader: ResourceLoader = {
+    ...EMPTY_RESOURCE_LOADER_BASE,
     getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }),
-    getSkills: () => ({ skills: [], diagnostics: [] }),
-    getPrompts: () => ({ prompts: [], diagnostics: [] }),
-    getThemes: () => ({ themes: [], diagnostics: [] }),
-    getAgentsFiles: () => ({ agentsFiles: [] }),
     getSystemPrompt: () => input.systemPrompt,
-    getAppendSystemPrompt: () => [],
-    getPathMetadata: () => new Map(),
-    extendResources: () => {},
-    reload: async () => {},
   };
 
   // Use a non-existent path so AuthStorage starts empty and never touches ~/.pi/agent/auth.json.
@@ -115,7 +120,10 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
 
   applySystemPromptOverrideToSession(session, input.systemPrompt);
 
-  const maxIterations = normalizePositiveInteger(input.maxIterations, DEFAULT_MAX_ITERATIONS);
+  const rawIterations = Number(input.maxIterations);
+  const maxIterations = Number.isFinite(rawIterations) && rawIterations >= 1
+    ? Math.floor(rawIterations)
+    : DEFAULT_MAX_ITERATIONS;
   const visionFallbackModel = resolveVisionFallbackModel(
     input.modelAdapter,
     input.visionFallbackModel,
@@ -252,23 +260,6 @@ function applySystemPromptOverrideToSession(session: AgentSession, override: str
   state._rebuildSystemPrompt = () => override;
 }
 
-function emptyUsage(): Usage {
-  return {
-    input: 0,
-    output: 0,
-    cacheRead: 0,
-    cacheWrite: 0,
-    totalTokens: 0,
-    cost: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      total: 0,
-    },
-  };
-}
-
 function convertContextToAgentMessages(
   contextMessages: SessionFactoryContextMessage[],
   resolvedModel: ResolvedPiAiModel,
@@ -313,22 +304,6 @@ function createTracingStreamFn(logger: Logger, maxChars: number): StreamFn {
   };
 }
 
-function safeJson(value: unknown, maxChars: number): string {
-  try {
-    return truncateForDebug(JSON.stringify(value, null, 2), maxChars);
-  } catch {
-    return "[unserializable payload]";
-  }
-}
-
-function truncateForDebug(value: string, maxChars: number): string {
-  if (value.length <= maxChars) {
-    return value;
-  }
-
-  return `${value.slice(0, Math.max(0, maxChars - 24))}...[truncated ${value.length - maxChars} chars]`;
-}
-
 function resolveVisionFallbackModel(
   modelAdapter: PiAiModelAdapter,
   visionFallbackModel: string | undefined,
@@ -349,49 +324,15 @@ function resolveVisionFallbackModel(
 }
 
 function hasImageToolOutput(value: unknown): boolean {
-  const stack: unknown[] = [value];
-  const seen = new Set<unknown>();
-
-  while (stack.length > 0) {
-    const current = stack.pop();
-    if (!current || typeof current !== "object") {
-      continue;
-    }
-
-    if (seen.has(current)) {
-      continue;
-    }
-    seen.add(current);
-
-    if (Array.isArray(current)) {
-      for (const entry of current) {
-        stack.push(entry);
-      }
-      continue;
-    }
-
-    const record = current as Record<string, unknown>;
-    if (record.type === "image" || record.kind === "image") {
-      return true;
-    }
-
-    for (const entry of Object.values(record)) {
-      stack.push(entry);
-    }
+  try {
+    const json = JSON.stringify(value);
+    return json.includes('"type":"image"') || json.includes('"kind":"image"');
+  } catch {
+    return false;
   }
-
-  return false;
 }
 
 function normalizeApiKey(value: string): string | undefined {
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function normalizePositiveInteger(value: unknown, fallback: number): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 1) {
-    return fallback;
-  }
-  return Math.floor(parsed);
 }

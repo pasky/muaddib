@@ -10,6 +10,7 @@ import {
   type RunnerLogger,
   type SessionFactoryContextMessage,
 } from "./session-factory.js";
+import { emptyUsage, safeJson, truncateForDebug } from "./debug-utils.js";
 
 const DEFAULT_EMPTY_COMPLETION_RETRY_PROMPT =
   "<meta>No valid text or tool use found in response. Please try again.</meta>";
@@ -51,44 +52,38 @@ export interface PromptResult {
 
 export class SessionRunner {
   private readonly model: string;
-  private readonly systemPrompt: string;
   private readonly tools: AgentTool<any>[];
   private readonly modelAdapter: PiAiModelAdapter;
-  private readonly getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
-  private readonly maxIterations?: number;
   private readonly logger: RunnerLogger;
   private readonly emptyCompletionRetryPrompt: string;
   private readonly llmDebugMaxChars: number;
-  private readonly steeringMessageProvider?: () => SessionFactoryContextMessage[];
+  private readonly options: SessionRunnerOptions;
 
   constructor(options: SessionRunnerOptions) {
+    this.options = options;
     this.model = options.model;
-    this.systemPrompt = options.systemPrompt;
     this.tools = options.tools ?? [];
     this.modelAdapter = options.modelAdapter;
-    this.getApiKey = options.getApiKey;
-    this.maxIterations = options.maxIterations;
     this.logger = options.logger ?? console;
     this.emptyCompletionRetryPrompt =
       options.emptyCompletionRetryPrompt ?? DEFAULT_EMPTY_COMPLETION_RETRY_PROMPT;
     this.llmDebugMaxChars = Math.max(500, Math.floor(options.llmDebugMaxChars ?? 120_000));
-    this.steeringMessageProvider = options.steeringMessageProvider;
   }
 
   async prompt(prompt: string, options: PromptOptions = {}): Promise<PromptResult> {
     const sessionCtx = createAgentSessionForInvocation({
       model: this.model,
-      systemPrompt: this.systemPrompt,
+      systemPrompt: this.options.systemPrompt,
       tools: this.tools,
       modelAdapter: this.modelAdapter,
-      getApiKey: this.getApiKey,
+      getApiKey: this.options.getApiKey,
       contextMessages: options.contextMessages,
       thinkingLevel: options.thinkingLevel,
-      maxIterations: this.maxIterations,
+      maxIterations: this.options.maxIterations,
       visionFallbackModel: options.visionFallbackModel,
       llmDebugMaxChars: this.llmDebugMaxChars,
       logger: this.logger,
-      steeringMessageProvider: this.steeringMessageProvider,
+      steeringMessageProvider: this.options.steeringMessageProvider,
     });
 
     const { session, agent } = sessionCtx;
@@ -267,23 +262,6 @@ function sumAssistantUsage(messages: readonly unknown[]): Usage {
   return total;
 }
 
-function emptyUsage(): Usage {
-  return {
-    input: 0,
-    output: 0,
-    cacheRead: 0,
-    cacheWrite: 0,
-    totalTokens: 0,
-    cost: {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-      total: 0,
-    },
-  };
-}
-
 function renderMessageForDebug(message: unknown, maxChars: number): Record<string, unknown> {
   if (!message || typeof message !== "object") {
     return { value: truncateForDebug(String(message), maxChars) };
@@ -378,20 +356,4 @@ function summarizeToolPayload(value: unknown, maxChars: number): string {
   }
 
   return safeJson(value, maxChars);
-}
-
-function safeJson(value: unknown, maxChars: number): string {
-  try {
-    return truncateForDebug(JSON.stringify(value, null, 2), maxChars);
-  } catch {
-    return "[unserializable payload]";
-  }
-}
-
-function truncateForDebug(value: string, maxChars: number): string {
-  if (value.length <= maxChars) {
-    return value;
-  }
-
-  return `${value.slice(0, Math.max(0, maxChars - 24))}...[truncated ${value.length - maxChars} chars]`;
 }
