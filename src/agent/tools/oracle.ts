@@ -6,7 +6,7 @@ import { SessionRunner } from "../session-runner.js";
 import type { MuaddibTool } from "./types.js";
 import type { RunnerLogger, SessionFactoryContextMessage } from "../session-factory.js";
 import type { ToolContext } from "./types.js";
-import { toConfiguredString } from "../../utils/index.js";
+import { stringifyError, toConfiguredString } from "../../utils/index.js";
 
 export interface OracleInput {
   query: string;
@@ -128,7 +128,7 @@ export function createDefaultOracleExecutor(
       logger.info(`${ORACLE_LOG_SEPARATOR} Oracle response: ${result.text.slice(0, 500)}...`);
       return result.text;
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = stringifyError(error);
       if (message.includes("iteration") || message.includes("max")) {
         logger.info(`${ORACLE_LOG_SEPARATOR} Oracle exhausted: ${message}...`);
         return `Oracle exhausted iterations: ${message}`;
