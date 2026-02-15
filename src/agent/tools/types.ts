@@ -2,6 +2,7 @@ import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { ChronicleStore } from "../../chronicle/chronicle-store.js";
 import type { ToolsConfig, ProvidersConfig } from "../../config/muaddib-config.js";
 import type { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
+import type { Logger } from "../../app/logging.js";
 
 /** How a tool's I/O is persisted for future context recall. */
 export type ToolPersistType = "none" | "summary" | "artifact";
@@ -14,10 +15,6 @@ export type ToolPersistType = "none" | "summary" | "artifact";
  */
 export interface MuaddibTool<T = any> extends AgentTool<any, T> {
   persistType: ToolPersistType;
-}
-
-export interface ToolExecutorLogger {
-  info(...data: unknown[]): void;
 }
 
 /**
@@ -33,7 +30,7 @@ export interface ToolContext {
   // ── Runtime services ──
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   modelAdapter: PiAiModelAdapter;
-  logger?: ToolExecutorLogger;
+  logger?: Logger;
   chronicleStore?: ChronicleStore;
   chronicleLifecycle?: {
     appendParagraph: (arc: string, text: string) => Promise<unknown>;

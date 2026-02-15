@@ -1,3 +1,4 @@
+import { CONSOLE_LOGGER, type Logger } from "../app/logging.js";
 import { MuaddibConfig } from "../config/muaddib-config.js";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -20,13 +21,9 @@ function isExplicitlyEnabled(value: unknown): boolean {
   return false;
 }
 
-interface DeferredFeatureLogger {
-  warn(message: string): void;
-}
-
 export function assertNoDeferredFeatureConfig(
   config: MuaddibConfig,
-  logger: DeferredFeatureLogger = console,
+  logger: Logger = CONSOLE_LOGGER,
 ): void {
   const blockingPaths: string[] = [];
   const ignoredPaths: string[] = [];

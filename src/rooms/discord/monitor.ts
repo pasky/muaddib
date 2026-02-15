@@ -1,5 +1,5 @@
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
-import { createConsoleLogger, type RuntimeLogger } from "../../app/logging.js";
+import { CONSOLE_LOGGER, RuntimeLogWriter, type Logger } from "../../app/logging.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import { RoomMessageHandler } from "../command/message-handler.js";
 import type { RoomMessage } from "../message.js";
@@ -110,11 +110,13 @@ export interface DiscordRoomMonitorOptions {
   eventSource?: DiscordEventSource;
   sender?: DiscordSender;
   onSendRetryEvent?: (event: SendRetryEvent) => void;
-  logger?: RuntimeLogger;
+  logger?: Logger;
+  logWriter?: RuntimeLogWriter;
 }
 
 export class DiscordRoomMonitor {
-  private readonly logger: RuntimeLogger;
+  private readonly logger: Logger;
+  private readonly logWriter?: RuntimeLogWriter;
 
   static fromRuntime(runtime: MuaddibRuntime): DiscordRoomMonitor[] {
     const roomConfig = runtime.config.getRoomConfig("discord");
@@ -146,12 +148,14 @@ export class DiscordRoomMonitor {
           runtime.logger.getLogger("muaddib.send-retry.discord"),
         ),
         logger: runtime.logger.getLogger("muaddib.rooms.discord.monitor"),
+        logWriter: runtime.logger,
       }),
     ];
   }
 
   constructor(private readonly options: DiscordRoomMonitorOptions) {
-    this.logger = options.logger ?? createConsoleLogger("muaddib.rooms.discord.monitor");
+    this.logger = options.logger ?? CONSOLE_LOGGER;
+    this.logWriter = options.logWriter;
   }
 
   async run(): Promise<void> {
@@ -356,19 +360,30 @@ export class DiscordRoomMonitor {
     }
 
     const arc = `${message.serverTag}#${message.channelName}`;
-    await this.logger.withMessageContext(
-      {
-        arc,
-        nick: message.nick,
-        message: event.content,
-      },
-      async () => {
-        this.logger.debug("Processing direct Discord message", `arc=${arc}`, `nick=${message.nick}`);
-        await this.withTypingIndicator(event.channelId, async () => {
-          await handleIncoming();
-        });
-      },
-    );
+    const runDirectMessage = async (): Promise<void> => {
+      this.logger.debug("Processing direct Discord message", `arc=${arc}`, `nick=${message.nick}`);
+      await this.withTypingIndicator(event.channelId, async () => {
+        await handleIncoming();
+      });
+    };
+
+    const withMessageContext =
+      this.logWriter?.withMessageContext.bind(this.logWriter) ??
+      (this.logger as { withMessageContext?: RuntimeLogWriter["withMessageContext"] }).withMessageContext?.bind(this.logger as object);
+
+    if (withMessageContext) {
+      await withMessageContext(
+        {
+          arc,
+          nick: message.nick,
+          message: event.content,
+        },
+        runDirectMessage,
+      );
+      return;
+    }
+
+    await runDirectMessage();
   }
 
   private async withTypingIndicator(

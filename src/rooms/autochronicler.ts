@@ -2,14 +2,8 @@
 import type { ChronicleStore } from "../chronicle/chronicle-store.js";
 import type { ChronicleLifecycle } from "../chronicle/lifecycle.js";
 import type { ChatHistoryStore } from "../history/chat-history-store.js";
+import { CONSOLE_LOGGER, type Logger } from "../app/logging.js";
 import { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
-
-interface AutoChroniclerLogger {
-  debug(...args: unknown[]): void;
-  info(...args: unknown[]): void;
-  warn(...args: unknown[]): void;
-  error(...args: unknown[]): void;
-}
 
 export interface AutoChronicler {
   checkAndChronicle(
@@ -31,7 +25,7 @@ export interface AutoChroniclerTsOptions {
   lifecycle: ChronicleLifecycle;
   config: AutoChroniclerConfig;
   modelAdapter: PiAiModelAdapter;
-  logger?: AutoChroniclerLogger;
+  logger?: Logger;
 }
 
 const CHRONICLE_APPEND_SYSTEM_PROMPT = `Append a short paragraph to the current chapter in the Chronicle.
@@ -40,16 +34,9 @@ A paragraph is automatically chronicled for every ~10 interactions. But you may 
 
 Retain not just critical facts, but also the tone of voice and emotional charge of the situation, and your feelings about it, if any. You can even include short quotes and URLs verbatim. Never invent content. In case it is important for you to remember even a sensitive and confidential conversation, you must chronicle it at all costs unless explicitly asked otherwise.`;
 
-const DEFAULT_LOGGER: AutoChroniclerLogger = {
-  debug: (...args: unknown[]) => console.debug(...args),
-  info: (...args: unknown[]) => console.info(...args),
-  warn: (...args: unknown[]) => console.warn(...args),
-  error: (...args: unknown[]) => console.error(...args),
-};
-
 export class AutoChroniclerTs implements AutoChronicler {
   private readonly modelAdapter: PiAiModelAdapter;
-  private readonly logger: AutoChroniclerLogger;
+  private readonly logger: Logger;
   private readonly arcQueues = new Map<string, Promise<void>>();
 
   static readonly MAX_CHRONICLE_BATCH = 100;
@@ -58,7 +45,7 @@ export class AutoChroniclerTs implements AutoChronicler {
 
   constructor(private readonly options: AutoChroniclerTsOptions) {
     this.modelAdapter = options.modelAdapter;
-    this.logger = options.logger ?? DEFAULT_LOGGER;
+    this.logger = options.logger ?? CONSOLE_LOGGER;
   }
 
   async checkAndChronicle(

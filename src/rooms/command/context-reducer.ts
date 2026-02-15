@@ -1,5 +1,6 @@
 import type { ChatRole } from "../../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
+import type { Logger } from "../../app/logging.js";
 
 export interface ContextReducerConfig {
   model?: string;
@@ -14,15 +15,10 @@ export interface ContextReducer {
   ): Promise<Array<{ role: ChatRole; content: string }>>;
 }
 
-interface ContextReducerLogger {
-  debug(message: string, ...data: unknown[]): void;
-  error(message: string, ...data: unknown[]): void;
-}
-
 export interface ContextReducerTsOptions {
   config?: ContextReducerConfig;
   modelAdapter: PiAiModelAdapter;
-  logger?: ContextReducerLogger;
+  logger?: Logger;
 }
 
 export class ContextReducerTs implements ContextReducer {

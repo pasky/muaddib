@@ -1,5 +1,5 @@
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
-import { createConsoleLogger, type RuntimeLogger } from "../../app/logging.js";
+import { CONSOLE_LOGGER, RuntimeLogWriter, type Logger } from "../../app/logging.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import { RoomMessageHandler } from "../command/message-handler.js";
 import type { RoomMessage } from "../message.js";
@@ -121,11 +121,13 @@ export interface SlackRoomMonitorOptions {
   eventSource?: SlackEventSource;
   sender?: SlackSender;
   onSendRetryEvent?: (event: SendRetryEvent) => void;
-  logger?: RuntimeLogger;
+  logger?: Logger;
+  logWriter?: RuntimeLogWriter;
 }
 
 export class SlackRoomMonitor {
-  private readonly logger: RuntimeLogger;
+  private readonly logger: Logger;
+  private readonly logWriter?: RuntimeLogWriter;
 
   static fromRuntime(runtime: MuaddibRuntime): SlackRoomMonitor[] {
     const roomConfig = runtime.config.getRoomConfig("slack");
@@ -171,12 +173,14 @@ export class SlackRoomMonitor {
           runtime.logger.getLogger(`muaddib.send-retry.slack.${workspaceId}`),
         ),
         logger: runtime.logger.getLogger(`muaddib.rooms.slack.monitor.${workspaceId}`),
+        logWriter: runtime.logger,
       });
     });
   }
 
   constructor(private readonly options: SlackRoomMonitorOptions) {
-    this.logger = options.logger ?? createConsoleLogger("muaddib.rooms.slack.monitor");
+    this.logger = options.logger ?? CONSOLE_LOGGER;
+    this.logWriter = options.logWriter;
   }
 
   async run(): Promise<void> {
@@ -397,23 +401,34 @@ export class SlackRoomMonitor {
       }
     }
 
-    await this.logger.withMessageContext(
-      {
-        arc,
-        nick: message.nick,
-        message: message.content,
-      },
-      async () => {
-        this.logger.debug("Processing direct Slack message", `arc=${arc}`, `nick=${message.nick}`);
-        try {
-          await handleIncoming();
-        } finally {
-          if (typingIndicatorSet && typingThreadTs && sender?.clearTypingIndicator) {
-            await sender.clearTypingIndicator(event.channelId, typingThreadTs);
-          }
+    const runDirectMessage = async (): Promise<void> => {
+      this.logger.debug("Processing direct Slack message", `arc=${arc}`, `nick=${message.nick}`);
+      try {
+        await handleIncoming();
+      } finally {
+        if (typingIndicatorSet && typingThreadTs && sender?.clearTypingIndicator) {
+          await sender.clearTypingIndicator(event.channelId, typingThreadTs);
         }
-      },
-    );
+      }
+    };
+
+    const withMessageContext =
+      this.logWriter?.withMessageContext.bind(this.logWriter) ??
+      (this.logger as { withMessageContext?: RuntimeLogWriter["withMessageContext"] }).withMessageContext?.bind(this.logger as object);
+
+    if (withMessageContext) {
+      await withMessageContext(
+        {
+          arc,
+          nick: message.nick,
+          message: message.content,
+        },
+        runDirectMessage,
+      );
+      return;
+    }
+
+    await runDirectMessage();
   }
 
   async processMessageEditEvent(event: SlackMessageEditEvent): Promise<void> {

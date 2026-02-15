@@ -1,21 +1,9 @@
+import { CONSOLE_LOGGER, type Logger } from "../app/logging.js";
 import type { ChronicleStore, QuestRow } from "./chronicle-store.js";
 
 const QUEST_OPEN_RE = /<\s*quest\s+id="([^"]+)"\s*>/i;
 const QUEST_FINISHED_RE = /<\s*quest_finished\s+id="([^"]+)"\s*>/i;
 
-interface QuestRuntimeLogger {
-  debug(...data: unknown[]): void;
-  info(...data: unknown[]): void;
-  warn(...data: unknown[]): void;
-  error(...data: unknown[]): void;
-}
-
-const DEFAULT_LOGGER: QuestRuntimeLogger = {
-  debug: (...data: unknown[]) => console.debug(...data),
-  info: (...data: unknown[]) => console.info(...data),
-  warn: (...data: unknown[]) => console.warn(...data),
-  error: (...data: unknown[]) => console.error(...data),
-};
 
 export interface QuestStepInput {
   arc: string;
@@ -39,7 +27,7 @@ export interface QuestRuntimeTsOptions {
   appendParagraph: (arc: string, text: string) => Promise<unknown>;
   config: QuestRuntimeConfig;
   runQuestStep?: QuestStepRunner;
-  logger?: QuestRuntimeLogger;
+  logger?: Logger;
 }
 
 /**
@@ -48,7 +36,7 @@ export interface QuestRuntimeTsOptions {
  * This mirrors Python quest-state semantics while keeping execution strategy injectable.
  */
 export class QuestRuntimeTs {
-  private readonly logger: QuestRuntimeLogger;
+  private readonly logger: Logger;
   private readonly chronicleStore: ChronicleStore;
   private readonly appendParagraph: (arc: string, text: string) => Promise<unknown>;
   private readonly cooldownSeconds: number;
@@ -60,7 +48,7 @@ export class QuestRuntimeTs {
   private heartbeatStopRequested = false;
 
   constructor(options: QuestRuntimeTsOptions) {
-    this.logger = options.logger ?? DEFAULT_LOGGER;
+    this.logger = options.logger ?? CONSOLE_LOGGER;
     this.chronicleStore = options.chronicleStore;
     this.appendParagraph = options.appendParagraph;
     this.cooldownSeconds = resolveCooldownSeconds(options.config.cooldownSeconds);

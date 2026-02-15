@@ -14,15 +14,11 @@ import {
 import { tmpdir } from "os";
 import { join } from "path";
 import { PiAiModelAdapter, type ResolvedPiAiModel } from "../models/pi-ai-model-adapter.js";
+import type { Logger } from "../app/logging.js";
 
 const DEFAULT_MAX_ITERATIONS = 25;
 
-export interface RunnerLogger {
-  debug(...data: unknown[]): void;
-  info(...data: unknown[]): void;
-  warn(...data: unknown[]): void;
-  error(...data: unknown[]): void;
-}
+export type RunnerLogger = Logger;
 
 export interface SessionFactoryContextMessage {
   role: "user" | "assistant";
@@ -40,7 +36,7 @@ interface CreateAgentSessionInput {
   maxIterations?: number;
   visionFallbackModel?: string;
   llmDebugMaxChars?: number;
-  logger?: RunnerLogger;
+  logger?: Logger;
   steeringMessageProvider?: () => SessionFactoryContextMessage[];
 }
 
@@ -306,7 +302,7 @@ function convertContextToAgentMessages(
   });
 }
 
-function createTracingStreamFn(logger: RunnerLogger, maxChars: number): StreamFn {
+function createTracingStreamFn(logger: Logger, maxChars: number): StreamFn {
   return (model, context, options) => {
     return streamSimple(model, context, {
       ...options,

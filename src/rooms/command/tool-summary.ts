@@ -3,11 +3,7 @@ import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { MuaddibTool, ToolPersistType } from "../../agent/tools/baseline-tools.js";
 import type { PromptResult } from "../../agent/session-runner.js";
 import type { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
-
-interface ToolSummaryLogger {
-  debug(message: string, ...data: unknown[]): void;
-  error(message: string, ...data: unknown[]): void;
-}
+import type { Logger } from "../../app/logging.js";
 
 const PERSISTENCE_SUMMARY_SYSTEM_PROMPT =
   "As an AI agent, you need to remember in the future what tools you used when generating a response, and what the tools told you. Summarize all tool uses in a single concise paragraph. If artifact links are included, include every artifact link and tie each link to the corresponding tool call.";
@@ -25,7 +21,7 @@ interface GenerateToolSummaryInput {
   tools: MuaddibTool[];
   persistenceSummaryModel: string | null;
   modelAdapter: PiAiModelAdapter;
-  logger: ToolSummaryLogger;
+  logger: Logger;
   arc?: string;
 }
 

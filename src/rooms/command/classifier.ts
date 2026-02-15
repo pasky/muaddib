@@ -1,18 +1,12 @@
 import { type UserMessage } from "@mariozechner/pi-ai";
 
+import { NOOP_LOGGER, type Logger } from "../../app/logging.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import type { CommandConfig } from "./resolver.js";
 
-interface ModeClassifierLogger {
-  debug(message: string, ...data: unknown[]): void;
-  info(message: string, ...data: unknown[]): void;
-  warn(message: string, ...data: unknown[]): void;
-  error(message: string, ...data: unknown[]): void;
-}
-
 export interface ModeClassifierOptions {
   modelAdapter: PiAiModelAdapter;
-  logger?: ModeClassifierLogger;
+  logger?: Logger;
 }
 
 export function createModeClassifier(
@@ -20,7 +14,7 @@ export function createModeClassifier(
   options: ModeClassifierOptions,
 ): (context: Array<{ role: string; content: string }>) => Promise<string> {
   const adapter = options.modelAdapter;
-  const logger = options.logger ?? noopModeClassifierLogger();
+  const logger = options.logger ?? NOOP_LOGGER;
 
   return async (context: Array<{ role: string; content: string }>): Promise<string> => {
     const fallbackLabel =
@@ -115,13 +109,4 @@ function countOccurrences(text: string, token: string): number {
     count += 1;
     index += token.length;
   }
-}
-
-function noopModeClassifierLogger(): ModeClassifierLogger {
-  return {
-    debug: () => {},
-    info: () => {},
-    warn: () => {},
-    error: () => {},
-  };
 }

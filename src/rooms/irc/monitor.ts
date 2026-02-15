@@ -1,5 +1,5 @@
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
-import { createConsoleLogger, type RuntimeLogger } from "../../app/logging.js";
+import { CONSOLE_LOGGER, RuntimeLogWriter, type Logger } from "../../app/logging.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import type { RoomMessage } from "../message.js";
 import { RoomMessageHandler } from "../command/message-handler.js";
@@ -49,14 +49,16 @@ export interface IrcRoomMonitorOptions {
   varlinkEvents?: IrcEventsClient;
   varlinkSender?: IrcSender;
   responseCleaner?: (text: string, nick: string) => string;
-  logger?: RuntimeLogger;
+  logger?: Logger;
+  logWriter?: RuntimeLogWriter;
 }
 
 export class IrcRoomMonitor {
   private readonly varlinkEvents: IrcEventsClient;
   private readonly varlinkSender: IrcSender;
   private readonly responseCleaner: (text: string, nick: string) => string;
-  private readonly logger: RuntimeLogger;
+  private readonly logger: Logger;
+  private readonly logWriter?: RuntimeLogWriter;
   private readonly serverNicks = new Map<string, string>();
 
   static fromRuntime(runtime: MuaddibRuntime): IrcRoomMonitor[] {
@@ -86,6 +88,7 @@ export class IrcRoomMonitor {
         history: runtime.history,
         commandHandler,
         logger: runtime.logger.getLogger("muaddib.rooms.irc.monitor"),
+        logWriter: runtime.logger,
       }),
     ];
   }
@@ -96,7 +99,8 @@ export class IrcRoomMonitor {
     this.varlinkSender =
       options.varlinkSender ?? new VarlinkSender(options.roomConfig.varlink.socket_path);
     this.responseCleaner = options.responseCleaner ?? defaultResponseCleaner;
-    this.logger = options.logger ?? createConsoleLogger("muaddib.rooms.irc.monitor");
+    this.logger = options.logger ?? CONSOLE_LOGGER;
+    this.logWriter = options.logWriter;
   }
 
   async run(): Promise<void> {
@@ -224,17 +228,28 @@ export class IrcRoomMonitor {
     }
 
     const arc = `${server}#${channelName}`;
-    await this.logger.withMessageContext(
-      {
-        arc,
-        nick: effectiveNick,
-        message: normalizedMessage,
-      },
-      async () => {
-        this.logger.debug("Processing direct IRC message", `arc=${arc}`, `nick=${effectiveNick}`);
-        await handleIncoming();
-      },
-    );
+    const runDirectMessage = async (): Promise<void> => {
+      this.logger.debug("Processing direct IRC message", `arc=${arc}`, `nick=${effectiveNick}`);
+      await handleIncoming();
+    };
+
+    const withMessageContext =
+      this.logWriter?.withMessageContext.bind(this.logWriter) ??
+      (this.logger as { withMessageContext?: RuntimeLogWriter["withMessageContext"] }).withMessageContext?.bind(this.logger as object);
+
+    if (withMessageContext) {
+      await withMessageContext(
+        {
+          arc,
+          nick: effectiveNick,
+          message: normalizedMessage,
+        },
+        runDirectMessage,
+      );
+      return;
+    }
+
+    await runDirectMessage();
   }
 
   private async connectWithRetry(maxRetries = 5): Promise<boolean> {

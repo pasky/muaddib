@@ -1,4 +1,5 @@
 
+import type { Logger } from "../app/logging.js";
 import { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
 import {
   ChronicleStore,
@@ -19,17 +20,12 @@ interface ChronicleQuestRuntimeHook {
   onChronicleAppend(arc: string, paragraphText: string, paragraphId: number): Promise<void>;
 }
 
-interface ChronicleLogger {
-  debug(message: string, ...data: unknown[]): void;
-  error(message: string, ...data: unknown[]): void;
-}
-
 export interface ChronicleLifecycleTsOptions {
   chronicleStore: ChronicleStore;
   config: ChronicleLifecycleConfig;
   modelAdapter: PiAiModelAdapter;
   questRuntime?: ChronicleQuestRuntimeHook;
-  logger?: ChronicleLogger;
+  logger?: Logger;
 }
 
 const DEFAULT_PARAGRAPHS_PER_CHAPTER = 3;
@@ -47,7 +43,7 @@ export class ChronicleLifecycleTs implements ChronicleLifecycle {
   private readonly config: ChronicleLifecycleConfig;
   private readonly modelAdapter: PiAiModelAdapter;
   private readonly questRuntime: ChronicleQuestRuntimeHook | null;
-  private readonly logger?: ChronicleLogger;
+  private readonly logger?: Logger;
   private readonly arcQueues = new Map<string, Promise<void>>();
 
   constructor(options: ChronicleLifecycleTsOptions) {

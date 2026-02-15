@@ -86,6 +86,7 @@ describe("createSendRetryEventLogger", () => {
     const errors: string[] = [];
 
     const emit = createSendRetryEventLogger({
+      debug: () => {},
       info: (...args: unknown[]) => {
         infos.push(args.map(String).join(" "));
       },
@@ -123,6 +124,7 @@ describe("createSendRetryEventLogger", () => {
     const errors: string[] = [];
 
     const emit = createSendRetryEventLogger({
+      debug: () => {},
       info: (...args: unknown[]) => {
         infos.push(args.map(String).join(" "));
       },

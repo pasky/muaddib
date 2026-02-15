@@ -38,8 +38,11 @@ import {
 } from "./resolver.js";
 import type { ProactiveConfig } from "./proactive.js";
 import { generateToolSummaryFromSession } from "./tool-summary.js";
+import type { Logger } from "../../app/logging.js";
 
 // ── Public types ──
+
+export type CommandExecutorLogger = Logger;
 
 export interface CommandExecutionResult {
   response: string | null;
@@ -54,7 +57,7 @@ export interface CommandRunnerFactoryInput {
   systemPrompt: string;
   tools: AgentTool<any>[];
   steeringMessageProvider?: () => SessionFactoryContextMessage[];
-  logger?: CommandExecutorLogger;
+  logger?: Logger;
 }
 
 export type CommandRunnerFactory = (input: CommandRunnerFactoryInput) => {
@@ -63,13 +66,6 @@ export type CommandRunnerFactory = (input: CommandRunnerFactoryInput) => {
 
 export interface CommandRateLimiter {
   checkLimit(): boolean;
-}
-
-export interface CommandExecutorLogger {
-  debug(message: string, ...data: unknown[]): void;
-  info(message: string, ...data: unknown[]): void;
-  warn(message: string, ...data: unknown[]): void;
-  error(message: string, ...data: unknown[]): void;
 }
 
 /** Result from invokeAndPostProcess — the shared agent invocation tail. */
@@ -98,7 +94,7 @@ export class CommandExecutor {
   private readonly commandConfig: CommandConfig;
   private readonly history: ChatHistoryStore;
   private readonly modelAdapter: PiAiModelAdapter;
-  private readonly logger: CommandExecutorLogger;
+  private readonly logger: Logger;
 
   private readonly runtime: MuaddibRuntime;
   private readonly roomName: string;

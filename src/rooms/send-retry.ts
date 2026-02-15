@@ -1,3 +1,5 @@
+import type { Logger } from "../app/logging.js";
+
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_RETRY_AFTER_MS = 1_000;
 const MAX_RETRY_AFTER_MS = 60_000;
@@ -148,14 +150,8 @@ function numberValue(value: unknown): number | null {
   return null;
 }
 
-interface SendRetryLogger {
-  info(...data: unknown[]): void;
-  warn(...data: unknown[]): void;
-  error(...data: unknown[]): void;
-}
-
 export function createSendRetryEventLogger(
-  logger: SendRetryLogger,
+  logger: Logger,
 ): (event: SendRetryEvent) => void {
   return (event: SendRetryEvent): void => {
     const payload = {

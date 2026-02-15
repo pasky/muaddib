@@ -33,7 +33,6 @@ export interface CliMessageModeResult {
 export async function runCliMessageMode(options: CliMessageModeOptions): Promise<CliMessageModeResult> {
   const muaddibHome = getMuaddibHome();
   const runtimeLogger = new RuntimeLogWriter({ muaddibHome });
-  const logger = runtimeLogger.getLogger("muaddib.cli.message");
 
   const roomName = options.roomName ?? "irc";
 
@@ -58,7 +57,7 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
     };
 
     const arc = `${message.serverTag}#${message.channelName}`;
-    const result = await logger.withMessageContext(
+    const result = await runtimeLogger.withMessageContext(
       {
         arc,
         nick: message.nick,

@@ -522,7 +522,7 @@ describe("RoomMessageHandler", () => {
       }),
     });
 
-    await runtimeLogs.getLogger("muaddib.rooms.command").withMessageContext(
+    await runtimeLogs.withMessageContext(
       {
         arc: "libera##test",
         nick: "alice",

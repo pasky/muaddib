@@ -11,13 +11,11 @@ export interface MessageLogContextInput {
   message: string;
 }
 
-export interface RuntimeLogger {
+export interface Logger {
   debug(message: string, ...data: unknown[]): void;
   info(message: string, ...data: unknown[]): void;
   warn(message: string, ...data: unknown[]): void;
   error(message: string, ...data: unknown[]): void;
-  child(name: string): RuntimeLogger;
-  withMessageContext<T>(context: MessageLogContextInput, run: () => Promise<T> | T): Promise<T>;
 }
 
 interface RuntimeLogWriterOptions {
@@ -45,7 +43,7 @@ export class RuntimeLogWriter {
     this.stdout = options.stdout ?? process.stdout;
   }
 
-  getLogger(name: string): RuntimeLogger {
+  getLogger(name: string): Logger {
     return new StructuredRuntimeLogger(name, this);
   }
 
@@ -82,7 +80,7 @@ export class RuntimeLogWriter {
   }
 }
 
-class StructuredRuntimeLogger implements RuntimeLogger {
+class StructuredRuntimeLogger implements Logger {
   constructor(
     private readonly name: string,
     private readonly writer: RuntimeLogWriter,
@@ -104,38 +102,32 @@ class StructuredRuntimeLogger implements RuntimeLogger {
     this.writer.write("ERROR", this.name, message, data);
   }
 
-  child(name: string): RuntimeLogger {
-    if (!name) {
-      return this;
-    }
-    return new StructuredRuntimeLogger(`${this.name}.${name}`, this.writer);
-  }
-
   async withMessageContext<T>(context: MessageLogContextInput, run: () => Promise<T> | T): Promise<T> {
     return await this.writer.withMessageContext(context, run);
   }
 }
 
-export function createConsoleLogger(name: string): RuntimeLogger {
-  return {
-    debug: (message: string, ...data: unknown[]) => {
-      console.debug(`${name} - ${message}`, ...data);
-    },
-    info: (message: string, ...data: unknown[]) => {
-      console.info(`${name} - ${message}`, ...data);
-    },
-    warn: (message: string, ...data: unknown[]) => {
-      console.warn(`${name} - ${message}`, ...data);
-    },
-    error: (message: string, ...data: unknown[]) => {
-      console.error(`${name} - ${message}`, ...data);
-    },
-    child: (childName: string) => createConsoleLogger(`${name}.${childName}`),
-    withMessageContext: async <T>(_context: MessageLogContextInput, run: () => Promise<T> | T): Promise<T> => {
-      return await run();
-    },
-  };
-}
+export const CONSOLE_LOGGER: Logger = {
+  debug: (message: string, ...data: unknown[]) => {
+    console.debug(message, ...data);
+  },
+  info: (message: string, ...data: unknown[]) => {
+    console.info(message, ...data);
+  },
+  warn: (message: string, ...data: unknown[]) => {
+    console.warn(message, ...data);
+  },
+  error: (message: string, ...data: unknown[]) => {
+    console.error(message, ...data);
+  },
+};
+
+export const NOOP_LOGGER: Logger = {
+  debug: () => {},
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+};
 
 function createRuntimeMessageContext(
   input: MessageLogContextInput,

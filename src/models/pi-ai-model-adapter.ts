@@ -10,6 +10,7 @@ import {
   type SimpleStreamOptions,
 } from "@mariozechner/pi-ai";
 
+import type { Logger } from "../app/logging.js";
 import { MuaddibConfig } from "../config/muaddib-config.js";
 import { parseModelSpec, type ModelSpec } from "./model-spec.js";
 import {
@@ -35,14 +36,9 @@ export interface ResolvedPiAiModel {
   model: Model<Api>;
 }
 
-interface LlmTraceLogger {
-  debug(message: string, ...data: unknown[]): void;
-  error(message: string, ...data: unknown[]): void;
-}
-
 export interface CompleteSimpleOptions {
   callType?: string;
-  logger?: LlmTraceLogger;
+  logger?: Logger;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   maxChars?: number;
   streamOptions?: Omit<SimpleStreamOptions, "apiKey" | "onPayload">;
