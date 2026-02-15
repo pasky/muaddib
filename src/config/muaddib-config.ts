@@ -184,6 +184,11 @@ interface MuaddibSettings {
   quests?: unknown;
 }
 
+/** Recursively makes all properties optional. */
+type DeepPartial<T> = T extends object
+  ? { [P in keyof T]?: DeepPartial<T[P]> }
+  : T;
+
 // ── Deep merge with room-specific semantics ────────────────────────────
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -192,10 +197,20 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 /**
  * Deep-merges two room config objects with room-specific semantics:
- * - `ignoreUsers` arrays are concatenated (not replaced)
- * - `promptVars` string values are concatenated (not replaced)
+ * - `ignoreUsers` arrays are concatenated (not replaced) at any nesting depth
+ * - `promptVars` string values are concatenated (not replaced) at any nesting depth
  */
 export function mergeRoomConfigs(
+  base: DeepPartial<RoomConfig>,
+  override: DeepPartial<RoomConfig>,
+): RoomConfig {
+  return deepMergeRoomConfig(
+    base as Record<string, unknown>,
+    override as Record<string, unknown>,
+  ) as RoomConfig;
+}
+
+function deepMergeRoomConfig(
   base: Record<string, unknown>,
   override: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -205,7 +220,7 @@ export function mergeRoomConfigs(
     if (Array.isArray(value)) {
       result[key] = [...value];
     } else if (isObject(value)) {
-      result[key] = mergeRoomConfigs(value, {});
+      result[key] = deepMergeRoomConfig(value, {});
     } else {
       result[key] = value;
     }
@@ -238,7 +253,7 @@ export function mergeRoomConfigs(
     }
 
     if (isObject(value) && isObject(result[key])) {
-      result[key] = mergeRoomConfigs(result[key] as Record<string, unknown>, value);
+      result[key] = deepMergeRoomConfig(result[key] as Record<string, unknown>, value);
       continue;
     }
 
@@ -328,8 +343,8 @@ export class MuaddibConfig {
 
   getRoomConfig(roomName: string): RoomConfig {
     const rooms = this.data.rooms ?? {};
-    const common = (rooms.common ?? {}) as Record<string, unknown>;
-    const room = (rooms[roomName] ?? {}) as Record<string, unknown>;
-    return mergeRoomConfigs(common, room) as unknown as RoomConfig;
+    const common = rooms.common ?? {};
+    const room = rooms[roomName] ?? {};
+    return mergeRoomConfigs(common, room);
   }
 }

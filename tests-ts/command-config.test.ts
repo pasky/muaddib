@@ -26,9 +26,9 @@ describe("mergeRoomConfigs", () => {
 
     const merged = mergeRoomConfigs(base, override);
 
-    expect((merged.command as any).ignoreUsers).toEqual(["bot1", "bot2"]);
-    expect((merged.command as any).historySize).toBe(10);
-    expect((merged.promptVars as any).output).toBe("AB");
+    expect(merged.command?.ignoreUsers).toEqual(["bot1", "bot2"]);
+    expect(merged.command?.historySize).toBe(10);
+    expect(merged.promptVars?.output).toBe("AB");
   });
 
   it("merges room config from common + room override", () => {
