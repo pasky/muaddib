@@ -161,37 +161,6 @@ export class SteeringQueue {
     return drained.map((item) => SteeringQueue.steeringContextMessage(item.message));
   }
 
-  takeNextWorkCompacted(key: SteeringKey): {
-    dropped: QueuedInboundMessage[];
-    nextItem: QueuedInboundMessage | null;
-  } {
-    const keyId = this.steeringKeyId(key);
-    const session = this.sessions.get(keyId);
-
-    if (!session) {
-      return { dropped: [], nextItem: null };
-    }
-
-    if (session.queue.length === 0) {
-      this.sessions.delete(keyId);
-      return { dropped: [], nextItem: null };
-    }
-
-    const firstCommandIndex = session.queue.findIndex((item) => item.kind === "command");
-
-    if (firstCommandIndex >= 0) {
-      const dropped = session.queue.slice(0, firstCommandIndex);
-      const nextItem = session.queue[firstCommandIndex] ?? null;
-      session.queue = session.queue.slice(firstCommandIndex + 1);
-      return { dropped, nextItem };
-    }
-
-    const dropped = session.queue.slice(0, -1);
-    const nextItem = session.queue[session.queue.length - 1] ?? null;
-    session.queue = [];
-    return { dropped, nextItem };
-  }
-
   /**
    * Wait until a new item is enqueued into the session, or until `timeoutMs`
    * elapses.  Returns `"woken"` if a new item arrived, `"timeout"` otherwise.
@@ -254,33 +223,26 @@ export class SteeringQueue {
   }
 
   /**
-   * Drain remaining queued items from a session, compacting passives.
-   * For each work item, calls `processItem` with the item and a
-   * steering context drainer, then finishes it.
-   * Dropped (compacted) passive items are finished with `result = null`.
-   * Closes the session when the queue is empty.
+   * Release a session after the runner finishes successfully.
+   * Passive items are finished (already persisted to history).
+   * Command items are failed so their callers retry as new runners.
    */
-  async drainSession(
-    key: SteeringKey,
-    processItem: (
-      item: QueuedInboundMessage,
-      contextDrainer: () => Array<{ role: ChatRole; content: string }>,
-    ) => Promise<void>,
-  ): Promise<void> {
-    const contextDrainer = this.createContextDrainer(key);
-    while (true) {
-      const { dropped, nextItem } = this.takeNextWorkCompacted(key);
-      for (const droppedItem of dropped) {
-        droppedItem.result = null;
-        this.finishItem(droppedItem);
-      }
+  releaseSession(key: SteeringKey): void {
+    const keyId = this.steeringKeyId(key);
+    const session = this.sessions.get(keyId);
+    if (!session) {
+      return;
+    }
 
-      if (!nextItem) {
-        return;
-      }
+    this.sessions.delete(keyId);
+    const retryError = new Error("Session released, retry as new runner");
 
-      await processItem(nextItem, contextDrainer);
-      this.finishItem(nextItem);
+    for (const item of session.queue) {
+      if (item.kind === "command") {
+        this.failItem(item, retryError);
+      } else {
+        this.finishItem(item);
+      }
     }
   }
 
@@ -299,22 +261,6 @@ export class SteeringQueue {
     }
 
     return remaining;
-  }
-
-  /**
-   * Close a session without error, finishing all remaining queued items.
-   */
-  closeSession(key: SteeringKey): void {
-    const keyId = this.steeringKeyId(key);
-    const session = this.sessions.get(keyId);
-    if (!session) {
-      return;
-    }
-
-    this.sessions.delete(keyId);
-    for (const item of session.queue) {
-      this.finishItem(item);
-    }
   }
 
   private wakeSession(session: SteeringSession): void {

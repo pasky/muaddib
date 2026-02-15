@@ -147,8 +147,6 @@ export class ProactiveRunner {
     const contextDrainer = this.steeringQueue.createContextDrainer(steeringKey);
     this.steeringQueue.finishItem(triggerItem);
 
-    let activeItem: QueuedInboundMessage | null = null;
-
     try {
       // ── Debounce loop: wait for silence ──
       while (true) {
@@ -159,69 +157,21 @@ export class ProactiveRunner {
         }
 
         if (this.steeringQueue.hasQueuedCommands(steeringKey)) {
-          break;
+          // Command arrived — release session so it retries as new runner.
+          this.steeringQueue.releaseSession(steeringKey);
+          return;
         }
 
         this.steeringQueue.drainSteeringContextMessages(steeringKey);
       }
 
-      // ── Take next work item via compaction ──
-      const { dropped, nextItem } = this.steeringQueue.takeNextWorkCompacted(steeringKey);
-      for (const droppedItem of dropped) {
-        droppedItem.result = null;
-        this.steeringQueue.finishItem(droppedItem);
-      }
-
-      if (!nextItem) {
-        await this.evaluateAndMaybeInterject(
-          triggerItem.message, triggerItem.sendResponse, contextDrainer,
-        );
-        return;
-      }
-
-      activeItem = nextItem;
-
-      if (activeItem.kind === "command") {
-        if (activeItem.triggerMessageId === null) {
-          throw new Error("Queued command item is missing trigger message id.");
-        }
-        activeItem.result = await this.executor.execute(
-          activeItem.message,
-          activeItem.triggerMessageId,
-          activeItem.sendResponse,
-          contextDrainer,
-        );
-      } else {
-        await this.evaluateAndMaybeInterject(
-          activeItem.message, activeItem.sendResponse, contextDrainer,
-        );
-        activeItem.result = null;
-      }
-
-      this.steeringQueue.finishItem(activeItem);
-
-      // Drain remaining items in the session
-      await this.steeringQueue.drainSession(steeringKey, async (item, drainer) => {
-        if (item.kind === "command") {
-          if (item.triggerMessageId === null) {
-            throw new Error("Queued command item is missing trigger message id.");
-          }
-          item.result = await this.executor.execute(
-            item.message,
-            item.triggerMessageId,
-            item.sendResponse,
-            drainer,
-          );
-        } else {
-          await this.executor.triggerAutoChronicler(item.message);
-          item.result = null;
-        }
-      });
+      // Silence achieved — evaluate and maybe interject.
+      await this.evaluateAndMaybeInterject(
+        triggerItem.message, triggerItem.sendResponse, contextDrainer,
+      );
+      this.steeringQueue.releaseSession(steeringKey);
     } catch (error) {
       this.steeringQueue.abortSession(steeringKey, error);
-      if (activeItem) {
-        this.steeringQueue.failItem(activeItem, error);
-      }
       throw error;
     }
   }

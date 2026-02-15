@@ -5,7 +5,6 @@
  * Delegates execution to CommandExecutor and proactive interjection lifecycle to ProactiveRunner.
  */
 
-import type { ChatRole } from "../../history/chat-history-store.js";
 import { SteeringQueue } from "./steering-queue.js";
 import { CommandResolver } from "./resolver.js";
 import { buildProactiveConfig, ProactiveRunner } from "./proactive.js";
@@ -153,9 +152,7 @@ export class RoomMessageHandler {
       );
 
       this.steeringQueue.finishItem(runnerItem);
-      await this.steeringQueue.drainSession(steeringKey, (item, contextDrainer) =>
-        this.processSessionItem(item, contextDrainer),
-      );
+      this.steeringQueue.releaseSession(steeringKey);
     } catch (error) {
       this.steeringQueue.abortSession(steeringKey, error);
       this.steeringQueue.failItem(runnerItem, error);
@@ -193,25 +190,5 @@ export class RoomMessageHandler {
     await this.executor.triggerAutoChronicler(message);
   }
 
-  // ── Shared session item processing ──
 
-  private async processSessionItem(
-    item: import("./steering-queue.js").QueuedInboundMessage,
-    contextDrainer: () => Array<{ role: ChatRole; content: string }>,
-  ): Promise<void> {
-    if (item.kind === "command") {
-      if (item.triggerMessageId === null) {
-        throw new Error("Queued command item is missing trigger message id.");
-      }
-      item.result = await this.executor.execute(
-        item.message,
-        item.triggerMessageId,
-        item.sendResponse,
-        contextDrainer,
-      );
-    } else {
-      await this.executor.triggerAutoChronicler(item.message);
-      item.result = null;
-    }
-  }
 }
