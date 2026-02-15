@@ -1,5 +1,6 @@
 import { App } from "@slack/bolt";
 
+import { escapeRegExp, stringifyError } from "../../utils/index.js";
 import type {
   SlackEventSource,
   SlackFileAttachment,
@@ -481,18 +482,6 @@ function isSlackTransportSignal(
   value: SlackIncomingEvent | SlackTransportSignal | null,
 ): value is SlackTransportSignal {
   return Boolean(value && typeof value === "object" && "kind" in value && value.kind === "disconnect");
-}
-
-function stringifyError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return String(error);
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function slackErrorCode(error: unknown): string {

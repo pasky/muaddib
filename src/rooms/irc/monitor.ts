@@ -1,5 +1,6 @@
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { CONSOLE_LOGGER, RuntimeLogWriter, type Logger } from "../../app/logging.js";
+import { escapeRegExp, requireNonEmptyString, sleep } from "../../utils/index.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import type { RoomMessage } from "../message.js";
 import { RoomMessageHandler } from "../command/message-handler.js";
@@ -334,19 +335,4 @@ function normalizeSenderAndMessage(nick: string, message: string): [string, stri
 function defaultResponseCleaner(text: string): string {
   const cleaned = text.replace(/\n/g, "; ").trim();
   return cleaned || text;
-}
-
-function escapeRegExp(input: string): string {
-  return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function requireNonEmptyString(value: unknown, message: string): string {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new Error(message);
-  }
-  return value;
 }

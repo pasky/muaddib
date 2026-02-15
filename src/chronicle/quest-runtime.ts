@@ -1,5 +1,6 @@
 import { CONSOLE_LOGGER, type Logger } from "../app/logging.js";
 import type { ChronicleStore, QuestRow } from "./chronicle-store.js";
+import { sleep } from "../utils/index.js";
 
 const QUEST_OPEN_RE = /<\s*quest\s+id="([^"]+)"\s*>/i;
 const QUEST_FINISHED_RE = /<\s*quest_finished\s+id="([^"]+)"\s*>/i;
@@ -223,10 +224,4 @@ function resolveCooldownSeconds(value: number): number {
   }
 
   return value;
-}
-
-async function sleep(ms: number): Promise<void> {
-  await new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
 }

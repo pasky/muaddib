@@ -6,6 +6,7 @@ import { SessionRunner } from "../session-runner.js";
 import type { MuaddibTool } from "./types.js";
 import type { RunnerLogger, SessionFactoryContextMessage } from "../session-factory.js";
 import type { ToolContext } from "./types.js";
+import { toConfiguredString } from "../../utils/index.js";
 
 export interface OracleInput {
   query: string;
@@ -136,13 +137,4 @@ export function createDefaultOracleExecutor(
       return `Oracle error: ${message}`;
     }
   };
-}
-
-function toConfiguredString(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
 }

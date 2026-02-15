@@ -3,6 +3,7 @@ import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import type { AssistantMessage, Usage } from "@mariozechner/pi-ai";
 
 import { detectRefusalSignal } from "./refusal-detection.js";
+import { stringifyError } from "../utils/index.js";
 import { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
 import {
   createAgentSessionForInvocation,
@@ -281,13 +282,6 @@ function emptyUsage(): Usage {
       total: 0,
     },
   };
-}
-
-function stringifyError(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
 }
 
 function renderMessageForDebug(message: unknown, maxChars: number): Record<string, unknown> {

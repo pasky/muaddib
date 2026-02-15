@@ -2,6 +2,7 @@ import { Type } from "@sinclair/typebox";
 
 import { parseModelSpec } from "../../models/model-spec.js";
 import type { ToolContext, MuaddibTool } from "./types.js";
+import { toConfiguredString } from "../../utils/index.js";
 
 export interface GenerateImageInput {
   prompt: string;
@@ -384,14 +385,7 @@ async function resolveOpenRouterApiKey(options: ToolContext): Promise<string | u
   return toConfiguredString(process.env.OPENROUTER_API_KEY);
 }
 
-function toConfiguredString(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
 
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
 
 function parseJsonResponseBody(body: string): unknown {
   if (!body) {

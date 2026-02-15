@@ -1,6 +1,7 @@
 import { Type } from "@sinclair/typebox";
 
 import type { ToolContext, MuaddibTool } from "./types.js";
+import { toConfiguredString } from "../../utils/index.js";
 
 export interface QuestStartInput {
   id: string;
@@ -192,13 +193,4 @@ export function createDefaultQuestSnoozeExecutor(
 
     return DEFERRED_QUEST_TOOL_MESSAGE;
   };
-}
-
-function toConfiguredString(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
 }

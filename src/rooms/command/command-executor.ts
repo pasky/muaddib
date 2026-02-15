@@ -28,6 +28,7 @@ import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { parseModelSpec } from "../../models/model-spec.js";
 import { ContextReducerTs, type ContextReducer } from "./context-reducer.js";
 import type { RoomMessage } from "../message.js";
+import { sleep } from "../../utils/index.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import { createModeClassifier } from "./classifier.js";
 import { RateLimiter } from "./rate-limiter.js";
@@ -946,11 +947,7 @@ function stripLeadingIrcContextEchoPrefixes(text: string): string {
   return text.replace(LEADING_IRC_CONTEXT_ECHO_PREFIX_RE, "");
 }
 
-async function sleep(ms: number): Promise<void> {
-  await new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
+
 
 function formatCurrentTime(date = new Date()): string {
   const year = date.getFullYear();

@@ -1,6 +1,7 @@
 import { Type } from "@sinclair/typebox";
 
 import type { ToolContext, MuaddibTool } from "./types.js";
+import { toConfiguredString } from "../../utils/index.js";
 
 export interface ChronicleReadInput {
   relative_chapter_id: number;
@@ -115,13 +116,4 @@ export function createDefaultChronicleAppendExecutor(
     await chronicleStore.appendParagraph(arc, text);
     return "OK";
   };
-}
-
-function toConfiguredString(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
 }

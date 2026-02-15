@@ -1,5 +1,6 @@
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { CONSOLE_LOGGER, RuntimeLogWriter, type Logger } from "../../app/logging.js";
+import { escapeRegExp, requireNonEmptyString, sleep } from "../../utils/index.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import { RoomMessageHandler } from "../command/message-handler.js";
 import type { RoomMessage } from "../message.js";
@@ -568,10 +569,6 @@ function normalizeName(name: string): string {
   return name.trim().split(/\s+/u).join("_");
 }
 
-function escapeRegExp(input: string): string {
-  return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function resolveReconnectPolicy(config: SlackReconnectConfig | undefined): {
   enabled: boolean;
   delayMs: number;
@@ -603,13 +600,6 @@ function nowMonotonicSeconds(): number {
   return Date.now() / 1_000;
 }
 
-function requireNonEmptyString(value: unknown, message: string): string {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new Error(message);
-  }
-  return value;
-}
-
 async function sendWithSlackRetryResult<T>(
   destination: string,
   onEvent: ((event: SendRetryEvent) => void) | undefined,
@@ -632,10 +622,4 @@ async function sendWithSlackRetryResult<T>(
   );
 
   return result;
-}
-
-async function sleep(ms: number): Promise<void> {
-  await new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
 }

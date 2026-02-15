@@ -4,6 +4,7 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { Type } from "@sinclair/typebox";
 
 import type { ToolContext, MuaddibTool } from "./types.js";
+import { stringifyError } from "../../utils/index.js";
 
 export interface EditArtifactInput {
   artifact_url: string;
@@ -110,7 +111,7 @@ export function createDefaultEditArtifactExecutor(
     try {
       sourceContent = await loadArtifactContentForEdit(options, artifactUrl, visitWebpage);
     } catch (error) {
-      const message = toErrorMessage(error);
+      const message = stringifyError(error);
       if (message.includes("Cannot edit binary artifacts")) {
         throw new Error(message);
       }
@@ -290,12 +291,4 @@ function countOccurrences(content: string, needle: string): number {
 
 function looksLikeImageUrl(url: string): boolean {
   return /\.(?:png|jpe?g|gif|webp)(?:$|[?#])/i.test(url);
-}
-
-function toErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return String(error);
 }

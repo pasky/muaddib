@@ -1,4 +1,5 @@
 import type { Logger } from "../app/logging.js";
+import { sleep } from "../utils/index.js";
 
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_RETRY_AFTER_MS = 1_000;
@@ -206,14 +207,4 @@ function summarizeRetryError(error: unknown): Record<string, unknown> {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-async function sleep(milliseconds: number): Promise<void> {
-  if (milliseconds <= 0) {
-    return;
-  }
-
-  await new Promise<void>((resolve) => {
-    setTimeout(resolve, milliseconds);
-  });
 }
