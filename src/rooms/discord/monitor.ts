@@ -284,9 +284,7 @@ export class DiscordRoomMonitor {
     };
 
     const sender = this.options.sender;
-    const replyEditDebounceSeconds = resolveReplyEditDebounceSeconds(
-      this.options.roomConfig.replyEditDebounceSeconds,
-    );
+    const replyEditDebounceSeconds = this.options.roomConfig.replyEditDebounceSeconds ?? 15;
     let lastReplyMessageId: string | undefined;
     let lastReplyText: string | undefined;
     let lastReplyAtSeconds: number | undefined;
@@ -496,15 +494,6 @@ function normalizeDirectContent(content: string, mynick: string, botUserId?: str
   }
 
   return normalizeContent(cleaned || content.trim());
-}
-
-function resolveReplyEditDebounceSeconds(value: unknown): number {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    return 15;
-  }
-
-  return parsed;
 }
 
 function nowMonotonicSeconds(): number {
