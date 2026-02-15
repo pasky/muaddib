@@ -72,6 +72,13 @@ export interface CommandExecutorLogger {
   error(message: string, ...data: unknown[]): void;
 }
 
+/** Result from invokeAndPostProcess — the shared agent invocation tail. */
+interface PromptRunResult {
+  responseText: string;
+  usage: Usage | null;
+  toolCallsCount: number;
+}
+
 /** Callback to drain steering context messages during agent execution. */
 export type SteeringContextDrainer = () => Array<{ role: ChatRole; content: string }>;
 
@@ -202,12 +209,213 @@ export class CommandExecutor {
     sendResponse: ((text: string) => Promise<void>) | undefined,
     steeringContextDrainer?: SteeringContextDrainer,
   ): Promise<CommandExecutionResult> {
-    const result = await this.executeCore(message, steeringContextDrainer);
-    await this.persistExecutionResult(message, triggerMessageId, result, sendResponse);
+    const { commandConfig, logger } = this;
+    const defaultSize = commandConfig.history_size;
+    const maxSize = Math.max(
+      defaultSize,
+      ...Object.values(commandConfig.modes).map((mode) => Number(mode.history_size ?? 0)),
+    );
 
-    if (!this.isRateLimitedResult(result)) {
-      await this.triggerAutoChronicler(message, this.commandConfig.history_size);
+    // ── Rate limit ──
+
+    if (!this.rateLimiter.checkLimit()) {
+      logger.warn("Rate limit triggered", `arc=${message.serverTag}#${message.channelName}`, `nick=${message.nick}`);
+      return await this.deliverResult(message, triggerMessageId, sendResponse, {
+        response: `${message.nick}: Slow down a little, will you? (rate limiting)`,
+        resolved: EMPTY_RESOLVED,
+      });
     }
+
+    logger.info(
+      "Received command",
+      `arc=${message.serverTag}#${message.channelName}`,
+      `nick=${message.nick}`,
+      `content=${message.content}`,
+    );
+
+    // ── Resolve command ──
+
+    const context = await this.history.getContextForMessage(message, maxSize);
+
+    const resolved = await this.resolver.resolve({
+      message,
+      context,
+      defaultSize,
+    });
+
+    if (resolved.error) {
+      logger.warn(
+        "Command parse error",
+        `arc=${message.serverTag}#${message.channelName}`,
+        `nick=${message.nick}`,
+        `error=${resolved.error}`,
+        `content=${message.content}`,
+      );
+      return await this.deliverResult(message, triggerMessageId, sendResponse, {
+        response: `${message.nick}: ${resolved.error}`, resolved,
+      });
+    }
+
+    if (resolved.helpRequested) {
+      logger.debug("Sending help message", `nick=${message.nick}`);
+      return await this.deliverResult(message, triggerMessageId, sendResponse, {
+        response: this.resolver.buildHelpMessage(message.serverTag, message.channelName), resolved,
+      });
+    }
+
+    if (!resolved.modeKey || !resolved.runtime || !resolved.selectedTrigger) {
+      return await this.deliverResult(message, triggerMessageId, sendResponse, {
+        response: `${message.nick}: Internal command resolution error.`, resolved,
+      });
+    }
+
+    const modeConfig = commandConfig.modes[resolved.modeKey];
+    const modelSpec =
+      resolved.modelOverride ??
+      resolved.runtime.model ??
+      pickModeModel(modeConfig.model) ??
+      null;
+
+    if (!modelSpec) {
+      return await this.deliverResult(message, triggerMessageId, sendResponse, {
+        response: `${message.nick}: No model configured for mode '${resolved.modeKey}'.`, resolved,
+      });
+    }
+
+    if (resolved.modelOverride) {
+      logger.debug("Overriding model", `model=${resolved.modelOverride}`);
+    }
+
+    if (resolved.selectedAutomatically) {
+      logger.debug(
+        "Processing automatic mode request",
+        `nick=${message.nick}`,
+        `query=${resolved.queryText}`,
+      );
+      if (resolved.channelMode) {
+        logger.debug(
+          "Channel policy resolved",
+          `policy=${resolved.channelMode}`,
+          `label=${resolved.selectedLabel}`,
+          `trigger=${resolved.selectedTrigger}`,
+        );
+      }
+    } else {
+      logger.debug(
+        "Processing explicit trigger",
+        `trigger=${resolved.selectedTrigger}`,
+        `mode=${resolved.modeKey}`,
+        `nick=${message.nick}`,
+        `query=${resolved.queryText}`,
+      );
+    }
+
+    logger.debug(
+      "Resolved direct command",
+      `arc=${message.serverTag}#${message.channelName}`,
+      `mode=${resolved.modeKey}`,
+      `trigger=${resolved.selectedTrigger}`,
+      `model=${modelSpec}`,
+      `context_disabled=${resolved.noContext}`,
+    );
+
+    // ── Build context & invoke agent ──
+
+    const steeringEnabled =
+      Boolean(resolved.runtime.steering) && !resolved.noContext;
+
+    // Wait the debounce period so that rapid follow-up messages land in
+    // the steering queue before the first LLM invocation.
+    const debounceSeconds = numberWithDefault(this.commandConfig.debounce, 0);
+    if (debounceSeconds > 0) {
+      await sleep(debounceSeconds * 1000);
+    }
+
+    const systemPrompt = this.buildSystemPrompt(
+      resolved.modeKey,
+      message.mynick,
+      resolved.modelOverride ?? undefined,
+    );
+
+    let prependedContext: Array<{ role: ChatRole; content: string }> = [];
+    if (
+      !resolved.noContext &&
+      resolved.runtime.includeChapterSummary &&
+      this.runtime.chronicleStore
+    ) {
+      prependedContext = await this.runtime.chronicleStore.getChapterContextMessages(
+        `${message.serverTag}#${message.channelName}`,
+      );
+    }
+
+    let selectedContext = (resolved.noContext ? context.slice(-1) : context).slice(
+      -resolved.runtime.historySize,
+    );
+
+    if (
+      !resolved.noContext &&
+      resolved.runtime.autoReduceContext &&
+      this.contextReducer.isConfigured &&
+      selectedContext.length > 1
+    ) {
+      const fullContext = [...prependedContext, ...selectedContext];
+      const reducedContext = await this.contextReducer.reduce(fullContext, systemPrompt);
+      prependedContext = [];
+      selectedContext = [
+        ...reducedContext,
+        selectedContext[selectedContext.length - 1],
+      ];
+    }
+
+    const initialSteeringMessages = steeringEnabled && steeringContextDrainer
+      ? steeringContextDrainer()
+      : [];
+
+    const runnerContext: SessionFactoryContextMessage[] = [
+      ...prependedContext,
+      ...selectedContext.slice(0, -1),
+      ...initialSteeringMessages,
+    ];
+
+    const tools = this.selectTools(message, resolved.runtime.allowedTools, runnerContext);
+
+    const steeringMessageProvider = steeringEnabled && steeringContextDrainer
+      ? () => steeringContextDrainer().map((msg) => ({
+          role: "user" as const,
+          content: msg.content,
+        }))
+      : undefined;
+
+    const runner = this.runnerFactory({
+      model: modelSpec,
+      systemPrompt,
+      tools,
+      steeringMessageProvider,
+      logger,
+    });
+
+    const { responseText, usage, toolCallsCount } = await this.invokeAndPostProcess(
+      runner, message, resolved.queryText, runnerContext, tools, {
+        reasoningEffort: resolved.runtime.reasoningEffort,
+        visionModel: resolved.runtime.visionModel ?? undefined,
+      },
+    );
+
+    if (!responseText) {
+      logger.info(
+        "Agent chose not to answer",
+        `arc=${message.serverTag}#${message.channelName}`,
+        `mode=${resolved.selectedLabel}`,
+        `trigger=${resolved.selectedTrigger}`,
+      );
+    }
+
+    // ── Deliver & persist ──
+
+    const result = await this.deliverResult(message, triggerMessageId, sendResponse, {
+      response: responseText || null, resolved, model: modelSpec, usage, toolCallsCount,
+    });
+    await this.triggerAutoChronicler(message, this.commandConfig.history_size);
 
     return result;
   }
@@ -265,23 +473,17 @@ export class CommandExecutor {
     const lastMessage = context[context.length - 1];
     const queryText = lastMessage?.content ?? "";
 
-    let agentResult: PromptResult;
+    let result: PromptRunResult;
     try {
-      agentResult = await runner.prompt(queryText, {
-        contextMessages: runnerContext,
-        thinkingLevel: normalizeThinkingLevel(classifiedRuntime.reasoningEffort),
-        refusalFallbackModel: this.refusalFallbackModel ?? undefined,
+      result = await this.invokeAndPostProcess(runner, message, queryText, runnerContext, tools, {
+        reasoningEffort: classifiedRuntime.reasoningEffort,
       });
-
-      await this.persistGeneratedToolSummary(message, agentResult, tools as MuaddibTool[]);
-      agentResult.session?.dispose();
     } catch (error) {
       logger.error("Error during proactive agent execution", error);
       return false;
     }
 
-    let responseText = agentResult.text;
-    if (!responseText || responseText.startsWith("Error: ")) {
+    if (!result.responseText || result.responseText.startsWith("Error: ")) {
       logger.info(
         "Agent decided not to interject proactively",
         `arc=${message.serverTag}#${message.channelName}`,
@@ -289,14 +491,7 @@ export class CommandExecutor {
       return false;
     }
 
-    responseText = await this.applyResponseLengthPolicy(responseText);
-    responseText = this.cleanResponseText(responseText, message.nick);
-
-    if (!responseText) {
-      return false;
-    }
-
-    responseText = `[${modelStrCore(modelSpec)}] ${responseText}`;
+    const responseText = `[${modelStrCore(modelSpec)}] ${result.responseText}`;
 
     logger.info(
       "Sending proactive response",
@@ -316,233 +511,36 @@ export class CommandExecutor {
         nick: message.mynick,
         content: responseText,
       },
-      {
-        mode: classifiedTrigger,
-      },
+      { mode: classifiedTrigger },
     );
 
     await this.triggerAutoChronicler(message, this.commandConfig.history_size);
     return true;
   }
 
-  // ── Core execution (no persistence/delivery) ──
+  // ── Shared: prompt invocation + post-processing ──
 
-  private async executeCore(
+  /**
+   * Invoke the agent runner, persist tool summaries, dispose session,
+   * and post-process the response (refusal annotation, length policy, cleaning).
+   */
+  private async invokeAndPostProcess(
+    runner: { prompt(prompt: string, options?: PromptOptions): Promise<PromptResult> },
     message: RoomMessage,
-    steeringContextDrainer?: SteeringContextDrainer,
-  ): Promise<CommandExecutionResult> {
-    const { commandConfig, logger } = this;
-    const defaultSize = commandConfig.history_size;
-    const maxSize = Math.max(
-      defaultSize,
-      ...Object.values(commandConfig.modes).map((mode) => Number(mode.history_size ?? 0)),
-    );
-
-    if (!this.rateLimiter.checkLimit()) {
-      logger.warn("Rate limit triggered", `arc=${message.serverTag}#${message.channelName}`, `nick=${message.nick}`);
-      return this.rateLimitedResult(message);
-    }
-
-    logger.info(
-      "Received command",
-      `arc=${message.serverTag}#${message.channelName}`,
-      `nick=${message.nick}`,
-      `content=${message.content}`,
-    );
-
-    const context = await this.history.getContextForMessage(message, maxSize);
-
-    const resolved = await this.resolver.resolve({
-      message,
-      context,
-      defaultSize,
+    queryText: string,
+    contextMessages: SessionFactoryContextMessage[],
+    tools: MuaddibTool[],
+    opts: { reasoningEffort: string; visionModel?: string },
+  ): Promise<PromptRunResult> {
+    const agentResult = await runner.prompt(queryText, {
+      contextMessages,
+      thinkingLevel: normalizeThinkingLevel(opts.reasoningEffort),
+      visionFallbackModel: opts.visionModel,
+      refusalFallbackModel: this.refusalFallbackModel ?? undefined,
     });
 
-    if (resolved.error) {
-      logger.warn(
-        "Command parse error",
-        `arc=${message.serverTag}#${message.channelName}`,
-        `nick=${message.nick}`,
-        `error=${resolved.error}`,
-        `content=${message.content}`,
-      );
-      return {
-        response: `${message.nick}: ${resolved.error}`,
-        resolved: resolved,
-        model: null,
-        usage: null,
-        toolCallsCount: 0,
-      };
-    }
-
-    if (resolved.helpRequested) {
-      logger.debug("Sending help message", `nick=${message.nick}`);
-      return {
-        response: this.resolver.buildHelpMessage(message.serverTag, message.channelName),
-        resolved: resolved,
-        model: null,
-        usage: null,
-        toolCallsCount: 0,
-      };
-    }
-
-    if (
-      !resolved.modeKey ||
-      !resolved.runtime ||
-      !resolved.selectedTrigger
-    ) {
-      return {
-        response: `${message.nick}: Internal command resolution error.`,
-        resolved: resolved,
-        model: null,
-        usage: null,
-        toolCallsCount: 0,
-      };
-    }
-
-    const modeConfig = commandConfig.modes[resolved.modeKey];
-    const modelSpec =
-      resolved.modelOverride ??
-      resolved.runtime.model ??
-      pickModeModel(modeConfig.model) ??
-      null;
-
-    if (!modelSpec) {
-      return {
-        response: `${message.nick}: No model configured for mode '${resolved.modeKey}'.`,
-        resolved: resolved,
-        model: null,
-        usage: null,
-        toolCallsCount: 0,
-      };
-    }
-
-    if (resolved.modelOverride) {
-      logger.debug("Overriding model", `model=${resolved.modelOverride}`);
-    }
-
-    if (resolved.selectedAutomatically) {
-      logger.debug(
-        "Processing automatic mode request",
-        `nick=${message.nick}`,
-        `query=${resolved.queryText}`,
-      );
-      if (resolved.channelMode) {
-        logger.debug(
-          "Channel policy resolved",
-          `policy=${resolved.channelMode}`,
-          `label=${resolved.selectedLabel}`,
-          `trigger=${resolved.selectedTrigger}`,
-        );
-      }
-    } else {
-      logger.debug(
-        "Processing explicit trigger",
-        `trigger=${resolved.selectedTrigger}`,
-        `mode=${resolved.modeKey}`,
-        `nick=${message.nick}`,
-        `query=${resolved.queryText}`,
-      );
-    }
-
-    logger.debug(
-      "Resolved direct command",
-      `arc=${message.serverTag}#${message.channelName}`,
-      `mode=${resolved.modeKey}`,
-      `trigger=${resolved.selectedTrigger}`,
-      `model=${modelSpec}`,
-      `context_disabled=${resolved.noContext}`,
-    );
-
-    const steeringEnabled =
-      Boolean(resolved.runtime.steering) && !resolved.noContext;
-
-    // Wait the debounce period so that rapid follow-up messages land in
-    // the steering queue before the first LLM invocation.
-    const debounceSeconds = numberWithDefault(this.commandConfig.debounce, 0);
-    if (debounceSeconds > 0) {
-      await sleep(debounceSeconds * 1000);
-    }
-
-    // Drain any messages that arrived during the debounce window.
-    const initialSteeringMessages = steeringEnabled && steeringContextDrainer
-      ? steeringContextDrainer()
-      : [];
-
-    const systemPrompt = this.buildSystemPrompt(
-      resolved.modeKey,
-      message.mynick,
-      resolved.modelOverride ?? undefined,
-    );
-
-    let prependedContext: Array<{ role: ChatRole; content: string }> = [];
-    if (
-      !resolved.noContext &&
-      resolved.runtime.includeChapterSummary &&
-      this.runtime.chronicleStore
-    ) {
-      prependedContext = await this.runtime.chronicleStore.getChapterContextMessages(
-        `${message.serverTag}#${message.channelName}`,
-      );
-    }
-
-    let selectedContext = (resolved.noContext ? context.slice(-1) : context).slice(
-      -resolved.runtime.historySize,
-    );
-
-    if (
-      !resolved.noContext &&
-      resolved.runtime.autoReduceContext &&
-      this.contextReducer.isConfigured &&
-      selectedContext.length > 1
-    ) {
-      const fullContext = [...prependedContext, ...selectedContext];
-      const reducedContext = await this.contextReducer.reduce(fullContext, systemPrompt);
-      prependedContext = [];
-      selectedContext = [
-        ...reducedContext,
-        selectedContext[selectedContext.length - 1],
-      ];
-    }
-
-    const runnerContext: SessionFactoryContextMessage[] = [
-      ...prependedContext,
-      ...selectedContext.slice(0, -1),
-      ...initialSteeringMessages,
-    ];
-
-    const tools = this.selectTools(message, resolved.runtime.allowedTools, runnerContext);
-
-    const steeringMessageProvider = steeringEnabled && steeringContextDrainer
-      ? () => steeringContextDrainer().map((msg) => ({
-          role: "user" as const,
-          content: msg.content,
-        }))
-      : undefined;
-
-    const runner = this.runnerFactory({
-      model: modelSpec,
-      systemPrompt,
-      tools,
-      steeringMessageProvider,
-      logger,
-    });
-
-    let agentResult: PromptResult;
-    try {
-      agentResult = await runner.prompt(resolved.queryText, {
-        contextMessages: runnerContext,
-        thinkingLevel: normalizeThinkingLevel(resolved.runtime.reasoningEffort),
-        visionFallbackModel: resolved.runtime.visionModel ?? undefined,
-        refusalFallbackModel: this.refusalFallbackModel ?? undefined,
-      });
-
-      await this.persistGeneratedToolSummary(message, agentResult, tools as MuaddibTool[]);
-      agentResult.session?.dispose();
-    } catch (error) {
-      logger.error("Error during agent execution", error);
-      throw error;
-    }
+    await this.persistGeneratedToolSummary(message, agentResult, tools);
+    agentResult.session?.dispose();
 
     let responseText = agentResult.text;
     if (agentResult.refusalFallbackActivated && agentResult.refusalFallbackModel) {
@@ -551,36 +549,42 @@ export class CommandExecutor {
     }
 
     responseText = await this.applyResponseLengthPolicy(responseText);
-    const cleaned = this.cleanResponseText(responseText, message.nick);
-
-    if (!cleaned) {
-      logger.info(
-        "Agent chose not to answer",
-        `arc=${message.serverTag}#${message.channelName}`,
-        `mode=${resolved.selectedLabel}`,
-        `trigger=${resolved.selectedTrigger}`,
-      );
-    }
+    responseText = this.cleanResponseText(responseText, message.nick);
 
     return {
-      response: cleaned || null,
-      resolved: resolved,
-      model: modelSpec,
+      responseText,
       usage: agentResult.usage,
       toolCallsCount: agentResult.toolCallsCount ?? 0,
     };
   }
 
-  // ── Persistence & response delivery ──
+  // ── Response delivery & persistence ──
 
-  private async persistExecutionResult(
+  /**
+   * Deliver a command execution result: log LLM call, send response,
+   * persist bot message, and emit cost followups.
+   */
+  private async deliverResult(
     message: RoomMessage,
     triggerMessageId: number,
-    result: CommandExecutionResult,
     sendResponse: ((text: string) => Promise<void>) | undefined,
-  ): Promise<void> {
+    partial: {
+      response: string | null;
+      resolved: ResolvedCommand;
+      model?: string | null;
+      usage?: Usage | null;
+      toolCallsCount?: number;
+    },
+  ): Promise<CommandExecutionResult> {
+    const result: CommandExecutionResult = {
+      model: null,
+      usage: null,
+      toolCallsCount: 0,
+      ...partial,
+    };
+
     if (!result.response) {
-      return;
+      return result;
     }
 
     const { history, logger } = this;
@@ -588,21 +592,17 @@ export class CommandExecutor {
 
     let llmCallId: number | null = null;
     if (result.model && result.usage) {
-      try {
-        const spec = parseModelSpec(result.model);
-        llmCallId = await history.logLlmCall({
-          provider: spec.provider,
-          model: spec.modelId,
-          inputTokens: result.usage.input,
-          outputTokens: result.usage.output,
-          cost: result.usage.cost.total,
-          callType: "agent_run",
-          arcName,
-          triggerMessageId,
-        });
-      } catch {
-        logger.warn("Could not parse model spec", `model=${result.model}`);
-      }
+      const spec = parseModelSpec(result.model);
+      llmCallId = await history.logLlmCall({
+        provider: spec.provider,
+        model: spec.modelId,
+        inputTokens: result.usage.input,
+        outputTokens: result.usage.output,
+        cost: result.usage.cost.total,
+        callType: "agent_run",
+        arcName,
+        triggerMessageId,
+      });
     }
 
     logger.debug(
@@ -635,7 +635,7 @@ export class CommandExecutor {
       },
       {
         mode: result.resolved.selectedTrigger ?? undefined,
-        llmCallId,
+        llmCallId: llmCallId ?? undefined,
       },
     );
 
@@ -650,6 +650,8 @@ export class CommandExecutor {
     );
 
     await this.emitCostFollowups(message, result, arcName, sendResponse);
+
+    return result;
   }
 
   private async emitCostFollowups(
@@ -749,26 +751,6 @@ export class CommandExecutor {
       message.channelName,
       maxSize,
     );
-  }
-
-  private rateLimitedResult(message: RoomMessage): CommandExecutionResult {
-    return {
-      response: `${message.nick}: Slow down a little, will you? (rate limiting)`,
-      resolved: {
-        noContext: false,
-        queryText: message.content,
-        modelOverride: null,
-        selectedLabel: null,
-        selectedTrigger: null,
-        modeKey: null,
-        runtime: null,
-        helpRequested: false,
-        selectedAutomatically: false,
-      },
-      model: null,
-      usage: null,
-      toolCallsCount: 0,
-    };
   }
 
   private isRateLimitedResult(result: CommandExecutionResult): boolean {
@@ -879,6 +861,18 @@ export class CommandExecutor {
     return baseline.filter((tool) => allowed.has(tool.name));
   }
 }
+
+const EMPTY_RESOLVED: ResolvedCommand = {
+  noContext: false,
+  queryText: "",
+  modelOverride: null,
+  selectedLabel: null,
+  selectedTrigger: null,
+  modeKey: null,
+  runtime: null,
+  helpRequested: false,
+  selectedAutomatically: false,
+};
 
 // ── Module-level helpers ──
 

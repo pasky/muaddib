@@ -493,7 +493,7 @@ describe("RoomMessageHandler", () => {
       }),
     ).rejects.toThrow("runner boom");
 
-    expect(logger.error).toHaveBeenCalledWith("Error during agent execution", expect.any(Error));
+    // Error propagates without being logged at executor level (no catch+rethrow).
 
     await history.close();
   });
