@@ -154,7 +154,7 @@ export class DiscordRoomMonitor {
     }
 
     const senderIsEventSource = Object.is(this.options.sender, this.options.eventSource);
-    const reconnectPolicy = resolveReconnectPolicy(this.options.roomConfig.reconnect);
+    const reconnect = this.options.roomConfig.reconnect;
 
     this.logger.info("Discord monitor starting.");
 
@@ -196,19 +196,19 @@ export class DiscordRoomMonitor {
             }
           }
         } catch (error) {
-          if (!reconnectPolicy.enabled) {
+          if (!(reconnect?.enabled ?? false)) {
             throw error;
           }
 
           reconnectAttempts += 1;
-          if (reconnectAttempts > reconnectPolicy.maxAttempts) {
+          if (reconnectAttempts > (reconnect?.maxAttempts ?? 5)) {
             throw error;
           }
 
           this.logger.warn(
             "Discord monitor receive loop failed; reconnecting",
             `attempt=${reconnectAttempts}`,
-            `delay_ms=${reconnectPolicy.delayMs}`,
+            `delay_ms=${(reconnect?.delayMs ?? 1_000)}`,
             error,
           );
         } finally {
@@ -221,7 +221,7 @@ export class DiscordRoomMonitor {
           }
         }
 
-        await sleep(reconnectPolicy.delayMs);
+        await sleep((reconnect?.delayMs ?? 1_000));
       }
     } finally {
       this.logger.info("Discord monitor stopped.");
@@ -496,24 +496,6 @@ function normalizeDirectContent(content: string, mynick: string, botUserId?: str
   }
 
   return normalizeContent(cleaned || content.trim());
-}
-
-function resolveReconnectPolicy(config: RoomConfig['reconnect']): {
-  enabled: boolean;
-  delayMs: number;
-  maxAttempts: number;
-} {
-  const enabled = config?.enabled ?? false;
-  const delayMs = Number.isFinite(Number(config?.delayMs)) ? Math.max(0, Number(config?.delayMs)) : 1_000;
-  const maxAttempts = Number.isFinite(Number(config?.maxAttempts))
-    ? Math.max(1, Math.trunc(Number(config?.maxAttempts)))
-    : 5;
-
-  return {
-    enabled,
-    delayMs,
-    maxAttempts,
-  };
 }
 
 function resolveReplyEditDebounceSeconds(value: unknown): number {
