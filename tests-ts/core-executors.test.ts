@@ -546,7 +546,7 @@ describe("oracle executor with invocation context", () => {
     );
   });
 
-  it("returns soft error string and logs Oracle failed on runtime failure", async () => {
+  it("propagates runtime errors and logs Oracle failed", async () => {
     oracleMock.promptFn.mockRejectedValue(new Error("connection refused"));
 
     const infoLog = vi.fn();
@@ -557,9 +557,7 @@ describe("oracle executor with invocation context", () => {
       { conversationContext: [], toolOptions: {}, buildTools: () => [] },
     );
 
-    const result = await executor({ query: "will fail" });
-
-    expect(result).toBe("Oracle error: connection refused");
+    await expect(executor({ query: "will fail" })).rejects.toThrow("connection refused");
     expect(infoLog).toHaveBeenCalledWith(
       expect.stringContaining("Oracle failed: connection refused"),
     );

@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -34,30 +34,22 @@ export async function writeArtifactText(
   content: string,
   suffix: string,
 ): Promise<string> {
-  const artifactsPath = options.toolsConfig?.artifacts?.path;
-  const artifactsUrl = options.toolsConfig?.artifacts?.url;
-
-  if (!artifactsPath || !artifactsUrl) {
-    throw new Error("Artifact tools require tools.artifacts.path and tools.artifacts.url configuration.");
-  }
-
-  await ensureArtifactsDirectory(artifactsPath);
-
-  const artifactId = generateArtifactId();
-  const normalizedSuffix = suffix.startsWith(".") ? suffix : `.${suffix}`;
-  const filename = `${artifactId}${normalizedSuffix}`;
-  const filePath = join(artifactsPath, filename);
-
-  await writeFile(filePath, content, "utf-8");
-  options.logger?.info(`Created artifact file: ${filePath}`);
-
-  return toArtifactViewerUrl(artifactsUrl, filename);
+  return writeArtifact(options, content, suffix, "utf-8");
 }
 
 export async function writeArtifactBytes(
   options: ToolContext,
   data: Buffer,
   suffix: string,
+): Promise<string> {
+  return writeArtifact(options, data, suffix);
+}
+
+async function writeArtifact(
+  options: ToolContext,
+  data: string | Buffer,
+  suffix: string,
+  encoding?: BufferEncoding,
 ): Promise<string> {
   const artifactsPath = options.toolsConfig?.artifacts?.path;
   const artifactsUrl = options.toolsConfig?.artifacts?.url;
@@ -73,27 +65,23 @@ export async function writeArtifactBytes(
   const filename = `${artifactId}${normalizedSuffix}`;
   const filePath = join(artifactsPath, filename);
 
-  await writeFile(filePath, data);
+  await writeFile(filePath, data, encoding);
   options.logger?.info(`Created artifact file: ${filePath}`);
 
   return toArtifactViewerUrl(artifactsUrl, filename);
 }
 
+/** Track directories where index.html has already been written this process. */
+const indexWrittenPaths = new Set<string>();
+
 async function ensureArtifactsDirectory(path: string): Promise<void> {
   await mkdir(path, { recursive: true });
 
+  if (indexWrittenPaths.has(path)) return;
+
   const indexPath = join(path, "index.html");
-  let currentIndex: string | null = null;
-
-  try {
-    currentIndex = await readFile(indexPath, "utf-8");
-  } catch {
-    // Recovery strategy: index file may not exist yet.
-  }
-
-  if (currentIndex !== ARTIFACT_VIEWER_HTML) {
-    await writeFile(indexPath, ARTIFACT_VIEWER_HTML, "utf-8");
-  }
+  await writeFile(indexPath, ARTIFACT_VIEWER_HTML, "utf-8");
+  indexWrittenPaths.add(path);
 }
 
 function toArtifactViewerUrl(baseUrl: string, filename: string): string {

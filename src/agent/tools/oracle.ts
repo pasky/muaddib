@@ -134,7 +134,7 @@ export function createDefaultOracleExecutor(
         return `Oracle exhausted iterations: ${message}`;
       }
       logger.info(`${ORACLE_LOG_SEPARATOR} Oracle failed: ${message}`);
-      return `Oracle error: ${message}`;
+      throw error;
     }
   };
 }

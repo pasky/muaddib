@@ -364,22 +364,10 @@ async function fetchImageAsDataUrl(
   return `data:${contentType};base64,${imageBytes.toString("base64")}`;
 }
 
-async function resolveProviderApiKey(
-  options: ToolContext,
-  provider: string,
-): Promise<string | undefined> {
-  if (!options.getApiKey) {
-    return undefined;
-  }
-
-  const key = await options.getApiKey(provider);
-  return toConfiguredString(key);
-}
-
 async function resolveOpenRouterApiKey(options: ToolContext): Promise<string | undefined> {
-  const fromConfig = await resolveProviderApiKey(options, "openrouter");
-  if (fromConfig) {
-    return fromConfig;
+  if (options.getApiKey) {
+    const key = toConfiguredString(await options.getApiKey("openrouter"));
+    if (key) return key;
   }
 
   return toConfiguredString(process.env.OPENROUTER_API_KEY);
@@ -395,9 +383,7 @@ function parseJsonResponseBody(body: string): unknown {
   try {
     return JSON.parse(body) as unknown;
   } catch {
-    return {
-      raw: body,
-    };
+    throw new Error(`Expected JSON response body, got: ${body.slice(0, 200)}`);
   }
 }
 

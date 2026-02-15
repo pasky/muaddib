@@ -18,6 +18,7 @@ import { Type } from "@sinclair/typebox";
 import { writeArtifactBytes } from "./artifact-storage.js";
 import type { ToolContext, MuaddibTool } from "./types.js";
 import type { VisitWebpageImageResult } from "./web.js";
+import { extractFilenameFromUrl } from "./url-utils.js";
 
 export interface ExecuteCodeInput {
   code: string;
@@ -98,29 +99,6 @@ export function createExecuteCodeTool(executors: { executeCode: ExecuteCodeExecu
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function extractFilenameFromUrl(url: string): string | undefined {
-  try {
-    const parsed = new URL(url);
-    const query = parsed.search.slice(1);
-    if (query) {
-      if (!query.includes("=")) {
-        const decoded = decodeURIComponent(query.trim());
-        return decoded || undefined;
-      }
-      const params = new URLSearchParams(query);
-      const fromKey = params.get("file") ?? params.get("filename");
-      if (fromKey?.trim()) return fromKey.trim();
-    }
-    const decodedPath = decodeURIComponent(parsed.pathname);
-    if (!decodedPath || decodedPath.endsWith("/")) return undefined;
-    const leaf = decodedPath.split("/").pop();
-    if (!leaf || leaf === "index.html") return undefined;
-    return leaf;
-  } catch {
-    return undefined;
-  }
-}
 
 function extractImageDataFromResult(result: VisitWebpageImageResult): Buffer | undefined {
   if (result.kind === "image" && result.data) {
@@ -213,6 +191,16 @@ export function createDefaultExecuteCodeExecutor(
     return workdir;
   }
 
+  // Cache ExecError class from the dynamic import for use in spriteExec.
+  let ExecErrorClass: typeof import("@fly/sprites").ExecError | null = null;
+  async function getExecError() {
+    if (!ExecErrorClass) {
+      const mod = await import("@fly/sprites");
+      ExecErrorClass = mod.ExecError;
+    }
+    return ExecErrorClass;
+  }
+
   /**
    * Execute a command on the sprite, capturing stdout/stderr and exit code.
    * The JS SDK's exec() throws ExecError on non-zero exit which already
@@ -223,7 +211,7 @@ export function createDefaultExecuteCodeExecutor(
     command: string,
     execOptions?: { cwd?: string; timeoutMs?: number },
   ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-    const { ExecError } = await import("@fly/sprites");
+    const ExecError = await getExecError();
 
     // Wrap with `timeout` command when a timeout is specified, so that
     // long-running sandbox commands are killed server-side.

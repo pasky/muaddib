@@ -105,33 +105,6 @@ export interface BaselineToolOptions extends ToolContext {
 
 type ExecutorBackedToolFactory = (executors: BaselineToolExecutors) => MuaddibTool;
 
-const WEB_TOOL_GROUP: ReadonlyArray<ExecutorBackedToolFactory> = [
-  createWebSearchTool,
-  createVisitWebpageTool,
-];
-
-const EXECUTE_CODE_TOOL_GROUP: ReadonlyArray<ExecutorBackedToolFactory> = [
-  createExecuteCodeTool,
-];
-
-const ARTIFACT_TOOL_GROUP: ReadonlyArray<ExecutorBackedToolFactory> = [
-  createShareArtifactTool,
-  createEditArtifactTool,
-];
-
-const IMAGE_TOOL_GROUP: ReadonlyArray<ExecutorBackedToolFactory> = [
-  createGenerateImageTool,
-];
-
-const ORACLE_TOOL_GROUP: ReadonlyArray<ExecutorBackedToolFactory> = [
-  createOracleTool,
-];
-
-const CHRONICLE_TOOL_GROUP: ReadonlyArray<ExecutorBackedToolFactory> = [
-  createChronicleReadTool,
-  createChronicleAppendTool,
-];
-
 /**
  * Select quest tools based on active quest context, matching Python parity:
  * - No active quest → quest_start only
@@ -148,13 +121,16 @@ function getQuestToolGroup(currentQuestId?: string | null): ReadonlyArray<Execut
   return [createQuestSnoozeTool];
 }
 
-const BASELINE_EXECUTOR_TOOL_GROUPS: ReadonlyArray<ReadonlyArray<ExecutorBackedToolFactory>> = [
-  WEB_TOOL_GROUP,
-  EXECUTE_CODE_TOOL_GROUP,
-  ARTIFACT_TOOL_GROUP,
-  IMAGE_TOOL_GROUP,
-  ORACLE_TOOL_GROUP,
-  CHRONICLE_TOOL_GROUP,
+const BASELINE_TOOL_FACTORIES: ReadonlyArray<ExecutorBackedToolFactory> = [
+  createWebSearchTool,
+  createVisitWebpageTool,
+  createExecuteCodeTool,
+  createShareArtifactTool,
+  createEditArtifactTool,
+  createGenerateImageTool,
+  createOracleTool,
+  createChronicleReadTool,
+  createChronicleAppendTool,
 ];
 
 export function createDefaultToolExecutors(
@@ -183,25 +159,16 @@ export function createDefaultToolExecutors(
  */
 export function createBaselineAgentTools(options: BaselineToolOptions): MuaddibTool[] {
   const defaultExecutors = createDefaultToolExecutors(options, options.oracleInvocation);
+  const overrides = options.executors ?? {};
   const executors: BaselineToolExecutors = {
-    webSearch: options.executors?.webSearch ?? defaultExecutors.webSearch,
-    visitWebpage: options.executors?.visitWebpage ?? defaultExecutors.visitWebpage,
-    executeCode: options.executors?.executeCode ?? defaultExecutors.executeCode,
-    shareArtifact: options.executors?.shareArtifact ?? defaultExecutors.shareArtifact,
-    editArtifact: options.executors?.editArtifact ?? defaultExecutors.editArtifact,
-    generateImage: options.executors?.generateImage ?? defaultExecutors.generateImage,
-    oracle: options.executors?.oracle ?? defaultExecutors.oracle,
-    chronicleRead: options.executors?.chronicleRead ?? defaultExecutors.chronicleRead,
-    chronicleAppend: options.executors?.chronicleAppend ?? defaultExecutors.chronicleAppend,
-    questStart: options.executors?.questStart ?? defaultExecutors.questStart,
-    subquestStart: options.executors?.subquestStart ?? defaultExecutors.subquestStart,
-    questSnooze: options.executors?.questSnooze ?? defaultExecutors.questSnooze,
-  };
+    ...defaultExecutors,
+    ...Object.fromEntries(Object.entries(overrides).filter(([, v]) => v !== undefined)),
+  } as BaselineToolExecutors;
 
   const questToolGroup = getQuestToolGroup(options.currentQuestId);
 
-  const executorBackedTools = [...BASELINE_EXECUTOR_TOOL_GROUPS, questToolGroup].flatMap((group) =>
-    group.map((factory) => factory(executors)),
+  const executorBackedTools = [...BASELINE_TOOL_FACTORIES, ...questToolGroup].map((factory) =>
+    factory(executors),
   );
 
   return [

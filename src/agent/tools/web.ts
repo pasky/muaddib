@@ -4,6 +4,7 @@ import { resolve, relative, extname } from "node:path";
 import { Type } from "@sinclair/typebox";
 
 import type { ToolContext, MuaddibTool } from "./types.js";
+import { extractLocalArtifactPath, looksLikeImageUrl } from "./url-utils.js";
 
 export interface VisitWebpageImageResult {
   kind: "image";
@@ -307,57 +308,6 @@ async function tryReadLocalArtifact(
 }
 
 /**
- * Extract the artifact-relative path from a URL that matches the artifacts base URL.
- * Handles both raw paths and `?filename` / `index.html?filename` query styles.
- */
-function extractLocalArtifactPath(url: string, artifactsUrl: string): string | null {
-  const base = artifactsUrl.replace(/\/+$/, "");
-  if (url !== base && !url.startsWith(base + "/") && !url.startsWith(base + "?")) {
-    return null;
-  }
-
-  let remainder = url.slice(base.length);
-  if (remainder.startsWith("/")) remainder = remainder.slice(1);
-
-  // ?filename style
-  if (remainder.startsWith("?")) {
-    return extractFilenameFromQuery(remainder.slice(1));
-  }
-
-  // index.html?filename style
-  if (remainder.startsWith("index.html?")) {
-    return extractFilenameFromQuery(remainder.slice("index.html?".length));
-  }
-
-  // path?query — check if path part is index.html
-  if (remainder.includes("?")) {
-    const [pathPart, query] = remainder.split("?", 2);
-    if (pathPart === "index.html") {
-      return extractFilenameFromQuery(query);
-    }
-  }
-
-  if (!remainder) return null;
-  return decodeURIComponent(remainder);
-}
-
-function extractFilenameFromQuery(query: string): string | null {
-  if (!query) return null;
-
-  if (query.includes("=")) {
-    const params = new URLSearchParams(query);
-    for (const key of ["file", "filename"]) {
-      const value = params.get(key)?.trim();
-      if (value) return decodeURIComponent(value);
-    }
-    return null;
-  }
-
-  const value = query.trim();
-  return value ? decodeURIComponent(value) : null;
-}
-
-/**
  * Fetch from Jina reader with backoff retries on HTTP 451 and 5xx errors.
  */
 async function fetchJinaWithRetry(
@@ -526,8 +476,4 @@ function asObjectRecord(value: unknown): Record<string, unknown> | null {
   }
 
   return value as Record<string, unknown>;
-}
-
-function looksLikeImageUrl(url: string): boolean {
-  return /\.(?:png|jpe?g|gif|webp)(?:$|[?#])/i.test(url);
 }

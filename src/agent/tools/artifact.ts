@@ -5,6 +5,7 @@ import { Type } from "@sinclair/typebox";
 
 import type { ToolContext, MuaddibTool } from "./types.js";
 import { stringifyError } from "../../utils/index.js";
+import { extractFilenameFromUrl, extractLocalArtifactPath, looksLikeImageUrl } from "./url-utils.js";
 
 export interface EditArtifactInput {
   artifact_url: string;
@@ -181,82 +182,6 @@ function deriveArtifactSuffixFromUrl(url: string): string {
   return `.${parts.slice(1).join(".")}`;
 }
 
-function extractFilenameFromUrl(url: string): string | undefined {
-  const parsedUrl = new URL(url);
-  const queryFilename = extractFilenameFromQuery(parsedUrl.search.slice(1));
-  if (queryFilename) {
-    return queryFilename;
-  }
-
-  const decodedPath = decodeURIComponent(parsedUrl.pathname);
-  if (!decodedPath || decodedPath.endsWith("/")) {
-    return undefined;
-  }
-
-  const pathLeaf = decodedPath.split("/").pop();
-  if (!pathLeaf || pathLeaf === "index.html") {
-    return undefined;
-  }
-
-  return pathLeaf;
-}
-
-function extractLocalArtifactPath(url: string, artifactsUrl: string | undefined): string | undefined {
-  if (!artifactsUrl) {
-    return undefined;
-  }
-
-  const base = artifactsUrl.replace(/\/+$/, "");
-  if (!(url === base || url.startsWith(`${base}/`) || url.startsWith(`${base}?`))) {
-    return undefined;
-  }
-
-  let remainder = url.slice(base.length);
-  if (remainder.startsWith("/")) {
-    remainder = remainder.slice(1);
-  }
-
-  if (remainder.startsWith("?")) {
-    return extractFilenameFromQuery(remainder.slice(1));
-  }
-
-  if (remainder.startsWith("index.html?")) {
-    return extractFilenameFromQuery(remainder.slice("index.html?".length));
-  }
-
-  if (remainder.includes("?")) {
-    const [pathPart, query] = remainder.split("?", 2);
-    if (pathPart === "index.html") {
-      return extractFilenameFromQuery(query);
-    }
-  }
-
-  if (!remainder) {
-    return undefined;
-  }
-
-  return decodeURIComponent(remainder);
-}
-
-function extractFilenameFromQuery(query: string): string | undefined {
-  if (!query) {
-    return undefined;
-  }
-
-  if (!query.includes("=")) {
-    return decodeURIComponent(query.trim());
-  }
-
-  const params = new URLSearchParams(query);
-  const keyBased = params.get("file") ?? params.get("filename");
-  if (!keyBased) {
-    return undefined;
-  }
-
-  const trimmed = keyBased.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
 function unwrapVisitWebpageResponse(content: string): string {
   if (!content.startsWith("## Content from ")) {
     return content;
@@ -287,8 +212,4 @@ function countOccurrences(content: string, needle: string): number {
     count += 1;
     index = found + needle.length;
   }
-}
-
-function looksLikeImageUrl(url: string): boolean {
-  return /\.(?:png|jpe?g|gif|webp)(?:$|[?#])/i.test(url);
 }
