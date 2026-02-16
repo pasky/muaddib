@@ -27,7 +27,7 @@ import type { ChatHistoryStore, ChatRole } from "../../history/chat-history-stor
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { parseModelSpec } from "../../models/model-spec.js";
 import { ContextReducerTs, type ContextReducer } from "./context-reducer.js";
-import type { RoomMessage } from "../message.js";
+import { type RoomMessage, roomArc } from "../message.js";
 import { sleep } from "../../utils/index.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import { createModeClassifier } from "./classifier.js";
@@ -216,7 +216,7 @@ export class CommandExecutor {
     // ── Rate limit ──
 
     if (!this.rateLimiter.checkLimit()) {
-      logger.warn("Rate limit triggered", `arc=${message.serverTag}#${message.channelName}`, `nick=${message.nick}`);
+      logger.warn("Rate limit triggered", `arc=${roomArc(message)}`, `nick=${message.nick}`);
       return await this.deliverResult(message, triggerMessageId, sendResponse, {
         response: `${message.nick}: Slow down a little, will you? (rate limiting)`,
         resolved: EMPTY_RESOLVED,
@@ -225,7 +225,7 @@ export class CommandExecutor {
 
     logger.info(
       "Received command",
-      `arc=${message.serverTag}#${message.channelName}`,
+      `arc=${roomArc(message)}`,
       `nick=${message.nick}`,
       `content=${message.content}`,
     );
@@ -243,7 +243,7 @@ export class CommandExecutor {
     if (resolved.error) {
       logger.warn(
         "Command parse error",
-        `arc=${message.serverTag}#${message.channelName}`,
+        `arc=${roomArc(message)}`,
         `nick=${message.nick}`,
         `error=${resolved.error}`,
         `content=${message.content}`,
@@ -309,7 +309,7 @@ export class CommandExecutor {
 
     logger.debug(
       "Resolved direct command",
-      `arc=${message.serverTag}#${message.channelName}`,
+      `arc=${roomArc(message)}`,
       `mode=${resolved.modeKey}`,
       `trigger=${resolved.selectedTrigger}`,
       `model=${modelSpec}`,
@@ -341,7 +341,7 @@ export class CommandExecutor {
       this.runtime.chronicleStore
     ) {
       prependedContext = await this.runtime.chronicleStore.getChapterContextMessages(
-        `${message.serverTag}#${message.channelName}`,
+        roomArc(message),
       );
     }
 
@@ -401,7 +401,7 @@ export class CommandExecutor {
     if (!responseText) {
       logger.info(
         "Agent chose not to answer",
-        `arc=${message.serverTag}#${message.channelName}`,
+        `arc=${roomArc(message)}`,
         `mode=${resolved.selectedLabel}`,
         `trigger=${resolved.selectedTrigger}`,
       );
@@ -483,7 +483,7 @@ export class CommandExecutor {
     if (!result.responseText || result.responseText.startsWith("Error: ")) {
       logger.info(
         "Agent decided not to interject proactively",
-        `arc=${message.serverTag}#${message.channelName}`,
+        `arc=${roomArc(message)}`,
       );
       return false;
     }
@@ -492,7 +492,7 @@ export class CommandExecutor {
 
     logger.info(
       "Sending proactive response",
-      `arc=${message.serverTag}#${message.channelName}`,
+      `arc=${roomArc(message)}`,
       `label=${classifiedTrigger}`,
       `trigger=${classifiedTrigger}`,
       `response=${responseText}`,
@@ -585,7 +585,7 @@ export class CommandExecutor {
     }
 
     const { history, logger } = this;
-    const arcName = `${message.serverTag}#${message.channelName}`;
+    const arcName = roomArc(message);
 
     let llmCallId: number | null = null;
     if (result.model && result.usage) {
@@ -806,7 +806,7 @@ export class CommandExecutor {
       persistenceSummaryModel: this.persistenceSummaryModel,
       modelAdapter: this.modelAdapter,
       logger: this.logger,
-      arc: `${message.serverTag}#${message.channelName}`,
+      arc: roomArc(message),
     });
 
     if (!summaryText) {
@@ -832,7 +832,7 @@ export class CommandExecutor {
   ): MuaddibTool[] {
     const invocationToolOptions: BaselineToolOptions = {
       ...this.buildToolOptions(),
-      arc: `${message.serverTag}#${message.channelName}`,
+      arc: roomArc(message),
       secrets: message.secrets,
     };
 

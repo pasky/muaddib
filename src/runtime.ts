@@ -4,15 +4,11 @@ import { assertNoDeferredFeatureConfig } from "./config/deferred-features.js";
 import { getMuaddibHome, resolveMuaddibPath } from "./config/paths.js";
 import { RuntimeLogWriter } from "./app/logging.js";
 import { ChronicleStore } from "./chronicle/chronicle-store.js";
-import {
-  ChronicleLifecycleTs,
-  type ChronicleLifecycleConfig,
-} from "./chronicle/lifecycle.js";
+import { ChronicleLifecycleTs } from "./chronicle/lifecycle.js";
+import { createChronicleSubsystem } from "./chronicle/create.js";
 import { ChatHistoryStore } from "./history/chat-history-store.js";
-import {
-  PiAiModelAdapter,
-} from "./models/pi-ai-model-adapter.js";
-import { AutoChroniclerTs, type AutoChronicler } from "./rooms/autochronicler.js";
+import { PiAiModelAdapter } from "./models/pi-ai-model-adapter.js";
+import type { AutoChronicler } from "./rooms/autochronicler.js";
 import { MuaddibConfig } from "./config/muaddib-config.js";
 
 export interface MuaddibRuntime {
@@ -57,8 +53,7 @@ export async function createMuaddibRuntime(
     join(muaddibHome, "chat_history.db"),
   );
 
-  const defaultRoomConfig = config.getRoomConfig("irc");
-  const defaultHistorySize = Number(defaultRoomConfig.command?.historySize ?? 40);
+  const defaultHistorySize = 40;
 
   log.info("Initializing history storage", `path=${historyDbPath}`, `history_size=${defaultHistorySize}`);
 
@@ -72,40 +67,19 @@ export async function createMuaddibRuntime(
   let autoChronicler: AutoChronicler | undefined;
 
   if (chroniclerConfig.model) {
-    const chronicleDbPath = resolveMuaddibPath(
-      chroniclerConfig.database?.path,
-      join(muaddibHome, "chronicle.db"),
-    );
-
-    log.info("Initializing chronicle storage", `path=${chronicleDbPath}`);
-
-    chronicleStore = new ChronicleStore(chronicleDbPath);
-    await chronicleStore.initialize();
-
-    const lifecycleConfig: ChronicleLifecycleConfig = {
+    const chronicle = await createChronicleSubsystem({
       model: chroniclerConfig.model,
-      arc_models: chroniclerConfig.arcModels,
-      paragraphs_per_chapter: chroniclerConfig.paragraphsPerChapter,
-    };
-
-    chronicleLifecycle = new ChronicleLifecycleTs({
-      chronicleStore,
-      config: lifecycleConfig,
-      modelAdapter,
-      logger: runtimeLogger.getLogger("muaddib.chronicle.lifecycle"),
-    });
-
-    autoChronicler = new AutoChroniclerTs({
+      arcModels: chroniclerConfig.arcModels,
+      paragraphsPerChapter: chroniclerConfig.paragraphsPerChapter,
+      databasePath: chroniclerConfig.database?.path,
+      muaddibHome,
       history,
-      chronicleStore,
-      lifecycle: chronicleLifecycle,
-      config: {
-        model: chroniclerConfig.model,
-        arc_models: chroniclerConfig.arcModels,
-      },
       modelAdapter,
-      logger: runtimeLogger.getLogger("muaddib.rooms.autochronicler"),
+      logger: runtimeLogger,
     });
+    chronicleStore = chronicle.chronicleStore;
+    chronicleLifecycle = chronicle.chronicleLifecycle;
+    autoChronicler = chronicle.autoChronicler;
   }
 
   return {

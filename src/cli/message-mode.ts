@@ -4,7 +4,7 @@ import {
   RoomMessageHandler,
   type CommandRunnerFactory,
 } from "../rooms/command/message-handler.js";
-import type { RoomMessage } from "../rooms/message.js";
+import { type RoomMessage, roomArc } from "../rooms/message.js";
 import { createMuaddibRuntime, shutdownRuntime } from "../runtime.js";
 
 export interface CliMessageModeOptions {
@@ -56,7 +56,7 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
       content: options.message,
     };
 
-    const arc = `${message.serverTag}#${message.channelName}`;
+    const arc = roomArc(message);
     const result = await runtimeLogger.withMessageContext(
       {
         arc,

@@ -21,7 +21,7 @@ import type {
 } from "./command-executor.js";
 import { pickModeModel } from "./command-executor.js";
 import type { SteeringQueue, QueuedInboundMessage, SteeringKey } from "./steering-queue.js";
-import type { RoomMessage } from "../message.js";
+import { type RoomMessage, roomArc } from "../message.js";
 
 // ── ProactiveConfig (resolved, all fields required) ──
 
@@ -184,7 +184,7 @@ export class ProactiveRunner {
     if (!this.rateLimiter.checkLimit()) {
       this.logger.debug(
         "Proactive interjection rate limited",
-        `arc=${message.serverTag}#${message.channelName}`,
+        `arc=${roomArc(message)}`,
         `nick=${message.nick}`,
       );
       return;
@@ -207,7 +207,7 @@ export class ProactiveRunner {
     if (!evalResult.shouldInterject) {
       this.logger.debug(
         "Proactive interjection declined",
-        `arc=${message.serverTag}#${message.channelName}`,
+        `arc=${roomArc(message)}`,
         `reason=${evalResult.reason}`,
       );
       return;
@@ -229,7 +229,7 @@ export class ProactiveRunner {
 
     this.logger.info(
       "Interjecting proactively",
-      `arc=${message.serverTag}#${message.channelName}`,
+      `arc=${roomArc(message)}`,
       `nick=${message.nick}`,
       `message=${message.content.slice(0, 150)}`,
       `reason=${evalResult.reason}`,

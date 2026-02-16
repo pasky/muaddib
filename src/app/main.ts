@@ -25,10 +25,6 @@ function parseAppArgs(argv: string[] = process.argv.slice(2)): AppArgs {
   return { configPath };
 }
 
-interface RunnableMonitor {
-  run(): Promise<void>;
-}
-
 export async function runMuaddibMain(argv: string[] = process.argv.slice(2)): Promise<void> {
   const args = parseAppArgs(argv);
   const runtimeLogger = new RuntimeLogWriter({
@@ -58,28 +54,14 @@ export async function runMuaddibMain(argv: string[] = process.argv.slice(2)): Pr
   }
 }
 
-function createMonitors(runtime: MuaddibRuntime): RunnableMonitor[] {
-  const monitors: RunnableMonitor[] = [];
-  // IRC
+function createMonitors(runtime: MuaddibRuntime): Array<{ run(): Promise<void> }> {
+  const monitors: Array<{ run(): Promise<void> }> = [];
   monitors.push(...IrcRoomMonitor.fromRuntime(runtime));
-
-  // Discord
   monitors.push(...DiscordRoomMonitor.fromRuntime(runtime));
-
-  // Slack
   monitors.push(...SlackRoomMonitor.fromRuntime(runtime));
-
   return monitors;
 }
 
-if (isExecutedAsMain()) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   await runMuaddibMain();
-}
-
-function isExecutedAsMain(): boolean {
-  const entry = process.argv[1];
-  if (!entry) {
-    return false;
-  }
-  return import.meta.url === pathToFileURL(entry).href;
 }

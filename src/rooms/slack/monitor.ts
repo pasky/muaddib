@@ -4,7 +4,7 @@ import { CONSOLE_LOGGER, RuntimeLogWriter, type Logger } from "../../app/logging
 import { appendAttachmentBlock, escapeRegExp, normalizeName, nowMonotonicSeconds, requireNonEmptyString, sleep } from "../../utils/index.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import { RoomMessageHandler } from "../command/message-handler.js";
-import type { RoomMessage } from "../message.js";
+import { type RoomMessage, roomArc } from "../message.js";
 import {
   sendWithRetryResult,
   type SendRetryEvent,
@@ -376,7 +376,7 @@ export class SlackRoomMonitor {
       return;
     }
 
-    const arc = `${message.serverTag}#${message.channelName}`;
+    const arc = roomArc(message);
     const typingThreadTs = message.threadId ?? event.messageTs;
     let typingIndicatorSet = false;
 

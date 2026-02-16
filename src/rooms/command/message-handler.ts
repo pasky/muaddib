@@ -15,7 +15,7 @@ import {
   type CommandExecutorLogger,
 } from "./command-executor.js";
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
-import type { RoomMessage } from "../message.js";
+import { type RoomMessage, roomArc } from "../message.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 
 // Re-export types that external consumers depend on
@@ -81,7 +81,7 @@ export class RoomMessageHandler {
     if (!options.isDirect) {
       this.logger.debug(
         "Handling passive message",
-        `arc=${message.serverTag}#${message.channelName}`,
+        `arc=${roomArc(message)}`,
         `nick=${message.nick}`,
       );
       await this.handlePassiveMessage(message, options.sendResponse);
@@ -90,7 +90,7 @@ export class RoomMessageHandler {
 
     this.logger.debug(
       "Handling direct command",
-      `arc=${message.serverTag}#${message.channelName}`,
+      `arc=${roomArc(message)}`,
       `nick=${message.nick}`,
     );
 
