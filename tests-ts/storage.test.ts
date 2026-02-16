@@ -2,6 +2,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
+import { CONSOLE_LOGGER } from "../src/app/logging.js";
 import { ChronicleStore } from "../src/chronicle/chronicle-store.js";
 import { ChronicleLifecycleTs } from "../src/chronicle/lifecycle.js";
 import { QuestRuntimeTs } from "../src/chronicle/quest-runtime.js";
@@ -217,6 +218,7 @@ describe("ChronicleStore", () => {
         paragraphs_per_chapter: 2,
       },
       modelAdapter,
+      logger: CONSOLE_LOGGER,
     });
 
     await lifecycle.appendParagraph("libera##test", '<quest id="quest-1">First operational note.</quest>');
@@ -323,6 +325,7 @@ describe("ChronicleStore", () => {
       },
       modelAdapter: { completeSimple: vi.fn(async () => makeAssistantText("summary")) } as any,
       questRuntime,
+      logger: CONSOLE_LOGGER,
     });
 
     await lifecycle.appendParagraph("libera##test", '<quest id="quest-1">Do the thing</quest>');
@@ -372,6 +375,7 @@ describe("AutoChroniclerTs", () => {
         model: "openai:gpt-4o-mini",
       },
       modelAdapter: { completeSimple: vi.fn(async () => makeAssistantText("summary")) } as any,
+      logger: CONSOLE_LOGGER,
     });
 
     const modelAdapter = { completeSimple: vi.fn(async () => makeAssistantText("should not be called")) } as any;
@@ -432,6 +436,7 @@ describe("AutoChroniclerTs", () => {
       modelAdapter: {
         completeSimple: vi.fn(async () => makeAssistantText("Chapter summary paragraph.")),
       } as any,
+      logger: CONSOLE_LOGGER,
     });
 
     const modelAdapter = { completeSimple: vi.fn(async () => makeAssistantText("Auto chronicled paragraph.")) } as any;

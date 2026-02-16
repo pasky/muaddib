@@ -2,8 +2,8 @@ import { CONSOLE_LOGGER, type Logger } from "../app/logging.js";
 import type { ChronicleStore, QuestRow } from "./chronicle-store.js";
 import { sleep } from "../utils/index.js";
 
-const QUEST_OPEN_RE = /<\s*quest\s+id="([^"]+)"\s*>/i;
-const QUEST_FINISHED_RE = /<\s*quest_finished\s+id="([^"]+)"\s*>/i;
+export const QUEST_OPEN_RE = /<\s*quest\s+id="([^"]+)"\s*>/i;
+export const QUEST_FINISHED_RE = /<\s*quest_finished\s+id="([^"]+)"\s*>/i;
 
 
 export interface QuestStepInput {
@@ -54,6 +54,9 @@ export class QuestRuntimeTs {
     this.appendParagraph = options.appendParagraph;
     this.cooldownSeconds = resolveCooldownSeconds(options.config.cooldownSeconds);
     this.allowedArcs = new Set(options.config.arcs ?? []);
+    if (this.allowedArcs.size === 0) {
+      this.logger.warn("Quest runtime: no arcs configured — quests will be allowed on all arcs.");
+    }
     this.runQuestStep =
       options.runQuestStep ??
       (async () => {
@@ -132,6 +135,8 @@ export class QuestRuntimeTs {
     }
   }
 
+  /** Runs heartbeat ticks in a loop. Sleeps before the first tick intentionally,
+   *  so quests don't fire immediately on startup before the system is fully ready. */
   private async heartbeatLoop(): Promise<void> {
     while (!this.heartbeatStopRequested) {
       await sleep(this.cooldownSeconds * 1000);
@@ -220,7 +225,7 @@ function extractParentQuestId(questId: string): string | null {
 
 function resolveCooldownSeconds(value: number): number {
   if (!Number.isFinite(value) || value <= 0) {
-    return 60;
+    throw new Error(`Invalid cooldownSeconds: ${value}`);
   }
 
   return value;

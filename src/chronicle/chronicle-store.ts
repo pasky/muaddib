@@ -1,5 +1,6 @@
 import { open, type Database } from "sqlite";
 import sqlite3 from "sqlite3";
+import { requireLastID, migrateAddColumn } from "../utils/index.js";
 
 export interface Chapter {
   id: number;
@@ -107,11 +108,7 @@ export class ChronicleStore {
       ON quests(parent_id);
     `);
 
-    const questColumns = await db.all<Array<{ name: string }>>("PRAGMA table_info(quests)");
-    const hasResumeAt = questColumns.some((column) => column.name === "resume_at");
-    if (!hasResumeAt) {
-      await db.exec("ALTER TABLE quests ADD COLUMN resume_at TEXT");
-    }
+    await migrateAddColumn(db, "quests", "resume_at", "TEXT");
   }
 
   async close(): Promise<void> {
@@ -154,7 +151,7 @@ export class ChronicleStore {
 
     const row = await db.get<ParagraphRow>(
       "SELECT id, chapter_id, ts, content FROM paragraphs WHERE id = ?",
-      Number(result.lastID ?? 0),
+      requireLastID(result),
     );
 
     if (!row) {
@@ -349,30 +346,12 @@ export class ChronicleStore {
       return `# Arc: ${arc} — No chapters yet\n\n(Empty)`;
     }
 
-    const db = this.requireDb();
-    const rows = await db.all<Array<{ ts: string; content: string }>>(
-      "SELECT ts, content FROM paragraphs WHERE chapter_id = ? ORDER BY ts ASC",
-      resolvedChapter.id,
-    );
-
-    const selectedRows = lastN && lastN > 0 ? rows.slice(-lastN) : rows;
-
     let title = `# Arc: ${arc} — Chapter ${resolvedChapter.id} (opened ${resolvedChapter.openedAt.split(".")[0]})`;
     if (resolvedChapter.closedAt) {
       title += `, closed ${resolvedChapter.closedAt.split(".")[0]}`;
     }
 
-    const lines = [title, "", "Paragraphs:"];
-    for (const row of selectedRows) {
-      const hhmm = row.ts.length >= 16 ? row.ts.slice(11, 16) : row.ts;
-      lines.push(`[${hhmm}] ${row.content}`);
-    }
-
-    if (selectedRows.length === 0) {
-      lines.push("(No paragraphs)");
-    }
-
-    return lines.join("\n");
+    return this.formatChapterParagraphs(resolvedChapter, lastN, title);
   }
 
   async renderChapterRelative(arc: string, relativeChapterId: number, lastN?: number): Promise<string> {
@@ -385,14 +364,6 @@ export class ChronicleStore {
       return `# Arc: ${arc} — No chapters at relative offset ${relativeChapterId}\n\n(Empty)`;
     }
 
-    const db = this.requireDb();
-    const rows = await db.all<Array<{ ts: string; content: string }>>(
-      "SELECT ts, content FROM paragraphs WHERE chapter_id = ? ORDER BY ts ASC",
-      resolvedChapter.id,
-    );
-
-    const selectedRows = lastN && lastN > 0 ? rows.slice(-lastN) : rows;
-
     const relativeDesc =
       relativeChapterId === 0
         ? "current"
@@ -402,6 +373,18 @@ export class ChronicleStore {
     if (resolvedChapter.closedAt) {
       title += `, closed ${resolvedChapter.closedAt.split(".")[0]}`;
     }
+
+    return this.formatChapterParagraphs(resolvedChapter, lastN, title);
+  }
+
+  private async formatChapterParagraphs(chapter: Chapter, lastN: number | undefined, title: string): Promise<string> {
+    const db = this.requireDb();
+    const rows = await db.all<Array<{ ts: string; content: string }>>(
+      "SELECT ts, content FROM paragraphs WHERE chapter_id = ? ORDER BY ts ASC",
+      chapter.id,
+    );
+
+    const selectedRows = lastN && lastN > 0 ? rows.slice(-lastN) : rows;
 
     const lines = [title, "", "Paragraphs:"];
     for (const row of selectedRows) {
@@ -424,7 +407,7 @@ export class ChronicleStore {
     }
 
     const result = await db.run("INSERT INTO arcs(name) VALUES (?)", arc);
-    return [Number(result.lastID ?? 0), true];
+    return [requireLastID(result), true];
   }
 
   private async getOpenChapter(arcId: number): Promise<Chapter | null> {
@@ -469,7 +452,7 @@ export class ChronicleStore {
       meta_json: string | null;
     }>(
       "SELECT id, arc_id, opened_at, closed_at, meta_json FROM chapters WHERE id = ?",
-      Number(result.lastID ?? 0),
+      requireLastID(result),
     );
 
     if (!row) {
@@ -489,54 +472,46 @@ export class ChronicleStore {
     const db = this.requireDb();
     const [arcId] = await this.getOrCreateArc(arc);
 
-    const rows = await db.all<
-      Array<{
-        id: number;
-        arc_id: number;
-        opened_at: string;
-        closed_at: string | null;
-        meta_json: string | null;
-      }>
-    >(
-      `
-      SELECT id, arc_id, opened_at, closed_at, meta_json
-      FROM chapters
-      WHERE arc_id = ?
-      ORDER BY opened_at ASC
-      `,
+    // Find the current chapter (open, or latest closed) then offset from it in SQL.
+    // Uses a CTE to rank chapters by opened_at, find the current chapter's rank,
+    // then select the one at rank + relativeChapterId.
+    const row = await db.get<{
+      id: number;
+      arc_id: number;
+      opened_at: string;
+      closed_at: string | null;
+      meta_json: string | null;
+    }>(
+      `WITH ranked AS (
+         SELECT id, arc_id, opened_at, closed_at, meta_json,
+                ROW_NUMBER() OVER (ORDER BY opened_at ASC) AS rn
+         FROM chapters
+         WHERE arc_id = ?
+       ),
+       current_chapter AS (
+         SELECT rn FROM ranked
+         WHERE closed_at IS NULL
+         UNION ALL
+         SELECT MAX(rn) FROM ranked
+         LIMIT 1
+       )
+       SELECT r.id, r.arc_id, r.opened_at, r.closed_at, r.meta_json
+       FROM ranked r, current_chapter c
+       WHERE r.rn = c.rn + ?`,
       arcId,
+      relativeChapterId,
     );
 
-    if (rows.length === 0) {
-      return null;
-    }
-
-    const open = await this.getOpenChapter(arcId);
-    const currentChapterId = open ? open.id : Number(rows[rows.length - 1].id);
-    const chapterIds = rows.map((row) => Number(row.id));
-    const currentIndex = chapterIds.indexOf(currentChapterId);
-
-    if (currentIndex < 0) {
-      return null;
-    }
-
-    const targetIndex = currentIndex + relativeChapterId;
-    if (targetIndex < 0 || targetIndex >= chapterIds.length) {
-      return null;
-    }
-
-    const targetChapterId = chapterIds[targetIndex];
-    const targetRow = rows.find((row) => Number(row.id) === targetChapterId);
-    if (!targetRow) {
+    if (!row) {
       return null;
     }
 
     return {
-      id: Number(targetRow.id),
-      arcId: Number(targetRow.arc_id),
-      openedAt: String(targetRow.opened_at),
-      closedAt: targetRow.closed_at,
-      metaJson: targetRow.meta_json,
+      id: Number(row.id),
+      arcId: Number(row.arc_id),
+      openedAt: String(row.opened_at),
+      closedAt: row.closed_at,
+      metaJson: row.meta_json,
     };
   }
 

@@ -1,6 +1,7 @@
 import { open, type Database } from "sqlite";
 import sqlite3 from "sqlite3";
 
+import { requireLastID, migrateAddColumn } from "../utils/index.js";
 import type { RoomMessage } from "../rooms/message.js";
 
 export type ChatRole = "user" | "assistant";
@@ -165,7 +166,7 @@ export class ChatHistoryStore {
       input.triggerMessageId ?? null,
     );
 
-    return Number(result.lastID ?? 0);
+    return requireLastID(result);
   }
 
   async updateLlmCallResponse(callId: number, responseMessageId: number): Promise<void> {
@@ -211,7 +212,7 @@ export class ChatHistoryStore {
       message.responseThreadId ?? message.threadId ?? null,
     );
 
-    return Number(result.lastID ?? 0);
+    return requireLastID(result);
   }
 
   async getContextForMessage(
@@ -543,33 +544,17 @@ export class ChatHistoryStore {
 
   private async migrateChatMessagesTable(): Promise<void> {
     const db = this.requireDb();
-    const columns = await db.all<Array<{ name: string }>>("PRAGMA table_info(chat_messages)");
-    const names = new Set(columns.map((column) => column.name));
-
-    if (!names.has("mode")) {
-      await db.exec("ALTER TABLE chat_messages ADD COLUMN mode TEXT NULL");
-    }
-    if (!names.has("llm_call_id")) {
-      await db.exec("ALTER TABLE chat_messages ADD COLUMN llm_call_id INTEGER NULL");
-    }
-    if (!names.has("platform_id")) {
-      await db.exec("ALTER TABLE chat_messages ADD COLUMN platform_id TEXT NULL");
-    }
-    if (!names.has("thread_id")) {
-      await db.exec("ALTER TABLE chat_messages ADD COLUMN thread_id TEXT NULL");
-    }
+    await migrateAddColumn(db, "chat_messages", "mode", "TEXT NULL");
+    await migrateAddColumn(db, "chat_messages", "llm_call_id", "INTEGER NULL");
+    await migrateAddColumn(db, "chat_messages", "platform_id", "TEXT NULL");
+    await migrateAddColumn(db, "chat_messages", "thread_id", "TEXT NULL");
   }
 
   private async migrateLlmCallsTable(): Promise<void> {
     const db = this.requireDb();
-    const columns = await db.all<Array<{ name: string }>>("PRAGMA table_info(llm_calls)");
-    const names = new Set(columns.map((column) => column.name));
-
-    if (!names.has("trigger_message_id")) {
-      await db.exec("ALTER TABLE llm_calls ADD COLUMN trigger_message_id INTEGER NULL");
-    }
-    if (!names.has("response_message_id")) {
-      await db.exec("ALTER TABLE llm_calls ADD COLUMN response_message_id INTEGER NULL");
+    await migrateAddColumn(db, "llm_calls", "trigger_message_id", "INTEGER NULL");
+    const added = await migrateAddColumn(db, "llm_calls", "response_message_id", "INTEGER NULL");
+    if (added) {
       await db.exec(`
         UPDATE llm_calls SET response_message_id = (
           SELECT id FROM chat_messages WHERE llm_call_id = llm_calls.id LIMIT 1

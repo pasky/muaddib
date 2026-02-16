@@ -5,6 +5,7 @@ import {
   ChronicleStore,
   type Chapter,
 } from "./chronicle-store.js";
+import { QUEST_OPEN_RE, QUEST_FINISHED_RE } from "./quest-runtime.js";
 
 export interface ChronicleLifecycleConfig {
   model: string;
@@ -25,7 +26,7 @@ export interface ChronicleLifecycleTsOptions {
   config: ChronicleLifecycleConfig;
   modelAdapter: PiAiModelAdapter;
   questRuntime?: ChronicleQuestRuntimeHook;
-  logger?: Logger;
+  logger: Logger;
 }
 
 const DEFAULT_PARAGRAPHS_PER_CHAPTER = 3;
@@ -43,7 +44,7 @@ export class ChronicleLifecycleTs implements ChronicleLifecycle {
   private readonly config: ChronicleLifecycleConfig;
   private readonly modelAdapter: PiAiModelAdapter;
   private readonly questRuntime: ChronicleQuestRuntimeHook | null;
-  private readonly logger?: Logger;
+  private readonly logger: Logger;
   private readonly arcQueues = new Map<string, Promise<void>>();
 
   constructor(options: ChronicleLifecycleTsOptions) {
@@ -102,12 +103,10 @@ export class ChronicleLifecycleTs implements ChronicleLifecycle {
   }
 
   private collectUnresolvedQuestParagraphs(chapterParagraphs: string[]): string[] {
-    const questRegex = /<\s*quest\s+id="([^"]+)"\s*>/i;
-    const finishedRegex = /<\s*quest_finished\s+id="([^"]+)"\s*>/i;
     const latestByQuestId = new Map<string, { paragraph: string; isFinished: boolean }>();
 
     for (const paragraph of chapterParagraphs) {
-      const finishedMatch = finishedRegex.exec(paragraph);
+      const finishedMatch = QUEST_FINISHED_RE.exec(paragraph);
       if (finishedMatch) {
         latestByQuestId.set(finishedMatch[1], {
           paragraph,
@@ -116,7 +115,7 @@ export class ChronicleLifecycleTs implements ChronicleLifecycle {
         continue;
       }
 
-      const questMatch = questRegex.exec(paragraph);
+      const questMatch = QUEST_OPEN_RE.exec(paragraph);
       if (questMatch) {
         latestByQuestId.set(questMatch[1], {
           paragraph,
@@ -177,9 +176,13 @@ export class ChronicleLifecycleTs implements ChronicleLifecycle {
   }
 
   private resolveParagraphLimit(): number {
+    if (this.config.paragraphs_per_chapter == null) {
+      return DEFAULT_PARAGRAPHS_PER_CHAPTER;
+    }
+
     const parsed = Number(this.config.paragraphs_per_chapter);
     if (!Number.isFinite(parsed) || parsed <= 0) {
-      return DEFAULT_PARAGRAPHS_PER_CHAPTER;
+      throw new Error(`Invalid paragraphs_per_chapter: ${this.config.paragraphs_per_chapter}`);
     }
 
     return Math.trunc(parsed);

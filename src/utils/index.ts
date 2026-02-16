@@ -66,6 +66,36 @@ export function nowMonotonicSeconds(): number {
   return Date.now() / 1_000;
 }
 
+/**
+ * Extract the auto-increment row ID from an INSERT result, throwing if absent.
+ * Prevents silent use of 0 as a row ID when lastID is unexpectedly nullish.
+ */
+export function requireLastID(result: { lastID?: number | bigint }): number {
+  const id = result.lastID;
+  if (id == null) {
+    throw new Error("INSERT did not return a lastID");
+  }
+  return Number(id);
+}
+
+/**
+ * Add a column to a table if it doesn't already exist.
+ * Uses PRAGMA table_info to check, then ALTER TABLE to add.
+ */
+export async function migrateAddColumn(
+  db: { all: <T>(sql: string) => Promise<T>; exec: (sql: string) => Promise<void> },
+  table: string,
+  column: string,
+  type: string,
+): Promise<boolean> {
+  const columns = await db.all<Array<{ name: string }>>(`PRAGMA table_info(${table})`);
+  if (columns.some((c) => c.name === column)) {
+    return false;
+  }
+  await db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  return true;
+}
+
 /** Combine message content with an attachment block, handling empty cases. */
 export function appendAttachmentBlock(content: string, attachmentBlock: string): string {
   if (!attachmentBlock) {
