@@ -35,6 +35,7 @@ interface CommandLike {
     message: RoomMessage,
     options: { isDirect: boolean; sendResponse?: (text: string) => Promise<void> },
   ): Promise<{ response: string | null } | null>;
+  cancelProactive?(): void;
 }
 
 export interface IrcRoomMonitorOptions {
@@ -145,6 +146,8 @@ export class IrcRoomMonitor {
         break;
       }
     }
+
+    this.options.commandHandler.cancelProactive?.();
 
     if (inFlightEvents.size > 0) {
       await Promise.allSettled([...inFlightEvents]);
@@ -312,5 +315,5 @@ function normalizeSenderAndMessage(nick: string, message: string): [string, stri
 }
 
 function defaultResponseCleaner(text: string): string {
-  return text.replace(/\n/g, "; ").trim();
+  return text.replace(/\n/g, "; ").trim() || text;
 }

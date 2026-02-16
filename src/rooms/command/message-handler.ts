@@ -84,6 +84,11 @@ export class RoomMessageHandler {
     }
   }
 
+  /** Cancel all proactive sessions. Safe to call multiple times. */
+  cancelProactive(): void {
+    this.proactiveRunner?.cancelAll();
+  }
+
   async handleIncomingMessage(
     message: RoomMessage,
     options: { isDirect: boolean; sendResponse?: (text: string) => Promise<void> },

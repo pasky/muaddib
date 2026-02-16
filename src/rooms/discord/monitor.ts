@@ -17,6 +17,7 @@ interface CommandLike {
     message: RoomMessage,
     options: { isDirect: boolean; sendResponse?: (text: string) => Promise<void> },
   ): Promise<{ response: string | null } | null>;
+  cancelProactive?(): void;
 }
 
 export interface DiscordAttachment {
@@ -224,6 +225,7 @@ export class DiscordRoomMonitor {
         await sleep((reconnect?.delayMs ?? 1_000));
       }
     } finally {
+      this.options.commandHandler.cancelProactive?.();
       this.logger.info("Discord monitor stopped.");
     }
   }

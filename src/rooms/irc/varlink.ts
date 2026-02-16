@@ -7,6 +7,10 @@ import { AsyncQueue } from "../../utils/async-queue.js";
 export class NullTerminatedJsonParser {
   private buffer = "";
 
+  reset(): void {
+    this.buffer = "";
+  }
+
   push(chunk: string): Array<Record<string, unknown>> {
     this.buffer += chunk;
     const frames: Array<Record<string, unknown>> = [];
@@ -45,6 +49,9 @@ export class BaseVarlinkClient {
     if (this.socket && !this.socket.destroyed) {
       return;
     }
+
+    this.parser.reset();
+    this.responses.drain(null);
 
     await new Promise<void>((resolve, reject) => {
       const socket = createConnection({ path: this.socketPath });

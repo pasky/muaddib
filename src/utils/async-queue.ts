@@ -2,6 +2,14 @@ export class AsyncQueue<T> {
   private readonly items: T[] = [];
   private readonly waiters: Array<(value: T) => void> = [];
 
+  /** Discard all queued items and cancel pending waiters (resolving them with the given sentinel). */
+  drain(sentinel: T): void {
+    this.items.length = 0;
+    for (const waiter of this.waiters.splice(0)) {
+      waiter(sentinel);
+    }
+  }
+
   push(item: T): void {
     const waiter = this.waiters.shift();
     if (waiter) {

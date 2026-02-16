@@ -115,6 +115,8 @@ export class ProactiveRunner {
   private readonly activeDebounces = new Set<string>();
   /** Active proactive agents keyed by channel key — any passive message can steer into these. */
   private readonly activeAgents = new Map<string, Agent>();
+  /** Abort controller for cancelling all running proactive sessions. */
+  private abortController = new AbortController();
 
   constructor(opts: {
     config: ProactiveConfig;
@@ -130,6 +132,16 @@ export class ProactiveRunner {
     this.logger = opts.logger;
     this.executor = opts.executor;
     this.resolver = opts.resolver;
+  }
+
+  /**
+   * Cancel all running proactive sessions (debounce waits and active agents).
+   */
+  cancelAll(): void {
+    this.abortController.abort();
+    this.abortController = new AbortController();
+    this.activeDebounces.clear();
+    this.activeAgents.clear();
   }
 
   /**
@@ -189,11 +201,16 @@ export class ProactiveRunner {
     const channelKey = CommandResolver.channelKey(message.serverTag, message.channelName);
 
     this.activeDebounces.add(channelKey);
+    const signal = this.abortController.signal;
     try {
       // ── Debounce loop: poll history for silence ──
-      while (true) {
+      while (!signal.aborted) {
         const pollStart = Date.now();
-        await sleep(debounceMs);
+        await sleep(debounceMs, signal);
+
+        if (signal.aborted) {
+          return;
+        }
 
         // If a command session started, bail — it takes priority
         if (hasActiveCommandSession()) {
