@@ -270,11 +270,11 @@ export class ProactiveRunner {
       return;
     }
 
+    const lastContext = context[context.length - 1];
     this.logger.info(
       "Interjecting proactively",
       `arc=${roomArc(message)}`,
-      `nick=${message.nick}`,
-      `message=${message.content.slice(0, 150)}`,
+      `lastMessage=${lastContext?.content.slice(0, 150) ?? "(empty)"}`,
       `reason=${evalResult.reason}`,
     );
 
