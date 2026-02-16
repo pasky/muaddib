@@ -197,53 +197,6 @@ export async function createE2EContext(): Promise<E2EContext> {
   return { tmpHome, history, sender: new FakeSender() };
 }
 
-// ── Fetch mock ──
-
-export interface FetchRoute {
-  /** URL substring to match against */
-  match: string;
-  /** Response factory */
-  handler: (url: string, init?: RequestInit) => Response;
-}
-
-export interface FetchMock {
-  calls: Array<{ url: string; init?: RequestInit }>;
-  install: () => void;
-  restore: () => void;
-}
-
-/**
- * Create a fetch mock that intercepts requests matching route URL substrings.
- * Unmatched requests pass through to the real fetch.
- */
-export function createFetchMock(routes: FetchRoute[]): FetchMock {
-  const originalFetch = globalThis.fetch;
-  const calls: FetchMock["calls"] = [];
-
-  return {
-    calls,
-    install() {
-      globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-        const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-
-        for (const route of routes) {
-          if (url.includes(route.match)) {
-            calls.push({ url, init });
-            return route.handler(url, init);
-          }
-        }
-
-        return originalFetch(input, init as any);
-      }) as typeof globalThis.fetch;
-    },
-    restore() {
-      globalThis.fetch = originalFetch;
-    },
-  };
-}
-
-// ── Runtime / monitor construction ──
-
 export function buildRuntime(
   ctx: E2EContext,
   configData: Record<string, unknown>,

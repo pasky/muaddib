@@ -22,13 +22,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   type E2EContext,
-  type FetchMock,
   type StreamMockState,
   baseCommandConfig,
   buildIrcMonitor,
   buildRuntime,
   createE2EContext,
-  createFetchMock,
   createStreamMockState,
   handleStreamSimpleCall,
   resetStreamMock,
@@ -78,24 +76,34 @@ const FAKE_OPENROUTER_RESPONSE = {
 
 describe("E2E: Image generation pipeline", () => {
   let ctx: E2EContext;
-  let fetchMock: FetchMock;
+  let fetchCalls: Array<{ url: string; init: RequestInit }>;
+  let originalFetch: typeof globalThis.fetch;
 
   beforeEach(async () => {
     ctx = await createE2EContext();
     resetStreamMock(mockState);
+    fetchCalls = [];
 
-    fetchMock = createFetchMock([{
-      match: "openrouter.ai",
-      handler: () => new Response(JSON.stringify(FAKE_OPENROUTER_RESPONSE), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    }]);
-    fetchMock.install();
+    // Mock global fetch for OpenRouter calls
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+
+      if (url.includes("openrouter.ai")) {
+        fetchCalls.push({ url, init: init! });
+        return new Response(JSON.stringify(FAKE_OPENROUTER_RESPONSE), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // Pass through anything else
+      return originalFetch(input, init as any);
+    }) as typeof globalThis.fetch;
   });
 
   afterEach(async () => {
-    fetchMock.restore();
+    globalThis.fetch = originalFetch;
     await ctx.history.close();
     await rm(ctx.tmpHome, { recursive: true, force: true });
   });
@@ -155,15 +163,15 @@ describe("E2E: Image generation pipeline", () => {
     });
 
     // ── Verify fetch was called correctly ──
-    expect(fetchMock.calls).toHaveLength(1);
-    const call = fetchMock.calls[0];
+    expect(fetchCalls).toHaveLength(1);
+    const call = fetchCalls[0];
     expect(call.url).toBe("https://openrouter.ai/api/v1/chat/completions");
-    expect(call.init!.method).toBe("POST");
-    expect(call.init!.headers).toMatchObject({
+    expect(call.init.method).toBe("POST");
+    expect(call.init.headers).toMatchObject({
       Authorization: "Bearer sk-fake-openrouter-key",
       "Content-Type": "application/json",
     });
-    const body = JSON.parse(call.init!.body as string);
+    const body = JSON.parse(call.init.body as string);
     expect(body.model).toBe("some-image-model");
     expect(body.messages[0].content[0]).toEqual({ type: "text", text: "a red pixel" });
     expect(body.modalities).toEqual(["image", "text"]);
