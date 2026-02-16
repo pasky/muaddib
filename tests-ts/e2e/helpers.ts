@@ -197,12 +197,60 @@ export async function createE2EContext(): Promise<E2EContext> {
   return { tmpHome, history, sender: new FakeSender() };
 }
 
+/**
+ * Build a base E2E config with the shared rooms/providers skeleton,
+ * deep-merged with scenario-specific overrides.
+ */
+export function baseE2EConfig(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  const base: Record<string, unknown> = {
+    providers: {
+      openai: { apiKey: "sk-fake-openai-key" },
+    },
+    rooms: {
+      common: { command: baseCommandConfig() },
+      irc: {
+        command: { historySize: 40 },
+        varlink: { socketPath: "/tmp/muaddib-e2e-fake.sock" },
+      },
+    },
+  };
+  return deepMerge(base, overrides);
+}
+
+function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...target };
+  for (const key of Object.keys(source)) {
+    if (isPlainObject(result[key]) && isPlainObject(source[key])) {
+      result[key] = deepMerge(result[key] as Record<string, unknown>, source[key] as Record<string, unknown>);
+    } else {
+      result[key] = source[key];
+    }
+  }
+  return result;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Extract API keys from `providers.*.apiKey` in config data.
+ */
+function extractApiKeys(configData: Record<string, unknown>): Record<string, string> {
+  const providers = configData.providers as Record<string, { apiKey?: string }> | undefined;
+  if (!providers) return {};
+  const keys: Record<string, string> = {};
+  for (const [name, cfg] of Object.entries(providers)) {
+    if (cfg.apiKey) keys[name] = cfg.apiKey;
+  }
+  return keys;
+}
+
 export function buildRuntime(
   ctx: E2EContext,
   configData: Record<string, unknown>,
-  apiKeys?: Record<string, string>,
 ): MuaddibRuntime {
-  const keys = apiKeys ?? { openai: "sk-fake-openai-key" };
+  const keys = extractApiKeys(configData);
   return {
     config: MuaddibConfig.inMemory(configData),
     history: ctx.history,

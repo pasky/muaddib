@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type E2EContext,
   type StreamMockState,
-  baseCommandConfig,
+  baseE2EConfig,
   buildIrcMonitor,
   buildRuntime,
   createE2EContext,
@@ -116,9 +116,8 @@ describe("E2E: Oracle with nested web_search", () => {
       textStream("According to the oracle: Dune is a 1965 sci-fi novel by Frank Herbert about the desert planet Arrakis."),
     ];
 
-    const runtime = buildRuntime(ctx, {
+    const runtime = buildRuntime(ctx, baseE2EConfig({
       providers: {
-        openai: { apiKey: "sk-fake-openai-key" },
         anthropic: { apiKey: "sk-fake-anthropic-key" },
       },
       tools: {
@@ -130,17 +129,7 @@ describe("E2E: Oracle with nested web_search", () => {
           apiKey: "jina-fake-key",
         },
       },
-      rooms: {
-        common: { command: baseCommandConfig() },
-        irc: {
-          command: { historySize: 40 },
-          varlink: { socketPath: "/tmp/muaddib-e2e-fake.sock" },
-        },
-      },
-    }, {
-      openai: "sk-fake-openai-key",
-      anthropic: "sk-fake-anthropic-key",
-    });
+    }));
 
     const monitor = buildIrcMonitor(runtime, ctx.sender);
 

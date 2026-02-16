@@ -20,7 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type E2EContext,
   type StreamMockState,
-  baseCommandConfig,
+  baseE2EConfig,
   buildIrcMonitor,
   buildRuntime,
   createE2EContext,
@@ -69,25 +69,14 @@ describe("E2E: Refusal → fallback → annotated response", () => {
       textStream("The answer to your question is 42."),
     ];
 
-    const runtime = buildRuntime(ctx, {
+    const runtime = buildRuntime(ctx, baseE2EConfig({
       providers: {
-        openai: { apiKey: "sk-fake-openai-key" },
         anthropic: { apiKey: "sk-fake-anthropic-key" },
       },
       router: {
         refusalFallbackModel: "anthropic:claude-3-5-sonnet-20241022",
       },
-      rooms: {
-        common: { command: baseCommandConfig() },
-        irc: {
-          command: { historySize: 40 },
-          varlink: { socketPath: "/tmp/muaddib-e2e-fake.sock" },
-        },
-      },
-    }, {
-      openai: "sk-fake-openai-key",
-      anthropic: "sk-fake-anthropic-key",
-    });
+    }));
 
     const monitor = buildIrcMonitor(runtime, ctx.sender);
 

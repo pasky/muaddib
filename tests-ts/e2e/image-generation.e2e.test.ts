@@ -23,7 +23,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type E2EContext,
   type StreamMockState,
-  baseCommandConfig,
+  baseE2EConfig,
   buildIrcMonitor,
   buildRuntime,
   createE2EContext,
@@ -125,9 +125,8 @@ describe("E2E: Image generation pipeline", () => {
       textStream(`Here is your image: ${artifactsUrl}/?generated.png`),
     ];
 
-    const runtime = buildRuntime(ctx, {
+    const runtime = buildRuntime(ctx, baseE2EConfig({
       providers: {
-        openai: { apiKey: "sk-fake-openai-key" },
         openrouter: { apiKey: "sk-fake-openrouter-key" },
       },
       tools: {
@@ -139,17 +138,7 @@ describe("E2E: Image generation pipeline", () => {
           model: "openrouter:some-image-model",
         },
       },
-      rooms: {
-        common: { command: baseCommandConfig() },
-        irc: {
-          command: { historySize: 40 },
-          varlink: { socketPath: "/tmp/muaddib-e2e-fake.sock" },
-        },
-      },
-    }, {
-      openai: "sk-fake-openai-key",
-      openrouter: "sk-fake-openrouter-key",
-    });
+    }));
 
     const monitor = buildIrcMonitor(runtime, ctx.sender);
 
