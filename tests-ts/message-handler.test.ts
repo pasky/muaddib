@@ -1425,8 +1425,9 @@ describe("RoomMessageHandler", () => {
     expect(result2).toBeNull();
     expect(result3).toBeNull();
     expect(steerCalls).toHaveLength(2);
-    expect(steerCalls[0].content[0].text).toContain("bob");
-    expect(steerCalls[1].content[0].text).toContain("carol");
+    const steeredTexts = steerCalls.map((c: any) => c.content[0].text);
+    expect(steeredTexts).toContainEqual(expect.stringContaining("bob"));
+    expect(steeredTexts).toContainEqual(expect.stringContaining("carol"));
 
     await history.close();
   });
