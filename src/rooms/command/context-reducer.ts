@@ -68,7 +68,7 @@ export class ContextReducerTs implements ContextReducer {
         {
           callType: "context_reducer",
           logger: this.logger,
-          streamOptions: { maxTokens: 2_048 },
+          streamOptions: { maxTokens: 2_048, reasoning: "low" },
         },
       );
 
