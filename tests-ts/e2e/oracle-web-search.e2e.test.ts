@@ -16,11 +16,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   type E2EContext,
+  type FetchMock,
   type StreamMockState,
   baseCommandConfig,
   buildIrcMonitor,
   buildRuntime,
   createE2EContext,
+  createFetchMock,
   createStreamMockState,
   handleStreamSimpleCall,
   resetStreamMock,
@@ -58,33 +60,25 @@ Description: The Dune universe is the setting of the Dune novels.`;
 
 describe("E2E: Oracle with nested web_search", () => {
   let ctx: E2EContext;
-  let fetchCalls: Array<{ url: string; init?: RequestInit }>;
-  let originalFetch: typeof globalThis.fetch;
+  let fetchMock: FetchMock;
 
   beforeEach(async () => {
     ctx = await createE2EContext();
     resetStreamMock(mockState);
     resetWebRateLimiters();
-    fetchCalls = [];
 
-    originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
-
-      if (url.startsWith("https://s.jina.ai/")) {
-        fetchCalls.push({ url, init });
-        return new Response(FAKE_JINA_SEARCH_RESPONSE, {
-          status: 200,
-          headers: { "Content-Type": "text/plain" },
-        });
-      }
-
-      return originalFetch(input, init as any);
-    }) as typeof globalThis.fetch;
+    fetchMock = createFetchMock([{
+      match: "s.jina.ai",
+      handler: () => new Response(FAKE_JINA_SEARCH_RESPONSE, {
+        status: 200,
+        headers: { "Content-Type": "text/plain" },
+      }),
+    }]);
+    fetchMock.install();
   });
 
   afterEach(async () => {
-    globalThis.fetch = originalFetch;
+    fetchMock.restore();
     await ctx.history.close();
     await rm(ctx.tmpHome, { recursive: true, force: true });
   });
@@ -154,8 +148,8 @@ describe("E2E: Oracle with nested web_search", () => {
     });
 
     // ── Verify Jina web search fetch was called ──
-    expect(fetchCalls).toHaveLength(1);
-    const jinaCall = fetchCalls[0];
+    expect(fetchMock.calls).toHaveLength(1);
+    const jinaCall = fetchMock.calls[0];
     expect(jinaCall.url).toContain("https://s.jina.ai/?q=");
     expect(jinaCall.url).toContain(encodeURIComponent("Dune novel Frank Herbert"));
     expect(jinaCall.init?.headers).toMatchObject({
