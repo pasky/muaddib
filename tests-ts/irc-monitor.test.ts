@@ -10,30 +10,7 @@ import { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { PiAiModelAdapter } from "../src/models/pi-ai-model-adapter.js";
 import { IrcRoomMonitor } from "../src/rooms/irc/monitor.js";
 import type { MuaddibRuntime } from "../src/runtime.js";
-
-class FakeEventsClient {
-  async connect(): Promise<void> {}
-  async disconnect(): Promise<void> {}
-  async waitForEvents(): Promise<void> {}
-  async receiveResponse(): Promise<Record<string, unknown> | null> {
-    return null;
-  }
-}
-
-class FakeSender {
-  sent: Array<{ target: string; message: string; server: string }> = [];
-
-  async connect(): Promise<void> {}
-  async disconnect(): Promise<void> {}
-  async getServerNick(): Promise<string | null> {
-    return "muaddib";
-  }
-
-  async sendMessage(target: string, message: string, server: string): Promise<boolean> {
-    this.sent.push({ target, message, server });
-    return true;
-  }
-}
+import { FakeEventsClient, FakeSender, baseCommandConfig } from "./e2e/helpers.js";
 
 function createDeferred<T = void>() {
   let resolve: ((value: T | PromiseLike<T>) => void) | undefined;
@@ -47,29 +24,6 @@ function createDeferred<T = void>() {
     promise,
     resolve: resolve ?? (() => {}),
     reject: reject ?? (() => {}),
-  };
-}
-
-function baseCommandConfig() {
-  return {
-    historySize: 40,
-    defaultMode: "classifier:serious",
-    modes: {
-      serious: {
-        model: "openai:gpt-4o-mini",
-        prompt: "You are {mynick}",
-        triggers: {
-          "!s": {},
-        },
-      },
-    },
-    modeClassifier: {
-      model: "openai:gpt-4o-mini",
-      labels: {
-        EASY_SERIOUS: "!s",
-      },
-      fallbackLabel: "EASY_SERIOUS",
-    },
   };
 }
 
