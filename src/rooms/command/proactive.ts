@@ -132,11 +132,6 @@ export class ProactiveRunner {
     this.resolver = opts.resolver;
   }
 
-  /** Check whether a channel key is proactive-enabled. */
-  isProactiveChannel(channelKey: string): boolean {
-    return this.channels.has(channelKey);
-  }
-
   /**
    * Steer a passive message into an active proactive agent, or start a new
    * proactive session if none is running (and no debounce is active).
