@@ -234,7 +234,7 @@ describe("RoomMessageHandler", () => {
     expect(result.resolved.modeKey).toBe("serious");
     expect(result.model).toBe("openai:gpt-4o-mini");
     expect(runnerModel).toBe("openai:gpt-4o-mini");
-    expect(runnerPrompt).toBe("hello there");
+    expect(runnerPrompt).toBe("<alice> hello there");
     expect(runnerThinkingLevel).toBe("medium");
     expect(runnerContextContents.some((entry) => entry.includes("!a hello there"))).toBe(false);
     expect(runnerContextContents.some((entry) => entry.includes("previous context"))).toBe(true);
@@ -596,7 +596,7 @@ describe("RoomMessageHandler", () => {
 
     expect(result.response).toBe("done");
     expect(contextReducer.reduce).toHaveBeenCalledTimes(1);
-    expect(runnerPrompt).toBe("reduce context please");
+    expect(runnerPrompt).toBe("<alice> reduce context please");
     expect(runnerContextContents).toEqual(["[10:00] <summary> reduced context"]);
     expect(runnerContextContents.some((entry) => entry.includes("previous context"))).toBe(false);
 
@@ -1942,8 +1942,8 @@ describe("RoomMessageHandler", () => {
     expect(runCount).toBe(2);
     expect(r1?.response).toBe("alice reply");
     expect(r2?.response).toBe("bob reply");
-    expect(prompts).toContain("alice question");
-    expect(prompts).toContain("bob question");
+    expect(prompts).toContain("<alice> alice question");
+    expect(prompts).toContain("<bob> bob question");
 
     await history.close();
   });

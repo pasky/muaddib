@@ -366,7 +366,7 @@ export class CommandExecutor {
     });
 
     const { responseText, usage, toolCallsCount } = await this.invokeAndPostProcess(
-      runner, message, resolved.queryText, runnerContext, tools, {
+      runner, message, `<${message.nick}> ${resolved.queryText}`, runnerContext, tools, {
         reasoningEffort: resolved.runtime.reasoningEffort,
         visionModel: resolved.runtime.visionModel ?? undefined,
       },
