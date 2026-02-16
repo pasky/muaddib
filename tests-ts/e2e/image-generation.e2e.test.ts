@@ -23,11 +23,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type E2EContext,
   type StreamMockState,
-  baseE2EConfig,
   buildIrcMonitor,
   buildRuntime,
   createE2EContext,
   createStreamMockState,
+  e2eConfig,
   handleStreamSimpleCall,
   resetStreamMock,
   textStream,
@@ -125,20 +125,12 @@ describe("E2E: Image generation pipeline", () => {
       textStream(`Here is your image: ${artifactsUrl}/?generated.png`),
     ];
 
-    const runtime = buildRuntime(ctx, baseE2EConfig({
-      providers: {
-        openrouter: { apiKey: "sk-fake-openrouter-key" },
-      },
-      tools: {
-        artifacts: {
-          path: artifactsPath,
-          url: artifactsUrl,
-        },
-        imageGen: {
-          model: "openrouter:some-image-model",
-        },
-      },
-    }));
+    const config = e2eConfig();
+    (config.tools as Record<string, unknown>).artifacts = {
+      path: artifactsPath,
+      url: artifactsUrl,
+    };
+    const runtime = buildRuntime(ctx, config);
 
     const monitor = buildIrcMonitor(runtime, ctx.sender);
 

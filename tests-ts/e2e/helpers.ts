@@ -198,13 +198,30 @@ export async function createE2EContext(): Promise<E2EContext> {
 }
 
 /**
- * Build a base E2E config with the shared rooms/providers skeleton,
- * deep-merged with scenario-specific overrides.
+ * Shared E2E config covering all scenarios. Unused keys are harmless —
+ * the agent only calls tools scripted via mockState.responses.
  */
-export function baseE2EConfig(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  const base: Record<string, unknown> = {
+export function e2eConfig(): Record<string, unknown> {
+  return {
     providers: {
       openai: { apiKey: "sk-fake-openai-key" },
+      anthropic: { apiKey: "sk-fake-anthropic-key" },
+      openrouter: { apiKey: "sk-fake-openrouter-key" },
+    },
+    router: {
+      refusalFallbackModel: "anthropic:claude-3-5-sonnet-20241022",
+    },
+    tools: {
+      oracle: {
+        model: "anthropic:claude-sonnet-4-20250514",
+        prompt: "You are a knowledgeable oracle. Answer queries thoroughly.",
+      },
+      jina: {
+        apiKey: "jina-fake-key",
+      },
+      imageGen: {
+        model: "openrouter:some-image-model",
+      },
     },
     rooms: {
       common: { command: baseCommandConfig() },
@@ -214,23 +231,6 @@ export function baseE2EConfig(overrides: Record<string, unknown> = {}): Record<s
       },
     },
   };
-  return deepMerge(base, overrides);
-}
-
-function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): Record<string, unknown> {
-  const result = { ...target };
-  for (const key of Object.keys(source)) {
-    if (isPlainObject(result[key]) && isPlainObject(source[key])) {
-      result[key] = deepMerge(result[key] as Record<string, unknown>, source[key] as Record<string, unknown>);
-    } else {
-      result[key] = source[key];
-    }
-  }
-  return result;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**

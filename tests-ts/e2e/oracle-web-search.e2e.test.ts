@@ -17,11 +17,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type E2EContext,
   type StreamMockState,
-  baseE2EConfig,
   buildIrcMonitor,
   buildRuntime,
   createE2EContext,
   createStreamMockState,
+  e2eConfig,
   handleStreamSimpleCall,
   resetStreamMock,
   textStream,
@@ -116,20 +116,7 @@ describe("E2E: Oracle with nested web_search", () => {
       textStream("According to the oracle: Dune is a 1965 sci-fi novel by Frank Herbert about the desert planet Arrakis."),
     ];
 
-    const runtime = buildRuntime(ctx, baseE2EConfig({
-      providers: {
-        anthropic: { apiKey: "sk-fake-anthropic-key" },
-      },
-      tools: {
-        oracle: {
-          model: "anthropic:claude-sonnet-4-20250514",
-          prompt: "You are a knowledgeable oracle. Answer queries thoroughly.",
-        },
-        jina: {
-          apiKey: "jina-fake-key",
-        },
-      },
-    }));
+    const runtime = buildRuntime(ctx, e2eConfig());
 
     const monitor = buildIrcMonitor(runtime, ctx.sender);
 
