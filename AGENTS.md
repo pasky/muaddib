@@ -7,7 +7,7 @@
 - Build runtime: `npm run build`
 - Any change should be accompanied with tests update. (Always prefer updating existing unit tests over adding new ones.)
 - Any change where viable should be tested by actually running the CLI e2e test: `MUADDIB_HOME=. npm run cli:message -- --message "your message here"`
-- Run linting/typecheck/etc. via pre-commit where configured.
+- **Rely on pre-commit hooks** for typecheck/tests/lint — don't run them manually before committing unless you need to debug a specific failure. The pre-commit pipeline runs typecheck, tests, lint, and build automatically on `git commit`.
 - Python runtime/tests are deprecated and auxiliary; do not use them as the primary validation path.
 - You must test and commit your work once finished. Never respond with "Tests not run (not requested)."
 - NEVER use `git add -A` blindly, there may be untracked files that must not be committed; use `git add -u` instead
