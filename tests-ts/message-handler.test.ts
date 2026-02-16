@@ -88,10 +88,15 @@ function createHandler(options: {
       ...(options.chronicleStore ? { chronicleStore: options.chronicleStore } : {}),
     } as NonNullable<typeof runtime.chronicle>;
   }
+  if (options.modelAdapter) {
+    runtime.modelAdapter = options.modelAdapter as any;
+  }
   if (options.logger) {
     runtime.logger.getLogger = () => options.logger as any;
   }
 
+  // Handler must be constructed after runtime mutations so CommandExecutor
+  // and ProactiveRunner capture the overridden values.
   return new RoomMessageHandler(runtime, "irc", {
     runnerFactory: options.runnerFactory,
     rateLimiter: options.rateLimiter,
@@ -1708,6 +1713,180 @@ describe("RoomMessageHandler", () => {
     expect(sent).toContain("command response");
     expect(runnerPrompts.some(p => p.includes("direct question"))).toBe(true);
 
+    await history.close();
+  });
+
+  it("passive messages steer into running proactive agent session", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const proactiveRoomConfig = {
+      ...roomConfig,
+      proactive: {
+        interjecting: ["libera##test"],
+        debounceSeconds: 0.05,
+        historySize: 10,
+        rateLimit: 10,
+        ratePeriod: 60,
+        interjectThreshold: 1,
+        models: {
+          validation: ["openai:gpt-4o-mini"],
+          serious: "openai:gpt-4o-mini",
+        },
+        prompts: {
+          interject: "Score: {message}",
+          seriousExtra: "",
+        },
+      },
+    };
+
+    const agentStarted = createDeferred<void>();
+    const releaseAgent = createDeferred<void>();
+    const steeredMessages: string[] = [];
+
+    // Fake agent that records steered messages
+    const fakeAgent = {
+      steer(msg: { content: Array<{ type: string; text: string }> }) {
+        const text = msg.content[0]?.text ?? "";
+        steeredMessages.push(text);
+      },
+    };
+
+    const handler = createHandler({
+      roomConfig: proactiveRoomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: (input) => ({
+        prompt: async () => {
+          // Fire onAgentCreated to register the proactive agent
+          input.onAgentCreated?.(fakeAgent as any);
+          agentStarted.resolve();
+          await releaseAgent.promise;
+          return makeRunnerResult("proactive response");
+        },
+      }),
+      modelAdapter: {
+        completeSimple: async () => ({
+          content: [{ type: "text", text: "Score: 9/10 - very interesting" }],
+        }),
+      },
+    });
+
+    // Seed a message so proactive has context
+    await history.addMessage(makeMessage("seed message"));
+
+    // Passive message triggers proactive debounce + eval + agent
+    const passivePromise = handler.handleIncomingMessage(makeMessage("trigger chat"), {
+      isDirect: false,
+    });
+
+    // Wait for the proactive agent to start
+    await agentStarted.promise;
+
+    // Send more passive messages from different nicks — should steer into proactive agent
+    await handler.handleIncomingMessage(
+      { ...makeMessage("bob says hi"), nick: "bob" },
+      { isDirect: false },
+    );
+    await handler.handleIncomingMessage(
+      { ...makeMessage("carol chimes in"), nick: "carol" },
+      { isDirect: false },
+    );
+
+    expect(steeredMessages).toEqual([
+      "<bob> bob says hi",
+      "<carol> carol chimes in",
+    ]);
+
+    // Release the agent and let the proactive session finish
+    releaseAgent.resolve();
+    await passivePromise;
+    // Give the fire-and-forget proactive pipeline time to complete cleanup
+    await new Promise((r) => setTimeout(r, 100));
+
+    // After proactive session ends, passive messages should no longer steer
+    steeredMessages.length = 0;
+    await handler.handleIncomingMessage(
+      { ...makeMessage("late message"), nick: "dave" },
+      { isDirect: false },
+    );
+    expect(steeredMessages).toEqual([]);
+
+    await history.close();
+  });
+
+  it("commands are not blocked by running proactive session", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const proactiveRoomConfig = {
+      ...roomConfig,
+      proactive: {
+        interjecting: ["libera##test"],
+        debounceSeconds: 0.05,
+        historySize: 10,
+        rateLimit: 10,
+        ratePeriod: 60,
+        interjectThreshold: 1,
+        models: {
+          validation: ["openai:gpt-4o-mini"],
+          serious: "openai:gpt-4o-mini",
+        },
+        prompts: {
+          interject: "Score: {message}",
+          seriousExtra: "",
+        },
+      },
+    };
+
+    const agentStarted = createDeferred<void>();
+    const releaseAgent = createDeferred<void>();
+    let commandRunnerCalled = false;
+    let isProactiveCall = true;
+
+    const handler = createHandler({
+      roomConfig: proactiveRoomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: (input) => ({
+        prompt: async () => {
+          if (isProactiveCall) {
+            input.onAgentCreated?.({ steer() {} } as any);
+            agentStarted.resolve();
+            await releaseAgent.promise;
+            return makeRunnerResult("proactive response");
+          }
+          commandRunnerCalled = true;
+          input.onAgentCreated?.({ steer() {} } as any);
+          return makeRunnerResult("command response");
+        },
+      }),
+      modelAdapter: {
+        completeSimple: async () => ({
+          content: [{ type: "text", text: "Score: 9/10" }],
+        }),
+      },
+    });
+
+    await history.addMessage(makeMessage("seed message"));
+
+    // Start proactive session
+    const passivePromise = handler.handleIncomingMessage(makeMessage("trigger chat"), {
+      isDirect: false,
+    });
+    await agentStarted.promise;
+
+    // Command should still execute independently
+    isProactiveCall = false;
+    const result = await handler.handleIncomingMessage(makeMessage("!s direct question"), {
+      isDirect: true,
+    });
+
+    expect(commandRunnerCalled).toBe(true);
+    expect(result?.response).toBe("command response");
+
+    releaseAgent.resolve();
+    await passivePromise;
     await history.close();
   });
 

@@ -7,6 +7,7 @@
  * loop, evaluation, and delegation to the executor for actual interjection.
  */
 
+import type { Agent } from "@mariozechner/pi-agent-core";
 import type { ChatRole } from "../../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import type { ProactiveRoomConfig } from "../../config/muaddib-config.js";
@@ -112,6 +113,8 @@ export class ProactiveRunner {
   private readonly resolver: CommandResolver;
   /** Channel keys with an active debounce wait — prevents duplicate proactive sessions. */
   private readonly activeDebounces = new Set<string>();
+  /** Active proactive agents keyed by channel key — any passive message can steer into these. */
+  private readonly activeAgents = new Map<string, Agent>();
 
   constructor(opts: {
     config: ProactiveConfig;
@@ -134,29 +137,61 @@ export class ProactiveRunner {
     return this.channels.has(channelKey);
   }
 
-  /** Whether a debounce wait is already active for this channel key. */
-  hasActiveDebounce(channelKey: string): boolean {
-    return this.activeDebounces.has(channelKey);
+  /**
+   * Steer a passive message into an active proactive agent, or start a new
+   * proactive session if none is running (and no debounce is active).
+   *
+   * @returns true if the message was steered into an active proactive agent.
+   */
+  steerOrStart(
+    message: RoomMessage,
+    sendResponse: ((text: string) => Promise<void>) | undefined,
+    hasActiveCommandSession: () => boolean,
+  ): boolean {
+    const channelKey = CommandResolver.channelKey(message.serverTag, message.channelName);
+    if (!this.channels.has(channelKey)) {
+      return false;
+    }
+
+    // Steer into running proactive agent if one exists
+    const existing = this.activeAgents.get(channelKey);
+    if (existing) {
+      const content = `<${message.nick}> ${message.content}`;
+      existing.steer({
+        role: "user",
+        content: [{ type: "text", text: content }],
+        timestamp: Date.now(),
+      });
+      this.logger.debug(
+        "Steered passive message into proactive session",
+        `arc=${roomArc(message)}`,
+        `nick=${message.nick}`,
+      );
+      return true;
+    }
+
+    // No active agent — start debounce + eval if not already debouncing
+    if (!this.activeDebounces.has(channelKey)) {
+      this.runSession(message, sendResponse, hasActiveCommandSession)
+        .catch((error) => {
+          this.logger.error("Proactive session failed", error);
+        });
+    }
+
+    return false;
   }
 
   /**
    * Run a proactive session: debounce (poll history for silence),
    * evaluate, and possibly interject.
-   *
-   * @param hasActiveSession - callback to check if a command session is
-   *   currently running for this channel (if so, abort proactive).
    */
-  async runSession(
+  private async runSession(
     message: RoomMessage,
     sendResponse: ((text: string) => Promise<void>) | undefined,
-    hasActiveSession: () => boolean,
+    hasActiveCommandSession: () => boolean,
   ): Promise<void> {
     const debounceMs = this.config.debounceSeconds * 1000;
     const channelKey = CommandResolver.channelKey(message.serverTag, message.channelName);
-
-    if (this.activeDebounces.has(channelKey)) {
-      return; // Another debounce is already running for this channel
-    }
 
     this.activeDebounces.add(channelKey);
     try {
@@ -166,7 +201,7 @@ export class ProactiveRunner {
         await sleep(debounceMs);
 
         // If a command session started, bail — it takes priority
-        if (hasActiveSession()) {
+        if (hasActiveCommandSession()) {
           this.logger.debug("Proactive debounce aborted — command session active", `channel=${channelKey}`);
           return;
         }
@@ -182,15 +217,17 @@ export class ProactiveRunner {
       }
 
       // Silence achieved — evaluate and maybe interject.
-      await this.evaluateAndMaybeInterject(message, sendResponse);
+      await this.evaluateAndMaybeInterject(message, sendResponse, channelKey);
     } finally {
       this.activeDebounces.delete(channelKey);
+      this.activeAgents.delete(channelKey);
     }
   }
 
   private async evaluateAndMaybeInterject(
     message: RoomMessage,
     sendResponse: ((text: string) => Promise<void>) | undefined,
+    channelKey: string,
   ): Promise<void> {
     if (!this.rateLimiter.checkLimit()) {
       this.logger.debug(
@@ -252,6 +289,7 @@ export class ProactiveRunner {
       this.config,
       classifiedTrigger,
       classifiedRuntime,
+      (agent) => { this.activeAgents.set(channelKey, agent); },
     );
   }
 }

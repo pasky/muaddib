@@ -401,6 +401,7 @@ export class CommandExecutor {
     proactiveConfig: ProactiveConfig,
     classifiedTrigger: string,
     classifiedRuntime: { reasoningEffort: string; allowedTools: string[] | null },
+    onAgentCreated?: (agent: Agent) => void,
   ): Promise<boolean> {
     const { logger } = this;
     const modelSpec = proactiveConfig.models.serious;
@@ -424,6 +425,7 @@ export class CommandExecutor {
       systemPrompt,
       tools,
       logger,
+      onAgentCreated,
     });
 
     const lastMessage = context[context.length - 1];

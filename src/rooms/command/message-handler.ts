@@ -168,26 +168,19 @@ export class RoomMessageHandler {
   ): Promise<void> {
     const key = sessionKey(message);
 
-    // If there's an active agent session, steer the passive message into it
+    // If there's an active command session for this key, steer into it
     const existing = this.activeSessions.get(key);
     if (existing) {
       this.steerAgent(existing, message);
       return;
     }
 
-    // Check for proactive interjection
-    const channelKey = CommandResolver.channelKey(message.serverTag, message.channelName);
-    if (this.proactiveRunner?.isProactiveChannel(channelKey)) {
-      if (!this.proactiveRunner.hasActiveDebounce(channelKey)) {
-        this.proactiveRunner.runSession(
-          message,
-          sendResponse,
-          () => this.activeSessions.has(sessionKey(message)),
-        ).catch((error) => {
-          this.logger.error("Proactive session failed", error);
-        });
-      }
-    }
+    // Try proactive: steer into running proactive agent, or start new session
+    this.proactiveRunner?.steerOrStart(
+      message,
+      sendResponse,
+      () => this.activeSessions.has(sessionKey(message)),
+    );
 
     await this.executor.triggerAutoChronicler(message);
   }
