@@ -20,8 +20,8 @@ import type {
   CommandExecutorLogger,
 } from "./command-executor.js";
 import { pickModeModel } from "./command-executor.js";
-import type { SteeringQueue, QueuedInboundMessage, SteeringKey } from "./steering-queue.js";
 import { type RoomMessage, roomArc } from "../message.js";
+import { sleep } from "../../utils/index.js";
 
 // ── ProactiveConfig (resolved, all fields required) ──
 
@@ -110,7 +110,8 @@ export class ProactiveRunner {
   private readonly logger: CommandExecutorLogger;
   private readonly executor: CommandExecutor;
   private readonly resolver: CommandResolver;
-  private readonly steeringQueue: SteeringQueue;
+  /** Channel keys with an active debounce wait — prevents duplicate proactive sessions. */
+  private readonly activeDebounces = new Set<string>();
 
   constructor(opts: {
     config: ProactiveConfig;
@@ -118,7 +119,6 @@ export class ProactiveRunner {
     logger: CommandExecutorLogger;
     executor: CommandExecutor;
     resolver: CommandResolver;
-    steeringQueue: SteeringQueue;
   }) {
     this.config = opts.config;
     this.channels = new Set(opts.config.interjecting);
@@ -127,7 +127,6 @@ export class ProactiveRunner {
     this.logger = opts.logger;
     this.executor = opts.executor;
     this.resolver = opts.resolver;
-    this.steeringQueue = opts.steeringQueue;
   }
 
   /** Check whether a channel key is proactive-enabled. */
@@ -135,51 +134,63 @@ export class ProactiveRunner {
     return this.channels.has(channelKey);
   }
 
+  /** Whether a debounce wait is already active for this channel key. */
+  hasActiveDebounce(channelKey: string): boolean {
+    return this.activeDebounces.has(channelKey);
+  }
+
   /**
-   * Run a proactive session: debounce, evaluate, and possibly interject.
-   * Takes ownership of the steering session lifecycle.
+   * Run a proactive session: debounce (poll history for silence),
+   * evaluate, and possibly interject.
+   *
+   * @param hasActiveSession - callback to check if a command session is
+   *   currently running for this channel (if so, abort proactive).
    */
   async runSession(
-    steeringKey: SteeringKey,
-    triggerItem: QueuedInboundMessage,
+    message: RoomMessage,
+    sendResponse: ((text: string) => Promise<void>) | undefined,
+    hasActiveSession: () => boolean,
   ): Promise<void> {
     const debounceMs = this.config.debounceSeconds * 1000;
-    const contextDrainer = this.steeringQueue.createContextDrainer(steeringKey);
-    this.steeringQueue.finishItem(triggerItem);
+    const channelKey = CommandResolver.channelKey(message.serverTag, message.channelName);
 
+    if (this.activeDebounces.has(channelKey)) {
+      return; // Another debounce is already running for this channel
+    }
+
+    this.activeDebounces.add(channelKey);
     try {
-      // ── Debounce loop: wait for silence ──
+      // ── Debounce loop: poll history for silence ──
       while (true) {
-        const result = await this.steeringQueue.waitForNewItem(steeringKey, debounceMs);
+        const pollStart = Date.now();
+        await sleep(debounceMs);
 
-        if (result === "timeout") {
-          break;
-        }
-
-        if (this.steeringQueue.hasQueuedCommands(steeringKey)) {
-          // Command arrived — release session so it retries as new runner.
-          this.steeringQueue.releaseSession(steeringKey);
+        // If a command session started, bail — it takes priority
+        if (hasActiveSession()) {
+          this.logger.debug("Proactive debounce aborted — command session active", `channel=${channelKey}`);
           return;
         }
 
-        this.steeringQueue.drainSteeringContextMessages(steeringKey);
+        // Any new messages since we started waiting?
+        const newMessages = await this.runtime.history.countMessagesSince(
+          message.serverTag, message.channelName, pollStart,
+        );
+
+        if (newMessages === 0) {
+          break; // Silence achieved
+        }
       }
 
       // Silence achieved — evaluate and maybe interject.
-      await this.evaluateAndMaybeInterject(
-        triggerItem.message, triggerItem.sendResponse, contextDrainer,
-      );
-      this.steeringQueue.releaseSession(steeringKey);
-    } catch (error) {
-      this.steeringQueue.abortSession(steeringKey, error);
-      throw error;
+      await this.evaluateAndMaybeInterject(message, sendResponse);
+    } finally {
+      this.activeDebounces.delete(channelKey);
     }
   }
 
   private async evaluateAndMaybeInterject(
     message: RoomMessage,
     sendResponse: ((text: string) => Promise<void>) | undefined,
-    contextDrainer: () => Array<{ role: ChatRole; content: string }>,
   ): Promise<void> {
     if (!this.rateLimiter.checkLimit()) {
       this.logger.debug(
@@ -241,7 +252,6 @@ export class ProactiveRunner {
       this.config,
       classifiedTrigger,
       classifiedRuntime,
-      contextDrainer,
     );
   }
 }

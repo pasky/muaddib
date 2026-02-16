@@ -392,6 +392,28 @@ export class ChatHistoryStore {
     });
   }
 
+  /**
+   * Count messages in a channel since the given epoch timestamp (ms).
+   * Used by proactive debounce to detect silence.
+   */
+  async countMessagesSince(serverTag: string, channelName: string, sinceEpochMs: number): Promise<number> {
+    const db = this.requireDb();
+    const isoTimestamp = new Date(sinceEpochMs).toISOString();
+
+    const row = await db.get<{ count: number }>(
+      `
+      SELECT COUNT(*) as count FROM chat_messages
+      WHERE server_tag = ? AND channel_name = ?
+      AND timestamp >= ?
+      `,
+      serverTag,
+      channelName,
+      isoTimestamp,
+    );
+
+    return Number(row?.count ?? 0);
+  }
+
   async countRecentUnchronicled(serverTag: string, channelName: string, days = 7): Promise<number> {
     const db = this.requireDb();
 

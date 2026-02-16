@@ -1,11 +1,15 @@
 /**
  * Room message handler — session lifecycle coordinator.
  *
- * Owns the steering queue and dispatch between direct command vs passive message paths.
- * Delegates execution to CommandExecutor and proactive interjection lifecycle to ProactiveRunner.
+ * Maintains a map of active agent sessions keyed by (arc, nick, thread).
+ * When a message arrives for a key with an active session, it steers
+ * the running agent via agent.steer(). Otherwise, a new session is created.
+ *
+ * Delegates execution to CommandExecutor and proactive interjection to ProactiveRunner.
  */
 
-import { SteeringQueue } from "./steering-queue.js";
+import type { Agent } from "@mariozechner/pi-agent-core";
+
 import { CommandResolver } from "./resolver.js";
 import { buildProactiveConfig, ProactiveRunner } from "./proactive.js";
 import {
@@ -27,21 +31,31 @@ export type {
   CommandExecutorOverrides,
 } from "./command-executor.js";
 
+/** Key for session isolation: arc + nick (or arc + thread for threaded messages). */
+function sessionKey(message: RoomMessage): string {
+  const arc = roomArc(message);
+  if (message.threadId) {
+    return `${arc}\0*\0${message.threadId}`;
+  }
+  return `${arc}\0${message.nick.toLowerCase()}\0`;
+}
+
 /**
  * Shared room message handling path with proactive interjection support.
  *
- * Proactive interjection is integrated into the steering queue: passive messages
- * in proactive-enabled channels start a steering session with a debounce-until-
- * silence loop. Commands arriving during the debounce or during agent execution
- * are handled via the normal steering mechanism (queued and drained mid-flight).
+ * Active agent sessions are tracked in a map. Messages arriving for a key
+ * with a running session are steered into the agent via agent.steer().
+ * The session is removed from the map when execution completes.
  */
 export class RoomMessageHandler {
   readonly resolver: CommandResolver;
   private readonly executor: CommandExecutor;
-  private readonly steeringQueue: SteeringQueue;
   private readonly proactiveRunner: ProactiveRunner | null;
   private readonly history: ChatHistoryStore;
   private readonly logger: CommandExecutorLogger;
+
+  /** Active agent sessions keyed by session key. */
+  private readonly activeSessions = new Map<string, Agent>();
 
   constructor(
     runtime: MuaddibRuntime,
@@ -50,7 +64,6 @@ export class RoomMessageHandler {
   ) {
     this.executor = new CommandExecutor(runtime, roomName, overrides);
     this.resolver = this.executor.resolver;
-    this.steeringQueue = new SteeringQueue();
     this.history = runtime.history;
     this.logger = runtime.logger.getLogger(`muaddib.rooms.command.${roomName}`);
 
@@ -64,7 +77,6 @@ export class RoomMessageHandler {
         runtime,
         executor: this.executor,
         resolver: this.resolver,
-        steeringQueue: this.steeringQueue,
         logger: this.logger,
       });
     } else {
@@ -94,26 +106,17 @@ export class RoomMessageHandler {
       `nick=${message.nick}`,
     );
 
-    if (this.resolver.shouldBypassSteeringQueue(message)) {
-      return this.executor.execute(
-        message,
-        triggerMessageId,
-        options.sendResponse,
-        this.steeringQueue.createContextDrainer(SteeringQueue.keyForMessage(message)),
-      );
+    // Messages that bypass steering (help, parse errors, no-context, non-steering modes)
+    if (this.resolver.shouldBypassSteering(message)) {
+      return this.executor.execute(message, triggerMessageId, options.sendResponse);
     }
 
     return this.handleCommandMessage(message, triggerMessageId, options.sendResponse);
   }
 
-  /** Direct execution without steering queue (for CLI / tests). */
+  /** Direct execution without steering (for CLI / tests). */
   async execute(message: RoomMessage): Promise<CommandExecutionResult> {
-    return this.executor.execute(
-      message,
-      0,
-      undefined,
-      this.steeringQueue.createContextDrainer(SteeringQueue.keyForMessage(message)),
-    );
+    return this.executor.execute(message, 0, undefined);
   }
 
   // ── Session lifecycle: commands ──
@@ -123,43 +126,38 @@ export class RoomMessageHandler {
     triggerMessageId: number,
     sendResponse: ((text: string) => Promise<void>) | undefined,
   ): Promise<CommandExecutionResult | null> {
-    const {
-      isRunner,
-      steeringKey,
-      item: runnerItem,
-    } = this.steeringQueue.enqueueCommandOrStartRunner(message, triggerMessageId, sendResponse);
+    const key = sessionKey(message);
+    const existing = this.activeSessions.get(key);
 
-    if (!isRunner) {
-      try {
-        await runnerItem.completion;
-        return (runnerItem.result as CommandExecutionResult | null) ?? null;
-      } catch {
-        // Runner session failed — retry as a new session.
-        return this.handleCommandMessage(message, triggerMessageId, sendResponse);
-      }
+    if (existing) {
+      this.steerAgent(existing, message);
+      return null;
     }
 
+    // Start a new session. The map entry is set inside onAgentCreated
+    // (which fires synchronously before the first LLM call).
     try {
-      if (runnerItem.triggerMessageId === null) {
-        throw new Error("Runner command item is missing trigger message id.");
-      }
-
-      runnerItem.result = await this.executor.execute(
-        runnerItem.message,
-        runnerItem.triggerMessageId,
-        runnerItem.sendResponse,
-        this.steeringQueue.createContextDrainer(steeringKey),
+      return await this.executor.execute(
+        message, triggerMessageId, sendResponse,
+        (agent) => { this.activeSessions.set(key, agent); },
       );
-
-      this.steeringQueue.finishItem(runnerItem);
-      this.steeringQueue.releaseSession(steeringKey);
-    } catch (error) {
-      this.steeringQueue.abortSession(steeringKey, error);
-      this.steeringQueue.failItem(runnerItem, error);
-      throw error;
+    } finally {
+      this.activeSessions.delete(key);
     }
+  }
 
-    return (runnerItem.result as CommandExecutionResult | null) ?? null;
+  private steerAgent(agent: Agent, message: RoomMessage): void {
+    const content = `<${message.nick}> ${message.content}`;
+    agent.steer({
+      role: "user",
+      content: [{ type: "text", text: content }],
+      timestamp: Date.now(),
+    });
+    this.logger.debug(
+      "Steered message into active session",
+      `arc=${roomArc(message)}`,
+      `nick=${message.nick}`,
+    );
   }
 
   // ── Session lifecycle: passives ──
@@ -168,23 +166,27 @@ export class RoomMessageHandler {
     message: RoomMessage,
     sendResponse: ((text: string) => Promise<void>) | undefined,
   ): Promise<void> {
-    const channelKey = CommandResolver.channelKey(message.serverTag, message.channelName);
-    const startProactive = this.proactiveRunner?.isProactiveChannel(channelKey) ?? false;
+    const key = sessionKey(message);
 
-    const { queued, isProactiveRunner, steeringKey, item } =
-      this.steeringQueue.enqueuePassive(message, sendResponse, startProactive);
-
-    if (queued) {
-      await item.completion;
+    // If there's an active agent session, steer the passive message into it
+    const existing = this.activeSessions.get(key);
+    if (existing) {
+      this.steerAgent(existing, message);
       return;
     }
 
-    if (isProactiveRunner && this.proactiveRunner) {
-      this.proactiveRunner.runSession(steeringKey, item).catch((error) => {
-        this.logger.error("Proactive session failed", error);
-      });
-      await item.completion;
-      return;
+    // Check for proactive interjection
+    const channelKey = CommandResolver.channelKey(message.serverTag, message.channelName);
+    if (this.proactiveRunner?.isProactiveChannel(channelKey)) {
+      if (!this.proactiveRunner.hasActiveDebounce(channelKey)) {
+        this.proactiveRunner.runSession(
+          message,
+          sendResponse,
+          () => this.activeSessions.has(sessionKey(message)),
+        ).catch((error) => {
+          this.logger.error("Proactive session failed", error);
+        });
+      }
     }
 
     await this.executor.triggerAutoChronicler(message);

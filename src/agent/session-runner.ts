@@ -1,4 +1,4 @@
-import type { Agent, AgentTool, ThinkingLevel } from "@mariozechner/pi-agent-core";
+import { type Agent, type AgentTool, type ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import type { AssistantMessage, Usage } from "@mariozechner/pi-ai";
 
@@ -25,7 +25,7 @@ export interface SessionRunnerOptions {
   emptyCompletionRetryPrompt?: string;
   llmDebugMaxChars?: number;
   logger?: RunnerLogger;
-  steeringMessageProvider?: () => SessionFactoryContextMessage[];
+  onAgentCreated?: (agent: Agent) => void;
 }
 
 export interface PromptOptions {
@@ -83,10 +83,11 @@ export class SessionRunner {
       visionFallbackModel: options.visionFallbackModel,
       llmDebugMaxChars: this.llmDebugMaxChars,
       logger: this.logger,
-      steeringMessageProvider: this.options.steeringMessageProvider,
+
     });
 
     const { session, agent } = sessionCtx;
+    this.options.onAgentCreated?.(agent);
     const primaryProvider = this.modelAdapter.resolve(this.model).spec.provider;
     await sessionCtx.ensureProviderKey(primaryProvider);
     let iterations = 0;

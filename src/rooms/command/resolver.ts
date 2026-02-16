@@ -208,7 +208,7 @@ export class CommandResolver {
     return channelModes[key] ?? this.commandConfig.defaultMode ?? "classifier";
   }
 
-  shouldBypassSteeringQueue(message: RoomMessage): boolean {
+  shouldBypassSteering(message: RoomMessage): boolean {
     const parsed = this.parsePrefix(message.content);
 
     if (parsed.error || parsed.noContext) {

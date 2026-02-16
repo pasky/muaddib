@@ -49,7 +49,6 @@ interface CreateAgentSessionInput {
   visionFallbackModel?: string;
   llmDebugMaxChars?: number;
   logger?: Logger;
-  steeringMessageProvider?: () => SessionFactoryContextMessage[];
 }
 
 interface CreateAgentSessionResult {
@@ -133,29 +132,6 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
 
   let turnCount = 0;
   let visionFallbackActivated = false;
-  const steeringMessageProvider = input.steeringMessageProvider;
-
-  // Hook into the agent's internal dequeueSteeringMessages so that external
-  // steering messages (from the steering queue) are picked up by the agent
-  // loop's getSteeringMessages callback — not only via the turn_end subscriber
-  // which fires too late due to the async event-stream consumer decoupling.
-  if (steeringMessageProvider) {
-    const origDequeue = (agent as any).dequeueSteeringMessages.bind(agent);
-    (agent as any).dequeueSteeringMessages = () => {
-      const messages = steeringMessageProvider();
-      for (const msg of messages) {
-        agent.steer({
-          role: "user",
-          content: [{ type: "text", text: msg.content }],
-          timestamp: Date.now(),
-        });
-      }
-      if (messages.length > 0) {
-        logger.info(`Injected ${messages.length} steering message(s) via dequeue hook`);
-      }
-      return origDequeue();
-    };
-  }
 
   const unsubscribe = session.subscribe((event) => {
     if (event.type === "turn_end") {

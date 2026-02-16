@@ -133,7 +133,7 @@ describe("CommandResolver", () => {
       (model) => String(model),
     );
 
-    const bypass = resolver.shouldBypassSteeringQueue({
+    const bypass = resolver.shouldBypassSteering({
       serverTag: "libera",
       channelName: "#general",
       nick: "user",

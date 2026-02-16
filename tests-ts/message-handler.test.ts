@@ -751,51 +751,34 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
-  it("debounce waits before prompt and drains steering queue followups into context", async () => {
+  it("second command in same thread steers into active session and returns null", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();
-
-    await history.addMessage({
-      ...makeMessage("previous context"),
-      nick: "bob",
-    });
 
     const incoming: RoomMessage = {
       ...makeMessage("!s first line"),
       threadId: "thread-1",
     };
 
-    const firstTriggerPersisted = waitForPersistedMessage(
-      history,
-      (message) => message.content === "!s first line",
-    );
+    const firstStarted = createDeferred<void>();
+    const releaseFirst = createDeferred<void>();
 
     let promptCallCount = 0;
-    let runnerPrompt = "";
-    let runnerContextContents: string[] = [];
+    const steerCalls: any[] = [];
+    const mockAgent = {
+      steer: (msg: any) => { steerCalls.push(msg); },
+    };
 
     const handler = createHandler({
-      roomConfig: {
-        ...roomConfig,
-        command: {
-          ...roomConfig.command,
-          debounce: 0.2,
-          modes: {
-            ...roomConfig.command.modes,
-            serious: {
-              ...roomConfig.command.modes.serious,
-              steering: true,
-            },
-          },
-        },
-      } as any,
+      roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: () => ({
-        prompt: async (prompt, options) => {
+      runnerFactory: (input) => ({
+        prompt: async (_prompt) => {
           promptCallCount += 1;
-          runnerPrompt = prompt;
-          runnerContextContents = (options?.contextMessages ?? []).map((entry) => entry.content);
+          input.onAgentCreated?.(mockAgent as any);
+          firstStarted.resolve();
+          await releaseFirst.promise;
           return makeRunnerResult("done");
         },
       }),
@@ -806,7 +789,7 @@ describe("RoomMessageHandler", () => {
       sendResponse: async () => {},
     });
 
-    await firstTriggerPersisted;
+    await firstStarted.promise;
 
     const followup: RoomMessage = {
       ...makeMessage("!s second line"),
@@ -818,15 +801,15 @@ describe("RoomMessageHandler", () => {
       sendResponse: async () => {},
     });
 
-    expect(promptCallCount).toBe(0);
+    releaseFirst.resolve();
 
     const [result, followupResult] = await Promise.all([resultPromise, followupPromise]);
 
     expect(result?.response).toBe("done");
     expect(followupResult).toBeNull();
     expect(promptCallCount).toBe(1);
-    expect(runnerPrompt).toBe("first line");
-    expect(runnerContextContents.some((entry) => entry.includes("second line"))).toBe(true);
+    expect(steerCalls).toHaveLength(1);
+    expect(steerCalls[0].content[0].text).toContain("second line");
 
     await history.close();
   });
@@ -1326,7 +1309,7 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
-  it("collapses queued followup commands into one followup runner turn", async () => {
+  it("concurrent commands from same user steer into active session", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();
 
@@ -1334,262 +1317,189 @@ describe("RoomMessageHandler", () => {
     const releaseFirst = createDeferred<void>();
 
     let runCount = 0;
-    const prompts: string[] = [];
-    const runnerContextContents: string[][] = [];
-    const sent: string[] = [];
+    const steerCalls: any[] = [];
+    const mockAgent = {
+      steer: (msg: any) => { steerCalls.push(msg); },
+    };
 
     const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: () => ({
-        prompt: async (prompt, options) => {
+      runnerFactory: (input) => ({
+        prompt: async (_prompt) => {
           runCount += 1;
-          prompts.push(prompt);
-          runnerContextContents.push((options?.contextMessages ?? []).map((entry) => entry.content));
-
-          if (runCount === 1) {
-            firstStarted.resolve();
-            await releaseFirst.promise;
-            return makeRunnerResult("first response");
-          }
-
-          return makeRunnerResult("second response");
+          input.onAgentCreated?.(mockAgent as any);
+          firstStarted.resolve();
+          await releaseFirst.promise;
+          return makeRunnerResult("first response");
         },
       }),
     });
 
     const t1 = handler.handleIncomingMessage(makeMessage("!s first"), {
       isDirect: true,
-      sendResponse: async (text) => {
-        sent.push(text);
-      },
+      sendResponse: async () => {},
     });
 
     await firstStarted.promise;
 
     const t2 = handler.handleIncomingMessage(makeMessage("!s second"), {
       isDirect: true,
-      sendResponse: async (text) => {
-        sent.push(text);
-      },
+      sendResponse: async () => {},
     });
     const t3 = handler.handleIncomingMessage(makeMessage("!s third"), {
       isDirect: true,
-      sendResponse: async (text) => {
-        sent.push(text);
-      },
+      sendResponse: async () => {},
     });
 
     releaseFirst.resolve();
 
     const [result1, result2, result3] = await Promise.all([t1, t2, t3]);
 
-    expect(runCount).toBe(2);
-    expect(prompts[0]).toBe("first");
-    expect(["second", "third"]).toContain(prompts[1]);
-
-    const collapsedPrompt = prompts[1] === "second" ? "<alice> !s third" : "<alice> !s second";
-    expect(runnerContextContents[1]).toContain(collapsedPrompt);
-    expect(sent).toEqual(["first response", "second response"]);
-
+    expect(runCount).toBe(1);
     expect(result1?.response).toBe("first response");
-    expect(Boolean(result2?.response) || Boolean(result3?.response)).toBe(true);
-    expect([result2, result3].filter((result) => result === null)).toHaveLength(1);
+    expect(result2).toBeNull();
+    expect(result3).toBeNull();
+    expect(steerCalls).toHaveLength(2);
+    const steeredTexts = steerCalls.map((c: any) => c.content[0].text);
+    expect(steeredTexts.some((t: string) => t.includes("second"))).toBe(true);
+    expect(steeredTexts.some((t: string) => t.includes("third"))).toBe(true);
 
     await history.close();
   });
 
-  it("shares steering queue context across users in the same thread", async () => {
+  it("shares session across users in the same thread via steering", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();
 
     const firstStarted = createDeferred<void>();
     const releaseFirst = createDeferred<void>();
 
-    let runCount = 0;
-    const prompts: string[] = [];
-    const runnerContextContents: string[][] = [];
-    const sent: string[] = [];
+    const steerCalls: any[] = [];
+    const mockAgent = {
+      steer: (msg: any) => { steerCalls.push(msg); },
+    };
 
     const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: () => ({
-        prompt: async (prompt, options) => {
-          runCount += 1;
-          prompts.push(prompt);
-          runnerContextContents.push((options?.contextMessages ?? []).map((entry) => entry.content));
-
-          if (runCount === 1) {
-            firstStarted.resolve();
-            await releaseFirst.promise;
-            return makeRunnerResult("first response");
-          }
-
-          return makeRunnerResult("second response");
+      runnerFactory: (input) => ({
+        prompt: async () => {
+          input.onAgentCreated?.(mockAgent as any);
+          firstStarted.resolve();
+          await releaseFirst.promise;
+          return makeRunnerResult("first response");
         },
       }),
     });
 
     const t1 = handler.handleIncomingMessage(
-      {
-        ...makeMessage("!s first"),
-        threadId: "thread-1",
-      },
-      {
-        isDirect: true,
-        sendResponse: async (text) => {
-          sent.push(text);
-        },
-      },
+      { ...makeMessage("!s first"), threadId: "thread-1" },
+      { isDirect: true, sendResponse: async () => {} },
     );
 
     await firstStarted.promise;
 
     const t2 = handler.handleIncomingMessage(
-      {
-        ...makeMessage("!s second"),
-        nick: "bob",
-        threadId: "thread-1",
-      },
-      {
-        isDirect: true,
-        sendResponse: async (text) => {
-          sent.push(text);
-        },
-      },
+      { ...makeMessage("!s second"), nick: "bob", threadId: "thread-1" },
+      { isDirect: true, sendResponse: async () => {} },
     );
 
     const t3 = handler.handleIncomingMessage(
-      {
-        ...makeMessage("!s third"),
-        nick: "carol",
-        threadId: "thread-1",
-      },
-      {
-        isDirect: true,
-        sendResponse: async (text) => {
-          sent.push(text);
-        },
-      },
+      { ...makeMessage("!s third"), nick: "carol", threadId: "thread-1" },
+      { isDirect: true, sendResponse: async () => {} },
     );
 
     releaseFirst.resolve();
 
-    const [, result2, result3] = await Promise.all([t1, t2, t3]);
+    const [result1, result2, result3] = await Promise.all([t1, t2, t3]);
 
-    expect(runCount).toBe(2);
-    expect(prompts[0]).toBe("first");
-    expect(["second", "third"]).toContain(prompts[1]);
-
-    const collapsedPrompt = result2?.response ? "<carol> !s third" : "<bob> !s second";
-    expect(runnerContextContents[1]).toContain(collapsedPrompt);
-    expect(sent).toEqual(["first response", "second response"]);
-
-    expect(Boolean(result2?.response) || Boolean(result3?.response)).toBe(true);
-    expect([result2, result3].filter((result) => result === null)).toHaveLength(1);
+    expect(result1?.response).toBe("first response");
+    expect(result2).toBeNull();
+    expect(result3).toBeNull();
+    expect(steerCalls).toHaveLength(2);
+    expect(steerCalls[0].content[0].text).toContain("bob");
+    expect(steerCalls[1].content[0].text).toContain("carol");
 
     await history.close();
   });
 
-  it("compacts passives around queued commands and keeps only the tail passive for steering", async () => {
+  it("passives and commands arriving during active session all steer into the agent", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();
 
     const firstStarted = createDeferred<void>();
     const releaseFirst = createDeferred<void>();
 
-    let runCount = 0;
-    const prompts: string[] = [];
-    const runnerContextContents: string[][] = [];
+    const steerCalls: any[] = [];
+    const mockAgent = {
+      steer: (msg: any) => { steerCalls.push(msg); },
+    };
     const sent: string[] = [];
 
     const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: () => ({
-        prompt: async (prompt, options) => {
-          runCount += 1;
-          prompts.push(prompt);
-          runnerContextContents.push((options?.contextMessages ?? []).map((entry) => entry.content));
-
-          if (runCount === 1) {
-            firstStarted.resolve();
-            await releaseFirst.promise;
-            return makeRunnerResult("first response");
-          }
-
-          return makeRunnerResult("second response");
+      runnerFactory: (input) => ({
+        prompt: async () => {
+          input.onAgentCreated?.(mockAgent as any);
+          firstStarted.resolve();
+          await releaseFirst.promise;
+          return makeRunnerResult("first response");
         },
       }),
     });
 
-    handler.handleIncomingMessage(makeMessage("!s first"), {
+    const t1 = handler.handleIncomingMessage(makeMessage("!s first"), {
       isDirect: true,
-      sendResponse: async (text) => {
-        sent.push(text);
-      },
+      sendResponse: async (text) => { sent.push(text); },
     });
 
     await firstStarted.promise;
 
     const p3Persisted = waitForPersistedMessage(history, (message) => message.content === "p3");
 
-    const p1 = handler.handleIncomingMessage(makeMessage("p1"), {
-      isDirect: false,
-    });
-    const p2 = handler.handleIncomingMessage(makeMessage("p2"), {
-      isDirect: false,
-    });
+    const p1 = handler.handleIncomingMessage(makeMessage("p1"), { isDirect: false });
+    const p2 = handler.handleIncomingMessage(makeMessage("p2"), { isDirect: false });
     const c2 = handler.handleIncomingMessage(makeMessage("!s second"), {
-      isDirect: true,
-      sendResponse: async (text) => {
-        sent.push(text);
-      },
+      isDirect: true, sendResponse: async (text) => { sent.push(text); },
     });
-    const p3 = handler.handleIncomingMessage(makeMessage("p3"), {
-      isDirect: false,
-    });
+    const p3 = handler.handleIncomingMessage(makeMessage("p3"), { isDirect: false });
 
     await p3Persisted;
-
     releaseFirst.resolve();
 
-    const [passiveResult1, passiveResult2, commandResult2, passiveResult3] = await Promise.all([
-      p1,
-      p2,
-      c2,
-      p3,
+    const [result1, passiveResult1, passiveResult2, commandResult2, passiveResult3] = await Promise.all([
+      t1, p1, p2, c2, p3,
     ]);
 
-    expect(runCount).toBe(2);
-    expect(prompts).toEqual(["first", "second"]);
-    expect(runnerContextContents[1].some((entry) => entry.includes("<alice> p3"))).toBe(true);
-    expect(sent).toEqual(["first response", "second response"]);
-
+    expect(result1?.response).toBe("first response");
+    expect(sent).toEqual(["first response"]);
     expect(passiveResult1).toBeNull();
     expect(passiveResult2).toBeNull();
-    expect(commandResult2?.response).toBe("second response");
+    expect(commandResult2).toBeNull(); // steered, not a separate run
     expect(passiveResult3).toBeNull();
+    // All 4 messages should have been steered into the agent
+    expect(steerCalls).toHaveLength(4);
 
     await history.close();
   });
 
-  it("passes steeringMessageProvider to runner factory when steering is enabled", async () => {
+  it("passes onAgentCreated callback to runner factory for steering registration", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();
 
-    let capturedProvider: (() => any) | undefined;
+    let capturedCallback: ((agent: any) => void) | undefined;
 
     const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
       runnerFactory: (input) => {
-        capturedProvider = input.steeringMessageProvider;
+        capturedCallback = input.onAgentCreated;
         return {
           prompt: async () => makeRunnerResult("ok"),
         };
@@ -1598,37 +1508,35 @@ describe("RoomMessageHandler", () => {
 
     await handler.handleIncomingMessage(makeMessage("!s hello"), { isDirect: true });
 
-    expect(capturedProvider).toBeDefined();
-    // Provider should return empty when nothing is queued
-    expect(capturedProvider!()).toEqual([]);
+    expect(capturedCallback).toBeDefined();
 
     await history.close();
   });
 
-  it("steeringMessageProvider drains queued messages mid-run", async () => {
+  it("passive messages during active session steer into the running agent", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();
 
     const firstStarted = createDeferred<void>();
     const releaseFirst = createDeferred<void>();
 
-    let capturedProvider: (() => any) | undefined;
-    let midRunDrain: any[] = [];
+    // Mock agent with steer tracking
+    const steerCalls: any[] = [];
+    const mockAgent = {
+      steer: (msg: any) => { steerCalls.push(msg); },
+    };
 
     const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
       runnerFactory: (input) => {
-        capturedProvider = input.steeringMessageProvider;
         return {
           prompt: async () => {
+            // Simulate agent creation callback
+            input.onAgentCreated?.(mockAgent as any);
             firstStarted.resolve();
             await releaseFirst.promise;
-            // Simulate mid-run drain like the agent loop would do
-            if (capturedProvider) {
-              midRunDrain = capturedProvider();
-            }
             return makeRunnerResult("done");
           },
         };
@@ -1642,7 +1550,7 @@ describe("RoomMessageHandler", () => {
 
     await firstStarted.promise;
 
-    // Queue a passive message while agent is running
+    // Send a passive message while agent is running
     const interruptPersisted = waitForPersistedMessage(
       history,
       (message) => message.content === "interrupt me",
@@ -1654,8 +1562,8 @@ describe("RoomMessageHandler", () => {
     releaseFirst.resolve();
     await t1;
 
-    expect(midRunDrain).toHaveLength(1);
-    expect(midRunDrain[0].content).toContain("interrupt me");
+    expect(steerCalls).toHaveLength(1);
+    expect(steerCalls[0].content[0].text).toContain("interrupt me");
 
     await history.close();
   });
@@ -1912,41 +1820,31 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
-  it("queued commands execute sequentially — first is work item, rest drain as context then get own turns", async () => {
+  it("commands arriving after session starts are steered — only one runner invocation", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();
 
     const firstStarted = createDeferred<void>();
     const releaseFirst = createDeferred<void>();
-    const secondStarted = createDeferred<void>();
-    const releaseSecond = createDeferred<void>();
 
     let runCount = 0;
-    const prompts: string[] = [];
-    const runnerContextContents: string[][] = [];
+    const steerCalls: any[] = [];
+    const mockAgent = {
+      steer: (msg: any) => { steerCalls.push(msg); },
+    };
     const sent: string[] = [];
 
     const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: () => ({
-        prompt: async (prompt, options) => {
+      runnerFactory: (input) => ({
+        prompt: async () => {
           runCount += 1;
-          prompts.push(prompt);
-          runnerContextContents.push((options?.contextMessages ?? []).map((entry) => entry.content));
-
-          if (runCount === 1) {
-            firstStarted.resolve();
-            await releaseFirst.promise;
-            return makeRunnerResult("reply 1");
-          }
-          if (runCount === 2) {
-            secondStarted.resolve();
-            await releaseSecond.promise;
-            return makeRunnerResult("reply 2");
-          }
-          return makeRunnerResult(`reply ${runCount}`);
+          input.onAgentCreated?.(mockAgent as any);
+          firstStarted.resolve();
+          await releaseFirst.promise;
+          return makeRunnerResult("reply 1");
         },
       }),
     });
@@ -1962,66 +1860,39 @@ describe("RoomMessageHandler", () => {
       isDirect: true,
       sendResponse: async (text) => { sent.push(text); },
     });
-
     const t3 = handler.handleIncomingMessage(makeMessage("!s third"), {
       isDirect: true,
       sendResponse: async (text) => { sent.push(text); },
     });
 
-    // Release first — second becomes next work item; if third arrives before
-    // the second runner drains context, it becomes steering context for second.
     releaseFirst.resolve();
-    await secondStarted.promise;
-
-    // At this point cmd3 should have been collapsed as context into cmd2's run
-    releaseSecond.resolve();
     const [r1, r2, r3] = await Promise.all([t1, t2, t3]);
 
-    // Two runner turns: first is the initial runner, second drains from session
-    expect(runCount).toBe(2);
-    expect(prompts[0]).toBe("first");
-    // Second prompt is one of the queued commands, the other is context
-    expect(["second", "third"]).toContain(prompts[1]);
-    expect(sent).toEqual(["reply 1", "reply 2"]);
-
-    // One of result2/result3 was collapsed (null), the other got a response
+    expect(runCount).toBe(1);
     expect(r1?.response).toBe("reply 1");
-    const results = [r2, r3];
-    expect(results.filter(r => r?.response === "reply 2")).toHaveLength(1);
-    expect(results.filter(r => r === null)).toHaveLength(1);
+    expect(r2).toBeNull();
+    expect(r3).toBeNull();
+    expect(steerCalls).toHaveLength(2);
+    expect(sent).toEqual(["reply 1"]);
 
     await history.close();
   });
 
-  it("runner error does not discard queued commands — they still execute", async () => {
-    // Suppress vitest's unhandled rejection detection for this test —
-    // the rejection IS handled via .catch() but vitest's global handler
-    // fires first on the microtask queue.
-    const suppress = () => {};
-    process.on("unhandledRejection", suppress);
-
+  it("runner error cleans up session so next command starts fresh", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();
 
-    const firstStarted = createDeferred<void>();
-    const releaseFirst = createDeferred<void>();
-
     let runCount = 0;
-    const prompts: string[] = [];
     const sent: string[] = [];
 
     const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: () => ({
-        prompt: async (prompt) => {
+      runnerFactory: (_input) => ({
+        prompt: async () => {
           runCount += 1;
-          prompts.push(prompt);
-
           if (runCount === 1) {
-            firstStarted.resolve();
-            await releaseFirst.promise;
             throw new Error("runner exploded");
           }
           return makeRunnerResult("recovered");
@@ -2029,40 +1900,25 @@ describe("RoomMessageHandler", () => {
       }),
     });
 
-    const t1 = handler.handleIncomingMessage(makeMessage("!s first"), {
-      isDirect: true,
-      sendResponse: async (text) => { sent.push(text); },
-    }).catch((e: unknown) => e); // prevent unhandled rejection
+    // First command fails
+    await expect(
+      handler.handleIncomingMessage(makeMessage("!s first"), {
+        isDirect: true,
+        sendResponse: async (text) => { sent.push(text); },
+      }),
+    ).rejects.toThrow("runner exploded");
 
-    await firstStarted.promise;
-
-    const secondPersisted = waitForPersistedMessage(
-      history,
-      (message) => message.content === "!s second",
-    );
-    const t2 = handler.handleIncomingMessage(makeMessage("!s second"), {
+    // Second command should start a fresh session (no stale entry in map)
+    const result = await handler.handleIncomingMessage(makeMessage("!s second"), {
       isDirect: true,
       sendResponse: async (text) => { sent.push(text); },
     });
 
-    await secondPersisted;
-
-    releaseFirst.resolve();
-
-    const [r1settled, r2settled] = await Promise.allSettled([t1, t2]);
-
-    // First command should have failed (error caught inline)
-    expect(r1settled.status).toBe("fulfilled");
-    expect((r1settled as PromiseFulfilledResult<unknown>).value).toBeInstanceOf(Error);
-
-    // Second command should still execute successfully
-    expect(r2settled.status).toBe("fulfilled");
-    expect((r2settled as PromiseFulfilledResult<any>).value?.response).toBe("recovered");
+    expect(runCount).toBe(2);
+    expect(result?.response).toBe("recovered");
     expect(sent).toContain("recovered");
-    expect(prompts).toContain("second");
 
     await history.close();
-    process.off("unhandledRejection", suppress);
   });
 
   it("passive messages with no active session and no proactive are no-ops", async () => {

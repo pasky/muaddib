@@ -8,7 +8,7 @@
  * returns a result. All queue/session lifecycle stays in message-handler.
  */
 
-import type { AgentTool, ThinkingLevel } from "@mariozechner/pi-agent-core";
+import type { Agent, AgentTool, ThinkingLevel } from "@mariozechner/pi-agent-core";
 import { type Usage } from "@mariozechner/pi-ai";
 
 import {
@@ -28,7 +28,6 @@ import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { parseModelSpec } from "../../models/model-spec.js";
 import { ContextReducerTs, type ContextReducer } from "./context-reducer.js";
 import { type RoomMessage, roomArc } from "../message.js";
-import { sleep } from "../../utils/index.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import { createModeClassifier } from "./classifier.js";
 import { RateLimiter } from "./rate-limiter.js";
@@ -57,8 +56,8 @@ export interface CommandRunnerFactoryInput {
   model: string;
   systemPrompt: string;
   tools: AgentTool<any>[];
-  steeringMessageProvider?: () => SessionFactoryContextMessage[];
   logger?: Logger;
+  onAgentCreated?: (agent: Agent) => void;
 }
 
 export type CommandRunnerFactory = (input: CommandRunnerFactoryInput) => {
@@ -75,9 +74,6 @@ interface PromptRunResult {
   usage: Usage | null;
   toolCallsCount: number;
 }
-
-/** Callback to drain steering context messages during agent execution. */
-export type SteeringContextDrainer = () => Array<{ role: ChatRole; content: string }>;
 
 export interface CommandExecutorOverrides {
   responseCleaner?: (text: string, nick: string) => string;
@@ -150,7 +146,7 @@ export class CommandExecutor {
           maxIterations: actorConfig.maxIterations,
           llmDebugMaxChars: actorConfig.llmDebugMaxChars,
           logger: input.logger,
-          steeringMessageProvider: input.steeringMessageProvider,
+          onAgentCreated: input.onAgentCreated,
         }));
 
     this.rateLimiter =
@@ -204,7 +200,7 @@ export class CommandExecutor {
     message: RoomMessage,
     triggerMessageId: number,
     sendResponse: ((text: string) => Promise<void>) | undefined,
-    steeringContextDrainer?: SteeringContextDrainer,
+    onAgentCreated?: (agent: Agent) => void,
   ): Promise<CommandExecutionResult> {
     const { commandConfig, logger } = this;
     const defaultSize = commandConfig.historySize;
@@ -318,16 +314,6 @@ export class CommandExecutor {
 
     // ── Build context & invoke agent ──
 
-    const steeringEnabled =
-      Boolean(resolved.runtime.steering) && !resolved.noContext;
-
-    // Wait the debounce period so that rapid follow-up messages land in
-    // the steering queue before the first LLM invocation.
-    const debounceSeconds = numberWithDefault(this.commandConfig.debounce, 0);
-    if (debounceSeconds > 0) {
-      await sleep(debounceSeconds * 1000);
-    }
-
     const systemPrompt = this.buildSystemPrompt(
       resolved.modeKey,
       message.mynick,
@@ -364,31 +350,19 @@ export class CommandExecutor {
       ];
     }
 
-    const initialSteeringMessages = steeringEnabled && steeringContextDrainer
-      ? steeringContextDrainer()
-      : [];
-
     const runnerContext: SessionFactoryContextMessage[] = [
       ...prependedContext,
       ...selectedContext.slice(0, -1),
-      ...initialSteeringMessages,
     ];
 
     const tools = this.selectTools(message, resolved.runtime.allowedTools, runnerContext);
-
-    const steeringMessageProvider = steeringEnabled && steeringContextDrainer
-      ? () => steeringContextDrainer().map((msg) => ({
-          role: "user" as const,
-          content: msg.content,
-        }))
-      : undefined;
 
     const runner = this.runnerFactory({
       model: modelSpec,
       systemPrompt,
       tools,
-      steeringMessageProvider,
       logger,
+      onAgentCreated,
     });
 
     const { responseText, usage, toolCallsCount } = await this.invokeAndPostProcess(
@@ -426,8 +400,7 @@ export class CommandExecutor {
     sendResponse: ((text: string) => Promise<void>) | undefined,
     proactiveConfig: ProactiveConfig,
     classifiedTrigger: string,
-    classifiedRuntime: { steering?: boolean; reasoningEffort: string; allowedTools: string[] | null },
-    steeringContextDrainer?: SteeringContextDrainer,
+    classifiedRuntime: { reasoningEffort: string; allowedTools: string[] | null },
   ): Promise<boolean> {
     const { logger } = this;
     const modelSpec = proactiveConfig.models.serious;
@@ -440,30 +413,16 @@ export class CommandExecutor {
       proactiveConfig.historySize,
     );
 
-    const steeringEnabled = Boolean(classifiedRuntime.steering);
-    const initialSteeringMessages = steeringEnabled && steeringContextDrainer
-      ? steeringContextDrainer()
-      : [];
-
     const runnerContext: SessionFactoryContextMessage[] = [
       ...context.slice(0, -1),
-      ...initialSteeringMessages,
     ];
 
     const tools = this.selectTools(message, classifiedRuntime.allowedTools, runnerContext);
-
-    const steeringMessageProvider = steeringEnabled && steeringContextDrainer
-      ? () => steeringContextDrainer().map((msg) => ({
-          role: "user" as const,
-          content: msg.content,
-        }))
-      : undefined;
 
     const runner = this.runnerFactory({
       model: modelSpec,
       systemPrompt,
       tools,
-      steeringMessageProvider,
       logger,
     });
 
