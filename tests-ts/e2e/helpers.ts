@@ -12,6 +12,7 @@ import { join } from "node:path";
 import type {
   AssistantMessage,
   AssistantMessageEventStream,
+  ToolCall,
   Usage,
 } from "@mariozechner/pi-ai";
 import { createAssistantMessageEventStream } from "@mariozechner/pi-ai/dist/utils/event-stream.js";
@@ -90,6 +91,39 @@ export function textStream(text: string): () => AssistantMessageEventStream {
       stream.push({ type: "text_delta", contentIndex: 0, delta: text, partial });
       stream.push({ type: "text_end", contentIndex: 0, content: text, partial });
       stream.push({ type: "done", reason: "stop", message: partial });
+    });
+
+    return stream;
+  };
+}
+
+/** Build a factory that produces a scripted tool-call AssistantMessageEventStream. */
+export function toolCallStream(
+  toolCall: ToolCall,
+): () => AssistantMessageEventStream {
+  return () => {
+    const stream = createAssistantMessageEventStream();
+    const partial: AssistantMessage = {
+      role: "assistant",
+      content: [toolCall],
+      api: "openai-completions",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      usage: emptyUsage(),
+      stopReason: "toolUse",
+      timestamp: Date.now(),
+    };
+
+    queueMicrotask(() => {
+      stream.push({ type: "start", partial });
+      stream.push({ type: "toolcall_start", contentIndex: 0, partial });
+      stream.push({
+        type: "toolcall_end",
+        contentIndex: 0,
+        toolCall,
+        partial,
+      });
+      stream.push({ type: "done", reason: "toolUse", message: partial });
     });
 
     return stream;
