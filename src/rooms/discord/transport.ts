@@ -187,7 +187,7 @@ export class DiscordGatewayTransport implements DiscordEventSource, DiscordSende
   }
 
   private mapMessage(message: Message): DiscordMessageEvent | null {
-    if (message.author.bot) {
+    if (this.client.user && message.author.id === this.client.user.id) {
       return null;
     }
 

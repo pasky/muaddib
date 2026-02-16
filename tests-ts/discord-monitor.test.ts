@@ -975,4 +975,39 @@ describe("DiscordRoomMonitor", () => {
 
     await history.close();
   });
+
+  it("preserves other users' resolved mentions in direct content", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    let seenMessage = "";
+
+    const monitor = new DiscordRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async (message) => {
+          seenMessage = message.content;
+          return null;
+        },
+      },
+    });
+
+    // In production, transport delivers cleanContent where mentions are
+    // already resolved to @Username by discord.js.
+    await monitor.processMessageEvent({
+      guildId: "guild-1",
+      channelId: "chan-1",
+      username: "alice",
+      content: "@muaddib @Bob hey check this",
+      mynick: "muaddib",
+      botUserId: "999",
+      mentionsBot: true,
+    });
+
+    // Bot name prefix is stripped, but @Bob (another user) is preserved
+    expect(seenMessage).toBe("@Bob hey check this");
+
+    await history.close();
+  });
 });

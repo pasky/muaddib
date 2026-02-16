@@ -120,7 +120,9 @@ export class DiscordRoomMonitor {
       "Discord room is enabled but rooms.discord.token is missing.",
     );
 
-    const commandHandler = new RoomMessageHandler(runtime, "discord");
+    const commandHandler = new RoomMessageHandler(runtime, "discord", {
+      responseCleaner: stripDiscordNickPrefix,
+    });
     const transport = new DiscordGatewayTransport({
       token,
       botNameFallback: roomConfig.botName,
@@ -472,14 +474,6 @@ function normalizeDirectContent(content: string, mynick: string, botUserId?: str
     }
   }
 
-  if (cleaned === content.trimStart()) {
-    const anyMentionPattern = /^\s*(?:<@!?\w+>\s*)+[:,]?\s*(.*)$/i;
-    const match = cleaned.match(anyMentionPattern);
-    if (match) {
-      cleaned = match[1]?.trim() ?? "";
-    }
-  }
-
   const namePattern = new RegExp(`^\\s*@?${escapeRegExp(mynick)}[:,]?\\s*(.*)$`, "i");
   const nameMatch = cleaned.match(namePattern);
   if (nameMatch) {
@@ -487,4 +481,18 @@ function normalizeDirectContent(content: string, mynick: string, botUserId?: str
   }
 
   return normalizeDiscordEmoji(cleaned || content.trim());
+}
+
+/**
+ * Response cleaner: strips a leading "nick:" prefix from LLM responses.
+ * Matches Python's `_strip_nick_prefix` behavior.
+ */
+function stripDiscordNickPrefix(text: string, nick: string): string {
+  const cleaned = text.trimStart();
+  const prefix = `${nick}:`;
+  if (cleaned.toLowerCase().startsWith(prefix.toLowerCase())) {
+    const stripped = cleaned.slice(prefix.length).trimStart();
+    return stripped || text;
+  }
+  return text;
 }
