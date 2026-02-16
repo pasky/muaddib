@@ -191,8 +191,8 @@ export class CommandExecutor {
       getApiKey: this.runtime.getApiKey,
       modelAdapter: this.modelAdapter,
       logger: this.logger,
-      chronicleStore: this.runtime.chronicleStore,
-      chronicleLifecycle: this.runtime.chronicleLifecycle,
+      chronicleStore: this.runtime.chronicle?.chronicleStore,
+      chronicleLifecycle: this.runtime.chronicle?.chronicleLifecycle,
     };
   }
 
@@ -338,9 +338,9 @@ export class CommandExecutor {
     if (
       !resolved.noContext &&
       resolved.runtime.includeChapterSummary &&
-      this.runtime.chronicleStore
+      this.runtime.chronicle?.chronicleStore
     ) {
-      prependedContext = await this.runtime.chronicleStore.getChapterContextMessages(
+      prependedContext = await this.runtime.chronicle.chronicleStore.getChapterContextMessages(
         roomArc(message),
       );
     }
@@ -738,11 +738,11 @@ export class CommandExecutor {
 
   async triggerAutoChronicler(message: RoomMessage, maxSize?: number): Promise<void> {
     maxSize ??= this.commandConfig.historySize;
-    if (!this.runtime.autoChronicler) {
+    if (!this.runtime.chronicle?.autoChronicler) {
       return;
     }
 
-    await this.runtime.autoChronicler.checkAndChronicle(
+    await this.runtime.chronicle.autoChronicler.checkAndChronicle(
       message.mynick,
       message.serverTag,
       message.channelName,

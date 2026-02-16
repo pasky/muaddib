@@ -81,11 +81,12 @@ function createHandler(options: {
     logger: options.runtimeLogger,
   });
 
-  if (options.autoChronicler) {
-    runtime.autoChronicler = options.autoChronicler;
-  }
-  if (options.chronicleStore) {
-    runtime.chronicleStore = options.chronicleStore;
+  if (options.autoChronicler || options.chronicleStore) {
+    runtime.chronicle = {
+      ...runtime.chronicle,
+      ...(options.autoChronicler ? { autoChronicler: options.autoChronicler } : {}),
+      ...(options.chronicleStore ? { chronicleStore: options.chronicleStore } : {}),
+    } as NonNullable<typeof runtime.chronicle>;
   }
   if (options.logger) {
     runtime.logger.getLogger = () => options.logger as any;

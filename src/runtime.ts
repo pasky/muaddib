@@ -3,12 +3,9 @@ import { join } from "node:path";
 import { assertNoDeferredFeatureConfig } from "./config/deferred-features.js";
 import { getMuaddibHome, resolveMuaddibPath } from "./config/paths.js";
 import { RuntimeLogWriter } from "./app/logging.js";
-import { ChronicleStore } from "./chronicle/chronicle-store.js";
-import { ChronicleLifecycleTs } from "./chronicle/lifecycle.js";
-import { createChronicleSubsystem } from "./chronicle/create.js";
+import { createChronicleSubsystem, type ChronicleSubsystem } from "./chronicle/create.js";
 import { ChatHistoryStore } from "./history/chat-history-store.js";
 import { PiAiModelAdapter } from "./models/pi-ai-model-adapter.js";
-import type { AutoChronicler } from "./rooms/autochronicler.js";
 import { MuaddibConfig } from "./config/muaddib-config.js";
 
 export interface MuaddibRuntime {
@@ -17,9 +14,7 @@ export interface MuaddibRuntime {
   modelAdapter: PiAiModelAdapter;
   getApiKey: (provider: string) => Promise<string | undefined> | string | undefined;
   logger: RuntimeLogWriter;
-  chronicleStore?: ChronicleStore;
-  chronicleLifecycle?: ChronicleLifecycleTs;
-  autoChronicler?: AutoChronicler;
+  chronicle?: ChronicleSubsystem;
 }
 
 interface CreateMuaddibRuntimeOptions {
@@ -62,12 +57,10 @@ export async function createMuaddibRuntime(
 
   // Chronicle subsystem
   const chroniclerConfig = config.getChroniclerConfig();
-  let chronicleStore: ChronicleStore | undefined;
-  let chronicleLifecycle: ChronicleLifecycleTs | undefined;
-  let autoChronicler: AutoChronicler | undefined;
+  let chronicle: ChronicleSubsystem | undefined;
 
   if (chroniclerConfig.model) {
-    const chronicle = await createChronicleSubsystem({
+    chronicle = await createChronicleSubsystem({
       model: chroniclerConfig.model,
       arcModels: chroniclerConfig.arcModels,
       paragraphsPerChapter: chroniclerConfig.paragraphsPerChapter,
@@ -77,9 +70,6 @@ export async function createMuaddibRuntime(
       modelAdapter,
       logger: runtimeLogger,
     });
-    chronicleStore = chronicle.chronicleStore;
-    chronicleLifecycle = chronicle.chronicleLifecycle;
-    autoChronicler = chronicle.autoChronicler;
   }
 
   return {
@@ -88,13 +78,11 @@ export async function createMuaddibRuntime(
     modelAdapter,
     getApiKey,
     logger: runtimeLogger,
-    chronicleStore,
-    chronicleLifecycle,
-    autoChronicler,
+    chronicle,
   };
 }
 
 export async function shutdownRuntime(runtime: MuaddibRuntime): Promise<void> {
   await runtime.history.close();
-  await runtime.chronicleStore?.close();
+  await runtime.chronicle?.chronicleStore.close();
 }
