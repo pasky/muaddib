@@ -17,9 +17,28 @@ export function emptyUsage(): Usage {
   };
 }
 
+const LEAF_STRING_MAX = 512;
+
+function truncateLeafStrings(value: unknown): unknown {
+  if (typeof value === "string") {
+    if (value.length <= LEAF_STRING_MAX) return value;
+    const half = Math.floor((LEAF_STRING_MAX - 3) / 2);
+    return `${value.slice(0, half)}...${value.slice(-half)}`;
+  }
+  if (Array.isArray(value)) return value.map(truncateLeafStrings);
+  if (value !== null && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) {
+      out[k] = truncateLeafStrings(v);
+    }
+    return out;
+  }
+  return value;
+}
+
 export function safeJson(value: unknown, maxChars: number): string {
   try {
-    return truncateForDebug(JSON.stringify(value, null, 2), maxChars);
+    return truncateForDebug(JSON.stringify(truncateLeafStrings(value), null, 2), maxChars);
   } catch {
     return "[unserializable payload]";
   }
