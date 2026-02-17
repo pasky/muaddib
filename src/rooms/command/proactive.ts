@@ -10,6 +10,7 @@
 import type { Agent } from "@mariozechner/pi-agent-core";
 import type { ChatRole } from "../../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
+import { chatContextToMessages } from "./chat-to-messages.js";
 import type { ProactiveRoomConfig } from "../../config/muaddib-config.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import type { CommandConfig } from "./resolver.js";
@@ -337,11 +338,7 @@ export async function evaluateProactiveInterjection(
       const response = await adapter.completeSimple(
         model,
         {
-          messages: context.map((entry) => ({
-            role: "user" as const,
-            content: entry.role === "assistant" ? `[assistant] ${entry.content}` : entry.content,
-            timestamp: Date.now(),
-          })),
+          messages: chatContextToMessages(context),
           systemPrompt: prompt,
         },
         {
