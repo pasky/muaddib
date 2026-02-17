@@ -14,6 +14,7 @@
 import { rm } from "node:fs/promises";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { messageText } from "../../src/utils/index.js";
 
 import {
   type E2EContext,
@@ -235,9 +236,7 @@ describe("E2E: Context reduction + multi-tool + progress + tool summary", () => 
       50,
     );
     const monologueMessages = historyMessages.filter((m) => {
-      const text = m.role === "user" && typeof m.content === "string" ? m.content
-        : m.role === "assistant" ? m.content.filter((b) => b.type === "text").map((b) => b.text).join(" ")
-        : "";
+      const text = messageText(m);
       return text.includes("[internal monologue]") && text.includes(TOOL_SUMMARY_TEXT);
     });
     expect(monologueMessages).toHaveLength(1);

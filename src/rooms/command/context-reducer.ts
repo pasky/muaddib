@@ -2,6 +2,7 @@ import type { Message } from "@mariozechner/pi-ai";
 import { createStubAssistantFields } from "../../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import type { Logger } from "../../app/logging.js";
+import { messageText } from "../../utils/index.js";
 
 export interface ContextReducerConfig {
   model?: string;
@@ -104,20 +105,13 @@ export class ContextReducerTs implements ContextReducer {
 
     for (const message of context.slice(0, -1)) {
       const role = message.role === "assistant" ? "ASSISTANT" : "USER";
-      const text = message.role === "assistant"
-        ? message.content.filter((b) => b.type === "text").map((b) => b.text).join(" ")
-        : typeof message.content === "string" ? message.content : message.content.filter((b) => b.type === "text").map((b) => b.text).join(" ");
-      lines.push(`[${role}]: ${text}`);
+      lines.push(`[${role}]: ${messageText(message)}`);
     }
 
     lines.push("");
     lines.push("## TRIGGERING INPUT (for relevance - do not include in output)");
     const last = context[context.length - 1];
-    const lastText = last
-      ? (last.role === "assistant"
-          ? last.content.filter((b) => b.type === "text").map((b) => b.text).join(" ")
-          : typeof last.content === "string" ? last.content : last.content.filter((b) => b.type === "text").map((b) => b.text).join(" "))
-      : "";
+    const lastText = last ? messageText(last) : "";
     lines.push(lastText);
 
     return lines.join("\n");

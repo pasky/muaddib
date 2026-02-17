@@ -10,6 +10,7 @@
 import type { Agent } from "@mariozechner/pi-agent-core";
 import type { Message } from "@mariozechner/pi-ai";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
+import { messageText } from "../../utils/index.js";
 import type { ProactiveRoomConfig } from "../../config/muaddib-config.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import type { CommandConfig } from "./resolver.js";
@@ -430,9 +431,7 @@ export async function evaluateProactiveInterjection(
 }
 
 function extractCurrentMessage(message: Message): string {
-  const text = message.role === "assistant"
-    ? message.content.filter((b) => b.type === "text").map((b) => b.text).join(" ")
-    : typeof message.content === "string" ? message.content : message.content.filter((b) => b.type === "text").map((b) => b.text).join(" ");
+  const text = messageText(message);
   const match = text.match(/<?\S+>\s*(.*)/);
   return match ? match[1].trim() : text;
 }

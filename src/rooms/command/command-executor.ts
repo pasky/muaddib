@@ -11,6 +11,7 @@
 import type { Agent, AgentTool, ThinkingLevel } from "@mariozechner/pi-agent-core";
 import { type Usage } from "@mariozechner/pi-ai";
 
+import { messageText } from "../../utils/index.js";
 import {
   SessionRunner,
   type PromptOptions,
@@ -430,13 +431,7 @@ export class CommandExecutor {
     });
 
     const lastMessage = context[context.length - 1];
-    const queryText = lastMessage
-      ? (lastMessage.role === "user" && typeof lastMessage.content === "string"
-          ? lastMessage.content
-          : lastMessage.role === "assistant"
-            ? lastMessage.content.filter((b) => b.type === "text").map((b) => b.text).join(" ")
-            : "")
-      : "";
+    const queryText = lastMessage ? messageText(lastMessage) : "";
 
     let result: PromptRunResult;
     try {

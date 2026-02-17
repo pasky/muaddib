@@ -2,6 +2,7 @@ import type { Message } from "@mariozechner/pi-ai";
 
 import { NOOP_LOGGER, type Logger } from "../../app/logging.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
+import { messageText } from "../../utils/index.js";
 import type { CommandConfig } from "./resolver.js";
 
 export interface ModeClassifierOptions {
@@ -88,9 +89,7 @@ export function createModeClassifier(
 }
 
 function extractCurrentMessage(message: Message): string {
-  const text = message.role === "assistant"
-    ? message.content.filter((b) => b.type === "text").map((b) => b.text).join(" ")
-    : typeof message.content === "string" ? message.content : message.content.filter((b) => b.type === "text").map((b) => b.text).join(" ");
+  const text = messageText(message);
   const match = text.match(/<[^>]+>\s*(.*)$/);
   return match ? match[1].trim() : text;
 }
