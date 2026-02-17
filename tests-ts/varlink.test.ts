@@ -6,6 +6,7 @@ import {
   BaseVarlinkClient,
   NullTerminatedJsonParser,
   calculateIrcMaxPayload,
+  jsonStringifyAscii,
   splitMessageForIrcPayload,
 } from "../src/rooms/irc/varlink.js";
 import { AsyncQueue } from "../src/utils/async-queue.js";
@@ -77,6 +78,14 @@ describe("varlink helpers", () => {
     parser.reset();
     const frames = parser.push('{"fresh":1}\0');
     expect(frames).toEqual([{ fresh: 1 }]);
+  });
+
+  it("jsonStringifyAscii escapes non-ASCII as \\uXXXX", () => {
+    const result = jsonStringifyAscii({ message: "fascinující způsob" });
+    expect(result).toBe('{"message":"fascinuj\\u00edc\\u00ed zp\\u016fsob"}');
+    // Must be pure ASCII
+    // eslint-disable-next-line no-control-regex
+    expect(/^[\x00-\x7F]*$/.test(result)).toBe(true);
   });
 
   it("never splits inside utf-8 codepoints", () => {

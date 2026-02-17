@@ -4,6 +4,15 @@ import { join } from "node:path";
 
 import { AsyncQueue } from "../../utils/async-queue.js";
 
+/** JSON.stringify with non-ASCII escaped as \uXXXX (matches Python's ensure_ascii=True). */
+export function jsonStringifyAscii(value: unknown): string {
+  // eslint-disable-next-line no-control-regex
+  return JSON.stringify(value).replace(/[^\x00-\x7F]/g, (ch) => {
+    const code = ch.charCodeAt(0);
+    return "\\u" + code.toString(16).padStart(4, "0");
+  });
+}
+
 export class NullTerminatedJsonParser {
   private buffer = "";
 
@@ -118,7 +127,7 @@ export class BaseVarlinkClient {
       payload.more = true;
     }
 
-    this.socket.write(`${JSON.stringify(payload)}\0`, "utf-8");
+    this.socket.write(`${jsonStringifyAscii(payload)}\0`, "utf-8");
 
     if (more) {
       return null;
