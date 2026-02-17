@@ -9,7 +9,7 @@ import {
   createAgentSessionForInvocation,
   type RunnerLogger,
 } from "./session-factory.js";
-import { emptyUsage, safeJson, truncateForDebug } from "./debug-utils.js";
+import { compactJson, emptyUsage, safeJson, truncateForDebug } from "./debug-utils.js";
 
 const DEFAULT_EMPTY_COMPLETION_RETRY_PROMPT =
   "<meta>No valid text or tool use found in response. Please try again.</meta>";
@@ -339,7 +339,12 @@ function renderContentForDebug(content: unknown, maxChars: number): unknown {
 
 function summarizeToolPayload(value: unknown, maxChars: number): string {
   if (typeof value === "string") {
-    return truncateForDebug(value, maxChars);
+    return truncateForDebug(value.replaceAll("\n", " "), maxChars);
+  }
+
+  // For objects with a "content" key, summarize only that key
+  if (value && typeof value === "object" && !Array.isArray(value) && "content" in value) {
+    return summarizeToolPayload((value as Record<string, unknown>).content, maxChars);
   }
 
   if (Array.isArray(value)) {
@@ -347,7 +352,7 @@ function summarizeToolPayload(value: unknown, maxChars: number): string {
       .filter((entry): entry is { type?: unknown; text?: unknown } => Boolean(entry) && typeof entry === "object")
       .filter((entry) => entry.type === "text")
       .map((entry) => String(entry.text ?? ""))
-      .join("\n")
+      .join(" ")
       .trim();
 
     if (textItems.length > 0) {
@@ -355,5 +360,5 @@ function summarizeToolPayload(value: unknown, maxChars: number): string {
     }
   }
 
-  return safeJson(value, maxChars);
+  return compactJson(value, maxChars);
 }

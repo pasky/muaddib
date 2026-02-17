@@ -17,7 +17,7 @@ export function emptyUsage(): Usage {
   };
 }
 
-const LEAF_STRING_MAX = 512;
+const LEAF_STRING_MAX = 2048;
 
 function truncateLeafStrings(value: unknown): unknown {
   if (typeof value === "string") {
@@ -39,6 +39,14 @@ function truncateLeafStrings(value: unknown): unknown {
 export function safeJson(value: unknown, maxChars: number): string {
   try {
     return truncateForDebug(JSON.stringify(truncateLeafStrings(value), null, 2), maxChars);
+  } catch {
+    return "[unserializable payload]";
+  }
+}
+
+export function compactJson(value: unknown, maxChars: number): string {
+  try {
+    return truncateForDebug(JSON.stringify(truncateLeafStrings(value)), maxChars);
   } catch {
     return "[unserializable payload]";
   }
