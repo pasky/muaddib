@@ -347,18 +347,5 @@ function summarizeToolPayload(value: unknown, maxChars: number): string {
     return summarizeToolPayload((value as Record<string, unknown>).content, maxChars);
   }
 
-  if (Array.isArray(value)) {
-    const textItems = value
-      .filter((entry): entry is { type?: unknown; text?: unknown } => Boolean(entry) && typeof entry === "object")
-      .filter((entry) => entry.type === "text")
-      .map((entry) => String(entry.text ?? ""))
-      .join(" ")
-      .trim();
-
-    if (textItems.length > 0) {
-      return truncateForDebug(textItems, maxChars);
-    }
-  }
-
   return compactJson(value, maxChars);
 }
