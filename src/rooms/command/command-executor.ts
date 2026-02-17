@@ -915,9 +915,16 @@ function resolveConfigModelSpec(
  */
 const LEADING_IRC_CONTEXT_ECHO_PREFIX_RE = /^(?:\s*(?:\[[^\]]+\]\s*)?(?:![A-Za-z][\w-]*\s+)?(?:\[?\d{1,2}:\d{2}\]?\s*)?(?:<(?!\/?quest(?:_finished)?\b)[^>]+>))*\s*/iu;
 
+/**
+ * Matches a bare command-dispatch prefix the LLM may echo without IRC angle brackets,
+ * e.g. "!d caster:" or "!d caster,".  The nick part is required so we don't strip
+ * a legitimate "!something" at the start of a real response.
+ */
+const BARE_COMMAND_PREFIX_RE = /^![A-Za-z]\s+\S+[,:]\s*/u;
+
 /** Strip leading IRC context echo prefixes that LLMs sometimes parrot from conversation history. */
 function stripLeadingIrcContextEchoPrefixes(text: string): string {
-  return text.replace(LEADING_IRC_CONTEXT_ECHO_PREFIX_RE, "");
+  return text.replace(LEADING_IRC_CONTEXT_ECHO_PREFIX_RE, "").replace(BARE_COMMAND_PREFIX_RE, "");
 }
 
 
