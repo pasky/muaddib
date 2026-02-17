@@ -2,7 +2,7 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { RuntimeLogWriter } from "../src/app/logging.js";
 import { MuaddibConfig } from "../src/config/muaddib-config.js";
@@ -339,7 +339,11 @@ describe("IrcRoomMonitor", () => {
       },
     });
 
-    await expect((monitor as any).connectWithRetry(2)).resolves.toBe(true);
+    vi.useFakeTimers();
+    const promise = (monitor as any).connectWithRetry(2);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(promise).resolves.toBe(true);
+    vi.useRealTimers();
 
     expect(eventsDisconnectCalls).toBe(1);
     expect(senderDisconnectCalls).toBe(1);
@@ -434,7 +438,11 @@ describe("IrcRoomMonitor", () => {
       },
     });
 
-    await expect((monitor as any).connectWithRetry(2)).resolves.toBe(true);
+    vi.useFakeTimers();
+    const promise = (monitor as any).connectWithRetry(2);
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(promise).resolves.toBe(true);
+    vi.useRealTimers();
 
     const datePath = new Date().toISOString().slice(0, 10);
     const systemLogPath = join(logsHome, "logs", datePath, "system.log");

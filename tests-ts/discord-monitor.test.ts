@@ -621,10 +621,10 @@ describe("DiscordRoomMonitor", () => {
           if (sendAttempts === 1) {
             const error = new Error("rate limited") as Error & {
               status?: number;
-              retryAfterMs?: number;
+              retryAfter?: number;
             };
             error.status = 429;
-            error.retryAfterMs = 0;
+            error.retryAfter = 0;
             throw error;
           }
         },
