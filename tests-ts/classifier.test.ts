@@ -131,6 +131,45 @@ describe("createModeClassifier", () => {
     );
   });
 
+  it("maps assistant context entries to assistant role messages", async () => {
+    let seenMessages: any[] = [];
+
+    const modelAdapter = {
+      completeSimple: vi.fn(async (_modelSpec: string, context: { messages: any[] }) => {
+        seenMessages = context.messages;
+        return {
+          role: "assistant",
+          content: [{ type: "text", text: "SARCASTIC" }],
+          api: "openai-completions",
+          provider: "openai",
+          model: "gpt-4o-mini",
+          usage: {
+            input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          stopReason: "stop",
+          timestamp: Date.now(),
+        };
+      }),
+    } as any;
+
+    const classifier = createModeClassifier(commandConfig as any, { modelAdapter });
+
+    await classifier([
+      { role: "user", content: "<nick> hello" },
+      { role: "assistant", content: "<bot> hi there" },
+      { role: "user", content: "<nick> tell joke" },
+    ]);
+
+    expect(seenMessages).toHaveLength(3);
+    expect(seenMessages[0].role).toBe("user");
+    expect(seenMessages[0].content).toBe("<nick> hello");
+    expect(seenMessages[1].role).toBe("assistant");
+    expect(seenMessages[1].content).toEqual([{ type: "text", text: "<bot> hi there" }]);
+    expect(seenMessages[2].role).toBe("user");
+    expect(seenMessages[2].content).toBe("<nick> tell joke");
+  });
+
   it("falls back when completion fails and logs error severity", async () => {
     const logger = {
       debug: vi.fn(),

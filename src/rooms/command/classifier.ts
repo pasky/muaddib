@@ -1,4 +1,4 @@
-import { type UserMessage } from "@mariozechner/pi-ai";
+import { type UserMessage, type AssistantMessage, type Message } from "@mariozechner/pi-ai";
 
 import { NOOP_LOGGER, type Logger } from "../../app/logging.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
@@ -27,12 +27,25 @@ export function createModeClassifier(
     }
 
     try {
-      const llmMessages = context.map<UserMessage>((entry) => ({
-        role: "user",
-        content:
-          entry.role === "assistant" ? `[assistant] ${entry.content}` : entry.content,
-        timestamp: Date.now(),
-      }));
+      const llmMessages = context.map<Message>((entry) => {
+        if (entry.role === "assistant") {
+          return {
+            role: "assistant",
+            content: [{ type: "text", text: entry.content }],
+            api: "",
+            provider: "",
+            model: "",
+            usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+            stopReason: "stop",
+            timestamp: Date.now(),
+          } satisfies AssistantMessage;
+        }
+        return {
+          role: "user",
+          content: entry.content,
+          timestamp: Date.now(),
+        } satisfies UserMessage;
+      });
 
       const currentMessage = extractCurrentMessage(context[context.length - 1].content);
       const labels = Object.keys(commandConfig.modeClassifier.labels);
