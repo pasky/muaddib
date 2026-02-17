@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Usage } from "@mariozechner/pi-ai";
 
-let mockCreateAgentSessionForInvocation: ReturnType<typeof vi.fn>;
+import type { Mock } from "vitest";
+
+let mockCreateAgentSessionForInvocation: Mock<(...args: unknown[]) => unknown>;
 
 vi.mock("../src/agent/session-factory.js", () => ({
   createAgentSessionForInvocation: (...args: unknown[]) => mockCreateAgentSessionForInvocation(...args),

@@ -320,6 +320,7 @@ export class CommandExecutor {
       resolved.modeKey,
       message.mynick,
       resolved.modelOverride ?? undefined,
+      resolved.selectedTrigger ?? undefined,
     );
 
     let prependedContext: Message[] = [];
@@ -667,7 +668,7 @@ export class CommandExecutor {
 
   // ── Helpers ──
 
-  buildSystemPrompt(mode: string, mynick: string, modelOverride?: string): string {
+  buildSystemPrompt(mode: string, mynick: string, modelOverride?: string, selectedTrigger?: string): string {
     const modeConfig = this.commandConfig.modes[mode];
     if (!modeConfig) {
       throw new Error(`Command mode '${mode}' not found in config`);
@@ -694,6 +695,10 @@ export class CommandExecutor {
       ...promptVars,
       mynick,
       current_time: formatCurrentTime(),
+      ...(selectedTrigger ? { current_trigger: selectedTrigger } : {}),
+      ...(selectedTrigger && triggerModelVars[`${selectedTrigger}_model`]
+        ? { current_model: triggerModelVars[`${selectedTrigger}_model`] }
+        : {}),
     };
 
     return promptTemplate.replace(/\{([A-Za-z0-9_]+)\}/g, (full, key: string) => vars[key] ?? full);
@@ -918,10 +923,11 @@ function stripLeadingIrcContextEchoPrefixes(text: string): string {
 
 
 function formatCurrentTime(date = new Date()): string {
-  // Intl produces locale-aware "YYYY-MM-DD HH:MM" in local time.
+  // Use UTC to match the chat history timestamps (SQLite CURRENT_TIMESTAMP is UTC).
   const fmt = new Intl.DateTimeFormat("sv-SE", {
     year: "numeric", month: "2-digit", day: "2-digit",
     hour: "2-digit", minute: "2-digit", hour12: false,
+    timeZone: "UTC",
   });
   return fmt.format(date);
 }
