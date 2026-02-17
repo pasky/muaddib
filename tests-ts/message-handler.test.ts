@@ -1376,6 +1376,67 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("messages arriving before agent creation are buffered and steered on flush", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const resolveStarted = createDeferred<void>();
+    const releaseResolve = createDeferred<void>();
+
+    const steerCalls: any[] = [];
+    const mockAgent = {
+      steer: (msg: any) => { steerCalls.push(msg); },
+    };
+
+    // The runner factory delays onAgentCreated until releaseResolve fires,
+    // simulating a slow resolve/context-build phase.
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: (input) => ({
+        prompt: async () => {
+          resolveStarted.resolve();
+          await releaseResolve.promise;
+          input.onAgentCreated?.(mockAgent as any);
+          return makeRunnerResult("done");
+        },
+      }),
+    });
+
+    // First message triggers session creation (blocks in prompt).
+    const t1 = handler.handleIncomingMessage(makeMessage("!s hello"), {
+      isDirect: true,
+      sendResponse: async () => {},
+    });
+
+    await resolveStarted.promise;
+
+    // Second message arrives while agent is NOT yet created (pre-onAgentCreated).
+    const t2 = handler.handleIncomingMessage(makeMessage("!s continuation"), {
+      isDirect: true,
+      sendResponse: async () => {},
+    });
+
+    // Also a passive message from the same user should be buffered.
+    const t3 = handler.handleIncomingMessage(
+      makeMessage("passive follow-up"),
+      { isDirect: false },
+    );
+
+    // Now release — onAgentCreated fires, buffered messages flush.
+    releaseResolve.resolve();
+
+    await Promise.all([t1, t2, t3]);
+
+    expect(steerCalls).toHaveLength(2);
+    const texts = steerCalls.map((c: any) => c.content[0].text);
+    expect(texts.some((t: string) => t.includes("continuation"))).toBe(true);
+    expect(texts.some((t: string) => t.includes("passive follow-up"))).toBe(true);
+
+    await history.close();
+  });
+
   it("shares session across users in the same thread via steering", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();

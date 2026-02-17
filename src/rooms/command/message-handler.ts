@@ -9,7 +9,6 @@
  */
 
 import type { Agent } from "@mariozechner/pi-agent-core";
-
 import { CommandResolver } from "./resolver.js";
 import { buildProactiveConfig, ProactiveRunner } from "./proactive.js";
 import {
@@ -54,8 +53,8 @@ export class RoomMessageHandler {
   private readonly history: ChatHistoryStore;
   private readonly logger: CommandExecutorLogger;
 
-  /** Active agent sessions keyed by session key. */
-  private readonly activeSessions = new Map<string, Agent>();
+  /** Active steering functions keyed by session key. */
+  private readonly activeSteers = new Map<string, (message: RoomMessage) => void>();
 
   constructor(
     runtime: MuaddibRuntime,
@@ -132,22 +131,32 @@ export class RoomMessageHandler {
     sendResponse: ((text: string) => Promise<void>) | undefined,
   ): Promise<CommandExecutionResult | null> {
     const key = sessionKey(message);
-    const existing = this.activeSessions.get(key);
+    const existing = this.activeSteers.get(key);
 
     if (existing) {
-      this.steerAgent(existing, message);
+      existing(message);
       return null;
     }
 
-    // Start a new session. The map entry is set inside onAgentCreated
-    // (which fires synchronously before the first LLM call).
+    // Register a buffering steer function immediately so messages arriving
+    // before the agent is created are captured and flushed once it's ready.
+    const pending: RoomMessage[] = [];
+    this.activeSteers.set(key, (msg) => { pending.push(msg); });
+
     try {
       return await this.executor.execute(
         message, triggerMessageId, sendResponse,
-        (agent) => { this.activeSessions.set(key, agent); },
+        (agent) => {
+          // Flush buffered messages, then swap to direct steering.
+          for (const buffered of pending) {
+            this.steerAgent(agent, buffered);
+          }
+          pending.length = 0;
+          this.activeSteers.set(key, (msg) => { this.steerAgent(agent, msg); });
+        },
       );
     } finally {
-      this.activeSessions.delete(key);
+      this.activeSteers.delete(key);
     }
   }
 
@@ -174,9 +183,9 @@ export class RoomMessageHandler {
     const key = sessionKey(message);
 
     // If there's an active command session for this key, steer into it
-    const existing = this.activeSessions.get(key);
+    const existing = this.activeSteers.get(key);
     if (existing) {
-      this.steerAgent(existing, message);
+      existing(message);
       return;
     }
 
@@ -184,7 +193,7 @@ export class RoomMessageHandler {
     this.proactiveRunner?.steerOrStart(
       message,
       sendResponse,
-      () => this.activeSessions.has(sessionKey(message)),
+      () => this.activeSteers.has(sessionKey(message)),
     );
 
     await this.executor.triggerAutoChronicler(message);
