@@ -58,6 +58,7 @@ export interface CommandRunnerFactoryInput {
   model: string;
   systemPrompt: string;
   tools: AgentTool<any>[];
+  metaReminder?: string;
   logger?: Logger;
   onAgentCreated?: (agent: Agent) => void;
 }
@@ -147,6 +148,7 @@ export class CommandExecutor {
           getApiKey: runtime.getApiKey,
           maxIterations: actorConfig.maxIterations,
           llmDebugMaxChars: actorConfig.llmDebugMaxChars,
+          metaReminder: input.metaReminder,
           logger: input.logger,
           onAgentCreated: input.onAgentCreated,
         }));
@@ -364,6 +366,7 @@ export class CommandExecutor {
       model: modelSpec,
       systemPrompt,
       tools,
+      metaReminder: modeConfig.prompt_reminder,
       logger,
       onAgentCreated,
     });
@@ -427,6 +430,7 @@ export class CommandExecutor {
       model: modelSpec,
       systemPrompt,
       tools,
+      metaReminder: this.commandConfig.modes.serious?.prompt_reminder,
       logger,
       onAgentCreated,
     });

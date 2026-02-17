@@ -43,6 +43,7 @@ interface CreateAgentSessionInput {
   maxIterations?: number;
   visionFallbackModel?: string;
   llmDebugMaxChars?: number;
+  metaReminder?: string;
   logger?: Logger;
 }
 
@@ -147,6 +148,14 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
       if (turnCount >= maxIterations + 2) {
         logger.warn("Exceeding max iterations, aborting session prompt loop.");
         void session.abort();
+      }
+
+      if (turnCount < maxIterations && input.metaReminder && event.toolResults.length > 0) {
+        agent.steer({
+          role: "user",
+          content: [{ type: "text", text: `<meta>${input.metaReminder}</meta>` }],
+          timestamp: Date.now(),
+        });
       }
 
       return;

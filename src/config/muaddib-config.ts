@@ -108,6 +108,7 @@ export interface ModeConfig {
   includeChapterSummary?: boolean;
   visionModel?: string;
   prompt?: string;
+  prompt_reminder?: string;
   triggers: Record<string, Record<string, unknown>>;
 }
 

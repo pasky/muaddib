@@ -161,4 +161,62 @@ describe("createAgentSessionForInvocation", () => {
     expect(session.abort).toHaveBeenCalledTimes(1);
     expect(logger.warn).toHaveBeenCalledWith("Exceeding max iterations, aborting session prompt loop.");
   });
+
+  it("injects metaReminder via steer on each turn before iteration limit", () => {
+    const ctx = createAgentSessionForInvocation({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "system",
+      tools: [],
+      modelAdapter: { resolve: vi.fn(() => ({
+        spec: { provider: "openai", modelId: "gpt-4o-mini" },
+        model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
+      })) } as any,
+      maxIterations: 3,
+      metaReminder: "Stay focused on the quest.",
+    });
+
+    const session = mockState.sessions[0];
+    const agent = ctx.agent as any;
+
+    // Turn with tool results: should steer with reminder
+    session.emit({ type: "turn_end", toolResults: [{ role: "toolResult" }] });
+    expect(agent.steer).toHaveBeenCalledTimes(1);
+    expect(agent.steer.mock.calls[0][0].content[0].text).toBe(
+      "<meta>Stay focused on the quest.</meta>",
+    );
+
+    // Turn without tool results: no metaReminder steer
+    agent.steer.mockClear();
+    session.emit({ type: "turn_end", toolResults: [] });
+    expect(agent.steer).not.toHaveBeenCalled();
+
+    // Turn with tool results, still under limit
+    session.emit({ type: "turn_end", toolResults: [{ role: "toolResult" }] });
+    expect(agent.steer).toHaveBeenCalledTimes(1);
+
+    // Fourth turn (at limit): iteration-limit steer only, no metaReminder
+    agent.steer.mockClear();
+    session.emit({ type: "turn_end", toolResults: [{ role: "toolResult" }] });
+    expect(agent.steer).toHaveBeenCalledTimes(1);
+    expect(agent.steer.mock.calls[0][0].content[0].text).toContain("iteration limit");
+  });
+
+  it("does not inject metaReminder when not configured", () => {
+    const ctx = createAgentSessionForInvocation({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "system",
+      tools: [],
+      modelAdapter: { resolve: vi.fn(() => ({
+        spec: { provider: "openai", modelId: "gpt-4o-mini" },
+        model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
+      })) } as any,
+      maxIterations: 5,
+    });
+
+    const session = mockState.sessions[0];
+    const agent = ctx.agent as any;
+
+    session.emit({ type: "turn_end", toolResults: [{ role: "toolResult" }] });
+    expect(agent.steer).not.toHaveBeenCalled();
+  });
 });

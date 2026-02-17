@@ -23,6 +23,7 @@ export interface SessionRunnerOptions {
   maxIterations?: number;
   emptyCompletionRetryPrompt?: string;
   llmDebugMaxChars?: number;
+  metaReminder?: string;
   logger?: RunnerLogger;
   onAgentCreated?: (agent: Agent) => void;
 }
@@ -81,8 +82,8 @@ export class SessionRunner {
       maxIterations: this.options.maxIterations,
       visionFallbackModel: options.visionFallbackModel,
       llmDebugMaxChars: this.llmDebugMaxChars,
+      metaReminder: this.options.metaReminder,
       logger: this.logger,
-
     });
 
     const { session, agent } = sessionCtx;
