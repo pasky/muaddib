@@ -9,21 +9,9 @@ repos:
 
   - repo: local
     hooks:
-      - id: ts-lint
-        name: TypeScript lint
-        entry: npm run lint
-        language: system
-        pass_filenames: false
-
-      - id: ts-typecheck
-        name: TypeScript typecheck
-        entry: npm run typecheck
-        language: system
-        pass_filenames: false
-
-      - id: ts-tests
-        name: TypeScript tests
-        entry: npm test
+      - id: ts-check
+        name: TypeScript lint + typecheck + tests (parallel)
+        entry: bash -c 'npm run lint & pid_lint=$!; npm run typecheck & pid_tc=$!; timeout 30 npm test & pid_test=$!; wait $pid_lint && wait $pid_tc && wait $pid_test'
         language: system
         pass_filenames: false
 
