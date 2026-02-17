@@ -25,6 +25,10 @@ interface ActorConfig {
   maxIterations?: number;
   maxCompletionRetries?: number;
   llmDebugMaxChars?: number;
+  progress?: {
+    thresholdSeconds?: number;
+    minIntervalSeconds?: number;
+  };
 }
 
 export interface ArtifactsConfig {
@@ -73,6 +77,11 @@ interface ChroniclerConfig {
   database?: { path?: string };
   paragraphsPerChapter?: number;
   arcModels?: Record<string, string>;
+  quests?: {
+    arcs?: string[];
+    promptReminder?: string;
+    cooldown?: number;
+  };
 }
 
 export interface OpenRouterProviderConfig {

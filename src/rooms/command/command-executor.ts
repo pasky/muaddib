@@ -59,6 +59,8 @@ export interface CommandRunnerFactoryInput {
   systemPrompt: string;
   tools: AgentTool<any>[];
   metaReminder?: string;
+  progressThresholdSeconds?: number;
+  progressMinIntervalSeconds?: number;
   logger?: Logger;
   onAgentCreated?: (agent: Agent) => void;
 }
@@ -149,6 +151,8 @@ export class CommandExecutor {
           maxIterations: actorConfig.maxIterations,
           llmDebugMaxChars: actorConfig.llmDebugMaxChars,
           metaReminder: input.metaReminder,
+          progressThresholdSeconds: input.progressThresholdSeconds,
+          progressMinIntervalSeconds: input.progressMinIntervalSeconds,
           logger: input.logger,
           onAgentCreated: input.onAgentCreated,
         }));
@@ -362,11 +366,14 @@ export class CommandExecutor {
 
     const tools = this.selectTools(message, resolved.runtime.allowedTools, runnerContext);
 
+    const progressConfig = this.runtime.config.getActorConfig().progress;
     const runner = this.runnerFactory({
       model: modelSpec,
       systemPrompt,
       tools,
       metaReminder: modeConfig.prompt_reminder,
+      progressThresholdSeconds: progressConfig?.thresholdSeconds,
+      progressMinIntervalSeconds: progressConfig?.minIntervalSeconds,
       logger,
       onAgentCreated,
     });
@@ -426,11 +433,14 @@ export class CommandExecutor {
 
     const tools = this.selectTools(message, classifiedRuntime.allowedTools, runnerContext);
 
+    const proactiveProgressConfig = this.runtime.config.getActorConfig().progress;
     const runner = this.runnerFactory({
       model: modelSpec,
       systemPrompt,
       tools,
       metaReminder: this.commandConfig.modes.serious?.prompt_reminder,
+      progressThresholdSeconds: proactiveProgressConfig?.thresholdSeconds,
+      progressMinIntervalSeconds: proactiveProgressConfig?.minIntervalSeconds,
       logger,
       onAgentCreated,
     });

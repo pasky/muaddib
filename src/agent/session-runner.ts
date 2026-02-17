@@ -24,6 +24,8 @@ export interface SessionRunnerOptions {
   emptyCompletionRetryPrompt?: string;
   llmDebugMaxChars?: number;
   metaReminder?: string;
+  progressThresholdSeconds?: number;
+  progressMinIntervalSeconds?: number;
   logger?: RunnerLogger;
   onAgentCreated?: (agent: Agent) => void;
 }
@@ -83,6 +85,8 @@ export class SessionRunner {
       visionFallbackModel: options.visionFallbackModel,
       llmDebugMaxChars: this.llmDebugMaxChars,
       metaReminder: this.options.metaReminder,
+      progressThresholdSeconds: this.options.progressThresholdSeconds,
+      progressMinIntervalSeconds: this.options.progressMinIntervalSeconds,
       logger: this.logger,
     });
 

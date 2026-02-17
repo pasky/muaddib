@@ -201,6 +201,84 @@ describe("createAgentSessionForInvocation", () => {
     expect(agent.steer.mock.calls[0][0].content[0].text).toContain("iteration limit");
   });
 
+  it("injects progress nudge when elapsed time exceeds threshold", async () => {
+    const ctx = createAgentSessionForInvocation({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "system",
+      tools: [],
+      modelAdapter: { resolve: vi.fn(() => ({
+        spec: { provider: "openai", modelId: "gpt-4o-mini" },
+        model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
+      })) } as any,
+      maxIterations: 10,
+      metaReminder: "Stay focused.",
+      progressThresholdSeconds: 0, // always triggers
+      progressMinIntervalSeconds: 0,
+    });
+
+    const session = mockState.sessions[0];
+    const agent = ctx.agent as any;
+
+    session.emit({ type: "turn_end", toolResults: [{ role: "toolResult" }] });
+    expect(agent.steer).toHaveBeenCalledTimes(1);
+    const text = agent.steer.mock.calls[0][0].content[0].text;
+    expect(text).toContain("Stay focused.");
+    expect(text).toContain("progress_report");
+  });
+
+  it("injects progress nudge on first tool-using turn with high reasoning", () => {
+    const ctx = createAgentSessionForInvocation({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "system",
+      tools: [],
+      modelAdapter: { resolve: vi.fn(() => ({
+        spec: { provider: "openai", modelId: "gpt-4o-mini" },
+        model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
+      })) } as any,
+      maxIterations: 10,
+      progressThresholdSeconds: 9999, // won't trigger by elapsed time
+      progressMinIntervalSeconds: 0,
+      thinkingLevel: "high",
+    });
+
+    const session = mockState.sessions[0];
+    const agent = ctx.agent as any;
+
+    // First turn with tool results + high reasoning → nudge
+    session.emit({ type: "turn_end", toolResults: [{ role: "toolResult" }] });
+    expect(agent.steer).toHaveBeenCalledTimes(1);
+    expect(agent.steer.mock.calls[0][0].content[0].text).toContain("progress_report");
+
+    // Second turn: no nudge (not first turn, threshold not met)
+    agent.steer.mockClear();
+    session.emit({ type: "turn_end", toolResults: [{ role: "toolResult" }] });
+    expect(agent.steer).not.toHaveBeenCalled();
+  });
+
+  it("does not inject progress nudge near iteration limit", () => {
+    const ctx = createAgentSessionForInvocation({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "system",
+      tools: [],
+      modelAdapter: { resolve: vi.fn(() => ({
+        spec: { provider: "openai", modelId: "gpt-4o-mini" },
+        model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
+      })) } as any,
+      maxIterations: 3,
+      progressThresholdSeconds: 0,
+      progressMinIntervalSeconds: 0,
+      thinkingLevel: "high",
+    });
+
+    const session = mockState.sessions[0];
+    const agent = ctx.agent as any;
+
+    // Turn 1: maxIterations=3, turnCount=1, limit-2=1 → turnCount < maxIterations-2 is false
+    session.emit({ type: "turn_end", toolResults: [{ role: "toolResult" }] });
+    // Should NOT have progress nudge since turnCount(1) >= maxIterations-2(1)
+    expect(agent.steer).not.toHaveBeenCalled();
+  });
+
   it("does not inject metaReminder when not configured", () => {
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",

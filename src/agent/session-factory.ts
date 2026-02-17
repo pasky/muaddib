@@ -44,6 +44,8 @@ interface CreateAgentSessionInput {
   visionFallbackModel?: string;
   llmDebugMaxChars?: number;
   metaReminder?: string;
+  progressThresholdSeconds?: number;
+  progressMinIntervalSeconds?: number;
   logger?: Logger;
 }
 
@@ -128,7 +130,10 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
 
   let turnCount = 0;
   let visionFallbackActivated = false;
-
+  const sessionStartTime = Date.now();
+  let lastProgressNudgeTime = 0;
+  const progressThreshold = input.progressThresholdSeconds;
+  const progressMinInterval = input.progressMinIntervalSeconds ?? 0;
   const unsubscribe = session.subscribe((event) => {
     if (event.type === "turn_end") {
       turnCount += 1;
@@ -150,12 +155,39 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
         void session.abort();
       }
 
-      if (turnCount < maxIterations && input.metaReminder && event.toolResults.length > 0) {
-        agent.steer({
-          role: "user",
-          content: [{ type: "text", text: `<meta>${input.metaReminder}</meta>` }],
-          timestamp: Date.now(),
-        });
+      if (turnCount < maxIterations && event.toolResults?.length > 0) {
+        const parts: string[] = [];
+
+        if (input.metaReminder) {
+          parts.push(input.metaReminder);
+        }
+
+        // Progress report nudge: fire when elapsed >= threshold (with min interval),
+        // or on first iteration with medium/high reasoning.
+        if (progressThreshold != null && turnCount < maxIterations - 2) {
+          const now = Date.now();
+          const elapsedSeconds = (now - sessionStartTime) / 1000;
+          const sinceLastNudge = (now - lastProgressNudgeTime) / 1000;
+          const tl = input.thinkingLevel ?? "off";
+          const isFirstTurnHighReasoning = turnCount === 1 &&
+            (tl === "medium" || tl === "high" || tl === "xhigh");
+
+          if (
+            isFirstTurnHighReasoning ||
+            (elapsedSeconds >= progressThreshold && sinceLastNudge >= progressMinInterval)
+          ) {
+            parts.push("If you are going to call more tools, you MUST ALSO use the progress_report tool now.");
+            lastProgressNudgeTime = now;
+          }
+        }
+
+        if (parts.length > 0) {
+          agent.steer({
+            role: "user",
+            content: [{ type: "text", text: `<meta>${parts.join(" ")}</meta>` }],
+            timestamp: Date.now(),
+          });
+        }
       }
 
       return;

@@ -69,6 +69,9 @@ export async function createMuaddibRuntime(
       history,
       modelAdapter,
       logger: runtimeLogger,
+      quests: chroniclerConfig.quests,
+      getApiKey,
+      actorConfig: config.getActorConfig(),
     });
   }
 
