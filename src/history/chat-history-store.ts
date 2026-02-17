@@ -7,13 +7,32 @@ import type { RoomMessage } from "../rooms/message.js";
 
 export type ChatRole = "user" | "assistant";
 
-/** Stub fields for constructing AssistantMessage objects from stored history.
- *  These fields are required by the pi-ai type but meaningless for input context. */
-export const STUB_ASSISTANT_FIELDS = {
-  api: "", provider: "", model: "",
-  usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
-  stopReason: "stop",
-} as const;
+/**
+ * Construct stub fields for AssistantMessage objects created from persisted context.
+ * Returns fresh nested objects on each call to avoid accidental shared mutations.
+ */
+export function createStubAssistantFields(): Pick<AssistantMessage, "api" | "provider" | "model" | "usage" | "stopReason"> {
+  return {
+    api: "",
+    provider: "",
+    model: "",
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        total: 0,
+      },
+    },
+    stopReason: "stop",
+  };
+}
 
 export interface LlmCallInput {
   provider: string;
@@ -309,7 +328,7 @@ export class ChatHistoryStore {
           return {
             role: "assistant",
             content: [{ type: "text", text }],
-            ...STUB_ASSISTANT_FIELDS,
+            ...createStubAssistantFields(),
             timestamp,
           } satisfies AssistantMessage;
         }

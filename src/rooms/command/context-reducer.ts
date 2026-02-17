@@ -1,5 +1,5 @@
 import type { Message } from "@mariozechner/pi-ai";
-import { STUB_ASSISTANT_FIELDS } from "../../history/chat-history-store.js";
+import { createStubAssistantFields } from "../../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import type { Logger } from "../../app/logging.js";
 
@@ -138,7 +138,7 @@ export class ContextReducerTs implements ContextReducer {
         messages.push({
           role: "assistant",
           content: [{ type: "text", text: content }],
-          ...STUB_ASSISTANT_FIELDS,
+          ...createStubAssistantFields(),
           timestamp: 0,
         });
       } else {

@@ -2,14 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import type { Message } from "@mariozechner/pi-ai";
 
 import { ContextReducerTs } from "../src/rooms/command/context-reducer.js";
-import { STUB_ASSISTANT_FIELDS } from "../src/history/chat-history-store.js";
+import { createStubAssistantFields } from "../src/history/chat-history-store.js";
 
 function userMsg(content: string): Message {
   return { role: "user", content, timestamp: 0 };
 }
 
 function assistantMsg(content: string): Message {
-  return { role: "assistant", content: [{ type: "text", text: content }], ...STUB_ASSISTANT_FIELDS, timestamp: 0 };
+  return { role: "assistant", content: [{ type: "text", text: content }], ...createStubAssistantFields(), timestamp: 0 };
 }
 
 function assistantTextMessage(text: string) {
