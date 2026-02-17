@@ -263,6 +263,72 @@ describe("SlackRoomMonitor", () => {
     await history.close();
   });
 
+  it("strips @botname prefix from direct messages", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    let seenText = "";
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async (message) => {
+          seenText = message.content;
+          return null;
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      workspaceId: "T123",
+      channelId: "C123",
+      username: "alice",
+      text: "@muaddib: hello there",
+      mynick: "muaddib",
+      mentionsBot: true,
+    });
+
+    expect(seenText).toBe("hello there");
+
+    await history.close();
+  });
+
+  it("decodes HTML entities in Slack message text", async () => {
+    const history = new ChatHistoryStore(":memory:", 20);
+    await history.initialize();
+
+    let seenText = "";
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async (message) => {
+          seenText = message.content;
+          return null;
+        },
+      },
+    });
+
+    // The text field arrives pre-normalized by the transport; simulate what
+    // SlackSocketTransport.normalizeIncomingText would produce for entities
+    // that go beyond the basic &amp;/&lt;/&gt; triple.
+    await monitor.processMessageEvent({
+      workspaceId: "T123",
+      channelId: "C123",
+      channelType: "im",
+      username: "alice",
+      text: 'he said "hello" & it\'s <fine>',
+      mynick: "muaddib",
+      isDirectMessage: true,
+    });
+
+    expect(seenText).toBe('he said "hello" & it\'s <fine>');
+
+    await history.close();
+  });
+
   it("maps workspace/message identity fields with Python parity semantics", async () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();

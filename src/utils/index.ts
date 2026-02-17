@@ -106,6 +106,40 @@ export async function migrateAddColumn(
   return true;
 }
 
+/**
+ * Strip a leading bot mention or @name prefix from a direct message.
+ *
+ * Handles patterns like `<@BOT_ID> text`, `@botname: text`, and `botname, text`.
+ * The `mentionPattern` parameter allows platform-specific mention syntax
+ * (e.g. Discord uses `<@!?ID>`, Slack uses `<@ID>`).
+ */
+export function stripLeadingMention(
+  content: string,
+  mynick: string,
+  botUserId?: string,
+  /** Regex fragment for the bot-user-id mention, defaults to `<@ID>`. */
+  mentionFragment?: string,
+): string {
+  let cleaned = content.trimStart();
+
+  if (botUserId) {
+    const fragment = mentionFragment ?? `<@${escapeRegExp(botUserId)}>`;
+    const mentionPattern = new RegExp(`^\\s*(?:${fragment}\\s*)+[:,]?\\s*(.*)$`, "i");
+    const match = cleaned.match(mentionPattern);
+    if (match) {
+      cleaned = match[1]?.trim() ?? "";
+    }
+  }
+
+  const namePattern = new RegExp(`^\\s*@?${escapeRegExp(mynick)}[:,]?\\s*(.*)$`, "i");
+  const nameMatch = cleaned.match(namePattern);
+  if (nameMatch) {
+    cleaned = nameMatch[1]?.trim() ?? "";
+  }
+
+  return cleaned || content.trim();
+}
+
 /** Combine message content with an attachment block, handling empty cases. */
 export function appendAttachmentBlock(content: string, attachmentBlock: string): string {
   if (!attachmentBlock) {

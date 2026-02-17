@@ -74,6 +74,11 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
       }
     });
 
+    // No-op handler for app_mention events — we detect mentions via the
+    // message event to ensure file attachments are included. Registering
+    // this suppresses Slack Bolt warnings about unhandled events.
+    this.app.event("app_mention", async () => {});
+
     this.app.error(async (error) => {
       this.queue.push({
         kind: "disconnect",
@@ -393,10 +398,16 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
 }
 
 function decodeSlackEntities(text: string): string {
+  // Decode the three entities Slack always encodes, plus any other HTML entities
+  // (numeric like &#39; / &#x27; or named like &quot;) that may appear.
   return text
     .replaceAll("&amp;", "&")
     .replaceAll("&lt;", "<")
-    .replaceAll("&gt;", ">");
+    .replaceAll("&gt;", ">")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_m, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_m, dec) => String.fromCodePoint(parseInt(dec, 10)))
+    .replaceAll("&quot;", '"')
+    .replaceAll("&apos;", "'");
 }
 
 function mapSlackFiles(value: unknown): SlackFileAttachment[] {

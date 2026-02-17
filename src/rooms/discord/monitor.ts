@@ -1,7 +1,7 @@
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import type { RoomConfig } from "../../config/muaddib-config.js";
 import { CONSOLE_LOGGER, RuntimeLogWriter, type Logger } from "../../app/logging.js";
-import { appendAttachmentBlock, escapeRegExp, nowMonotonicSeconds, requireNonEmptyString, sleep } from "../../utils/index.js";
+import { appendAttachmentBlock, escapeRegExp, nowMonotonicSeconds, requireNonEmptyString, sleep, stripLeadingMention } from "../../utils/index.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import { RoomMessageHandler } from "../command/message-handler.js";
 import { type RoomMessage, roomArc } from "../message.js";
@@ -464,23 +464,9 @@ function buildDiscordAttachmentBlock(attachments: DiscordAttachment[]): string {
 }
 
 function normalizeDirectContent(content: string, mynick: string, botUserId?: string): string {
-  let cleaned = content.trimStart();
-
-  if (botUserId) {
-    const mentionPattern = new RegExp(`^\\s*(?:<@!?${escapeRegExp(botUserId)}>\\s*)+[:,]?\\s*(.*)$`, "i");
-    const match = cleaned.match(mentionPattern);
-    if (match) {
-      cleaned = match[1]?.trim() ?? "";
-    }
-  }
-
-  const namePattern = new RegExp(`^\\s*@?${escapeRegExp(mynick)}[:,]?\\s*(.*)$`, "i");
-  const nameMatch = cleaned.match(namePattern);
-  if (nameMatch) {
-    cleaned = nameMatch[1]?.trim() ?? "";
-  }
-
-  return normalizeDiscordEmoji(cleaned || content.trim());
+  // Discord mentions use <@ID> or <@!ID> (nickname mention).
+  const mentionFragment = botUserId ? `<@!?${escapeRegExp(botUserId)}>` : undefined;
+  return normalizeDiscordEmoji(stripLeadingMention(content, mynick, botUserId, mentionFragment));
 }
 
 /**
