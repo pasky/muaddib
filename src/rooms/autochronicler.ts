@@ -71,7 +71,7 @@ export class AutoChroniclerTs implements AutoChronicler {
         return false;
       }
 
-      this.logger.info(
+      this.logger.debug(
         `Auto-chronicling triggered for ${arc}: ${unchronicledCount} unchronicled messages`,
       );
 
