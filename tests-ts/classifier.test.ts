@@ -1,6 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
+import type { Message } from "@mariozechner/pi-ai";
 
 import { createModeClassifier } from "../src/rooms/command/classifier.js";
+import { STUB_ASSISTANT_FIELDS } from "../src/history/chat-history-store.js";
+
+function userMsg(content: string): Message {
+  return { role: "user", content, timestamp: 0 };
+}
+
+function assistantMsg(content: string): Message {
+  return { role: "assistant", content: [{ type: "text", text: content }], ...STUB_ASSISTANT_FIELDS, timestamp: 0 };
+}
 
 const commandConfig = {
   historySize: 40,
@@ -55,9 +65,9 @@ describe("createModeClassifier", () => {
     });
 
     const label = await classifier([
-      { role: "user", content: "<nick> hello" },
-      { role: "assistant", content: "<bot> hi there" },
-      { role: "user", content: "<nick> tell joke" },
+      userMsg("<nick> hello"),
+      assistantMsg("<bot> hi there"),
+      userMsg("<nick> tell joke"),
     ]);
     expect(label).toBe("SARCASTIC");
 
@@ -98,7 +108,7 @@ describe("createModeClassifier", () => {
       modelAdapter,
     });
 
-    await classifier([{ role: "user", content: "<nick> tell joke" }]);
+    await classifier([userMsg("<nick> tell joke")]);
 
     expect(seenSystemPrompt).toContain("Classify: tell joke");
     expect(seenSystemPrompt).toContain("exactly one classifier label token");
@@ -137,7 +147,7 @@ describe("createModeClassifier", () => {
       modelAdapter,
     });
 
-    const label = await classifier([{ role: "user", content: "hello" }]);
+    const label = await classifier([userMsg("hello")]);
 
     expect(label).toBe("EASY_SERIOUS");
     expect(logger.warn).toHaveBeenCalledWith(
@@ -165,7 +175,7 @@ describe("createModeClassifier", () => {
       modelAdapter,
     });
 
-    const label = await classifier([{ role: "user", content: "hello" }]);
+    const label = await classifier([userMsg("hello")]);
     expect(label).toBe("EASY_SERIOUS");
     expect(logger.error).toHaveBeenCalledWith("Error classifying mode", expect.any(Error));
   });

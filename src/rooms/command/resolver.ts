@@ -1,3 +1,4 @@
+import type { Message } from "@mariozechner/pi-ai";
 import type { CommandConfig, ModeConfig } from "../../config/muaddib-config.js";
 import type { RoomMessage } from "../message.js";
 
@@ -45,7 +46,7 @@ export class CommandResolver {
 
   constructor(
     private readonly commandConfig: CommandConfig,
-    private readonly classifyModeFn: (context: Array<{ role: string; content: string }>) => Promise<string>,
+    private readonly classifyModeFn: (context: Message[]) => Promise<string>,
     private readonly helpToken: string,
     private readonly flagTokens: Set<string>,
     private readonly modelNameFormatter: (value: unknown) => string,
@@ -264,7 +265,7 @@ export class CommandResolver {
 
   async resolve(input: {
     message: RoomMessage;
-    context: Array<{ role: string; content: string }>;
+    context: Message[];
     defaultSize: number;
   }): Promise<ResolvedCommand> {
     const parsed = this.parsePrefix(input.message.content);
@@ -383,7 +384,7 @@ export class CommandResolver {
     };
   }
 
-  private async classifyMode(context: Array<{ role: string; content: string }>): Promise<string> {
+  private async classifyMode(context: Message[]): Promise<string> {
     return this.classifyModeFn(context);
   }
 

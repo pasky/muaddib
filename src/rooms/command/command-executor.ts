@@ -16,14 +16,15 @@ import {
   type PromptOptions,
   type PromptResult,
 } from "../../agent/session-runner.js";
-import type { SessionFactoryContextMessage } from "../../agent/session-factory.js";
+
 import {
   createBaselineAgentTools,
   createDefaultToolExecutors,
   type BaselineToolOptions,
   type MuaddibTool,
 } from "../../agent/tools/baseline-tools.js";
-import type { ChatHistoryStore, ChatRole } from "../../history/chat-history-store.js";
+import type { Message } from "@mariozechner/pi-ai";
+import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { parseModelSpec } from "../../models/model-spec.js";
 import { ContextReducerTs, type ContextReducer } from "./context-reducer.js";
@@ -87,7 +88,7 @@ export interface CommandExecutorOverrides {
 
 export class CommandExecutor {
   readonly resolver: CommandResolver;
-  readonly classifyMode: (context: Array<{ role: string; content: string }>) => Promise<string>;
+  readonly classifyMode: (context: Message[]) => Promise<string>;
   private readonly commandConfig: CommandConfig;
   private readonly history: ChatHistoryStore;
   private readonly modelAdapter: PiAiModelAdapter;
@@ -320,7 +321,7 @@ export class CommandExecutor {
       resolved.modelOverride ?? undefined,
     );
 
-    let prependedContext: Array<{ role: ChatRole; content: string }> = [];
+    let prependedContext: Message[] = [];
     if (
       !resolved.noContext &&
       resolved.runtime.includeChapterSummary &&
@@ -331,7 +332,7 @@ export class CommandExecutor {
       );
     }
 
-    let selectedContext = (resolved.noContext ? context.slice(-1) : context).slice(
+    let selectedContext: Message[] = (resolved.noContext ? context.slice(-1) : context).slice(
       -resolved.runtime.historySize,
     );
 
@@ -350,7 +351,7 @@ export class CommandExecutor {
       ];
     }
 
-    const runnerContext: SessionFactoryContextMessage[] = [
+    const runnerContext: Message[] = [
       ...prependedContext,
       ...selectedContext.slice(0, -1),
     ];
@@ -414,7 +415,7 @@ export class CommandExecutor {
       proactiveConfig.historySize,
     );
 
-    const runnerContext: SessionFactoryContextMessage[] = [
+    const runnerContext: Message[] = [
       ...context.slice(0, -1),
     ];
 
@@ -429,7 +430,13 @@ export class CommandExecutor {
     });
 
     const lastMessage = context[context.length - 1];
-    const queryText = lastMessage?.content ?? "";
+    const queryText = lastMessage
+      ? (lastMessage.role === "user" && typeof lastMessage.content === "string"
+          ? lastMessage.content
+          : lastMessage.role === "assistant"
+            ? lastMessage.content.filter((b) => b.type === "text").map((b) => b.text).join(" ")
+            : "")
+      : "";
 
     let result: PromptRunResult;
     try {
@@ -486,7 +493,7 @@ export class CommandExecutor {
     runner: { prompt(prompt: string, options?: PromptOptions): Promise<PromptResult> },
     message: RoomMessage,
     queryText: string,
-    contextMessages: SessionFactoryContextMessage[],
+    contextMessages: Message[],
     tools: MuaddibTool[],
     opts: { reasoningEffort: string; visionModel?: string },
   ): Promise<PromptRunResult> {
@@ -789,7 +796,7 @@ export class CommandExecutor {
   selectTools(
     message: RoomMessage,
     allowedTools: string[] | null,
-    conversationContext?: SessionFactoryContextMessage[],
+    conversationContext?: Message[],
   ): MuaddibTool[] {
     const invocationToolOptions: BaselineToolOptions = {
       ...this.buildToolOptions(),

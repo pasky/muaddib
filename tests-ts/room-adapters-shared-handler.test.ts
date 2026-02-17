@@ -109,7 +109,8 @@ describe("room adapters share RoomMessageHandler behavior", () => {
     expect(historyRows[1].role).toBe("assistant");
 
     const context = await history.getContext("discord:guild-1", "chan-1", 10);
-    expect(context[1].content).toContain("!s");
+    const assistantContent = (context[1] as any).content[0].text;
+    expect(assistantContent).toContain("!s");
 
     await history.close();
   });
@@ -190,7 +191,8 @@ describe("room adapters share RoomMessageHandler behavior", () => {
     expect(historyRows).toHaveLength(2);
 
     const context = await history.getContext("slack:T123", "C123", 10);
-    expect(context[1].content).toContain("!s");
+    const slackAssistantContent = (context[1] as any).content[0].text;
+    expect(slackAssistantContent).toContain("!s");
 
     await history.close();
   });

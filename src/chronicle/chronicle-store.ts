@@ -1,5 +1,6 @@
 import { open, type Database } from "sqlite";
 import sqlite3 from "sqlite3";
+import type { Message, UserMessage } from "@mariozechner/pi-ai";
 import { requireLastID, migrateAddColumn } from "../utils/index.js";
 
 export interface Chapter {
@@ -192,13 +193,18 @@ export class ChronicleStore {
     return rows.map((row) => row.content);
   }
 
-  async getChapterContextMessages(arc: string): Promise<Array<{ role: "user"; content: string }>> {
+  async getChapterContextMessages(arc: string): Promise<Message[]> {
     const chapter = await this.getOrOpenCurrentChapter(arc);
-    const paragraphs = await this.readChapter(chapter.id);
+    const db = this.requireDb();
+    const rows = await db.all<Array<{ content: string; ts: string }>>(
+      "SELECT content, ts FROM paragraphs WHERE chapter_id = ? ORDER BY ts ASC",
+      chapter.id,
+    );
 
-    return paragraphs.map((paragraph) => ({
-      role: "user" as const,
-      content: `<context_summary>${paragraph}</context_summary>`,
+    return rows.map((row): UserMessage => ({
+      role: "user",
+      content: `<context_summary>${row.content}</context_summary>`,
+      timestamp: new Date(row.ts + "Z").getTime() || 0,
     }));
   }
 

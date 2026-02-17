@@ -1,6 +1,7 @@
+import type { Message } from "@mariozechner/pi-ai";
+
 import { NOOP_LOGGER, type Logger } from "../../app/logging.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
-import { chatContextToMessages } from "./chat-to-messages.js";
 import type { CommandConfig } from "./resolver.js";
 
 export interface ModeClassifierOptions {
@@ -11,11 +12,11 @@ export interface ModeClassifierOptions {
 export function createModeClassifier(
   commandConfig: CommandConfig,
   options: ModeClassifierOptions,
-): (context: Array<{ role: string; content: string }>) => Promise<string> {
+): (context: Message[]) => Promise<string> {
   const adapter = options.modelAdapter;
   const logger = options.logger ?? NOOP_LOGGER;
 
-  return async (context: Array<{ role: string; content: string }>): Promise<string> => {
+  return async (context: Message[]): Promise<string> => {
     const fallbackLabel =
       commandConfig.modeClassifier.fallbackLabel ??
       Object.keys(commandConfig.modeClassifier.labels)[0];
@@ -26,9 +27,7 @@ export function createModeClassifier(
     }
 
     try {
-      const llmMessages = chatContextToMessages(context);
-
-      const currentMessage = extractCurrentMessage(context[context.length - 1].content);
+      const currentMessage = extractCurrentMessage(context[context.length - 1]);
       const labels = Object.keys(commandConfig.modeClassifier.labels);
       const classifierPrompt =
         commandConfig.modeClassifier.prompt ??
@@ -39,7 +38,7 @@ export function createModeClassifier(
       const response = await adapter.completeSimple(
         commandConfig.modeClassifier.model,
         {
-          messages: llmMessages,
+          messages: context,
           systemPrompt: `${prompt}\n\nReturn exactly one classifier label token. No explanation. If uncertain, pick the best label.`,
         },
         {
@@ -88,7 +87,10 @@ export function createModeClassifier(
   };
 }
 
-function extractCurrentMessage(content: string): string {
-  const match = content.match(/<[^>]+>\s*(.*)$/);
-  return match ? match[1].trim() : content;
+function extractCurrentMessage(message: Message): string {
+  const text = message.role === "assistant"
+    ? message.content.filter((b) => b.type === "text").map((b) => b.text).join(" ")
+    : typeof message.content === "string" ? message.content : message.content.filter((b) => b.type === "text").map((b) => b.text).join(" ");
+  const match = text.match(/<[^>]+>\s*(.*)$/);
+  return match ? match[1].trim() : text;
 }

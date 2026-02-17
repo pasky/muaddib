@@ -1,6 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
+import type { Message } from "@mariozechner/pi-ai";
 
 import { ContextReducerTs } from "../src/rooms/command/context-reducer.js";
+import { STUB_ASSISTANT_FIELDS } from "../src/history/chat-history-store.js";
+
+function userMsg(content: string): Message {
+  return { role: "user", content, timestamp: 0 };
+}
+
+function assistantMsg(content: string): Message {
+  return { role: "assistant", content: [{ type: "text", text: content }], ...STUB_ASSISTANT_FIELDS, timestamp: 0 };
+}
 
 function assistantTextMessage(text: string) {
   return {
@@ -42,15 +52,15 @@ describe("ContextReducerTs", () => {
   it("reduce returns context minus last message when not configured", async () => {
     const reducer = new ContextReducerTs({ modelAdapter });
     const context = [
-      { role: "user" as const, content: "hello" },
-      { role: "assistant" as const, content: "hi" },
-      { role: "user" as const, content: "latest" },
+      userMsg("hello"),
+      assistantMsg("hi"),
+      userMsg("latest"),
     ];
 
     const result = await reducer.reduce(context, "system prompt");
     expect(result).toEqual([
-      { role: "user" as const, content: "hello" },
-      { role: "assistant" as const, content: "hi" },
+      userMsg("hello"),
+      assistantMsg("hi"),
     ]);
   });
 
@@ -61,7 +71,7 @@ describe("ContextReducerTs", () => {
       modelAdapter,
     });
 
-    const result = await reducer.reduce([{ role: "user" as const, content: "only message" }], "sys");
+    const result = await reducer.reduce([userMsg("only message")], "sys");
     expect(result).toEqual([]);
     expect(modelAdapter.completeSimple).not.toHaveBeenCalled();
   });
@@ -77,15 +87,15 @@ describe("ContextReducerTs", () => {
     });
 
     const context = [
-      { role: "user" as const, content: "long question" },
-      { role: "assistant" as const, content: "long answer" },
-      { role: "user" as const, content: "follow up" },
+      userMsg("long question"),
+      assistantMsg("long answer"),
+      userMsg("follow up"),
     ];
 
     const result = await reducer.reduce(context, "agent system prompt");
     expect(result).toEqual([
-      { role: "user" as const, content: "summarized question" },
-      { role: "assistant" as const, content: "summarized answer" },
+      userMsg("summarized question"),
+      assistantMsg("summarized answer"),
     ]);
 
     const firstCall = modelAdapter.completeSimple.mock.calls[0] as any[];
@@ -113,17 +123,14 @@ describe("ContextReducerTs", () => {
     });
 
     const context = [
-      { role: "user" as const, content: "tell me about cats" },
-      { role: "assistant" as const, content: "cats are great" },
-      { role: "user" as const, content: "more" },
+      userMsg("tell me about cats"),
+      assistantMsg("cats are great"),
+      userMsg("more"),
     ];
 
     const result = await reducer.reduce(context, "sys");
     expect(result).toEqual([
-      {
-        role: "user",
-        content: "<context_summary>The user asked about cats and the assistant explained feline behavior.</context_summary>",
-      },
+      userMsg("<context_summary>The user asked about cats and the assistant explained feline behavior.</context_summary>"),
     ]);
   });
 
@@ -136,15 +143,15 @@ describe("ContextReducerTs", () => {
     });
 
     const context = [
-      { role: "user" as const, content: "a" },
-      { role: "assistant" as const, content: "b" },
-      { role: "user" as const, content: "c" },
+      userMsg("a"),
+      assistantMsg("b"),
+      userMsg("c"),
     ];
 
     const result = await reducer.reduce(context, "sys");
     expect(result).toEqual([
-      { role: "user" as const, content: "a" },
-      { role: "assistant" as const, content: "b" },
+      userMsg("a"),
+      assistantMsg("b"),
     ]);
   });
 
@@ -161,12 +168,12 @@ describe("ContextReducerTs", () => {
     });
 
     const context = [
-      { role: "user" as const, content: "a" },
-      { role: "user" as const, content: "b" },
+      userMsg("a"),
+      userMsg("b"),
     ];
 
     const result = await reducer.reduce(context, "sys");
-    expect(result).toEqual([{ role: "user" as const, content: "a" }]);
+    expect(result).toEqual([userMsg("a")]);
   });
 
   it("reduce does not pass API key callback per-call when adapter is injected", async () => {
@@ -179,8 +186,8 @@ describe("ContextReducerTs", () => {
 
     await reducer.reduce(
       [
-        { role: "user" as const, content: "a" },
-        { role: "user" as const, content: "b" },
+        userMsg("a"),
+        userMsg("b"),
       ],
       "sys",
     );
@@ -202,19 +209,19 @@ describe("ContextReducerTs", () => {
 
     const result = await reducer.reduce(
       [
-        { role: "user" as const, content: "a" },
-        { role: "assistant" as const, content: "b" },
-        { role: "user" as const, content: "c" },
-        { role: "assistant" as const, content: "d" },
-        { role: "user" as const, content: "e" },
+        userMsg("a"),
+        assistantMsg("b"),
+        userMsg("c"),
+        assistantMsg("d"),
+        userMsg("e"),
       ],
       "sys",
     );
 
     expect(result).toEqual([
-      { role: "user" as const, content: "question one" },
-      { role: "assistant" as const, content: "answer one" },
-      { role: "user" as const, content: "question two" },
+      userMsg("question one"),
+      assistantMsg("answer one"),
+      userMsg("question two"),
     ]);
   });
 
@@ -230,13 +237,13 @@ describe("ContextReducerTs", () => {
 
     const result = await reducer.reduce(
       [
-        { role: "user" as const, content: "a" },
-        { role: "assistant" as const, content: "b" },
-        { role: "user" as const, content: "c" },
+        userMsg("a"),
+        assistantMsg("b"),
+        userMsg("c"),
       ],
       "sys",
     );
 
-    expect(result).toEqual([{ role: "assistant" as const, content: "actual content" }]);
+    expect(result).toEqual([assistantMsg("actual content")]);
   });
 });

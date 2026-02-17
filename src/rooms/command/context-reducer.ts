@@ -1,4 +1,5 @@
-import type { ChatRole } from "../../history/chat-history-store.js";
+import type { Message } from "@mariozechner/pi-ai";
+import { STUB_ASSISTANT_FIELDS } from "../../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import type { Logger } from "../../app/logging.js";
 
@@ -10,9 +11,9 @@ export interface ContextReducerConfig {
 export interface ContextReducer {
   readonly isConfigured: boolean;
   reduce(
-    context: Array<{ role: ChatRole; content: string }>,
+    context: Message[],
     agentSystemPrompt: string,
-  ): Promise<Array<{ role: ChatRole; content: string }>>;
+  ): Promise<Message[]>;
 }
 
 export interface ContextReducerTsOptions {
@@ -36,9 +37,9 @@ export class ContextReducerTs implements ContextReducer {
   }
 
   async reduce(
-    context: Array<{ role: ChatRole; content: string }>,
+    context: Message[],
     agentSystemPrompt: string,
-  ): Promise<Array<{ role: ChatRole; content: string }>> {
+  ): Promise<Message[]> {
     const contextToReduce = context.slice(0, -1);
 
     if (!this.isConfigured) {
@@ -90,7 +91,7 @@ export class ContextReducerTs implements ContextReducer {
   }
 
   private formatContextForReduction(
-    context: Array<{ role: ChatRole; content: string }>,
+    context: Message[],
     agentSystemPrompt: string,
   ): string {
     const lines: string[] = [];
@@ -103,18 +104,27 @@ export class ContextReducerTs implements ContextReducer {
 
     for (const message of context.slice(0, -1)) {
       const role = message.role === "assistant" ? "ASSISTANT" : "USER";
-      lines.push(`[${role}]: ${message.content}`);
+      const text = message.role === "assistant"
+        ? message.content.filter((b) => b.type === "text").map((b) => b.text).join(" ")
+        : typeof message.content === "string" ? message.content : message.content.filter((b) => b.type === "text").map((b) => b.text).join(" ");
+      lines.push(`[${role}]: ${text}`);
     }
 
     lines.push("");
     lines.push("## TRIGGERING INPUT (for relevance - do not include in output)");
-    lines.push(context[context.length - 1]?.content ?? "");
+    const last = context[context.length - 1];
+    const lastText = last
+      ? (last.role === "assistant"
+          ? last.content.filter((b) => b.type === "text").map((b) => b.text).join(" ")
+          : typeof last.content === "string" ? last.content : last.content.filter((b) => b.type === "text").map((b) => b.text).join(" "))
+      : "";
+    lines.push(lastText);
 
     return lines.join("\n");
   }
 
-  private parseReducedContext(response: string): Array<{ role: ChatRole; content: string }> {
-    const messages: Array<{ role: ChatRole; content: string }> = [];
+  private parseReducedContext(response: string): Message[] {
+    const messages: Message[] = [];
     const pattern = /\[(USER|ASSISTANT)\]:[ ]*(.*?)(?=\n\[(?:USER|ASSISTANT)\]:|$)/gis;
 
     for (const match of response.matchAll(pattern)) {
@@ -124,10 +134,20 @@ export class ContextReducerTs implements ContextReducer {
         continue;
       }
 
-      messages.push({
-        role: role === "assistant" ? "assistant" : "user",
-        content,
-      });
+      if (role === "assistant") {
+        messages.push({
+          role: "assistant",
+          content: [{ type: "text", text: content }],
+          ...STUB_ASSISTANT_FIELDS,
+          timestamp: 0,
+        });
+      } else {
+        messages.push({
+          role: "user",
+          content,
+          timestamp: 0,
+        });
+      }
     }
 
     if (messages.length > 0) {
@@ -138,6 +158,7 @@ export class ContextReducerTs implements ContextReducer {
       {
         role: "user",
         content: `<context_summary>${response.trim()}</context_summary>`,
+        timestamp: 0,
       },
     ];
   }

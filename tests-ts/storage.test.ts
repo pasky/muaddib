@@ -58,7 +58,8 @@ describe("ChatHistoryStore", () => {
     expect(context).toHaveLength(2);
     expect(context[0].role).toBe("user");
     expect(context[1].role).toBe("assistant");
-    expect(context[1].content).toContain("!s [");
+    const assistantContent = (context[1] as any).content[0].text;
+    expect(assistantContent).toContain("!s [");
 
     await store.close();
   });
@@ -188,9 +189,9 @@ describe("ChronicleStore", () => {
     await store.appendParagraph("libera##test", "Important update");
 
     const contextMessages = await store.getChapterContextMessages("libera##test");
-    expect(contextMessages.some((message) => message.content.includes("Important update"))).toBe(
-      true,
-    );
+    expect(contextMessages.some((message) =>
+      message.role === "user" && typeof message.content === "string" && message.content.includes("Important update"),
+    )).toBe(true);
 
     const rendered = await store.renderChapter("libera##test");
     expect(rendered).toContain("Arc: libera##test");

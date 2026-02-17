@@ -1,5 +1,5 @@
 import { Agent, type AgentMessage, type AgentTool, type StreamFn, type ThinkingLevel } from "@mariozechner/pi-agent-core";
-import { streamSimple, type AssistantMessage, type UserMessage } from "@mariozechner/pi-ai";
+import { streamSimple, type Message } from "@mariozechner/pi-ai";
 import {
   AgentSession,
   AuthStorage,
@@ -15,7 +15,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { PiAiModelAdapter, type ResolvedPiAiModel } from "../models/pi-ai-model-adapter.js";
 import type { Logger } from "../app/logging.js";
-import { emptyUsage, safeJson } from "./debug-utils.js";
+import { safeJson } from "./debug-utils.js";
 
 const DEFAULT_MAX_ITERATIONS = 25;
 
@@ -32,18 +32,13 @@ const EMPTY_RESOURCE_LOADER_BASE: Omit<ResourceLoader, "getExtensions" | "getSys
 
 export type RunnerLogger = Logger;
 
-export interface SessionFactoryContextMessage {
-  role: "user" | "assistant";
-  content: string;
-}
-
 interface CreateAgentSessionInput {
   model: string;
   systemPrompt: string;
   tools: AgentTool<any>[];
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
   modelAdapter: PiAiModelAdapter;
-  contextMessages?: SessionFactoryContextMessage[];
+  contextMessages?: Message[];
   thinkingLevel?: ThinkingLevel;
   maxIterations?: number;
   visionFallbackModel?: string;
@@ -244,35 +239,14 @@ function applySystemPromptOverrideToSession(session: AgentSession, override: str
 }
 
 function convertContextToAgentMessages(
-  contextMessages: SessionFactoryContextMessage[],
-  resolvedModel: ResolvedPiAiModel,
+  contextMessages: Message[],
+  _resolvedModel: ResolvedPiAiModel,
 ): AgentMessage[] {
   const now = Date.now();
 
   return contextMessages.map((message, index): AgentMessage => {
-    const timestamp = now + index;
-
-    if (message.role === "assistant") {
-      const assistant: AssistantMessage = {
-        role: "assistant",
-        content: [{ type: "text", text: message.content }],
-        api: resolvedModel.model.api,
-        provider: resolvedModel.spec.provider,
-        model: resolvedModel.spec.modelId,
-        usage: emptyUsage(),
-        stopReason: "stop",
-        timestamp,
-      };
-      return assistant;
-    }
-
-    const user: UserMessage = {
-      role: "user",
-      content: [{ type: "text", text: message.content }],
-      timestamp,
-    };
-
-    return user;
+    // Ensure sequential timestamps for ordering within the agent session.
+    return { ...message, timestamp: now + index } as AgentMessage;
   });
 }
 

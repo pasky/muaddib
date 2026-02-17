@@ -193,7 +193,7 @@ describe("RoomMessageHandler", () => {
           prompt: async (prompt, options) => {
             runnerPrompt = prompt;
             runnerThinkingLevel = options?.thinkingLevel;
-            runnerContextContents = (options?.contextMessages ?? []).map((entry) => entry.content);
+            runnerContextContents = (options?.contextMessages ?? []).map((entry) => typeof entry.content === 'string' ? entry.content : entry.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join(' '));
             return {
               assistantMessage: {
                 role: "assistant",
@@ -559,6 +559,7 @@ describe("RoomMessageHandler", () => {
         {
           role: "user" as const,
           content: "[10:00] <summary> reduced context",
+          timestamp: 0,
         },
       ]),
     };
@@ -586,7 +587,7 @@ describe("RoomMessageHandler", () => {
       runnerFactory: () => ({
         prompt: async (prompt, options) => {
           runnerPrompt = prompt;
-          runnerContextContents = (options?.contextMessages ?? []).map((entry) => entry.content);
+          runnerContextContents = (options?.contextMessages ?? []).map((entry) => typeof entry.content === 'string' ? entry.content : entry.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join(' '));
           return makeRunnerResult("done");
         },
       }),
@@ -635,7 +636,7 @@ describe("RoomMessageHandler", () => {
       chronicleStore,
       runnerFactory: () => ({
         prompt: async (_prompt, options) => {
-          runnerContextWithSummary.push((options?.contextMessages ?? []).map((entry) => entry.content));
+          runnerContextWithSummary.push((options?.contextMessages ?? []).map((entry) => typeof entry.content === 'string' ? entry.content : entry.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join(' ')));
           return makeRunnerResult("done");
         },
       }),
@@ -1000,7 +1001,8 @@ describe("RoomMessageHandler", () => {
     expect(rows[1].role).toBe("assistant");
 
     const context = await history.getContext("libera", "#test", 10);
-    expect(context[1].content).toContain("!s");
+    const assistantContent = (context[1] as any).content[0].text;
+    expect(assistantContent).toContain("!s");
 
     const llmCalls = await history.getLlmCalls();
     expect(llmCalls).toHaveLength(1);

@@ -8,9 +8,8 @@
  */
 
 import type { Agent } from "@mariozechner/pi-agent-core";
-import type { ChatRole } from "../../history/chat-history-store.js";
+import type { Message } from "@mariozechner/pi-ai";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
-import { chatContextToMessages } from "./chat-to-messages.js";
 import type { ProactiveRoomConfig } from "../../config/muaddib-config.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import type { CommandConfig } from "./resolver.js";
@@ -289,10 +288,15 @@ export class ProactiveRunner {
     }
 
     const lastContext = context[context.length - 1];
+    const lastContentStr = lastContext
+      ? (lastContext.role === "user" && typeof lastContext.content === "string"
+          ? lastContext.content
+          : JSON.stringify(lastContext.content))
+      : "(empty)";
     this.logger.info(
       "Interjecting proactively",
       `arc=${roomArc(message)}`,
-      `lastMessage=${lastContext?.content.slice(0, 150) ?? "(empty)"}`,
+      `lastMessage=${lastContentStr.slice(0, 150)}`,
       `reason=${evalResult.reason}`,
     );
 
@@ -316,7 +320,7 @@ export class ProactiveRunner {
  */
 export async function evaluateProactiveInterjection(
   config: ProactiveConfig,
-  context: Array<{ role: ChatRole; content: string }>,
+  context: Message[],
   options: ProactiveEvaluatorOptions,
 ): Promise<ProactiveEvalResult> {
   const adapter = options.modelAdapter;
@@ -326,7 +330,7 @@ export async function evaluateProactiveInterjection(
     return { shouldInterject: false, reason: "No context provided" };
   }
 
-  const currentMessage = extractCurrentMessage(context[context.length - 1].content);
+  const currentMessage = extractCurrentMessage(context[context.length - 1]);
   const prompt = config.prompts.interject.replace("{message}", currentMessage);
   const validationModels = config.models.validation;
 
@@ -338,7 +342,7 @@ export async function evaluateProactiveInterjection(
       const response = await adapter.completeSimple(
         model,
         {
-          messages: chatContextToMessages(context),
+          messages: context,
           systemPrompt: prompt,
         },
         {
@@ -425,7 +429,10 @@ export async function evaluateProactiveInterjection(
   }
 }
 
-function extractCurrentMessage(content: string): string {
-  const match = content.match(/<?\S+>\s*(.*)/);
-  return match ? match[1].trim() : content;
+function extractCurrentMessage(message: Message): string {
+  const text = message.role === "assistant"
+    ? message.content.filter((b) => b.type === "text").map((b) => b.text).join(" ")
+    : typeof message.content === "string" ? message.content : message.content.filter((b) => b.type === "text").map((b) => b.text).join(" ");
+  const match = text.match(/<?\S+>\s*(.*)/);
+  return match ? match[1].trim() : text;
 }

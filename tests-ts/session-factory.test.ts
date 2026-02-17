@@ -83,8 +83,8 @@ describe("createAgentSessionForInvocation", () => {
       tools: [],
       modelAdapter: { resolve: vi.fn(() => resolved) } as any,
       contextMessages: [
-        { role: "user", content: "hello" },
-        { role: "assistant", content: "world" },
+        { role: "user", content: "hello", timestamp: 0 },
+        { role: "assistant", content: [{ type: "text" as const, text: "world" }], api: "", provider: "", model: "", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: "stop" as const, timestamp: 0 },
       ],
     });
 
@@ -93,8 +93,6 @@ describe("createAgentSessionForInvocation", () => {
     const [messages] = agent.replaceMessages.mock.calls[0];
     expect(messages[0].role).toBe("user");
     expect(messages[1].role).toBe("assistant");
-    expect(messages[1].provider).toBe("openai");
-    expect(messages[1].model).toBe("gpt-4o-mini");
   });
 
   it("caches provider keys via ensureProviderKey", async () => {

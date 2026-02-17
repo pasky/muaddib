@@ -1,6 +1,6 @@
 import { type Agent, type AgentTool, type ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
-import type { AssistantMessage, Usage } from "@mariozechner/pi-ai";
+import type { AssistantMessage, Message, Usage } from "@mariozechner/pi-ai";
 
 import { detectRefusalSignal } from "./refusal-detection.js";
 import { stringifyError } from "../utils/index.js";
@@ -8,7 +8,6 @@ import { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
 import {
   createAgentSessionForInvocation,
   type RunnerLogger,
-  type SessionFactoryContextMessage,
 } from "./session-factory.js";
 import { emptyUsage, safeJson, truncateForDebug } from "./debug-utils.js";
 
@@ -29,7 +28,7 @@ export interface SessionRunnerOptions {
 }
 
 export interface PromptOptions {
-  contextMessages?: SessionFactoryContextMessage[];
+  contextMessages?: Message[];
   thinkingLevel?: ThinkingLevel;
   visionFallbackModel?: string;
   refusalFallbackModel?: string;

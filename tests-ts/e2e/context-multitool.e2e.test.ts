@@ -234,9 +234,12 @@ describe("E2E: Context reduction + multi-tool + progress + tool summary", () => 
       { ...arc, nick: "alice", content: "check" },
       50,
     );
-    const monologueMessages = historyMessages.filter(
-      (m) => m.content.includes("[internal monologue]") && m.content.includes(TOOL_SUMMARY_TEXT),
-    );
+    const monologueMessages = historyMessages.filter((m) => {
+      const text = m.role === "user" && typeof m.content === "string" ? m.content
+        : m.role === "assistant" ? m.content.filter((b) => b.type === "text").map((b) => b.text).join(" ")
+        : "";
+      return text.includes("[internal monologue]") && text.includes(TOOL_SUMMARY_TEXT);
+    });
     expect(monologueMessages).toHaveLength(1);
   }, 30_000);
 });

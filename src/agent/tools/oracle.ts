@@ -4,7 +4,8 @@ import { Type } from "@sinclair/typebox";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { SessionRunner } from "../session-runner.js";
 import type { MuaddibTool } from "./types.js";
-import type { RunnerLogger, SessionFactoryContextMessage } from "../session-factory.js";
+import type { Message } from "@mariozechner/pi-ai";
+import type { RunnerLogger } from "../session-factory.js";
 import type { ToolContext } from "./types.js";
 import { stringifyError, toConfiguredString } from "../../utils/index.js";
 
@@ -65,7 +66,7 @@ export function createOracleTool(executors: { oracle: OracleExecutor }): Muaddib
  */
 export interface OracleInvocationContext {
   /** Conversation context at invocation time (passed to oracle's nested session). */
-  conversationContext: SessionFactoryContextMessage[];
+  conversationContext: Message[];
 
   /**
    * Factory that builds the full baseline tool set.

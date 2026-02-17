@@ -1,10 +1,19 @@
 import { open, type Database } from "sqlite";
 import sqlite3 from "sqlite3";
+import type { AssistantMessage, Message, UserMessage } from "@mariozechner/pi-ai";
 
 import { requireLastID, migrateAddColumn } from "../utils/index.js";
 import type { RoomMessage } from "../rooms/message.js";
 
 export type ChatRole = "user" | "assistant";
+
+/** Stub fields for constructing AssistantMessage objects from stored history.
+ *  These fields are required by the pi-ai type but meaningless for input context. */
+export const STUB_ASSISTANT_FIELDS = {
+  api: "", provider: "", model: "",
+  usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+  stopReason: "stop",
+} as const;
 
 export interface LlmCallInput {
   provider: string;
@@ -42,6 +51,7 @@ interface ContextRow {
   message: string;
   role: ChatRole;
   time_only: string;
+  timestamp: string;
   mode: string | null;
 }
 
@@ -218,7 +228,7 @@ export class ChatHistoryStore {
   async getContextForMessage(
     message: RoomMessage,
     limit?: number,
-  ): Promise<Array<{ role: ChatRole; content: string }>> {
+  ): Promise<Message[]> {
     return this.getContext(
       message.serverTag,
       message.channelName,
@@ -234,7 +244,7 @@ export class ChatHistoryStore {
     limit?: number,
     threadId?: string,
     threadStarterId?: number,
-  ): Promise<Array<{ role: ChatRole; content: string }>> {
+  ): Promise<Message[]> {
     const db = this.requireDb();
     const inferenceLimit = limit ?? this.inferenceLimit;
 
@@ -244,7 +254,7 @@ export class ChatHistoryStore {
       if (threadStarterId !== undefined) {
         rows = await db.all<ContextRow[]>(
           `
-          SELECT message, role, strftime('%H:%M', timestamp) as time_only, mode
+          SELECT message, role, strftime('%H:%M', timestamp) as time_only, timestamp, mode
           FROM chat_messages
           WHERE server_tag = ? AND channel_name = ?
           AND ((thread_id IS NULL AND id <= ?) OR thread_id = ?)
@@ -260,7 +270,7 @@ export class ChatHistoryStore {
       } else {
         rows = await db.all<ContextRow[]>(
           `
-          SELECT message, role, strftime('%H:%M', timestamp) as time_only, mode
+          SELECT message, role, strftime('%H:%M', timestamp) as time_only, timestamp, mode
           FROM chat_messages
           WHERE server_tag = ? AND channel_name = ?
           AND (thread_id IS NULL OR thread_id = ?)
@@ -276,7 +286,7 @@ export class ChatHistoryStore {
     } else {
       rows = await db.all<ContextRow[]>(
         `
-        SELECT message, role, strftime('%H:%M', timestamp) as time_only, mode
+        SELECT message, role, strftime('%H:%M', timestamp) as time_only, timestamp, mode
         FROM chat_messages
         WHERE server_tag = ? AND channel_name = ? AND thread_id IS NULL
         ORDER BY timestamp DESC
@@ -291,12 +301,23 @@ export class ChatHistoryStore {
     return rows
       .slice()
       .reverse()
-      .map((row) => {
+      .map((row): Message => {
         const modePrefix = row.role === "assistant" && row.mode ? this.modeToPrefix(row.mode) : "";
+        const text = `${modePrefix}[${row.time_only}] ${row.message}`;
+        const timestamp = new Date(row.timestamp + "Z").getTime() || 0;
+        if (row.role === "assistant") {
+          return {
+            role: "assistant",
+            content: [{ type: "text", text }],
+            ...STUB_ASSISTANT_FIELDS,
+            timestamp,
+          } satisfies AssistantMessage;
+        }
         return {
-          role: row.role,
-          content: `${modePrefix}[${row.time_only}] ${row.message}`,
-        };
+          role: "user",
+          content: text,
+          timestamp,
+        } satisfies UserMessage;
       });
   }
 

@@ -145,11 +145,7 @@ export class AutoChroniclerTs implements AutoChronicler {
       {
         systemPrompt: CHRONICLE_APPEND_SYSTEM_PROMPT,
         messages: [
-          ...contextMessages.map((message) => ({
-            role: message.role,
-            content: message.content,
-            timestamp: Date.now(),
-          })),
+          ...contextMessages,
           {
             role: "user",
             content: userPrompt,

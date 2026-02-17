@@ -115,7 +115,7 @@ describe("CommandResolver", () => {
         mynick: "bot",
         content: "tell me something",
       },
-      context: [{ role: "user", content: "hello" }],
+      context: [{ role: "user" as const, content: "hello", timestamp: 0 }],
       defaultSize: 40,
     });
 
