@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Usage } from "@mariozechner/pi-ai";
+import { AuthStorage } from "@mariozechner/pi-coding-agent";
 
 import type { Mock } from "vitest";
 
@@ -88,6 +89,7 @@ describe("SessionRunner", () => {
     const runner = new SessionRunner({
       model: "openai:gpt-4o-mini",
       systemPrompt: "sys",
+      authStorage: AuthStorage.inMemory(),
       logger,
       modelAdapter: {
         resolve: (spec: string) => ({
@@ -130,7 +132,8 @@ describe("SessionRunner", () => {
     const runner = new SessionRunner({
       model: "openai:gpt-4o-mini",
       systemPrompt: "sys",
-      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+
+      authStorage: AuthStorage.inMemory(),      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
       modelAdapter: {
         resolve: (spec: string) => ({
           spec: { provider: spec.split(":")[0], modelId: spec.split(":")[1] },
@@ -178,7 +181,8 @@ describe("SessionRunner", () => {
     const runner = new SessionRunner({
       model: "openai:gpt-4o-mini",
       systemPrompt: "sys",
-      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+
+      authStorage: AuthStorage.inMemory(),      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
       modelAdapter: { resolve: () => ({ spec: { provider: "openai", modelId: "gpt-4o-mini" }, model: {} }) } as any,
     });
 

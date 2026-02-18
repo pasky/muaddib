@@ -1,23 +1,19 @@
 {
-  "_comment": "Set provider keys. Choose models by provider:model",
+  "_comment": "Configuration (no secrets). API keys go in auth.json — see auth.json.example.",
 
   "providers": {
     "anthropic": {
-      "url": "https://api.anthropic.com/v1/messages",
-      "key": "your-anthropic-api-key-here"
+      "url": "https://api.anthropic.com/v1/messages"
     },
     "deepseek": {
-      "url": "https://api.deepseek.com/anthropic/v1/messages",
-      "key": "your-deepseek-api-key-here"
+      "url": "https://api.deepseek.com/anthropic/v1/messages"
     },
     "openai": {
       "base_url": "https://api.openai.com/v1",
-      "key": "your-openai-api-key-here",
       "max_tokens": 5000
     },
     "openrouter": {
-      "base_url": "https://openrouter.ai/api/v1",
-      "key": "your-openrouter-api-key-here"
+      "base_url": "https://openrouter.ai/api/v1"
     }
   },
 
@@ -27,14 +23,13 @@
 
   "tools": {
     "sprites": {
-      "_note": "Get token at https://sprites.dev (sign in with Fly.io, then Settings > API Tokens)",
-      "token": "your-sprites-token-here"
+      "_note": "Get token at https://sprites.dev — set in auth.json as 'sprites' key"
     },
     "brave": {
-      "api_key": "your-brave-api-key-here"
+      "_note": "Set brave API key in auth.json as 'brave' key"
     },
     "jina": {
-      "_comment": "You may optionally set the api_key key here (for 20rpm->500rpm NC use)"
+      "_comment": "Optionally set jina API key in auth.json for 20rpm->500rpm NC use"
     },
     "search_provider": "wikipedia,google,bing,brave",
     "_search_provider_note": "It is VERY RECOMMENDED to get a jina API key (mandatory) and then set search_provider to 'jina'",
@@ -196,7 +191,6 @@
 
     "discord": {
       "enabled": false,
-      "token": "your-discord-bot-token-here",
       "reply_edit_debounce_seconds": 30.0,
       "prompt_vars": {
         "output": " You are now connected to Discord, and can afford using even _very light_ italics / bold text styling."
@@ -216,11 +210,9 @@
 
     "slack": {
       "enabled": false,
-      "app_token": "xapp-your-slack-app-token-here",
       "workspaces": {
         "T123": {
-          "name": "AmazingB2BSaaS",
-          "bot_token": "xoxb-your-slack-bot-token-here"
+          "name": "AmazingB2BSaaS"
         }
       },
       "reply_start_thread": {

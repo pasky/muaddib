@@ -114,6 +114,7 @@ function extractFilenameFromViewerUrl(url: string): string {
 function createDefaultToolExecutors(options: Record<string, unknown> = {}) {
   return createDefaultToolExecutorsRaw({
     modelAdapter: new PiAiModelAdapter(),
+    authStorage: AuthStorage.inMemory(),
     ...(options as any),
   });
 }
@@ -121,6 +122,7 @@ function createDefaultToolExecutors(options: Record<string, unknown> = {}) {
 function createDefaultOracleExecutor(options: Record<string, unknown> = {}, invocation?: any) {
   return createDefaultOracleExecutorRaw({
     modelAdapter: new PiAiModelAdapter(),
+    authStorage: AuthStorage.inMemory(),
     ...(options as any),
   } as any, invocation);
 }

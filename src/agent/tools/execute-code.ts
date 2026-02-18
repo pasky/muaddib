@@ -386,7 +386,7 @@ export function createDefaultExecuteCodeExecutor(
       throw new Error("execute_code.code must be non-empty.");
     }
 
-    const spritesToken = await options.authStorage?.getApiKey("sprites");
+    const spritesToken = await options.authStorage.getApiKey("sprites");
     if (!spritesToken) {
       throw new Error(
         "execute_code requires a 'sprites' API key in auth.json for sandboxed execution.",

@@ -66,31 +66,40 @@ All muaddib data lives in `$MUADDIB_HOME` (defaults to `~/.muaddib/`):
 
 ```
 ~/.muaddib/
-├── config.json         # Configuration
+├── config.json         # Configuration (no secrets)
+├── auth.json           # API keys and secrets
 ├── chat_history.db     # Chat history database
 ├── chronicle.db        # Chronicle database
+├── artifacts/          # Published artifacts
 └── logs/               # Per-message log files
 ```
 
-Copy `config.json.example` to `~/.muaddib/config.json` (or `$MUADDIB_HOME/config.json`) and set your:
-- API keys (you can get started with just a small subset)
-- Paths for tools and artifacts (relative paths are resolved against `$MUADDIB_HOME`)
-- Custom prompts for various modes
-- integration settings such as channel modes
+1. Copy `config.json.example` to `~/.muaddib/config.json` and configure:
+   - Provider endpoints and model settings
+   - Paths for tools and artifacts (relative paths are resolved against `$MUADDIB_HOME`)
+   - Custom prompts for various modes
+   - Room integration settings (channels, modes, proactive behavior)
+
+2. Copy `auth.json.example` to `~/.muaddib/auth.json` and set your API keys:
+   - Provider keys (`anthropic`, `openai`, `openrouter`, `deepseek`, etc.)
+   - Tool keys (`sprites`, `jina`, `brave`)
+   - Room tokens (`discord`, `slack-app`, `slack-{workspaceId}`)
 
 **Tip:** Set `MUADDIB_HOME=.` to use the current directory (useful for development).
+
+**Migrating from older versions:** If you previously had API keys in `config.json`, run `npx tsx scripts/migrate-auth.ts` to extract them into `auth.json`, then manually remove the secret fields from `config.json`.
 
 ### Installation
 
 Recommended for Discord:
-1. Follow [Discord setup instructions](docs/discord.md) to create a bot account and obtain a token. Set it in `~/.muaddib/config.json` Discord section.
+1. Follow [Discord setup instructions](docs/discord.md) to create a bot account and obtain a token. Set it in `~/.muaddib/auth.json` as the `discord` key.
 2. Install dependencies: `npm ci`
 3. Build runtime: `npm run build`
 4. Run the service: `npm run start`
 
 Recommended for Slack:
 1. Follow [Slack setup instructions](docs/slack.md) to create a Slack app, enable Socket Mode, and obtain tokens.
-2. Set the Slack config block in `~/.muaddib/config.json`.
+2. Set the Slack config block in `~/.muaddib/config.json` and tokens in `~/.muaddib/auth.json`.
 3. Install dependencies: `npm ci`
 4. Build runtime: `npm run build`
 5. Run the service: `npm run start`

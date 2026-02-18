@@ -365,11 +365,8 @@ async function fetchImageAsDataUrl(
 }
 
 async function resolveOpenRouterApiKey(options: ToolContext): Promise<string | undefined> {
-  if (options.authStorage) {
-    const key = toConfiguredString(await options.authStorage.getApiKey("openrouter"));
-    if (key) return key;
-  }
-
+  const key = toConfiguredString(await options.authStorage.getApiKey("openrouter"));
+  if (key) return key;
   return toConfiguredString(process.env.OPENROUTER_API_KEY);
 }
 

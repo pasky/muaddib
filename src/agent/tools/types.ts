@@ -29,7 +29,7 @@ export interface ToolContext {
   providersConfig?: ProvidersConfig;
 
   // ── Runtime services ──
-  authStorage?: AuthStorage;
+  authStorage: AuthStorage;
   modelAdapter: PiAiModelAdapter;
   logger?: Logger;
   chronicleStore?: ChronicleStore;

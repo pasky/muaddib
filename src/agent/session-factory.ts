@@ -36,7 +36,7 @@ interface CreateAgentSessionInput {
   model: string;
   systemPrompt: string;
   tools: AgentTool<any>[];
-  authStorage?: AuthStorage;
+  authStorage: AuthStorage;
   modelAdapter: PiAiModelAdapter;
   contextMessages?: Message[];
   thinkingLevel?: ThinkingLevel;
@@ -72,8 +72,7 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
     getSystemPrompt: () => input.systemPrompt,
   };
 
-  const authStorage = input.authStorage ?? AuthStorage.inMemory();
-  const modelRegistry = new ModelRegistry(authStorage);
+  const modelRegistry = new ModelRegistry(input.authStorage);
   const llmDebugMaxChars = Math.max(500, Math.floor(input.llmDebugMaxChars ?? 120_000));
   const streamFn = createTracingStreamFn(logger, llmDebugMaxChars);
 
@@ -85,7 +84,7 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
       tools: input.tools,
     },
     convertToLlm,
-    getApiKey: input.authStorage ? (provider: string) => input.authStorage!.getApiKey(provider) : undefined,
+    getApiKey: (provider: string) => input.authStorage.getApiKey(provider),
     streamFn,
     steeringMode: "all",
   });
@@ -192,7 +191,7 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
     session,
     agent,
     ensureProviderKey: async (provider: string) => {
-      const key = await authStorage.getApiKey(provider);
+      const key = await input.authStorage.getApiKey(provider);
       if (!key) {
         throw new Error(`No API key configured for provider '${provider}'. Add it to auth.json.`);
       }

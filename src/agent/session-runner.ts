@@ -19,7 +19,7 @@ export interface SessionRunnerOptions {
   systemPrompt: string;
   tools?: AgentTool<any>[];
   modelAdapter: PiAiModelAdapter;
-  authStorage?: AuthStorage;
+  authStorage: AuthStorage;
   maxIterations?: number;
   emptyCompletionRetryPrompt?: string;
   llmDebugMaxChars?: number;

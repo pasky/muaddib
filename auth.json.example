@@ -1,0 +1,15 @@
+{
+  "_comment": "API keys and secrets. Place at $MUADDIB_HOME/auth.json (default ~/.muaddib/auth.json)",
+
+  "anthropic": { "type": "api_key", "key": "your-anthropic-api-key-here" },
+  "deepseek": { "type": "api_key", "key": "your-deepseek-api-key-here" },
+  "openai": { "type": "api_key", "key": "your-openai-api-key-here" },
+  "openrouter": { "type": "api_key", "key": "your-openrouter-api-key-here" },
+
+  "sprites": { "type": "api_key", "key": "your-sprites-token-here" },
+  "jina": { "type": "api_key", "key": "your-jina-api-key-here" },
+
+  "discord": { "type": "api_key", "key": "your-discord-bot-token-here" },
+  "slack-app": { "type": "api_key", "key": "xapp-your-slack-app-token-here" },
+  "slack-T123": { "type": "api_key", "key": "xoxb-your-slack-bot-token-here" }
+}

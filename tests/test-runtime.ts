@@ -12,6 +12,7 @@ import type { MuaddibRuntime } from "../src/runtime.js";
 interface CreateTestRuntimeOptions {
   history: ChatHistoryStore;
   configData?: Record<string, unknown>;
+  authStorage: AuthStorage;
   logger?: RuntimeLogWriter;
 }
 
@@ -20,7 +21,7 @@ export function createTestRuntime(options: CreateTestRuntimeOptions): MuaddibRun
     config: MuaddibConfig.inMemory(options.configData ?? {}),
     history: options.history,
     modelAdapter: new PiAiModelAdapter(),
-    authStorage: AuthStorage.inMemory(),
+    authStorage: options.authStorage,
     logger: options.logger ?? new RuntimeLogWriter({
       muaddibHome: join(tmpdir(), "muaddib-test-runtime"),
       stdout: {

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AuthStorage } from "@mariozechner/pi-coding-agent";
 
 const mockState = vi.hoisted(() => ({
   streamSimpleMock: vi.fn((_model, _context, options) => {
@@ -82,6 +83,7 @@ describe("createAgentSessionForInvocation", () => {
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
+      authStorage: AuthStorage.inMemory(),
       modelAdapter: { resolve: vi.fn(() => resolved) } as any,
       contextMessages: [
         { role: "user", content: "hello", timestamp: 0 },
@@ -142,6 +144,7 @@ describe("createAgentSessionForInvocation", () => {
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
+      authStorage: AuthStorage.inMemory(),
       modelAdapter: { resolve } as any,
       visionFallbackModel: "anthropic:claude-sonnet-4",
       maxIterations: 2,
@@ -174,6 +177,7 @@ describe("createAgentSessionForInvocation", () => {
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
+      authStorage: AuthStorage.inMemory(),
       modelAdapter: { resolve: vi.fn(() => ({
         spec: { provider: "openai", modelId: "gpt-4o-mini" },
         model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
@@ -214,6 +218,7 @@ describe("createAgentSessionForInvocation", () => {
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [progressTool as any],
+      authStorage: AuthStorage.inMemory(),
       modelAdapter: { resolve: vi.fn(() => ({
         spec: { provider: "openai", modelId: "gpt-4o-mini" },
         model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
@@ -240,6 +245,7 @@ describe("createAgentSessionForInvocation", () => {
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [progressTool as any],
+      authStorage: AuthStorage.inMemory(),
       modelAdapter: { resolve: vi.fn(() => ({
         spec: { provider: "openai", modelId: "gpt-4o-mini" },
         model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
@@ -270,6 +276,7 @@ describe("createAgentSessionForInvocation", () => {
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [progressTool as any],
+      authStorage: AuthStorage.inMemory(),
       modelAdapter: { resolve: vi.fn(() => ({
         spec: { provider: "openai", modelId: "gpt-4o-mini" },
         model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
@@ -294,6 +301,7 @@ describe("createAgentSessionForInvocation", () => {
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
+      authStorage: AuthStorage.inMemory(),
       modelAdapter: { resolve: vi.fn(() => ({
         spec: { provider: "openai", modelId: "gpt-4o-mini" },
         model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
@@ -324,6 +332,7 @@ describe("createAgentSessionForInvocation", () => {
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [progressTool as any],
+      authStorage: AuthStorage.inMemory(),
       modelAdapter: { resolve: vi.fn(() => ({
         spec: { provider: "openai", modelId: "gpt-4o-mini" },
         model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
@@ -349,6 +358,7 @@ describe("createAgentSessionForInvocation", () => {
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
+      authStorage: AuthStorage.inMemory(),
       modelAdapter: { resolve: vi.fn(() => ({
         spec: { provider: "openai", modelId: "gpt-4o-mini" },
         model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },

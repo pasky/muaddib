@@ -1,12 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import { AuthStorage } from "@mariozechner/pi-coding-agent";
-import { RuntimeLogWriter } from "../src/app/logging.js";
-import { MuaddibConfig } from "../src/config/muaddib-config.js";
 import { ChatHistoryStore } from "../src/history/chat-history-store.js";
-import { PiAiModelAdapter } from "../src/models/pi-ai-model-adapter.js";
 import { SlackRoomMonitor } from "../src/rooms/slack/monitor.js";
-import type { MuaddibRuntime } from "../src/runtime.js";
+import { createTestRuntime } from "./test-runtime.js";
 
 function baseCommandConfig() {
   return {
@@ -31,17 +28,8 @@ function baseCommandConfig() {
   };
 }
 
-function buildRuntime(configData: Record<string, unknown>, history: ChatHistoryStore, authStorage?: AuthStorage): MuaddibRuntime {
-  return {
-    config: MuaddibConfig.inMemory(configData),
-    history,
-    modelAdapter: new PiAiModelAdapter(),
-    authStorage: authStorage ?? AuthStorage.inMemory(),
-    logger: new RuntimeLogWriter({
-      muaddibHome: process.cwd(),
-      stdout: { write: () => true } as unknown as NodeJS.WriteStream,
-    }),
-  };
+function buildRuntime(configData: Record<string, unknown>, history: ChatHistoryStore, authStorage: AuthStorage = AuthStorage.inMemory()) {
+  return createTestRuntime({ history, configData, authStorage });
 }
 
 describe("SlackRoomMonitor", () => {

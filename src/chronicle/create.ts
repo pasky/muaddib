@@ -34,7 +34,7 @@ interface CreateChronicleOptions {
     promptReminder?: string;
     cooldown?: number;
   };
-  authStorage?: AuthStorage;
+  authStorage: AuthStorage;
   actorConfig?: { maxIterations?: number; llmDebugMaxChars?: number; progress?: { thresholdSeconds?: number; minIntervalSeconds?: number } };
 }
 
@@ -113,7 +113,7 @@ export async function createChronicleSubsystem(
 interface QuestStepRunnerOptions {
   model: string;
   modelAdapter: PiAiModelAdapter;
-  authStorage?: AuthStorage;
+  authStorage: AuthStorage;
   promptReminder?: string;
   actorConfig?: { maxIterations?: number; llmDebugMaxChars?: number; progress?: { thresholdSeconds?: number; minIntervalSeconds?: number } };
   logger: RuntimeLogWriter;

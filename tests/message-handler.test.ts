@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { RuntimeLogWriter } from "../src/app/logging.js";
 import { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import {
@@ -72,6 +73,7 @@ function createHandler(options: {
   configData?: Record<string, unknown>;
 }): RoomMessageHandler {
   const runtime = createTestRuntime({
+    authStorage: AuthStorage.inMemory(),
     history: options.history,
     configData: {
       ...(options.configData ?? {}),

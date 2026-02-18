@@ -6,11 +6,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { RuntimeLogWriter } from "../src/app/logging.js";
-import { MuaddibConfig } from "../src/config/muaddib-config.js";
 import { ChatHistoryStore } from "../src/history/chat-history-store.js";
-import { PiAiModelAdapter } from "../src/models/pi-ai-model-adapter.js";
 import { IrcRoomMonitor } from "../src/rooms/irc/monitor.js";
 import type { MuaddibRuntime } from "../src/runtime.js";
+import { createTestRuntime } from "./test-runtime.js";
 import { FakeEventsClient, FakeSender, baseCommandConfig } from "./e2e/helpers.js";
 
 function createDeferred<T = void>() {
@@ -29,16 +28,7 @@ function createDeferred<T = void>() {
 }
 
 function buildRuntime(configData: Record<string, unknown>, history: ChatHistoryStore): MuaddibRuntime {
-  return {
-    config: MuaddibConfig.inMemory(configData),
-    history,
-    modelAdapter: new PiAiModelAdapter(),
-    authStorage: AuthStorage.inMemory(),
-    logger: new RuntimeLogWriter({
-      muaddibHome: process.cwd(),
-      stdout: { write: () => true } as unknown as NodeJS.WriteStream,
-    }),
-  };
+  return createTestRuntime({ history, configData, authStorage: AuthStorage.inMemory() });
 }
 
 describe("IrcRoomMonitor", () => {
