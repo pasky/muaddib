@@ -19,6 +19,98 @@ import { safeJson } from "./debug-utils.js";
 
 const DEFAULT_MAX_ITERATIONS = 25;
 
+// ── Internal nudge transform ──
+
+interface InternalNudgeTransformInput {
+  /** Number of preloaded context messages before this invocation started. */
+  invocationStartMessageCount: number;
+  maxIterations: number;
+  metaReminder?: string;
+  progressThresholdSeconds?: number;
+  thinkingLevel: NonNullable<CreateAgentSessionInput["thinkingLevel"]>;
+  progressReportTool?: ProgressReportTool;
+  sessionStartTime: number;
+  logger: Logger;
+}
+
+/**
+ * Build a transformContext function that injects internal <meta> nudges
+ * ephemerally into the LLM context just before each assistant call.
+ *
+ * Unlike agent.steer(), this does NOT add a user message to agent.state.messages.
+ * The nudge is visible to the LLM but never becomes a persistent queue entry that
+ * could trigger an extra turn.
+ */
+function createInternalNudgeTransform(input: InternalNudgeTransformInput) {
+  const {
+    invocationStartMessageCount,
+    maxIterations,
+    metaReminder,
+    progressThresholdSeconds,
+    thinkingLevel,
+    progressReportTool,
+    sessionStartTime,
+    logger,
+  } = input;
+
+  return async (messages: AgentMessage[]): Promise<AgentMessage[]> => {
+    // Count assistant turns produced in this invocation (not from preloaded context).
+    const invocationMessages = messages.slice(invocationStartMessageCount);
+    const turnCount = (invocationMessages as Array<{ role: string }>).filter(
+      (m) => m.role === "assistant",
+    ).length;
+
+    // Only inject after a toolUse turn, and below the iteration ceiling.
+    const lastMsg = invocationMessages.at(-1) as { role?: string; stopReason?: string } | undefined;
+    const lastIsToolResult = lastMsg?.role === "toolResult";
+    // The most recent assistant message (immediately before the toolResult block)
+    const lastAssistant = [...(invocationMessages as Array<{ role: string; stopReason?: string }>)]
+      .reverse()
+      .find((m) => m.role === "assistant");
+    const lastStopReason = lastAssistant?.stopReason;
+
+    if (!lastIsToolResult || lastStopReason !== "toolUse" || turnCount >= maxIterations) {
+      return messages;
+    }
+
+    const parts: string[] = [];
+
+    if (metaReminder) {
+      parts.push(metaReminder);
+    }
+
+    if (progressThresholdSeconds != null && turnCount < maxIterations - 2) {
+      const now = Date.now();
+      const lastActivity = Math.max(sessionStartTime, progressReportTool?.lastSentAt ?? 0);
+      const elapsedSinceLastReport = (now - lastActivity) / 1000;
+      const isFirstTurnHighReasoning =
+        turnCount === 1 && (thinkingLevel === "medium" || thinkingLevel === "high" || thinkingLevel === "xhigh");
+
+      if (isFirstTurnHighReasoning || elapsedSinceLastReport >= progressThresholdSeconds) {
+        parts.push("If you are going to call more tools, you MUST ALSO use the progress_report tool now.");
+      }
+    }
+
+    if (parts.length === 0) {
+      return messages;
+    }
+
+    const nudgeText = `<meta>${parts.join(" ")}</meta>`;
+    logger.debug(
+      `internal_nudge_injected turnCount=${turnCount} lastStopReason=${lastStopReason} hasMetaReminder=${!!metaReminder} hasProgressNudge=${parts.length > (metaReminder ? 1 : 0)}`,
+    );
+
+    return [
+      ...messages,
+      {
+        role: "user",
+        content: [{ type: "text", text: nudgeText }],
+        timestamp: Date.now(),
+      } as AgentMessage,
+    ];
+  };
+}
+
 const EMPTY_RESOURCE_LOADER_BASE: Omit<ResourceLoader, "getExtensions" | "getSystemPrompt"> = {
   getSkills: () => ({ skills: [], diagnostics: [] }),
   getPrompts: () => ({ prompts: [], diagnostics: [] }),
@@ -76,6 +168,29 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
   const llmDebugMaxChars = Math.max(500, Math.floor(input.llmDebugMaxChars ?? 120_000));
   const streamFn = createTracingStreamFn(logger, llmDebugMaxChars);
 
+  // Compute maxIterations, session start, and nudge state before Agent construction
+  // so they can be captured in the transformContext closure.
+  const rawIterations = Number(input.maxIterations);
+  const maxIterations = Number.isFinite(rawIterations) && rawIterations >= 1
+    ? Math.floor(rawIterations)
+    : DEFAULT_MAX_ITERATIONS;
+  const sessionStartTime = Date.now();
+  const progressReportTool = input.tools.find(
+    (t): t is ProgressReportTool => t.name === "progress_report",
+  ) as ProgressReportTool | undefined;
+  const invocationStartMessageCount = input.contextMessages?.length ?? 0;
+
+  const transformContext = createInternalNudgeTransform({
+    invocationStartMessageCount,
+    maxIterations,
+    metaReminder: input.metaReminder,
+    progressThresholdSeconds: input.progressThresholdSeconds,
+    thinkingLevel: input.thinkingLevel ?? "off",
+    progressReportTool,
+    sessionStartTime,
+    logger,
+  });
+
   const agent = new Agent({
     initialState: {
       systemPrompt: input.systemPrompt,
@@ -84,6 +199,7 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
       tools: input.tools,
     },
     convertToLlm,
+    transformContext,
     getApiKey: (provider: string) => input.authStorage.getApiKey(provider),
     streamFn,
     steeringMode: "all",
@@ -105,10 +221,6 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
 
   applySystemPromptOverrideToSession(session, input.systemPrompt);
 
-  const rawIterations = Number(input.maxIterations);
-  const maxIterations = Number.isFinite(rawIterations) && rawIterations >= 1
-    ? Math.floor(rawIterations)
-    : DEFAULT_MAX_ITERATIONS;
   const visionFallbackModel = resolveVisionFallbackModel(
     input.modelAdapter,
     input.visionFallbackModel,
@@ -118,9 +230,6 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
 
   let turnCount = 0;
   let visionFallbackActivated = false;
-  const sessionStartTime = Date.now();
-  const progressThreshold = input.progressThresholdSeconds;
-  const progressReportTool = input.tools.find((t): t is ProgressReportTool => t.name === "progress_report") as ProgressReportTool | undefined;
   const unsubscribe = session.subscribe((event) => {
     if (event.type === "turn_end") {
       turnCount += 1;
@@ -156,45 +265,10 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
         }
       }
 
-      if (turnCount < maxIterations && stopReason === "toolUse") {
-        const parts: string[] = [];
-
-        if (input.metaReminder) {
-          parts.push(input.metaReminder);
-        }
-
-        // Progress report nudge: fire when elapsed >= threshold (debounced from last actual
-        // progress_report delivery, matching Python's max(start, executor._last_sent)).
-        if (progressThreshold != null && turnCount < maxIterations - 2) {
-          const now = Date.now();
-          const lastActivity = Math.max(sessionStartTime, progressReportTool?.lastSentAt ?? 0);
-          const elapsedSinceLastReport = (now - lastActivity) / 1000;
-          const tl = input.thinkingLevel ?? "off";
-          const isFirstTurnHighReasoning = turnCount === 1 &&
-            (tl === "medium" || tl === "high" || tl === "xhigh");
-
-          if (
-            isFirstTurnHighReasoning ||
-            (elapsedSinceLastReport >= progressThreshold)
-          ) {
-            parts.push("If you are going to call more tools, you MUST ALSO use the progress_report tool now.");
-          }
-        }
-
-        if (parts.length > 0) {
-          const hasQueuedMessages = agent.hasQueuedMessages();
-          if (hasQueuedMessages) {
-            logger.debug(`Skipping steering meta injection because agent already has queued messages: turnCount=${turnCount}, stopReason=${stopReason}`);
-          } else {
-            logger.debug(`Injecting steering meta: turnCount=${turnCount}, stopReason=${stopReason}, hasMetaReminder=${!!input.metaReminder}, hasProgressNudge=${parts.length > (input.metaReminder ? 1 : 0)}`);
-            agent.steer({
-              role: "user",
-              content: [{ type: "text", text: `<meta>${parts.join(" ")}</meta>` }],
-              timestamp: Date.now(),
-            });
-          }
-        }
-      }
+      // Internal reminder and progress nudges are injected ephemerally via
+      // transformContext (see createInternalNudgeTransform above). They appear
+      // in LLM context but are never queued as steering messages, so they cannot
+      // trigger extra turns or cause off-topic replies.
 
       return;
     }

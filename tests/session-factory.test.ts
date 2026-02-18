@@ -68,6 +68,57 @@ vi.mock("@mariozechner/pi-coding-agent", () => ({
 
 import { createAgentSessionForInvocation } from "../src/agent/session-factory.js";
 
+// ── helpers for transformContext unit tests ──
+
+type Role = "user" | "assistant" | "toolResult";
+
+function makeMsg(role: Role, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return { role, timestamp: Date.now(), ...extra };
+}
+
+function userMsg(text = "q") {
+  return makeMsg("user", { content: [{ type: "text", text }] });
+}
+
+function assistantToolCall(stopReason = "toolUse") {
+  return makeMsg("assistant", {
+    content: [{ type: "toolCall", id: "tc1", name: "web_search", arguments: {} }],
+    stopReason,
+  });
+}
+
+function toolResult() {
+  return makeMsg("toolResult", {
+    toolCallId: "tc1",
+    toolName: "web_search",
+    content: [{ type: "text", text: "ok" }],
+    details: {},
+    isError: false,
+  });
+}
+
+/** Minimal after-toolUse message context for transformContext tests. */
+function toolUseContext(extraAssistantTurns = 0): Record<string, unknown>[] {
+  const msgs: Record<string, unknown>[] = [userMsg()];
+  for (let i = 0; i < extraAssistantTurns; i++) {
+    msgs.push(assistantToolCall(), toolResult());
+  }
+  msgs.push(assistantToolCall(), toolResult());
+  return msgs;
+}
+
+async function getTransform(ctx: ReturnType<typeof createAgentSessionForInvocation>) {
+  // The mocked Agent stores constructor options at agent.config
+  return (ctx.agent as any).config.transformContext as
+    (messages: unknown[]) => Promise<unknown[]>;
+}
+
+function hasMetaInLast(msgs: unknown[]): boolean {
+  const last = msgs.at(-1) as { role?: string; content?: Array<{ type: string; text?: string }> } | undefined;
+  if (!last || last.role !== "user") return false;
+  return (last.content ?? []).some((c) => c.type === "text" && (c.text ?? "").includes("<meta>"));
+}
+
 describe("createAgentSessionForInvocation", () => {
   beforeEach(() => {
     mockState.sessions.length = 0;
@@ -205,7 +256,8 @@ describe("createAgentSessionForInvocation", () => {
     expect(logger.warn).toHaveBeenCalledWith("Exceeding max iterations, aborting session prompt loop.");
   });
 
-  it("injects metaReminder via steer on each turn before iteration limit", () => {
+  it("transformContext injects metaReminder after toolUse but not after stop, and not at iteration limit", async () => {
+    const REMINDER = "Stay focused on the quest.";
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
@@ -216,68 +268,46 @@ describe("createAgentSessionForInvocation", () => {
         model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
       })) } as any,
       maxIterations: 3,
-      metaReminder: "Stay focused on the quest.",
+      metaReminder: REMINDER,
     });
 
-    const session = mockState.sessions[0];
+    const transform = await getTransform(ctx);
+
+    // After first toolUse turn: nudge injected
+    const afterTurn1 = toolUseContext();
+    const out1 = await transform(afterTurn1);
+    expect(hasMetaInLast(out1)).toBe(true);
+    const lastMsg1 = out1.at(-1) as any;
+    expect(lastMsg1.content[0].text).toBe(`<meta>${REMINDER}</meta>`);
+    // Original array not mutated
+    expect(out1).not.toBe(afterTurn1);
+    expect(afterTurn1).not.toContain(out1.at(-1));
+
+    // After a stop turn: no nudge
+    const afterStop = [
+      userMsg(),
+      makeMsg("assistant", { content: [{ type: "text", text: "done" }], stopReason: "stop" }),
+    ];
+    const outStop = await transform(afterStop);
+    expect(hasMetaInLast(outStop)).toBe(false);
+    expect(outStop).toHaveLength(afterStop.length);
+
+    // After second toolUse turn (turnCount=2, maxIterations=3): nudge still injected
+    const afterTurn2 = toolUseContext(1); // 2 assistant turns
+    const out2 = await transform(afterTurn2);
+    expect(hasMetaInLast(out2)).toBe(true);
+
+    // After third toolUse turn (turnCount=3, >= maxIterations=3): no nudge from transform
+    const afterTurn3 = toolUseContext(2); // 3 assistant turns
+    const out3 = await transform(afterTurn3);
+    expect(hasMetaInLast(out3)).toBe(false);
+
+    // iteration-limit steer still happens via subscriber (not via transform)
     const agent = ctx.agent as any;
-
-    // Turn with tool results: should steer with reminder
-    session.emit({
-      type: "turn_end",
-      message: {
-        role: "assistant",
-        content: [{ type: "toolCall", id: "t1", name: "web_search", arguments: {} }],
-        stopReason: "toolUse",
-      },
-      toolResults: [{ role: "toolResult" }],
-    });
-    expect(agent.steer).toHaveBeenCalledTimes(1);
-    expect(agent.steer.mock.calls[0][0].content[0].text).toBe(
-      "<meta>Stay focused on the quest.</meta>",
-    );
-
-    // Turn without tool results: no metaReminder steer
-    agent.steer.mockClear();
-    session.emit({
-      type: "turn_end",
-      message: {
-        role: "assistant",
-        content: [{ type: "text", text: "done" }],
-        stopReason: "stop",
-      },
-      toolResults: [],
-    });
     expect(agent.steer).not.toHaveBeenCalled();
-
-    // Turn with tool results, still under limit
-    session.emit({
-      type: "turn_end",
-      message: {
-        role: "assistant",
-        content: [{ type: "toolCall", id: "t2", name: "web_search", arguments: {} }],
-        stopReason: "toolUse",
-      },
-      toolResults: [{ role: "toolResult" }],
-    });
-    expect(agent.steer).toHaveBeenCalledTimes(1);
-
-    // Fourth turn (at limit): iteration-limit steer only, no metaReminder
-    agent.steer.mockClear();
-    session.emit({
-      type: "turn_end",
-      message: {
-        role: "assistant",
-        content: [{ type: "toolCall", id: "t3", name: "web_search", arguments: {} }],
-        stopReason: "toolUse",
-      },
-      toolResults: [{ role: "toolResult" }],
-    });
-    expect(agent.steer).toHaveBeenCalledTimes(1);
-    expect(agent.steer.mock.calls[0][0].content[0].text).toContain("iteration limit");
   });
 
-  it("injects progress nudge when elapsed time exceeds threshold", async () => {
+  it("transformContext injects both reminder and progress nudge when threshold elapsed", async () => {
     const progressTool = { name: "progress_report", lastSentAt: 0 };
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
@@ -294,31 +324,23 @@ describe("createAgentSessionForInvocation", () => {
       progressMinIntervalSeconds: 0,
     });
 
-    const session = mockState.sessions[0];
-    const agent = ctx.agent as any;
-
-    session.emit({
-      type: "turn_end",
-      message: {
-        role: "assistant",
-        content: [{ type: "toolCall", id: "t1", name: "web_search", arguments: {} }],
-        stopReason: "toolUse",
-      },
-      toolResults: [{ role: "toolResult" }],
-    });
-    expect(agent.steer).toHaveBeenCalledTimes(1);
-    const text = agent.steer.mock.calls[0][0].content[0].text;
+    const transform = await getTransform(ctx);
+    const out = await transform(toolUseContext());
+    expect(hasMetaInLast(out)).toBe(true);
+    const text = (out.at(-1) as any).content[0].text as string;
     expect(text).toContain("Stay focused.");
     expect(text).toContain("progress_report");
   });
 
-  it("skips steering meta injection when agent already has queued messages", () => {
-    const progressTool = { name: "progress_report", lastSentAt: 0 };
-    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+  it("transformContext nudges are ephemeral: each call is independent and does not accumulate", async () => {
+    // The queue-guard (hasQueuedMessages) is gone. The race-safety guarantee now comes from
+    // transformContext being called inside the agent loop's LLM call boundary — the nudge is
+    // never enqueued. This test verifies that calling transform twice on the same base context
+    // does not produce two <meta> messages (no accumulation from previous calls).
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
-      tools: [progressTool as any],
+      tools: [],
       authStorage: AuthStorage.inMemory(),
       modelAdapter: { resolve: vi.fn(() => ({
         spec: { provider: "openai", modelId: "gpt-4o-mini" },
@@ -328,28 +350,27 @@ describe("createAgentSessionForInvocation", () => {
       metaReminder: "Stay focused.",
       progressThresholdSeconds: 0,
       progressMinIntervalSeconds: 0,
-      logger,
     });
 
-    const session = mockState.sessions[0];
+    const transform = await getTransform(ctx);
+    const base = toolUseContext();
+
+    // Call transform twice on the same input (simulating two LLM calls from the same context)
+    const out1 = await transform(base);
+    const out2 = await transform(base);
+
+    // Each call appends exactly one nudge message
+    expect(out1).toHaveLength(base.length + 1);
+    expect(out2).toHaveLength(base.length + 1);
+
+    // Importantly, the base is not mutated — so the second call doesn't see the first nudge
+    expect(base).toHaveLength(base.length); // still original length
+    expect(hasMetaInLast(out1)).toBe(true);
+    expect(hasMetaInLast(out2)).toBe(true);
+
+    // agent.hasQueuedMessages is never consulted — the queue guard is gone
     const agent = ctx.agent as any;
-    agent.hasQueuedMessages.mockReturnValue(true);
-
-    session.emit({
-      type: "turn_end",
-      message: {
-        role: "assistant",
-        content: [{ type: "toolCall", id: "t1", name: "web_search", arguments: {} }],
-        stopReason: "toolUse",
-      },
-      toolResults: [{ role: "toolResult" }],
-    });
-
-    expect(agent.hasQueuedMessages).toHaveBeenCalledTimes(1);
-    expect(agent.steer).not.toHaveBeenCalled();
-    expect(logger.debug).toHaveBeenCalledWith(
-      expect.stringContaining("Skipping steering meta injection because agent already has queued messages"),
-    );
+    expect(agent.hasQueuedMessages).not.toHaveBeenCalled();
   });
 
   it("does not inject progress nudge after a non-tool assistant turn", () => {
@@ -384,7 +405,7 @@ describe("createAgentSessionForInvocation", () => {
     expect(agent.steer).not.toHaveBeenCalled();
   });
 
-  it("injects progress nudge on first tool-using turn with high reasoning", () => {
+  it("transformContext injects progress nudge on first tool-using turn with high reasoning, not on second", async () => {
     const progressTool = { name: "progress_report", lastSentAt: 0 };
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
@@ -396,39 +417,24 @@ describe("createAgentSessionForInvocation", () => {
         model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
       })) } as any,
       maxIterations: 10,
-      progressThresholdSeconds: 9999, // won't trigger by elapsed time
+      progressThresholdSeconds: 9999, // won't trigger by elapsed time alone
       progressMinIntervalSeconds: 0,
       thinkingLevel: "high",
     });
 
-    const session = mockState.sessions[0];
-    const agent = ctx.agent as any;
+    const transform = await getTransform(ctx);
 
-    // First turn with tool results + high reasoning → nudge
-    session.emit({
-      type: "turn_end",
-      message: {
-        role: "assistant",
-        content: [{ type: "toolCall", id: "t1", name: "web_search", arguments: {} }],
-        stopReason: "toolUse",
-      },
-      toolResults: [{ role: "toolResult" }],
-    });
-    expect(agent.steer).toHaveBeenCalledTimes(1);
-    expect(agent.steer.mock.calls[0][0].content[0].text).toContain("progress_report");
+    // First turn (turnCount=1, high reasoning) → nudge injected
+    const afterTurn1 = toolUseContext(); // 1 assistant turn
+    const out1 = await transform(afterTurn1);
+    expect(hasMetaInLast(out1)).toBe(true);
+    expect((out1.at(-1) as any).content[0].text).toContain("progress_report");
 
-    // Second turn: no nudge (not first turn, threshold not met)
-    agent.steer.mockClear();
-    session.emit({
-      type: "turn_end",
-      message: {
-        role: "assistant",
-        content: [{ type: "toolCall", id: "t2", name: "web_search", arguments: {} }],
-        stopReason: "toolUse",
-      },
-      toolResults: [{ role: "toolResult" }],
-    });
-    expect(agent.steer).not.toHaveBeenCalled();
+    // Second turn (turnCount=2, threshold=9999s not met, not first turn) → no nudge
+    const afterTurn2 = toolUseContext(1); // 2 assistant turns
+    const out2 = await transform(afterTurn2);
+    expect(hasMetaInLast(out2)).toBe(false);
+    expect(out2).toHaveLength(afterTurn2.length);
   });
 
   it("does not inject progress nudge near iteration limit", () => {
@@ -465,7 +471,7 @@ describe("createAgentSessionForInvocation", () => {
     expect(agent.steer).not.toHaveBeenCalled();
   });
 
-  it("injects progress nudge even without progress_report tool in tools array", () => {
+  it("transformContext injects progress nudge even without progress_report tool in tools array", async () => {
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
@@ -480,27 +486,10 @@ describe("createAgentSessionForInvocation", () => {
       progressMinIntervalSeconds: 0,
     });
 
-    const session = mockState.sessions[0];
-    const agent = ctx.agent as any;
-
-    session.emit({
-      type: "turn_end",
-      message: {
-        role: "assistant",
-        content: [{ type: "toolCall", id: "t1", name: "web_search", arguments: {} }],
-        stopReason: "toolUse",
-      },
-      toolResults: [{ role: "toolResult" }],
-    });
-    expect(agent.steer).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: expect.arrayContaining([
-          expect.objectContaining({
-            text: expect.stringContaining("progress_report"),
-          }),
-        ]),
-      }),
-    );
+    const transform = await getTransform(ctx);
+    const out = await transform(toolUseContext());
+    expect(hasMetaInLast(out)).toBe(true);
+    expect((out.at(-1) as any).content[0].text).toContain("progress_report");
   });
 
   it("resets progress nudge debounce when progress_report tool is used", () => {
