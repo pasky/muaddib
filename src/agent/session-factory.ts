@@ -142,7 +142,8 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
         void session.abort();
       }
 
-      if (turnCount < maxIterations && event.toolResults?.length > 0) {
+      const stopReason = (event.message as { stopReason?: string }).stopReason;
+      if (turnCount < maxIterations && stopReason === "toolUse") {
         const parts: string[] = [];
 
         if (input.metaReminder) {
@@ -203,8 +204,6 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
     },
   };
 }
-
-
 
 function applySystemPromptOverrideToSession(session: AgentSession, override: string): void {
   session.agent.setSystemPrompt(override);

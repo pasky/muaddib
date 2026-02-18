@@ -162,10 +162,42 @@ describe("createAgentSessionForInvocation", () => {
     });
     expect(ctx.getVisionFallbackActivated()).toBe(true);
 
-    session.emit({ type: "turn_end" });
-    session.emit({ type: "turn_end" });
-    session.emit({ type: "turn_end" });
-    session.emit({ type: "turn_end" });
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "done" }],
+        stopReason: "stop",
+      },
+      toolResults: [],
+    });
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "done" }],
+        stopReason: "stop",
+      },
+      toolResults: [],
+    });
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "done" }],
+        stopReason: "stop",
+      },
+      toolResults: [],
+    });
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "done" }],
+        stopReason: "stop",
+      },
+      toolResults: [],
+    });
 
     expect(agent.steer).toHaveBeenCalled();
     expect(session.abort).toHaveBeenCalledTimes(1);
@@ -190,7 +222,15 @@ describe("createAgentSessionForInvocation", () => {
     const agent = ctx.agent as any;
 
     // Turn with tool results: should steer with reminder
-    session.emit({ type: "turn_end", toolResults: [{ role: "toolResult" }] });
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "t1", name: "web_search", arguments: {} }],
+        stopReason: "toolUse",
+      },
+      toolResults: [{ role: "toolResult" }],
+    });
     expect(agent.steer).toHaveBeenCalledTimes(1);
     expect(agent.steer.mock.calls[0][0].content[0].text).toBe(
       "<meta>Stay focused on the quest.</meta>",
@@ -198,16 +238,40 @@ describe("createAgentSessionForInvocation", () => {
 
     // Turn without tool results: no metaReminder steer
     agent.steer.mockClear();
-    session.emit({ type: "turn_end", toolResults: [] });
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "done" }],
+        stopReason: "stop",
+      },
+      toolResults: [],
+    });
     expect(agent.steer).not.toHaveBeenCalled();
 
     // Turn with tool results, still under limit
-    session.emit({ type: "turn_end", toolResults: [{ role: "toolResult" }] });
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "t2", name: "web_search", arguments: {} }],
+        stopReason: "toolUse",
+      },
+      toolResults: [{ role: "toolResult" }],
+    });
     expect(agent.steer).toHaveBeenCalledTimes(1);
 
     // Fourth turn (at limit): iteration-limit steer only, no metaReminder
     agent.steer.mockClear();
-    session.emit({ type: "turn_end", toolResults: [{ role: "toolResult" }] });
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "t3", name: "web_search", arguments: {} }],
+        stopReason: "toolUse",
+      },
+      toolResults: [{ role: "toolResult" }],
+    });
     expect(agent.steer).toHaveBeenCalledTimes(1);
     expect(agent.steer.mock.calls[0][0].content[0].text).toContain("iteration limit");
   });
@@ -232,11 +296,51 @@ describe("createAgentSessionForInvocation", () => {
     const session = mockState.sessions[0];
     const agent = ctx.agent as any;
 
-    session.emit({ type: "turn_end", toolResults: [{ role: "toolResult" }] });
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "t1", name: "web_search", arguments: {} }],
+        stopReason: "toolUse",
+      },
+      toolResults: [{ role: "toolResult" }],
+    });
     expect(agent.steer).toHaveBeenCalledTimes(1);
     const text = agent.steer.mock.calls[0][0].content[0].text;
     expect(text).toContain("Stay focused.");
     expect(text).toContain("progress_report");
+  });
+
+  it("does not inject progress nudge after a non-tool assistant turn", () => {
+    const progressTool = { name: "progress_report", lastSentAt: 0 };
+    const ctx = createAgentSessionForInvocation({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "system",
+      tools: [progressTool as any],
+      authStorage: AuthStorage.inMemory(),
+      modelAdapter: { resolve: vi.fn(() => ({
+        spec: { provider: "openai", modelId: "gpt-4o-mini" },
+        model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
+      })) } as any,
+      maxIterations: 10,
+      progressThresholdSeconds: 0,
+      progressMinIntervalSeconds: 0,
+    });
+
+    const session = mockState.sessions[0];
+    const agent = ctx.agent as any;
+
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "done" }],
+        stopReason: "stop",
+      },
+      toolResults: [{ role: "toolResult" }],
+    });
+
+    expect(agent.steer).not.toHaveBeenCalled();
   });
 
   it("injects progress nudge on first tool-using turn with high reasoning", () => {
@@ -260,13 +364,29 @@ describe("createAgentSessionForInvocation", () => {
     const agent = ctx.agent as any;
 
     // First turn with tool results + high reasoning → nudge
-    session.emit({ type: "turn_end", toolResults: [{ role: "toolResult" }] });
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "t1", name: "web_search", arguments: {} }],
+        stopReason: "toolUse",
+      },
+      toolResults: [{ role: "toolResult" }],
+    });
     expect(agent.steer).toHaveBeenCalledTimes(1);
     expect(agent.steer.mock.calls[0][0].content[0].text).toContain("progress_report");
 
     // Second turn: no nudge (not first turn, threshold not met)
     agent.steer.mockClear();
-    session.emit({ type: "turn_end", toolResults: [{ role: "toolResult" }] });
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "t2", name: "web_search", arguments: {} }],
+        stopReason: "toolUse",
+      },
+      toolResults: [{ role: "toolResult" }],
+    });
     expect(agent.steer).not.toHaveBeenCalled();
   });
 
@@ -291,7 +411,15 @@ describe("createAgentSessionForInvocation", () => {
     const agent = ctx.agent as any;
 
     // Turn 1: maxIterations=3, turnCount=1, limit-2=1 → turnCount < maxIterations-2 is false
-    session.emit({ type: "turn_end", toolResults: [{ role: "toolResult" }] });
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "t1", name: "web_search", arguments: {} }],
+        stopReason: "toolUse",
+      },
+      toolResults: [{ role: "toolResult" }],
+    });
     // Should NOT have progress nudge since turnCount(1) >= maxIterations-2(1)
     expect(agent.steer).not.toHaveBeenCalled();
   });
@@ -314,7 +442,15 @@ describe("createAgentSessionForInvocation", () => {
     const session = mockState.sessions[0];
     const agent = ctx.agent as any;
 
-    session.emit({ type: "turn_end", toolResults: [{ role: "toolResult" }] });
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "t1", name: "web_search", arguments: {} }],
+        stopReason: "toolUse",
+      },
+      toolResults: [{ role: "toolResult" }],
+    });
     expect(agent.steer).toHaveBeenCalledWith(
       expect.objectContaining({
         content: expect.arrayContaining([
@@ -349,7 +485,15 @@ describe("createAgentSessionForInvocation", () => {
     progressTool.lastSentAt = Date.now();
 
     // Turn 1: tool was just used, so elapsed since last report ~0s < 1s threshold → no nudge
-    session.emit({ type: "turn_end", toolResults: [{ role: "toolResult" }] });
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "t1", name: "web_search", arguments: {} }],
+        stopReason: "toolUse",
+      },
+      toolResults: [{ role: "toolResult" }],
+    });
     expect(agent.steer).not.toHaveBeenCalled();
   });
 
@@ -369,7 +513,15 @@ describe("createAgentSessionForInvocation", () => {
     const session = mockState.sessions[0];
     const agent = ctx.agent as any;
 
-    session.emit({ type: "turn_end", toolResults: [{ role: "toolResult" }] });
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "t1", name: "web_search", arguments: {} }],
+        stopReason: "toolUse",
+      },
+      toolResults: [{ role: "toolResult" }],
+    });
     expect(agent.steer).not.toHaveBeenCalled();
   });
 });
