@@ -1,6 +1,8 @@
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { AuthStorage } from "@mariozechner/pi-coding-agent";
+
 import { RuntimeLogWriter } from "../src/app/logging.js";
 import { MuaddibConfig } from "../src/config/muaddib-config.js";
 import type { ChatHistoryStore } from "../src/history/chat-history-store.js";
@@ -18,7 +20,7 @@ export function createTestRuntime(options: CreateTestRuntimeOptions): MuaddibRun
     config: MuaddibConfig.inMemory(options.configData ?? {}),
     history: options.history,
     modelAdapter: new PiAiModelAdapter(),
-    getApiKey: () => undefined,
+    authStorage: AuthStorage.inMemory(),
     logger: options.logger ?? new RuntimeLogWriter({
       muaddibHome: join(tmpdir(), "muaddib-test-runtime"),
       stdout: {

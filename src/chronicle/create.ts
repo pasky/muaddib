@@ -1,5 +1,7 @@
 import { join } from "node:path";
 
+import type { AuthStorage } from "@mariozechner/pi-coding-agent";
+
 import type { RuntimeLogWriter } from "../app/logging.js";
 import type { ChatHistoryStore } from "../history/chat-history-store.js";
 import type { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
@@ -32,7 +34,7 @@ interface CreateChronicleOptions {
     promptReminder?: string;
     cooldown?: number;
   };
-  getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+  authStorage?: AuthStorage;
   actorConfig?: { maxIterations?: number; llmDebugMaxChars?: number; progress?: { thresholdSeconds?: number; minIntervalSeconds?: number } };
 }
 
@@ -74,7 +76,7 @@ export async function createChronicleSubsystem(
       runQuestStep: createQuestStepRunner({
         model: options.model,
         modelAdapter: options.modelAdapter,
-        getApiKey: options.getApiKey,
+        authStorage: options.authStorage,
         promptReminder: questsConfig.promptReminder,
         actorConfig: options.actorConfig,
         logger: options.logger,
@@ -111,14 +113,14 @@ export async function createChronicleSubsystem(
 interface QuestStepRunnerOptions {
   model: string;
   modelAdapter: PiAiModelAdapter;
-  getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+  authStorage?: AuthStorage;
   promptReminder?: string;
   actorConfig?: { maxIterations?: number; llmDebugMaxChars?: number; progress?: { thresholdSeconds?: number; minIntervalSeconds?: number } };
   logger: RuntimeLogWriter;
 }
 
 function createQuestStepRunner(options: QuestStepRunnerOptions): QuestStepRunner {
-  const { model, modelAdapter, getApiKey, actorConfig, logger: runtimeLogger } = options;
+  const { model, modelAdapter, authStorage, actorConfig, logger: runtimeLogger } = options;
 
   return async (input) => {
     const log = runtimeLogger.getLogger(`muaddib.chronicle.quests.step.${input.questId}`);
@@ -133,7 +135,7 @@ function createQuestStepRunner(options: QuestStepRunnerOptions): QuestStepRunner
     // Build tools with quest context (currentQuestId enables correct quest tool selection)
     const tools = createBaselineAgentTools({
       modelAdapter,
-      getApiKey,
+      authStorage,
       currentQuestId: input.questId,
       logger: log,
     });
@@ -143,7 +145,7 @@ function createQuestStepRunner(options: QuestStepRunnerOptions): QuestStepRunner
       systemPrompt,
       tools,
       modelAdapter,
-      getApiKey,
+      authStorage,
       maxIterations: actorConfig?.maxIterations,
       llmDebugMaxChars: actorConfig?.llmDebugMaxChars,
       metaReminder: metaReminder || undefined,

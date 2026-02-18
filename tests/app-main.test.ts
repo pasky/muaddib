@@ -224,7 +224,7 @@ describe("runMuaddibMain", () => {
           },
         },
       }),
-    ).rejects.toThrow("Discord room is enabled but rooms.discord.token is missing.");
+    ).rejects.toThrow("'discord' API key is missing from auth.json");
   });
 
   it("throws when Slack is enabled without app token", async () => {
@@ -248,14 +248,12 @@ describe("runMuaddibMain", () => {
           slack: {
             enabled: true,
             workspaces: {
-              T123: {
-                botToken: "xoxb-demo",
-              },
+              T123: {},
             },
           },
         },
       }),
-    ).rejects.toThrow("Slack room is enabled but rooms.slack.app_token is missing.");
+    ).rejects.toThrow("'slack-app' API key is missing from auth.json");
   });
 
   it("throws when IRC is enabled without varlink socket path", async () => {
@@ -300,11 +298,11 @@ describe("runMuaddibMain", () => {
             },
           },
           irc: {
-            enabled: false,
+            enabled: true,
+            varlink: { socketPath: "/tmp/fake.sock" },
           },
           discord: {
-            enabled: true,
-            token: "discord-token",
+            enabled: false,
           },
           slack: {
             enabled: false,

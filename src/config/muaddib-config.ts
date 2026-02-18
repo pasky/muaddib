@@ -48,13 +48,11 @@ export interface ImageGenConfig {
 }
 
 export interface JinaConfig {
-  apiKey?: string;
   maxWebContentLength?: number;
   maxImageBytes?: number;
 }
 
 export interface SpritesConfig {
-  token?: string;
   executeTimeoutMs?: number;
 }
 
@@ -144,7 +142,6 @@ export interface CommandConfig {
 // ── Room config ────────────────────────────────────────────────────────
 
 interface SlackWorkspaceConfig {
-  botToken?: string;
   name?: string;
 }
 
@@ -171,9 +168,7 @@ export interface RoomConfig {
   proactive?: ProactiveRoomConfig;
   promptVars?: Record<string, string>;
   varlink?: { socketPath?: string };
-  token?: string;
   botName?: string;
-  appToken?: string;
   workspaces?: Record<string, SlackWorkspaceConfig>;
   replyStartThread?: { channel?: boolean; dm?: boolean };
   replyEditDebounceSeconds?: number;
@@ -187,7 +182,7 @@ interface MuaddibSettings {
   tools?: ToolsConfig;
   contextReducer?: ContextReducerConfig;
   chronicler?: ChroniclerConfig;
-  providers?: Record<string, { baseUrl?: string; key?: string }>;
+  providers?: Record<string, { baseUrl?: string }>;
   history?: HistoryConfig;
   router?: RouterConfig;
   rooms?: Record<string, RoomConfig>;
@@ -329,18 +324,6 @@ export class MuaddibConfig {
       openrouter: { baseUrl: p?.openrouter?.baseUrl },
       deepseek: { baseUrl: p?.deepseek?.baseUrl },
     };
-  }
-
-  getProviderStaticKeys(): Record<string, string> {
-    const providers = this.data.providers ?? {};
-    const keys: Record<string, string> = {};
-    for (const [provider, config] of Object.entries(providers)) {
-      const key = config?.key;
-      if (typeof key === "string" && key.trim().length > 0) {
-        keys[provider] = key.trim();
-      }
-    }
-    return keys;
   }
 
   getHistoryConfig(): HistoryConfig {

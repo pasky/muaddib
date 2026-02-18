@@ -108,7 +108,7 @@ export class DiscordRoomMonitor {
   private readonly logger: Logger;
   private readonly logWriter?: RuntimeLogWriter;
 
-  static fromRuntime(runtime: MuaddibRuntime): DiscordRoomMonitor[] {
+  static async fromRuntime(runtime: MuaddibRuntime): Promise<DiscordRoomMonitor[]> {
     const roomConfig = runtime.config.getRoomConfig("discord");
     const enabled = roomConfig.enabled ?? false;
     if (!enabled) {
@@ -116,8 +116,8 @@ export class DiscordRoomMonitor {
     }
 
     const token = requireNonEmptyString(
-      roomConfig.token,
-      "Discord room is enabled but rooms.discord.token is missing.",
+      await runtime.authStorage.getApiKey("discord"),
+      "Discord room is enabled but 'discord' API key is missing from auth.json.",
     );
 
     const commandHandler = new RoomMessageHandler(runtime, "discord", {

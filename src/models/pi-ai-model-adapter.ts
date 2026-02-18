@@ -10,6 +10,8 @@ import {
   type SimpleStreamOptions,
 } from "@mariozechner/pi-ai";
 
+import type { AuthStorage } from "@mariozechner/pi-coding-agent";
+
 import type { Logger } from "../app/logging.js";
 import { parseModelSpec, type ModelSpec } from "./model-spec.js";
 import {
@@ -26,7 +28,7 @@ export class PiAiModelResolutionError extends Error {
 }
 
 export interface PiAiModelAdapterOptions extends ProviderOverrideOptions {
-  getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+  authStorage?: AuthStorage;
 }
 
 export interface ResolvedPiAiModel {
@@ -37,7 +39,7 @@ export interface ResolvedPiAiModel {
 export interface CompleteSimpleOptions {
   callType?: string;
   logger?: Logger;
-  getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+  authStorage?: AuthStorage;
   maxChars?: number;
   streamOptions?: Omit<SimpleStreamOptions, "apiKey" | "onPayload">;
 }
@@ -109,10 +111,10 @@ export class PiAiModelAdapter {
         context,
         {
           ...(options.streamOptions ?? {}),
-          apiKey: options.getApiKey
-            ? await options.getApiKey(resolved.spec.provider)
-            : this.options.getApiKey
-              ? await this.options.getApiKey(resolved.spec.provider)
+          apiKey: options.authStorage
+            ? await options.authStorage.getApiKey(resolved.spec.provider)
+            : this.options.authStorage
+              ? await this.options.authStorage.getApiKey(resolved.spec.provider)
               : undefined,
           onPayload: (payload: unknown) => {
             logger?.debug(`llm_io payload ${callType}`, truncateJson(payload, maxChars));

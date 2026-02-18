@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { createDefaultToolExecutors as createDefaultToolExecutorsRaw } from "../src/agent/tools/baseline-tools.js";
 import { createDefaultOracleExecutor as createDefaultOracleExecutorRaw } from "../src/agent/tools/oracle.js";
 import { PiAiModelAdapter } from "../src/models/pi-ai-model-adapter.js";
@@ -670,7 +671,7 @@ describe("core tool executors web_search support", () => {
       return new Response("results", { status: 200 });
     });
 
-    const executors = createDefaultToolExecutors({ toolsConfig: { jina: { apiKey: "jina-key-123" } }});
+    const executors = createDefaultToolExecutors({ authStorage: AuthStorage.inMemory({ jina: { type: "api_key", key: "jina-key-123" } }) });
     await executors.webSearch("test");
   });
 });
@@ -916,7 +917,7 @@ describe("core tool executors execute_code support", () => {
     tempDirs.push(dir);
 
     const executors = createDefaultToolExecutors({
-      toolsConfig: { sprites: { token: "test-token" } },
+      toolsConfig: { sprites: {} }, authStorage: AuthStorage.inMemory({ sprites: { type: "api_key", key: "test-token" } }),
     });
 
     const result = await executors.executeCode({
@@ -933,7 +934,7 @@ describe("core tool executors execute_code support", () => {
     tempDirs.push(dir);
 
     const executors = createDefaultToolExecutors({
-      toolsConfig: { sprites: { token: "test-token" } },
+      toolsConfig: { sprites: {} }, authStorage: AuthStorage.inMemory({ sprites: { type: "api_key", key: "test-token" } }),
     });
 
     const result = await executors.executeCode({
@@ -949,7 +950,7 @@ describe("core tool executors execute_code support", () => {
     tempDirs.push(dir);
 
     const executors = createDefaultToolExecutors({
-      toolsConfig: { sprites: { token: "test-token" } },
+      toolsConfig: { sprites: {} }, authStorage: AuthStorage.inMemory({ sprites: { type: "api_key", key: "test-token" } }),
     });
 
     const result = await executors.executeCode({
@@ -978,7 +979,7 @@ describe("core tool executors execute_code support", () => {
     tempDirs.push(dir);
 
     const executors = createDefaultToolExecutors({
-      toolsConfig: { sprites: { token: "test-token" } },
+      toolsConfig: { sprites: {} }, authStorage: AuthStorage.inMemory({ sprites: { type: "api_key", key: "test-token" } }),
     });
 
     const result = await executors.executeCode({
@@ -996,7 +997,7 @@ describe("core tool executors execute_code support", () => {
     tempDirs.push(dir);
 
     const executors = createDefaultToolExecutors({
-      toolsConfig: { sprites: { token: "test-token" } },
+      toolsConfig: { sprites: {} }, authStorage: AuthStorage.inMemory({ sprites: { type: "api_key", key: "test-token" } }),
     });
 
     const result = await executors.executeCode({
@@ -1015,7 +1016,7 @@ describe("core tool executors execute_code support", () => {
     const artifactsDir = join(dir, "artifacts");
 
     const executors = createDefaultToolExecutors({
-      toolsConfig: { sprites: { token: "test-token" }, artifacts: { path: artifactsDir, url: "https://example.com/artifacts" } },
+      toolsConfig: { sprites: {}, artifacts: { path: artifactsDir, url: "https://example.com/artifacts" } }, authStorage: AuthStorage.inMemory({ sprites: { type: "api_key", key: "test-token" } }),
     });
 
     const result = await executors.executeCode({
@@ -1034,7 +1035,7 @@ describe("core tool executors execute_code support", () => {
     tempDirs.push(dir);
 
     const executors = createDefaultToolExecutors({
-      toolsConfig: { sprites: { token: "test-token" }, artifacts: { path: join(dir, "artifacts"), url: "https://example.com/artifacts" } },
+      toolsConfig: { sprites: {}, artifacts: { path: join(dir, "artifacts"), url: "https://example.com/artifacts" } }, authStorage: AuthStorage.inMemory({ sprites: { type: "api_key", key: "test-token" } }),
     });
 
     const result = await executors.executeCode({
@@ -1054,7 +1055,7 @@ describe("core tool executors execute_code support", () => {
     const artifactsDir = join(dir, "artifacts");
 
     const executors = createDefaultToolExecutors({
-      toolsConfig: { sprites: { token: "test-token" }, artifacts: { path: artifactsDir, url: "https://example.com/artifacts" } },
+      toolsConfig: { sprites: {}, artifacts: { path: artifactsDir, url: "https://example.com/artifacts" } }, authStorage: AuthStorage.inMemory({ sprites: { type: "api_key", key: "test-token" } }),
     });
 
     // Create a minimal PNG file (1x1 pixel) via bash
@@ -1073,7 +1074,7 @@ describe("core tool executors execute_code support", () => {
     tempDirs.push(dir);
 
     const executors = createDefaultToolExecutors({
-      toolsConfig: { sprites: { token: "test-token" } },
+      toolsConfig: { sprites: {} }, authStorage: AuthStorage.inMemory({ sprites: { type: "api_key", key: "test-token" } }),
     });
 
     const result = await executors.executeCode({
@@ -1091,7 +1092,7 @@ describe("core tool executors execute_code support", () => {
     tempDirs.push(dir);
 
     const executors = createDefaultToolExecutors({
-      toolsConfig: { sprites: { token: "test-token" } },
+      toolsConfig: { sprites: {} }, authStorage: AuthStorage.inMemory({ sprites: { type: "api_key", key: "test-token" } }),
     });
 
     // Generate output larger than 24000 chars
@@ -1113,7 +1114,7 @@ describe("core tool executors execute_code support", () => {
     const artifactsDir = join(dir, "artifacts");
 
     const executors = createDefaultToolExecutors({
-      toolsConfig: { sprites: { token: "test-token" }, artifacts: { path: artifactsDir, url: "https://example.com/artifacts" } },
+      toolsConfig: { sprites: {}, artifacts: { path: artifactsDir, url: "https://example.com/artifacts" } }, authStorage: AuthStorage.inMemory({ sprites: { type: "api_key", key: "test-token" } }),
     });
 
     // Create a tiny GIF in the workdir
@@ -1138,7 +1139,7 @@ with open('test.webp', 'wb') as f:
     tempDirs.push(dir);
 
     const executors = createDefaultToolExecutors({
-      toolsConfig: { sprites: { token: "test-token" } },
+      toolsConfig: { sprites: {} }, authStorage: AuthStorage.inMemory({ sprites: { type: "api_key", key: "test-token" } }),
     });
 
     const result = await executors.executeCode({
@@ -1156,7 +1157,7 @@ describe("core tool executors execute_code Sprites sandbox", () => {
 
     await expect(
       executors.executeCode({ code: 'echo "hi"', language: "bash" }),
-    ).rejects.toThrow("tools.sprites.token");
+    ).rejects.toThrow("'sprites' API key in auth.json");
   });
 
   it("execute_code handles binary output files correctly via base64 roundtrip", async () => {
@@ -1165,7 +1166,7 @@ describe("core tool executors execute_code Sprites sandbox", () => {
     const artifactsDir = join(dir, "artifacts");
 
     const executors = createDefaultToolExecutors({
-      toolsConfig: { sprites: { token: "test-token" }, artifacts: { path: artifactsDir, url: "https://example.com/artifacts" } },
+      toolsConfig: { sprites: {}, artifacts: { path: artifactsDir, url: "https://example.com/artifacts" } }, authStorage: AuthStorage.inMemory({ sprites: { type: "api_key", key: "test-token" } }),
     });
 
     // Write binary data (PNG header bytes) and download via output_files
@@ -1187,7 +1188,7 @@ describe("core tool executors execute_code Sprites sandbox", () => {
 
   it("execute_code handles code with shell-special characters safely", async () => {
     const executors = createDefaultToolExecutors({
-      toolsConfig: { sprites: { token: "test-token" } },
+      toolsConfig: { sprites: {} }, authStorage: AuthStorage.inMemory({ sprites: { type: "api_key", key: "test-token" } }),
     });
 
     // Code containing single quotes, backticks, dollar signs
@@ -1203,7 +1204,8 @@ describe("core tool executors execute_code Sprites sandbox", () => {
 
   it("execute_code applies timeout to execution", async () => {
     const executors = createDefaultToolExecutors({
-      toolsConfig: { sprites: { token: "test-token", executeTimeoutMs: 100 } },
+      toolsConfig: { sprites: { executeTimeoutMs: 100 } },
+      authStorage: AuthStorage.inMemory({ sprites: { type: "api_key", key: "test-token" } }),
     });
 
     const result = await executors.executeCode({
@@ -1342,9 +1344,7 @@ describe("core tool executors generate_image support", () => {
 
     const executors = createDefaultToolExecutors({ toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" }, imageGen: { model: "openrouter:google/gemini-3-pro-image-preview" } },
       providersConfig: { openrouter: { baseUrl: "https://openrouter.example/api/v1" } },
-      getApiKey: async (provider: string) => {
-        return provider === "openrouter" ? "or-key" : undefined;
-      },
+      authStorage: AuthStorage.inMemory({ openrouter: { type: "api_key", key: "or-key" } }),
     });
 
     const result = await executors.generateImage({
@@ -1383,7 +1383,7 @@ describe("core tool executors generate_image support", () => {
   it("generate_image rejects non-openrouter model providers", async () => {
     const executors = createDefaultToolExecutors({
       toolsConfig: { imageGen: { model: "openai:gpt-image-1" } },
-      getApiKey: async () => "demo",
+      authStorage: AuthStorage.inMemory({ openai: { type: "api_key", key: "demo" } }),
     });
 
     await expect(
@@ -1424,7 +1424,7 @@ describe("core tool executors generate_image support", () => {
 
     const executors = createDefaultToolExecutors({ toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" }, imageGen: { model: "openrouter:google/gemini-3-pro-image-preview" } },
       providersConfig: { openrouter: { baseUrl: "https://openrouter.example/api/v1" } },
-      getApiKey: async () => "or-key",
+      authStorage: AuthStorage.inMemory({ openrouter: { type: "api_key", key: "or-key" } }),
     });
 
     await expect(

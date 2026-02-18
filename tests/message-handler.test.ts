@@ -66,7 +66,7 @@ function createHandler(options: {
   classifyMode?: unknown;
   logger?: unknown;
   toolOptions?: unknown;
-  getApiKey?: unknown;
+
   modelAdapter?: unknown;
   runtimeLogger?: RuntimeLogWriter;
   configData?: Record<string, unknown>;

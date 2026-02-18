@@ -1,5 +1,7 @@
 import { join } from "node:path";
 
+import { AuthStorage } from "@mariozechner/pi-coding-agent";
+
 import { assertNoDeferredFeatureConfig } from "./config/deferred-features.js";
 import { getMuaddibHome, resolveMuaddibPath } from "./config/paths.js";
 import { RuntimeLogWriter } from "./app/logging.js";
@@ -12,7 +14,7 @@ export interface MuaddibRuntime {
   config: MuaddibConfig;
   history: ChatHistoryStore;
   modelAdapter: PiAiModelAdapter;
-  getApiKey: (provider: string) => Promise<string | undefined> | string | undefined;
+  authStorage: AuthStorage;
   logger: RuntimeLogWriter;
   chronicle?: ChronicleSubsystem;
 }
@@ -35,11 +37,10 @@ export async function createMuaddibRuntime(
   const config = MuaddibConfig.load(options.configPath);
   assertNoDeferredFeatureConfig(config, log);
 
-  const staticKeys = config.getProviderStaticKeys();
-  const getApiKey = (provider: string): string | undefined => staticKeys[provider];
+  const authStorage = AuthStorage.create(join(muaddibHome, "auth.json"));
   const modelAdapter = new PiAiModelAdapter({
     deepseekBaseUrl: config.getProvidersConfig().deepseek?.baseUrl,
-    getApiKey,
+    authStorage,
   });
 
   const historyConfig = config.getHistoryConfig();
@@ -70,7 +71,7 @@ export async function createMuaddibRuntime(
       modelAdapter,
       logger: runtimeLogger,
       quests: chroniclerConfig.quests,
-      getApiKey,
+      authStorage,
       actorConfig: config.getActorConfig(),
     });
   }
@@ -79,7 +80,7 @@ export async function createMuaddibRuntime(
     config,
     history,
     modelAdapter,
-    getApiKey,
+    authStorage,
     logger: runtimeLogger,
     chronicle,
   };

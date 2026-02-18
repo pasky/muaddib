@@ -1,5 +1,5 @@
 import { type Agent, type AgentTool, type ThinkingLevel } from "@mariozechner/pi-agent-core";
-import type { AgentSession } from "@mariozechner/pi-coding-agent";
+import type { AgentSession, AuthStorage } from "@mariozechner/pi-coding-agent";
 import type { AssistantMessage, Message, Usage } from "@mariozechner/pi-ai";
 
 import { detectRefusalSignal } from "./refusal-detection.js";
@@ -19,7 +19,7 @@ export interface SessionRunnerOptions {
   systemPrompt: string;
   tools?: AgentTool<any>[];
   modelAdapter: PiAiModelAdapter;
-  getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+  authStorage?: AuthStorage;
   maxIterations?: number;
   emptyCompletionRetryPrompt?: string;
   llmDebugMaxChars?: number;
@@ -78,7 +78,7 @@ export class SessionRunner {
       systemPrompt: this.options.systemPrompt,
       tools: this.tools,
       modelAdapter: this.modelAdapter,
-      getApiKey: this.options.getApiKey,
+      authStorage: this.options.authStorage,
       contextMessages: options.contextMessages,
       thinkingLevel: options.thinkingLevel,
       maxIterations: this.options.maxIterations,

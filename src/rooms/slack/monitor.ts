@@ -116,7 +116,7 @@ export class SlackRoomMonitor {
   private readonly logger: Logger;
   private readonly logWriter?: RuntimeLogWriter;
 
-  static fromRuntime(runtime: MuaddibRuntime): SlackRoomMonitor[] {
+  static async fromRuntime(runtime: MuaddibRuntime): Promise<SlackRoomMonitor[]> {
     const roomConfig = runtime.config.getRoomConfig("slack");
     const enabled = roomConfig.enabled ?? false;
     if (!enabled) {
@@ -124,8 +124,8 @@ export class SlackRoomMonitor {
     }
 
     const appToken = requireNonEmptyString(
-      roomConfig.appToken,
-      "Slack room is enabled but rooms.slack.app_token is missing.",
+      await runtime.authStorage.getApiKey("slack-app"),
+      "Slack room is enabled but 'slack-app' API key is missing from auth.json.",
     );
 
     const workspaceEntries = Object.entries(roomConfig.workspaces ?? {});
@@ -135,10 +135,10 @@ export class SlackRoomMonitor {
 
     const commandHandler = new RoomMessageHandler(runtime, "slack");
 
-    return workspaceEntries.map(([workspaceId, workspaceConfig]) => {
+    return await Promise.all(workspaceEntries.map(async ([workspaceId, workspaceConfig]) => {
       const botToken = requireNonEmptyString(
-        workspaceConfig.botToken,
-        `Slack room is enabled but rooms.slack.workspaces.${workspaceId}.bot_token is missing.`,
+        await runtime.authStorage.getApiKey(`slack-${workspaceId}`),
+        `Slack room is enabled but 'slack-${workspaceId}' API key is missing from auth.json.`,
       );
 
       const transport = new SlackSocketTransport({
@@ -162,7 +162,7 @@ export class SlackRoomMonitor {
         logger: runtime.logger.getLogger(`muaddib.rooms.slack.monitor.${workspaceId}`),
         logWriter: runtime.logger,
       });
-    });
+    }));
   }
 
   constructor(private readonly options: SlackRoomMonitorOptions) {

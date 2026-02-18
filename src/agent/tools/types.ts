@@ -1,4 +1,5 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
+import type { AuthStorage } from "@mariozechner/pi-coding-agent";
 import type { ChronicleStore } from "../../chronicle/chronicle-store.js";
 import type { ToolsConfig, ProvidersConfig } from "../../config/muaddib-config.js";
 import type { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
@@ -28,7 +29,7 @@ export interface ToolContext {
   providersConfig?: ProvidersConfig;
 
   // ── Runtime services ──
-  getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+  authStorage?: AuthStorage;
   modelAdapter: PiAiModelAdapter;
   logger?: Logger;
   chronicleStore?: ChronicleStore;

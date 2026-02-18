@@ -193,7 +193,7 @@ describe("ContextReducerTs", () => {
     );
 
     const firstCall = modelAdapter.completeSimple.mock.calls[0] as any[];
-    expect(firstCall[2]).not.toHaveProperty("getApiKey");
+    expect(firstCall[2]).not.toHaveProperty("authStorage");
   });
 
   it("reduce handles multi-turn parsed response correctly", async () => {

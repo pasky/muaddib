@@ -6,7 +6,7 @@
  *
  * Mock boundaries:
  *   - `streamSimple` from `@mariozechner/pi-ai` (scripted LLM responses)
- *   - `getApiKey` on runtime (returns fake keys)
+ *   - `authStorage` on runtime (returns fake keys)
  *
  * Verification:
  *   - FakeSender.sent contains the response with `[refusal fallback to ...]`

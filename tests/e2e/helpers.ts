@@ -17,6 +17,7 @@ import type {
 } from "@mariozechner/pi-ai";
 import { createAssistantMessageEventStream } from "@mariozechner/pi-ai/dist/utils/event-stream.js";
 
+import { AuthStorage, type ApiKeyCredential } from "@mariozechner/pi-coding-agent";
 import { RuntimeLogWriter } from "../../src/app/logging.js";
 import { MuaddibConfig } from "../../src/config/muaddib-config.js";
 import { ChatHistoryStore } from "../../src/history/chat-history-store.js";
@@ -234,28 +235,32 @@ export function e2eConfig(): Record<string, unknown> {
 }
 
 /**
- * Extract API keys from `providers.*.apiKey` in config data.
+ * Extract API keys from `providers.*.apiKey` in config data into AuthStorageData format.
  */
-function extractApiKeys(configData: Record<string, unknown>): Record<string, string> {
+function extractAuthData(configData: Record<string, unknown>): Record<string, ApiKeyCredential> {
+  const data: Record<string, ApiKeyCredential> = {};
   const providers = configData.providers as Record<string, { apiKey?: string }> | undefined;
-  if (!providers) return {};
-  const keys: Record<string, string> = {};
-  for (const [name, cfg] of Object.entries(providers)) {
-    if (cfg.apiKey) keys[name] = cfg.apiKey;
+  if (providers) {
+    for (const [name, cfg] of Object.entries(providers)) {
+      if (cfg.apiKey) data[name] = { type: "api_key", key: cfg.apiKey };
+    }
   }
-  return keys;
+  // Extract tool-level keys (jina, sprites)
+  const tools = configData.tools as Record<string, Record<string, unknown>> | undefined;
+  if (tools?.jina?.apiKey) data.jina = { type: "api_key", key: tools.jina.apiKey as string };
+  if (tools?.sprites?.token) data.sprites = { type: "api_key", key: tools.sprites.token as string };
+  return data;
 }
 
 export function buildRuntime(
   ctx: E2EContext,
   configData: Record<string, unknown>,
 ): MuaddibRuntime {
-  const keys = extractApiKeys(configData);
   return {
     config: MuaddibConfig.inMemory(configData),
     history: ctx.history,
     modelAdapter: new PiAiModelAdapter(),
-    getApiKey: (provider: string) => keys[provider],
+    authStorage: AuthStorage.inMemory(extractAuthData(configData)),
     logger: new RuntimeLogWriter({
       muaddibHome: ctx.tmpHome,
       stdout: { write: () => true } as unknown as NodeJS.WriteStream,

@@ -146,7 +146,7 @@ export class CommandExecutor {
           systemPrompt: input.systemPrompt,
           tools: input.tools,
           modelAdapter: this.modelAdapter,
-          getApiKey: runtime.getApiKey,
+          authStorage: runtime.authStorage,
           maxIterations: actorConfig.maxIterations,
           llmDebugMaxChars: actorConfig.llmDebugMaxChars,
           metaReminder: input.metaReminder,
@@ -191,7 +191,7 @@ export class CommandExecutor {
     return {
       toolsConfig: this.runtime.config.getToolsConfig(),
       providersConfig: this.runtime.config.getProvidersConfig(),
-      getApiKey: this.runtime.getApiKey,
+      authStorage: this.runtime.authStorage,
       modelAdapter: this.modelAdapter,
       logger: this.logger,
       chronicleStore: this.runtime.chronicle?.chronicleStore,

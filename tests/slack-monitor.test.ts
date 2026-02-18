@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { RuntimeLogWriter } from "../src/app/logging.js";
 import { MuaddibConfig } from "../src/config/muaddib-config.js";
 import { ChatHistoryStore } from "../src/history/chat-history-store.js";
@@ -30,12 +31,12 @@ function baseCommandConfig() {
   };
 }
 
-function buildRuntime(configData: Record<string, unknown>, history: ChatHistoryStore): MuaddibRuntime {
+function buildRuntime(configData: Record<string, unknown>, history: ChatHistoryStore, authStorage?: AuthStorage): MuaddibRuntime {
   return {
     config: MuaddibConfig.inMemory(configData),
     history,
     modelAdapter: new PiAiModelAdapter(),
-    getApiKey: () => undefined,
+    authStorage: authStorage ?? AuthStorage.inMemory(),
     logger: new RuntimeLogWriter({
       muaddibHome: process.cwd(),
       stdout: { write: () => true } as unknown as NodeJS.WriteStream,
@@ -48,7 +49,7 @@ describe("SlackRoomMonitor", () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();
 
-    const monitors = SlackRoomMonitor.fromRuntime(buildRuntime({
+    const monitors = await SlackRoomMonitor.fromRuntime(buildRuntime({
       rooms: {
         common: {
           command: baseCommandConfig(),
@@ -67,7 +68,7 @@ describe("SlackRoomMonitor", () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();
 
-    expect(() => SlackRoomMonitor.fromRuntime(buildRuntime({
+    await expect(SlackRoomMonitor.fromRuntime(buildRuntime({
       rooms: {
         common: {
           command: baseCommandConfig(),
@@ -76,34 +77,32 @@ describe("SlackRoomMonitor", () => {
           enabled: true,
         },
       },
-    }, history))).toThrow("Slack room is enabled but rooms.slack.app_token is missing.");
+    }, history))).rejects.toThrow("'slack-app' API key is missing from auth.json");
 
-    expect(() => SlackRoomMonitor.fromRuntime(buildRuntime({
+    await expect(SlackRoomMonitor.fromRuntime(buildRuntime({
       rooms: {
         common: {
           command: baseCommandConfig(),
         },
         slack: {
           enabled: true,
-          appToken: "xapp-test",
         },
       },
-    }, history))).toThrow("Slack room is enabled but rooms.slack.workspaces is missing.");
+    }, history, AuthStorage.inMemory({ "slack-app": { type: "api_key", key: "xapp-test" } })))).rejects.toThrow("Slack room is enabled but rooms.slack.workspaces is missing.");
 
-    expect(() => SlackRoomMonitor.fromRuntime(buildRuntime({
+    await expect(SlackRoomMonitor.fromRuntime(buildRuntime({
       rooms: {
         common: {
           command: baseCommandConfig(),
         },
         slack: {
           enabled: true,
-          appToken: "xapp-test",
           workspaces: {
             T123: {},
           },
         },
       },
-    }, history))).toThrow("Slack room is enabled but rooms.slack.workspaces.T123.bot_token is missing.");
+    }, history, AuthStorage.inMemory({ "slack-app": { type: "api_key", key: "xapp-test" } })))).rejects.toThrow("'slack-T123' API key is missing from auth.json");
 
     await history.close();
   });
@@ -112,25 +111,24 @@ describe("SlackRoomMonitor", () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();
 
-    const monitors = SlackRoomMonitor.fromRuntime(buildRuntime({
+    const monitors = await SlackRoomMonitor.fromRuntime(buildRuntime({
       rooms: {
         common: {
           command: baseCommandConfig(),
         },
         slack: {
           enabled: true,
-          appToken: "xapp-test",
           workspaces: {
-            T123: {
-              botToken: "xoxb-1",
-            },
-            T456: {
-              botToken: "xoxb-2",
-            },
+            T123: {},
+            T456: {},
           },
         },
       },
-    }, history));
+    }, history, AuthStorage.inMemory({
+      "slack-app": { type: "api_key", key: "xapp-test" },
+      "slack-T123": { type: "api_key", key: "xoxb-1" },
+      "slack-T456": { type: "api_key", key: "xoxb-2" },
+    })));
 
     expect(monitors).toHaveLength(2);
     await history.close();

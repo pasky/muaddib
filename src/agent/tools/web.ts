@@ -127,7 +127,7 @@ export function createDefaultWebSearchExecutor(
 
     const url = `https://s.jina.ai/?q=${encodeURIComponent(trimmedQuery)}`;
     const response = await fetch(url, {
-      headers: buildJinaHeaders(options.toolsConfig?.jina?.apiKey, {
+      headers: buildJinaHeaders(await options.authStorage?.getApiKey("jina"), {
         "X-Respond-With": "no-content",
       }),
     });
@@ -253,7 +253,7 @@ export function createDefaultVisitWebpageExecutor(
 
     // Use Jina reader with retry/backoff.
     const readerUrl = `https://r.jina.ai/${url}`;
-    const body = await fetchJinaWithRetry(readerUrl, options.toolsConfig?.jina?.apiKey, options.logger);
+    const body = await fetchJinaWithRetry(readerUrl, await options.authStorage?.getApiKey("jina"), options.logger);
 
     if (!body) {
       return `## Content from ${url}\n\n(Empty response)`;

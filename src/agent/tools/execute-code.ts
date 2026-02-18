@@ -128,14 +128,13 @@ export function createDefaultExecuteCodeExecutor(
   options: ToolContext,
 ): ExecuteCodeExecutor {
   const timeoutMs = options.toolsConfig?.sprites?.executeTimeoutMs ?? DEFAULT_EXECUTE_TIMEOUT_MS;
-  const spritesToken = options.toolsConfig?.sprites?.token;
   const arc = options.arc ?? "default";
 
   let sprite: Sprite | null = null;
   let workdir: string | null = null;
   let versionCounter = 0;
 
-  async function ensureSprite(): Promise<Sprite> {
+  async function ensureSprite(spritesToken: string): Promise<Sprite> {
     if (sprite) return sprite;
 
     const { SpritesClient } = await import("@fly/sprites");
@@ -387,15 +386,16 @@ export function createDefaultExecuteCodeExecutor(
       throw new Error("execute_code.code must be non-empty.");
     }
 
+    const spritesToken = await options.authStorage?.getApiKey("sprites");
     if (!spritesToken) {
       throw new Error(
-        "execute_code requires tools.sprites.token configuration for sandboxed execution.",
+        "execute_code requires a 'sprites' API key in auth.json for sandboxed execution.",
       );
     }
 
     let sp: Sprite;
     try {
-      sp = await ensureSprite();
+      sp = await ensureSprite(spritesToken);
     } catch (err) {
       return `Error initializing sandbox: ${err}`;
     }

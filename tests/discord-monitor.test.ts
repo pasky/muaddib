@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { RuntimeLogWriter } from "../src/app/logging.js";
+import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { MuaddibConfig } from "../src/config/muaddib-config.js";
 import { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { PiAiModelAdapter } from "../src/models/pi-ai-model-adapter.js";
@@ -34,12 +35,12 @@ function baseCommandConfig() {
   };
 }
 
-function buildRuntime(configData: Record<string, unknown>, history: ChatHistoryStore): MuaddibRuntime {
+function buildRuntime(configData: Record<string, unknown>, history: ChatHistoryStore, authStorage?: AuthStorage): MuaddibRuntime {
   return {
     config: MuaddibConfig.inMemory(configData),
     history,
     modelAdapter: new PiAiModelAdapter(),
-    getApiKey: () => undefined,
+    authStorage: authStorage ?? AuthStorage.inMemory(),
     logger: new RuntimeLogWriter({
       muaddibHome: process.cwd(),
       stdout: { write: () => true } as unknown as NodeJS.WriteStream,
@@ -52,7 +53,7 @@ describe("DiscordRoomMonitor", () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();
 
-    const monitors = DiscordRoomMonitor.fromRuntime(buildRuntime({
+    const monitors = await DiscordRoomMonitor.fromRuntime(buildRuntime({
       rooms: {
         common: {
           command: baseCommandConfig(),
@@ -71,7 +72,7 @@ describe("DiscordRoomMonitor", () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();
 
-    expect(() => DiscordRoomMonitor.fromRuntime(buildRuntime({
+    await expect(DiscordRoomMonitor.fromRuntime(buildRuntime({
       rooms: {
         common: {
           command: baseCommandConfig(),
@@ -80,7 +81,7 @@ describe("DiscordRoomMonitor", () => {
           enabled: true,
         },
       },
-    }, history))).toThrow("Discord room is enabled but rooms.discord.token is missing.");
+    }, history))).rejects.toThrow("'discord' API key is missing from auth.json");
 
     await history.close();
   });
@@ -89,18 +90,17 @@ describe("DiscordRoomMonitor", () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();
 
-    const monitors = DiscordRoomMonitor.fromRuntime(buildRuntime({
+    const monitors = await DiscordRoomMonitor.fromRuntime(buildRuntime({
       rooms: {
         common: {
           command: baseCommandConfig(),
         },
         discord: {
           enabled: true,
-          token: "discord-token",
           botName: "muaddib",
         },
       },
-    }, history));
+    }, history, AuthStorage.inMemory({ discord: { type: "api_key", key: "discord-token" } })));
 
     expect(monitors).toHaveLength(1);
     await history.close();

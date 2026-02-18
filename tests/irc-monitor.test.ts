@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { RuntimeLogWriter } from "../src/app/logging.js";
 import { MuaddibConfig } from "../src/config/muaddib-config.js";
 import { ChatHistoryStore } from "../src/history/chat-history-store.js";
@@ -32,7 +33,7 @@ function buildRuntime(configData: Record<string, unknown>, history: ChatHistoryS
     config: MuaddibConfig.inMemory(configData),
     history,
     modelAdapter: new PiAiModelAdapter(),
-    getApiKey: () => undefined,
+    authStorage: AuthStorage.inMemory(),
     logger: new RuntimeLogWriter({
       muaddibHome: process.cwd(),
       stdout: { write: () => true } as unknown as NodeJS.WriteStream,

@@ -5,7 +5,6 @@ const mockState = vi.hoisted(() => ({
     options?.onPayload?.({ hello: "world" });
     return { stream: true };
   }),
-  authStorageSetFallbackResolverMock: vi.fn(),
   sessions: [] as any[],
 }));
 
@@ -52,7 +51,8 @@ vi.mock("@mariozechner/pi-coding-agent", () => ({
       remove: vi.fn(),
       login: vi.fn(),
       logout: vi.fn(),
-      setFallbackResolver: (resolver: unknown) => mockState.authStorageSetFallbackResolverMock(resolver),
+      setFallbackResolver: vi.fn(),
+      getApiKey: vi.fn(async () => "test-key"),
     }),
   },
   ModelRegistry: class {
@@ -70,7 +70,6 @@ describe("createAgentSessionForInvocation", () => {
   beforeEach(() => {
     mockState.sessions.length = 0;
     mockState.streamSimpleMock.mockClear();
-    mockState.authStorageSetFallbackResolverMock.mockClear();
   });
 
   it("converts context messages and preserves provider/model metadata", () => {
@@ -97,13 +96,20 @@ describe("createAgentSessionForInvocation", () => {
     expect(messages[1].role).toBe("assistant");
   });
 
-  it("caches provider keys via ensureProviderKey", async () => {
-    const getApiKey = vi.fn(async (provider: string) => `  ${provider}-key  `);
+  it("validates provider key via ensureProviderKey", async () => {
+    const authStorage = {
+      getApiKey: vi.fn(async (provider: string) => `${provider}-key`),
+      set: vi.fn(),
+      remove: vi.fn(),
+      login: vi.fn(),
+      logout: vi.fn(),
+      setFallbackResolver: vi.fn(),
+    };
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
-      getApiKey,
+      authStorage: authStorage as any,
       modelAdapter: {
         resolve: vi.fn(() => ({
           spec: { provider: "openai", modelId: "gpt-4o-mini" },
@@ -113,9 +119,8 @@ describe("createAgentSessionForInvocation", () => {
     });
 
     await ctx.ensureProviderKey("openai");
-    await ctx.ensureProviderKey("openai");
 
-    expect(getApiKey).toHaveBeenCalledTimes(1);
+    expect(authStorage.getApiKey).toHaveBeenCalledWith("openai");
   });
 
   it("activates vision fallback model on image tool output and enforces max-iteration abort", () => {

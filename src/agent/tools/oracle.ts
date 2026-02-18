@@ -114,7 +114,7 @@ export function createDefaultOracleExecutor(
       systemPrompt,
       tools: oracleTools,
       modelAdapter,
-      getApiKey: options.getApiKey,
+      authStorage: options.authStorage,
       maxIterations: options.toolsConfig?.oracle?.maxIterations,
       logger,
     });

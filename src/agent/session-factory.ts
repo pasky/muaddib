@@ -36,7 +36,7 @@ interface CreateAgentSessionInput {
   model: string;
   systemPrompt: string;
   tools: AgentTool<any>[];
-  getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
+  authStorage?: AuthStorage;
   modelAdapter: PiAiModelAdapter;
   contextMessages?: Message[];
   thinkingLevel?: ThinkingLevel;
@@ -72,13 +72,8 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
     getSystemPrompt: () => input.systemPrompt,
   };
 
-  // In-memory AuthStorage: never touches disk. All key resolution goes through
-  // the fallback resolver backed by muaddib's config.json.
-  const authStorage = AuthStorage.inMemory();
-  const authBridge = new MuaddibConfigBackedAuthBridge(input.getApiKey);
+  const authStorage = input.authStorage ?? AuthStorage.inMemory();
   const modelRegistry = new ModelRegistry(authStorage);
-  // Set fallback resolver AFTER ModelRegistry constructor (which overwrites it).
-  authStorage.setFallbackResolver((provider) => authBridge.resolveSync(provider));
   const llmDebugMaxChars = Math.max(500, Math.floor(input.llmDebugMaxChars ?? 120_000));
   const streamFn = createTracingStreamFn(logger, llmDebugMaxChars);
 
@@ -90,7 +85,7 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
       tools: input.tools,
     },
     convertToLlm,
-    getApiKey: input.getApiKey,
+    getApiKey: input.authStorage ? (provider: string) => input.authStorage!.getApiKey(provider) : undefined,
     streamFn,
     steeringMode: "all",
   });
@@ -197,9 +192,10 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
     session,
     agent,
     ensureProviderKey: async (provider: string) => {
-      // Resolve the key to validate it exists (and warm the bridge cache),
-      // but do NOT persist to AuthStorage — all keys live in config.json only.
-      await authBridge.resolveAsync(provider);
+      const key = await authStorage.getApiKey(provider);
+      if (!key) {
+        throw new Error(`No API key configured for provider '${provider}'. Add it to auth.json.`);
+      }
     },
     getVisionFallbackActivated: () => visionFallbackActivated,
     dispose: () => {
@@ -209,57 +205,7 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
   };
 }
 
-class MuaddibConfigBackedAuthBridge {
-  private readonly cache = new Map<string, string>();
 
-  constructor(
-    private readonly getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined,
-  ) {}
-
-  resolveSync(provider: string): string | undefined {
-    const cached = this.cache.get(provider);
-    if (cached) {
-      return cached;
-    }
-
-    const value = this.getApiKey?.(provider);
-    if (typeof value !== "string") {
-      return undefined;
-    }
-
-    const normalized = normalizeApiKey(value);
-    if (!normalized) {
-      return undefined;
-    }
-
-    this.cache.set(provider, normalized);
-    return normalized;
-  }
-
-  async resolveAsync(provider: string): Promise<string | undefined> {
-    const cached = this.cache.get(provider);
-    if (cached) {
-      return cached;
-    }
-
-    if (!this.getApiKey) {
-      return undefined;
-    }
-
-    const value = await this.getApiKey(provider);
-    if (typeof value !== "string") {
-      return undefined;
-    }
-
-    const normalized = normalizeApiKey(value);
-    if (!normalized) {
-      return undefined;
-    }
-
-    this.cache.set(provider, normalized);
-    return normalized;
-  }
-}
 
 function applySystemPromptOverrideToSession(session: AgentSession, override: string): void {
   session.agent.setSystemPrompt(override);
@@ -320,9 +266,4 @@ function hasImageToolOutput(value: unknown): boolean {
   } catch {
     return false;
   }
-}
-
-function normalizeApiKey(value: string): string | undefined {
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
 }

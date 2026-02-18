@@ -40,7 +40,7 @@ export async function runMuaddibMain(argv: string[] = process.argv.slice(2)): Pr
   });
 
   try {
-    const monitors = createMonitors(runtime);
+    const monitors = await createMonitors(runtime);
     if (monitors.length === 0) {
       logger.error("No room monitors enabled.");
       throw new Error("No room monitors enabled.");
@@ -54,11 +54,11 @@ export async function runMuaddibMain(argv: string[] = process.argv.slice(2)): Pr
   }
 }
 
-function createMonitors(runtime: MuaddibRuntime): Array<{ run(): Promise<void> }> {
+async function createMonitors(runtime: MuaddibRuntime): Promise<Array<{ run(): Promise<void> }>> {
   const monitors: Array<{ run(): Promise<void> }> = [];
   monitors.push(...IrcRoomMonitor.fromRuntime(runtime));
-  monitors.push(...DiscordRoomMonitor.fromRuntime(runtime));
-  monitors.push(...SlackRoomMonitor.fromRuntime(runtime));
+  monitors.push(...await DiscordRoomMonitor.fromRuntime(runtime));
+  monitors.push(...await SlackRoomMonitor.fromRuntime(runtime));
   return monitors;
 }
 
