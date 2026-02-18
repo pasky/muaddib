@@ -39,7 +39,6 @@ export interface ResolvedPiAiModel {
 export interface CompleteSimpleOptions {
   callType?: string;
   logger?: Logger;
-  authStorage?: AuthStorage;
   maxChars?: number;
   streamOptions?: Omit<SimpleStreamOptions, "apiKey" | "onPayload">;
 }
@@ -111,11 +110,9 @@ export class PiAiModelAdapter {
         context,
         {
           ...(options.streamOptions ?? {}),
-          apiKey: options.authStorage
-            ? await options.authStorage.getApiKey(resolved.spec.provider)
-            : this.options.authStorage
-              ? await this.options.authStorage.getApiKey(resolved.spec.provider)
-              : undefined,
+          apiKey: this.options.authStorage
+            ? await this.options.authStorage.getApiKey(resolved.spec.provider)
+            : undefined,
           onPayload: (payload: unknown) => {
             logger?.debug(`llm_io payload ${callType}`, truncateJson(payload, maxChars));
           },
