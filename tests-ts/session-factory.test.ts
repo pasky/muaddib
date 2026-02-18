@@ -202,10 +202,11 @@ describe("createAgentSessionForInvocation", () => {
   });
 
   it("injects progress nudge when elapsed time exceeds threshold", async () => {
+    const progressTool = { name: "progress_report", hasCallback: true, lastSentAt: 0 };
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
-      tools: [],
+      tools: [progressTool as any],
       modelAdapter: { resolve: vi.fn(() => ({
         spec: { provider: "openai", modelId: "gpt-4o-mini" },
         model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
@@ -227,10 +228,11 @@ describe("createAgentSessionForInvocation", () => {
   });
 
   it("injects progress nudge on first tool-using turn with high reasoning", () => {
+    const progressTool = { name: "progress_report", hasCallback: true, lastSentAt: 0 };
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
-      tools: [],
+      tools: [progressTool as any],
       modelAdapter: { resolve: vi.fn(() => ({
         spec: { provider: "openai", modelId: "gpt-4o-mini" },
         model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
@@ -256,10 +258,11 @@ describe("createAgentSessionForInvocation", () => {
   });
 
   it("does not inject progress nudge near iteration limit", () => {
+    const progressTool = { name: "progress_report", hasCallback: true, lastSentAt: 0 };
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
-      tools: [],
+      tools: [progressTool as any],
       modelAdapter: { resolve: vi.fn(() => ({
         spec: { provider: "openai", modelId: "gpt-4o-mini" },
         model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
@@ -276,6 +279,54 @@ describe("createAgentSessionForInvocation", () => {
     // Turn 1: maxIterations=3, turnCount=1, limit-2=1 → turnCount < maxIterations-2 is false
     session.emit({ type: "turn_end", toolResults: [{ role: "toolResult" }] });
     // Should NOT have progress nudge since turnCount(1) >= maxIterations-2(1)
+    expect(agent.steer).not.toHaveBeenCalled();
+  });
+
+  it("does not inject progress nudge without progress callback", () => {
+    const progressTool = { name: "progress_report", hasCallback: false, lastSentAt: 0 };
+    const ctx = createAgentSessionForInvocation({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "system",
+      tools: [progressTool as any],
+      modelAdapter: { resolve: vi.fn(() => ({
+        spec: { provider: "openai", modelId: "gpt-4o-mini" },
+        model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
+      })) } as any,
+      maxIterations: 10,
+      progressThresholdSeconds: 0,
+      progressMinIntervalSeconds: 0,
+    });
+
+    const session = mockState.sessions[0];
+    const agent = ctx.agent as any;
+
+    session.emit({ type: "turn_end", toolResults: [{ role: "toolResult" }] });
+    expect(agent.steer).not.toHaveBeenCalled();
+  });
+
+  it("resets progress nudge debounce when progress_report tool is used", () => {
+    const progressTool = { name: "progress_report", hasCallback: true, lastSentAt: 0 };
+    const ctx = createAgentSessionForInvocation({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "system",
+      tools: [progressTool as any],
+      modelAdapter: { resolve: vi.fn(() => ({
+        spec: { provider: "openai", modelId: "gpt-4o-mini" },
+        model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
+      })) } as any,
+      maxIterations: 10,
+      progressThresholdSeconds: 1, // 1 second threshold
+      progressMinIntervalSeconds: 0,
+    });
+
+    const session = mockState.sessions[0];
+    const agent = ctx.agent as any;
+
+    // Simulate the tool having been used (lastSentAt set to now)
+    progressTool.lastSentAt = Date.now();
+
+    // Turn 1: tool was just used, so elapsed since last report ~0s < 1s threshold → no nudge
+    session.emit({ type: "turn_end", toolResults: [{ role: "toolResult" }] });
     expect(agent.steer).not.toHaveBeenCalled();
   });
 

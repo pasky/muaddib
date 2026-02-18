@@ -8,11 +8,17 @@ interface ProgressReportToolOptions {
   minIntervalSeconds?: number;
 }
 
-export function createProgressReportTool(options: ProgressReportToolOptions = {}): MuaddibTool {
-  const minInterval = (options.minIntervalSeconds ?? 15) * 1000;
-  let lastSentAt = 0;
+export interface ProgressReportTool extends MuaddibTool {
+  hasCallback: boolean;
+  lastSentAt: number;
+}
 
-  return {
+export function createProgressReportTool(options: ProgressReportToolOptions = {}): ProgressReportTool {
+  const minInterval = (options.minIntervalSeconds ?? 15) * 1000;
+
+  const tool: ProgressReportTool = {
+    hasCallback: !!options.onProgressReport,
+    lastSentAt: 0,
     name: "progress_report",
     persistType: "none",
     label: "Progress Report",
@@ -32,8 +38,8 @@ export function createProgressReportTool(options: ProgressReportToolOptions = {}
       }
 
       const now = Date.now();
-      if (now - lastSentAt < minInterval) {
-        const waitSec = Math.ceil((minInterval - (now - lastSentAt)) / 1000);
+      if (now - tool.lastSentAt < minInterval) {
+        const waitSec = Math.ceil((minInterval - (now - tool.lastSentAt)) / 1000);
         return {
           content: [{ type: "text", text: `OK (rate-limited, next report available in ~${waitSec}s)` }],
           details: { reported: clean, rateLimited: true },
@@ -43,7 +49,7 @@ export function createProgressReportTool(options: ProgressReportToolOptions = {}
       if (options.onProgressReport) {
         await options.onProgressReport(clean);
       }
-      lastSentAt = Date.now();
+      tool.lastSentAt = Date.now();
 
       return {
         content: [{ type: "text", text: "OK" }],
@@ -51,6 +57,8 @@ export function createProgressReportTool(options: ProgressReportToolOptions = {}
       };
     },
   };
+
+  return tool;
 }
 
 interface MakePlanToolOptions {

@@ -1,5 +1,6 @@
 import { Agent, type AgentMessage, type AgentTool, type StreamFn, type ThinkingLevel } from "@mariozechner/pi-agent-core";
 import { streamSimple, type Message } from "@mariozechner/pi-ai";
+import type { ProgressReportTool } from "./tools/control.js";
 import {
   AgentSession,
   AuthStorage,
@@ -131,9 +132,9 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
   let turnCount = 0;
   let visionFallbackActivated = false;
   const sessionStartTime = Date.now();
-  let lastProgressNudgeTime = 0;
   const progressThreshold = input.progressThresholdSeconds;
-  const progressMinInterval = input.progressMinIntervalSeconds ?? 0;
+  const progressReportTool = input.tools.find((t): t is ProgressReportTool => t.name === "progress_report") as ProgressReportTool | undefined;
+  const hasProgressCallback = progressReportTool?.hasCallback ?? false;
   const unsubscribe = session.subscribe((event) => {
     if (event.type === "turn_end") {
       turnCount += 1;
@@ -162,22 +163,22 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
           parts.push(input.metaReminder);
         }
 
-        // Progress report nudge: fire when elapsed >= threshold (with min interval),
-        // or on first iteration with medium/high reasoning.
-        if (progressThreshold != null && turnCount < maxIterations - 2) {
+        // Progress report nudge: fire when elapsed >= threshold (debounced from last actual
+        // progress_report delivery, matching Python's max(start, executor._last_sent)).
+        // Only nudge when a progress callback exists (matches Python: progress_callback is not None).
+        if (progressThreshold != null && hasProgressCallback && turnCount < maxIterations - 2) {
           const now = Date.now();
-          const elapsedSeconds = (now - sessionStartTime) / 1000;
-          const sinceLastNudge = (now - lastProgressNudgeTime) / 1000;
+          const lastActivity = Math.max(sessionStartTime, progressReportTool!.lastSentAt);
+          const elapsedSinceLastReport = (now - lastActivity) / 1000;
           const tl = input.thinkingLevel ?? "off";
           const isFirstTurnHighReasoning = turnCount === 1 &&
             (tl === "medium" || tl === "high" || tl === "xhigh");
 
           if (
             isFirstTurnHighReasoning ||
-            (elapsedSeconds >= progressThreshold && sinceLastNudge >= progressMinInterval)
+            (elapsedSinceLastReport >= progressThreshold)
           ) {
             parts.push("If you are going to call more tools, you MUST ALSO use the progress_report tool now.");
-            lastProgressNudgeTime = now;
           }
         }
 
