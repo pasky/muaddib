@@ -111,11 +111,22 @@ export class RoomMessageHandler {
     );
 
     // Messages that bypass steering (help, parse errors, no-context, non-steering modes)
-    if (this.resolver.shouldBypassSteering(message)) {
-      return this.executor.execute(message, triggerMessageId, options.sendResponse);
-    }
+    try {
+      if (this.resolver.shouldBypassSteering(message)) {
+        return await this.executor.execute(message, triggerMessageId, options.sendResponse);
+      }
 
-    return this.handleCommandMessage(message, triggerMessageId, options.sendResponse);
+      return await this.handleCommandMessage(message, triggerMessageId, options.sendResponse);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      this.logger.error("Agent execution failed", `nick=${message.nick}`, `error=${errorMsg}`);
+      if (options.sendResponse) {
+        await options.sendResponse(errorMsg).catch((sendErr) => {
+          this.logger.error("Failed to send error reply to room", sendErr);
+        });
+      }
+      throw error;
+    }
   }
 
   /** Direct execution without steering (for CLI / tests). */

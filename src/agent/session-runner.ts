@@ -22,6 +22,7 @@ export interface SessionRunnerOptions {
   authStorage: AuthStorage;
   maxIterations?: number;
   emptyCompletionRetryPrompt?: string;
+  onStatusMessage?: (text: string) => void | Promise<void>;
   llmDebugMaxChars?: number;
   metaReminder?: string;
   progressThresholdSeconds?: number;
@@ -58,6 +59,7 @@ export class SessionRunner {
   private readonly modelAdapter: PiAiModelAdapter;
   private readonly logger: RunnerLogger;
   private readonly emptyCompletionRetryPrompt: string;
+  private readonly onStatusMessage?: (text: string) => void | Promise<void>;
   private readonly llmDebugMaxChars: number;
   private readonly options: SessionRunnerOptions;
 
@@ -69,6 +71,7 @@ export class SessionRunner {
     this.logger = options.logger ?? console;
     this.emptyCompletionRetryPrompt =
       options.emptyCompletionRetryPrompt ?? DEFAULT_EMPTY_COMPLETION_RETRY_PROMPT;
+    this.onStatusMessage = options.onStatusMessage;
     this.llmDebugMaxChars = Math.max(500, Math.floor(options.llmDebugMaxChars ?? 120_000));
   }
 
@@ -143,16 +146,35 @@ export class SessionRunner {
         sessionCtx.ensureProviderKey,
       );
 
+      const lastAfterPrompt = findLastAssistantMessage(session.messages);
+      if (lastAfterPrompt?.stopReason === "error") {
+        const detail = lastAfterPrompt.errorMessage ? `: ${lastAfterPrompt.errorMessage}` : "";
+        throw new Error(
+          `Model returned error stop reason after prompt (provider=${lastAfterPrompt.provider ?? "unknown"}, model=${lastAfterPrompt.model ?? "unknown"})${detail}`,
+        );
+      }
+
       let text = extractLastAssistantText(session.messages);
       for (let i = 0; i < 3 && !text; i += 1) {
-        this.logger.debug(`Empty assistant text detected, retrying completion (${i + 1}/3)`);
+        const retryMsg = `Empty assistant text detected, retrying completion (${i + 1}/3)`;
+        this.logger.error(retryMsg);
+        await this.onStatusMessage?.(retryMsg);
         await session.prompt(this.emptyCompletionRetryPrompt);
         this.logLlmIo(`after_empty_retry_${i + 1}`, session.messages);
+
+        const retryAssistant = findLastAssistantMessage(session.messages);
+        if (retryAssistant?.stopReason === "error") {
+          const detail = retryAssistant.errorMessage ? `: ${retryAssistant.errorMessage}` : "";
+          throw new Error(
+            `Model returned error stop reason during empty-completion retry ${i + 1}/3 (provider=${retryAssistant.provider ?? "unknown"}, model=${retryAssistant.model ?? "unknown"})${detail}`,
+          );
+        }
+
         text = extractLastAssistantText(session.messages);
       }
 
       if (!text) {
-        throw new Error("Agent produced empty completion.");
+        throw new Error("Agent produced empty completion after 3 retries.");
       }
 
       const lastAssistant = findLastAssistantMessage(session.messages);

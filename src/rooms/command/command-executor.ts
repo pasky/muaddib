@@ -61,6 +61,7 @@ export interface CommandRunnerFactoryInput {
   metaReminder?: string;
   progressThresholdSeconds?: number;
   progressMinIntervalSeconds?: number;
+  onStatusMessage?: (text: string) => void | Promise<void>;
   logger?: Logger;
   onAgentCreated?: (agent: Agent) => void;
 }
@@ -152,6 +153,7 @@ export class CommandExecutor {
           metaReminder: input.metaReminder,
           progressThresholdSeconds: input.progressThresholdSeconds,
           progressMinIntervalSeconds: input.progressMinIntervalSeconds,
+          onStatusMessage: input.onStatusMessage,
           logger: input.logger,
           onAgentCreated: input.onAgentCreated,
         }));
@@ -372,6 +374,7 @@ export class CommandExecutor {
       metaReminder: modeConfig.prompt_reminder,
       progressThresholdSeconds: progressConfig?.thresholdSeconds,
       progressMinIntervalSeconds: progressConfig?.minIntervalSeconds,
+      onStatusMessage: sendResponse,
       logger,
       onAgentCreated,
     });
@@ -439,6 +442,7 @@ export class CommandExecutor {
       metaReminder: this.commandConfig.modes.serious?.prompt_reminder,
       progressThresholdSeconds: proactiveProgressConfig?.thresholdSeconds,
       progressMinIntervalSeconds: proactiveProgressConfig?.minIntervalSeconds,
+      onStatusMessage: sendResponse,
       logger,
       onAgentCreated,
     });
