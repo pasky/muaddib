@@ -1,6 +1,7 @@
 .*.sw?
 chat_history.db
 chronicle.db
+auth.json
 config.json
 *_analysis.csv
 debug.log
