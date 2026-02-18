@@ -364,7 +364,7 @@ export class CommandExecutor {
       ...selectedContext.slice(0, -1),
     ];
 
-    const tools = this.selectTools(message, resolved.runtime.allowedTools, runnerContext);
+    const tools = this.selectTools(message, resolved.runtime.allowedTools, runnerContext, sendResponse);
 
     const progressConfig = this.runtime.config.getActorConfig().progress;
     const runner = this.runnerFactory({
@@ -431,7 +431,7 @@ export class CommandExecutor {
       ...context.slice(0, -1),
     ];
 
-    const tools = this.selectTools(message, classifiedRuntime.allowedTools, runnerContext);
+    const tools = this.selectTools(message, classifiedRuntime.allowedTools, runnerContext, sendResponse);
 
     const proactiveProgressConfig = this.runtime.config.getActorConfig().progress;
     const runner = this.runnerFactory({
@@ -811,6 +811,7 @@ export class CommandExecutor {
     message: RoomMessage,
     allowedTools: string[] | null,
     conversationContext?: Message[],
+    sendResponse?: (text: string) => Promise<void>,
   ): MuaddibTool[] {
     const invocationToolOptions: BaselineToolOptions = {
       ...this.buildToolOptions(),
@@ -818,9 +819,24 @@ export class CommandExecutor {
       secrets: message.secrets,
     };
 
+    // Build per-invocation progress callback: send to room + persist in history.
+    // Explicit override takes precedence (e.g. CLI), then fall back to sendResponse.
+    const onProgressReport: ((text: string) => void | Promise<void>) | undefined =
+      this.overrides?.onProgressReport ??
+      (sendResponse
+        ? async (text: string) => {
+            await sendResponse(text);
+            await this.history.addMessage({
+              ...message,
+              nick: message.mynick,
+              content: text,
+            });
+          }
+        : undefined);
+
     const baseline = createBaselineAgentTools({
       ...invocationToolOptions,
-      onProgressReport: this.overrides?.onProgressReport,
+      onProgressReport,
       oracleInvocation: {
         conversationContext: conversationContext ?? [],
         toolOptions: invocationToolOptions,

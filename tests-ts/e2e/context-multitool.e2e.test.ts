@@ -218,11 +218,21 @@ describe("E2E: Context reduction + multi-tool + progress + tool summary", () => 
     // (reduced context + the triggering message)
     expect(contextMessages.length).toBeLessThan(10);
 
+    // ── Verify progress report was delivered to the channel ──
+    expect(ctx.sender.sent.length).toBeGreaterThanOrEqual(2);
+    const progressMessage = ctx.sender.sent.find((s: any) =>
+      s.message.includes("Searching for TypeScript docs"),
+    );
+    expect(progressMessage).toBeDefined();
+    expect(progressMessage!.target).toBe("#test");
+
     // ── Verify FakeSender got the final response ──
-    expect(ctx.sender.sent.length).toBeGreaterThanOrEqual(1);
-    const mainResponse = ctx.sender.sent[0];
-    expect(mainResponse.target).toBe("#test");
-    expect(mainResponse.message).toContain("TypeScript");
+    const mainResponse = ctx.sender.sent.find((s: any) =>
+      s.message.includes("TypeScript") && !s.message.includes("Searching"),
+    );
+    expect(mainResponse).toBeDefined();
+    expect(mainResponse!.target).toBe("#test");
+    expect(mainResponse!.message).toContain("TypeScript");
 
     // ── Verify tool summary was generated and persisted ──
     expect(completeSimpleCalls.length).toBe(2);
