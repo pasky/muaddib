@@ -46,12 +46,14 @@ vi.mock("@mariozechner/pi-coding-agent", () => ({
       this.callbacks.forEach((cb) => cb(event));
     }
   },
-  AuthStorage: class {
-    public set = vi.fn();
-    public remove = vi.fn();
-    public login = vi.fn();
-    public logout = vi.fn();
-    setFallbackResolver = (resolver: unknown) => mockState.authStorageSetFallbackResolverMock(resolver);
+  AuthStorage: {
+    inMemory: () => ({
+      set: vi.fn(),
+      remove: vi.fn(),
+      login: vi.fn(),
+      logout: vi.fn(),
+      setFallbackResolver: (resolver: unknown) => mockState.authStorageSetFallbackResolverMock(resolver),
+    }),
   },
   ModelRegistry: class {
     constructor(_authStorage: unknown) {}

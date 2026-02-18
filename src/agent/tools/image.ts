@@ -216,7 +216,7 @@ async function callOpenRouterImageGeneration(
     return parsedBody;
   } catch (error) {
     if (isAbortError(error)) {
-      throw new Error(`generate_image request timed out after ${request.timeoutMs}ms.`);
+      throw new Error(`generate_image request timed out after ${request.timeoutMs}ms.`, { cause: error });
     }
     throw error;
   } finally {

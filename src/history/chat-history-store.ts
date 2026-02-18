@@ -267,7 +267,7 @@ export class ChatHistoryStore {
     const db = this.requireDb();
     const inferenceLimit = limit ?? this.inferenceLimit;
 
-    let rows: ContextRow[] = [];
+    let rows: ContextRow[];
 
     if (threadId) {
       if (threadStarterId !== undefined) {

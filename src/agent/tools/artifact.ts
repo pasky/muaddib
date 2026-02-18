@@ -114,9 +114,9 @@ export function createDefaultEditArtifactExecutor(
     } catch (error) {
       const message = stringifyError(error);
       if (message.includes("Cannot edit binary artifacts")) {
-        throw new Error(message);
+        throw new Error(message, { cause: error });
       }
-      throw new Error(`Failed to fetch artifact: ${message}`);
+      throw new Error(`Failed to fetch artifact: ${message}`, { cause: error });
     }
 
     if (!sourceContent.includes(input.old_string)) {

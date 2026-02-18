@@ -12,8 +12,7 @@ import {
   type ResourceLoader,
 } from "@mariozechner/pi-coding-agent";
 
-import { tmpdir } from "os";
-import { join } from "path";
+
 import { PiAiModelAdapter, type ResolvedPiAiModel } from "../models/pi-ai-model-adapter.js";
 import type { Logger } from "../app/logging.js";
 import { safeJson } from "./debug-utils.js";
@@ -73,15 +72,9 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
     getSystemPrompt: () => input.systemPrompt,
   };
 
-  // Use a non-existent path so AuthStorage starts empty and never touches ~/.pi/agent/auth.json.
-  // All key resolution goes through the fallback resolver backed by muaddib's config.json.
-  // We override set/remove/login/logout to be no-ops so keys are never persisted to disk,
-  // even if upstream pi-coding-agent internals change.
-  const authStorage = new AuthStorage(join(tmpdir(), "muaddib-auth-noop.json"));
-  authStorage.set = () => {};
-  authStorage.remove = () => {};
-  authStorage.login = async () => {};
-  authStorage.logout = () => {};
+  // In-memory AuthStorage: never touches disk. All key resolution goes through
+  // the fallback resolver backed by muaddib's config.json.
+  const authStorage = AuthStorage.inMemory();
   const authBridge = new MuaddibConfigBackedAuthBridge(input.getApiKey);
   const modelRegistry = new ModelRegistry(authStorage);
   // Set fallback resolver AFTER ModelRegistry constructor (which overwrites it).
