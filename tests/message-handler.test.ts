@@ -1857,10 +1857,11 @@ describe("RoomMessageHandler", () => {
       { isDirect: false },
     );
 
-    expect(steeredMessages).toEqual([
-      "<bob> bob says hi",
-      "<carol> carol chimes in",
-    ]);
+    for (const msg of steeredMessages) {
+      expect(msg).toContain("Background channel message");
+    }
+    expect(steeredMessages[0]).toContain("<bob> bob says hi");
+    expect(steeredMessages[1]).toContain("<carol> carol chimes in");
 
     // Release the agent and let the proactive session finish
     releaseAgent.resolve();

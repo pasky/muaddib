@@ -172,7 +172,10 @@ export class RoomMessageHandler {
   }
 
   private steerAgent(agent: Agent, message: RoomMessage): void {
-    const content = `<${message.nick}> ${message.content}`;
+    const content =
+      `[Background channel message — DO NOT derail from your current task. ` +
+      `Acknowledge only if directly relevant, otherwise ignore.]\n` +
+      `<${message.nick}> ${message.content}`;
     agent.steer({
       role: "user",
       content: [{ type: "text", text: content }],

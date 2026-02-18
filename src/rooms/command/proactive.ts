@@ -164,7 +164,10 @@ export class ProactiveRunner {
     // Steer into running proactive agent if one exists
     const existing = this.activeAgents.get(channelKey);
     if (existing) {
-      const content = `<${message.nick}> ${message.content}`;
+      const content =
+        `[Background channel message — DO NOT derail from your current task. ` +
+        `Acknowledge only if directly relevant, otherwise ignore.]\n` +
+        `<${message.nick}> ${message.content}`;
       existing.steer({
         role: "user",
         content: [{ type: "text", text: content }],
