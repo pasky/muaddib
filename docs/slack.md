@@ -79,7 +79,6 @@ Notes:
 npm run start
 ```
 
-(Deprecated legacy runtime, auxiliary only: `uv run muaddib`.)
 
 ## 9) Test
 Mention the bot in a channel:

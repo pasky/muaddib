@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && cp src/agent/tools/artifact-viewer.html dist/agent/tools/artifact-viewer.html",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint \"{src,tests-ts,scripts}/**/*.ts\"",
+    "lint": "eslint \"{src,tests,scripts}/**/*.ts\"",
     "test": "scripts/run-vitest.sh",
     "cli:message": "node ./dist/cli/main.js",
     "start": "node ./dist/app/main.js",

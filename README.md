@@ -103,7 +103,6 @@ Manual for IRC ("bring your own irssi"):
 3. Build runtime: `npm run build`
 4. Run the service: `npm run start`
 
-> Python runtime note: the Python implementation is now deprecated and kept only as an auxiliary reference while we finish sunset. If you still need to invoke it manually: `uv run muaddib`.
 
 ### Commands
 
@@ -142,20 +141,3 @@ npm run cli:message -- --message "!a summarize https://python.org"
 ```
 
 This simulates full room command handling without running the full chat service.
-
-### Deprecated Python CLI & tooling (auxiliary)
-
-The legacy Python implementation is deprecated, but still available temporarily for compatibility and reference.
-
-```bash
-# Legacy Python CLI invocation
-uv run muaddib --message "!h"
-
-# Legacy chronicler commands
-uv run muaddib --chronicler "Record: Completed API migration" --arc "project-x"
-uv run muaddib --chronicler "Show me the current chapter" --arc "project-x"
-
-# Legacy analysis scripts
-uv run python analyze_classifier.py
-uv run python analyze_proactive.py --limit 20
-```

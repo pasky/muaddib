@@ -8,7 +8,6 @@
 - Any change should be accompanied with tests update. (Always prefer updating existing unit tests over adding new ones.)
 - Any change where viable should be tested by actually running the CLI e2e test: `MUADDIB_HOME=. npm run cli:message -- --message "your message here"`
 - **Rely on pre-commit hooks** for typecheck/tests/lint — don't run them manually before committing unless you need to debug a specific failure. The pre-commit pipeline runs typecheck, tests, lint, and build automatically on `git commit`.
-- Python runtime/tests are deprecated and auxiliary; do not use them as the primary validation path.
 - You must test and commit your work once finished. Never respond with "Tests not run (not requested)."
 - NEVER use `git add -A` blindly, there may be untracked files that must not be committed; use `git add -u` instead
 
@@ -28,7 +27,6 @@
 - **Config & Data**: all runtime state lives under `$MUADDIB_HOME` (defaults to `~/.muaddib/`), including `config.json`, `chat_history.db`, `chronicle.db`, `artifacts/`, `logs/`
 - Models MUST be fully-qualified as `provider:model` (e.g. `anthropic:claude-sonnet-4`). No defaults.
 - No backwards compatibility shims for legacy config keys.
-- Python code under `muaddib/` is deprecated and kept as auxiliary reference only.
 
 ## Code Style
 - **Language**: TypeScript (Node 20+, ESM, strict mode)
@@ -45,7 +43,7 @@
 - **No over-engineering for single use cases**: If a function, class, or abstraction has exactly one call site and adds no testability or clarity, inline it. This includes: single-re-export barrel files, identity wrapper functions, custom error classes with no discriminant fields, normalize wrappers that just set one default.
 
 ## Testing
-- Vitest behavioral tests in `tests-ts/`
+- Vitest behavioral tests in `tests/`
 - Prefer extending existing tests instead of creating new files unless justified
 - Keep room/command behavior parity covered when changing handler logic
 - Tests should avoid mocking low-level API client constructors when validating control flow. Prefer patching router calls to inject fake responses, and ensure provider configs are referenced via `providers.*`.
@@ -56,7 +54,3 @@
 - All new changes follow the red-green-refactor TDD approach!
 - For AI agents: When user is frustrated, stop and think: why? Consider whether not to append an additional behavioral instruction to this AGENTS.md file.
 - Every time after committing your work, stop and think: how could I improve the codebase I just touched? Did I notice any case of spaghetti code, useless adapters, wrong decoupling, invalid separation of concerns? Propose concrete ideas to the user.
-
-## Deprecated Python Runtime (auxiliary)
-- Legacy invocation remains available temporarily via: `uv run muaddib`
-- Keep operator docs clear that TypeScript runtime is primary
