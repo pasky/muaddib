@@ -190,41 +190,5 @@ describe("SessionRunner", () => {
     expect(session.prompt).toHaveBeenCalledTimes(4);
   });
 
-  it("throws immediately on stopReason error without retrying", async () => {
-    const session = {
-      messages: [
-        {
-          role: "assistant",
-          content: [],
-          usage: makeUsage(),
-          stopReason: "error",
-          errorMessage: "upstream failure",
-          provider: "openrouter",
-          model: "google/gemini-3-flash",
-        },
-      ] as any[],
-      subscribe: vi.fn(() => vi.fn()),
-      prompt: vi.fn(async () => {}),
-    };
 
-    mockCreateAgentSessionForInvocation.mockReturnValue({
-      session,
-      agent: { setModel: vi.fn() },
-      ensureProviderKey: vi.fn(async () => {}),
-      getVisionFallbackActivated: () => false,
-    });
-
-    const runner = new SessionRunner({
-      model: "openai:gpt-4o-mini",
-      systemPrompt: "sys",
-      authStorage: AuthStorage.inMemory(),
-      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-      modelAdapter: { resolve: () => ({ spec: { provider: "openai", modelId: "gpt-4o-mini" }, model: {} }) } as any,
-    });
-
-    await expect(runner.prompt("hello")).rejects.toThrow("Model returned error stop reason after prompt");
-    await expect(runner.prompt("hello")).rejects.toThrow("upstream failure");
-    // No retry attempts — only the initial prompt call
-    expect(session.prompt).toHaveBeenCalledTimes(2); // two calls from two expect lines
-  });
 });

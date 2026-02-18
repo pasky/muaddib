@@ -146,14 +146,6 @@ export class SessionRunner {
         sessionCtx.ensureProviderKey,
       );
 
-      const lastAfterPrompt = findLastAssistantMessage(session.messages);
-      if (lastAfterPrompt?.stopReason === "error") {
-        const detail = lastAfterPrompt.errorMessage ? `: ${lastAfterPrompt.errorMessage}` : "";
-        throw new Error(
-          `Model returned error stop reason after prompt (provider=${lastAfterPrompt.provider ?? "unknown"}, model=${lastAfterPrompt.model ?? "unknown"})${detail}`,
-        );
-      }
-
       let text = extractLastAssistantText(session.messages);
       for (let i = 0; i < 3 && !text; i += 1) {
         const retryMsg = `Empty assistant text detected, retrying completion (${i + 1}/3)`;
@@ -161,15 +153,6 @@ export class SessionRunner {
         await this.onStatusMessage?.(retryMsg);
         await session.prompt(this.emptyCompletionRetryPrompt);
         this.logLlmIo(`after_empty_retry_${i + 1}`, session.messages);
-
-        const retryAssistant = findLastAssistantMessage(session.messages);
-        if (retryAssistant?.stopReason === "error") {
-          const detail = retryAssistant.errorMessage ? `: ${retryAssistant.errorMessage}` : "";
-          throw new Error(
-            `Model returned error stop reason during empty-completion retry ${i + 1}/3 (provider=${retryAssistant.provider ?? "unknown"}, model=${retryAssistant.model ?? "unknown"})${detail}`,
-          );
-        }
-
         text = extractLastAssistantText(session.messages);
       }
 
