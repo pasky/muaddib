@@ -9,14 +9,9 @@
     "sprites": {
       "_note": "Get token at https://sprites.dev — set in auth.json as 'sprites' key"
     },
-    "brave": {
-      "_note": "Set brave API key in auth.json as 'brave' key"
-    },
     "jina": {
       "_comment": "Optionally set jina API key in auth.json for 20rpm->500rpm NC use"
     },
-    "search_provider": "wikipedia,google,bing,brave",
-    "_search_provider_note": "It is VERY RECOMMENDED to get a jina API key (mandatory) and then set search_provider to 'jina'",
     "artifacts": {
       "path": "artifacts",
       "url": "https://example.com/artifacts"
