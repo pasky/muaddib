@@ -15,10 +15,6 @@ const DEEPSEEK_PRICING_BY_MODEL: Record<string, { input: number; output: number 
   },
 };
 
-export interface ProviderOverrideOptions {
-  deepseekBaseUrl?: string;
-}
-
 export function getOverriddenProviders(): string[] {
   return [DEEPSEEK_PROVIDER];
 }
@@ -26,16 +22,15 @@ export function getOverriddenProviders(): string[] {
 export function resolveProviderOverrideModel(
   provider: string,
   modelId: string,
-  options: ProviderOverrideOptions = {},
 ): Model<Api> | undefined {
   if (provider === DEEPSEEK_PROVIDER) {
-    return resolveDeepSeekModel(modelId, options.deepseekBaseUrl);
+    return resolveDeepSeekModel(modelId);
   }
 
   return undefined;
 }
 
-function resolveDeepSeekModel(modelId: string, baseUrl?: string): Model<Api> {
+function resolveDeepSeekModel(modelId: string): Model<Api> {
   const pricing = DEEPSEEK_PRICING_BY_MODEL[modelId];
   if (!pricing) {
     const known = Object.keys(DEEPSEEK_PRICING_BY_MODEL).join(", ");
@@ -44,7 +39,7 @@ function resolveDeepSeekModel(modelId: string, baseUrl?: string): Model<Api> {
     );
   }
 
-  const normalizedUrl = (baseUrl ?? DEFAULT_DEEPSEEK_BASE_URL).trim().replace(/\/+$/u, "");
+  const normalizedUrl = DEFAULT_DEEPSEEK_BASE_URL;
 
   return {
     id: modelId,

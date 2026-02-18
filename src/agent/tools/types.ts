@@ -1,7 +1,7 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { AuthStorage } from "@mariozechner/pi-coding-agent";
 import type { ChronicleStore } from "../../chronicle/chronicle-store.js";
-import type { ToolsConfig, ProvidersConfig } from "../../config/muaddib-config.js";
+import type { ToolsConfig } from "../../config/muaddib-config.js";
 import type { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import type { Logger } from "../../app/logging.js";
 
@@ -26,8 +26,6 @@ export interface MuaddibTool<T = any> extends AgentTool<any, T> {
 export interface ToolContext {
   // ── Config (tools resolve their own settings from these) ──
   toolsConfig?: ToolsConfig;
-  providersConfig?: ProvidersConfig;
-
   // ── Runtime services ──
   authStorage: AuthStorage;
   modelAdapter: PiAiModelAdapter;

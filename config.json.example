@@ -1,22 +1,6 @@
 {
   "_comment": "Configuration (no secrets). API keys go in auth.json — see auth.json.example.",
 
-  "providers": {
-    "anthropic": {
-      "url": "https://api.anthropic.com/v1/messages"
-    },
-    "deepseek": {
-      "url": "https://api.deepseek.com/anthropic/v1/messages"
-    },
-    "openai": {
-      "base_url": "https://api.openai.com/v1",
-      "max_tokens": 5000
-    },
-    "openrouter": {
-      "base_url": "https://openrouter.ai/api/v1"
-    }
-  },
-
   "router": {
     "refusal_fallback_model": "deepseek:deepseek-reasoner"
   },

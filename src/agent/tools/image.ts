@@ -77,7 +77,7 @@ export function createDefaultGenerateImageExecutor(
   options: ToolContext,
 ): GenerateImageExecutor {
 
-  const openRouterBaseUrl = (toConfiguredString(options.providersConfig?.openrouter?.baseUrl) ?? DEFAULT_OPENROUTER_BASE_URL).replace(/\/+$/, "");
+  const openRouterBaseUrl = DEFAULT_OPENROUTER_BASE_URL;
   const maxImageBytes = options.toolsConfig?.jina?.maxImageBytes ?? DEFAULT_IMAGE_LIMIT;
   const timeoutMs = options.toolsConfig?.imageGen?.timeoutMs ?? DEFAULT_IMAGE_GEN_TIMEOUT_MS;
 

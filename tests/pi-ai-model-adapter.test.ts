@@ -26,22 +26,11 @@ describe("PiAiModelAdapter", () => {
     expect(resolved.model.baseUrl).toBe("https://api.deepseek.com/anthropic");
   });
 
-  it("strips trailing slash from deepseek base URL", () => {
-    const a = new PiAiModelAdapter({
-      deepseekBaseUrl: "https://api.deepseek.com/anthropic/",
-    });
+  it("resolves deepseek model with hardcoded base URL", () => {
+    const a = new PiAiModelAdapter({});
 
     const resolved = a.resolve("deepseek:deepseek-chat");
     expect(resolved.model.baseUrl).toBe("https://api.deepseek.com/anthropic");
-  });
-
-  it("uses custom deepseek base URL as-is (no silent suffix stripping)", () => {
-    const a = new PiAiModelAdapter({
-      deepseekBaseUrl: "https://custom.example.com/v1",
-    });
-
-    const resolved = a.resolve("deepseek:deepseek-chat");
-    expect(resolved.model.baseUrl).toBe("https://custom.example.com/v1");
   });
 
   it("throws explicit error for unknown provider", () => {

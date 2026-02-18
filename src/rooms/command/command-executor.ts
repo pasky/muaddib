@@ -190,7 +190,6 @@ export class CommandExecutor {
   private buildToolOptions(): Omit<BaselineToolOptions, "onProgressReport"> {
     return {
       toolsConfig: this.runtime.config.getToolsConfig(),
-      providersConfig: this.runtime.config.getProvidersConfig(),
       authStorage: this.runtime.authStorage,
       modelAdapter: this.modelAdapter,
       logger: this.logger,

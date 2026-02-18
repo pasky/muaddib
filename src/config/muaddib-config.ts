@@ -82,19 +82,6 @@ interface ChroniclerConfig {
   };
 }
 
-export interface OpenRouterProviderConfig {
-  baseUrl?: string;
-}
-
-export interface DeepSeekProviderConfig {
-  baseUrl?: string;
-}
-
-export interface ProvidersConfig {
-  openrouter?: OpenRouterProviderConfig;
-  deepseek?: DeepSeekProviderConfig;
-}
-
 interface HistoryConfig {
   database?: { path?: string };
 }
@@ -182,7 +169,6 @@ interface MuaddibSettings {
   tools?: ToolsConfig;
   contextReducer?: ContextReducerConfig;
   chronicler?: ChroniclerConfig;
-  providers?: Record<string, { baseUrl?: string }>;
   history?: HistoryConfig;
   router?: RouterConfig;
   rooms?: Record<string, RoomConfig>;
@@ -316,14 +302,6 @@ export class MuaddibConfig {
 
   getChroniclerConfig(): ChroniclerConfig {
     return this.data.chronicler ?? {};
-  }
-
-  getProvidersConfig(): ProvidersConfig {
-    const p = this.data.providers;
-    return {
-      openrouter: { baseUrl: p?.openrouter?.baseUrl },
-      deepseek: { baseUrl: p?.deepseek?.baseUrl },
-    };
   }
 
   getHistoryConfig(): HistoryConfig {

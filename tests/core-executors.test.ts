@@ -1313,7 +1313,7 @@ describe("core tool executors generate_image support", () => {
         });
       }
 
-      if (url === "https://openrouter.example/api/v1/chat/completions") {
+      if (url === "https://openrouter.ai/api/v1/chat/completions") {
         openRouterRequestBody = JSON.parse(String(init?.body ?? "{}"));
 
         return new Response(
@@ -1345,7 +1345,6 @@ describe("core tool executors generate_image support", () => {
     });
 
     const executors = createDefaultToolExecutors({ toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" }, imageGen: { model: "openrouter:google/gemini-3-pro-image-preview" } },
-      providersConfig: { openrouter: { baseUrl: "https://openrouter.example/api/v1" } },
       authStorage: AuthStorage.inMemory({ openrouter: { type: "api_key", key: "or-key" } }),
     });
 
@@ -1401,7 +1400,7 @@ describe("core tool executors generate_image support", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
 
-      if (url === "https://openrouter.example/api/v1/chat/completions") {
+      if (url === "https://openrouter.ai/api/v1/chat/completions") {
         return new Response(
           JSON.stringify({
             choices: [
@@ -1425,7 +1424,6 @@ describe("core tool executors generate_image support", () => {
     });
 
     const executors = createDefaultToolExecutors({ toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" }, imageGen: { model: "openrouter:google/gemini-3-pro-image-preview" } },
-      providersConfig: { openrouter: { baseUrl: "https://openrouter.example/api/v1" } },
       authStorage: AuthStorage.inMemory({ openrouter: { type: "api_key", key: "or-key" } }),
     });
 

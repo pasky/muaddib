@@ -38,10 +38,7 @@ export async function createMuaddibRuntime(
   assertNoDeferredFeatureConfig(config, log);
 
   const authStorage = AuthStorage.create(join(muaddibHome, "auth.json"));
-  const modelAdapter = new PiAiModelAdapter({
-    deepseekBaseUrl: config.getProvidersConfig().deepseek?.baseUrl,
-    authStorage,
-  });
+  const modelAdapter = new PiAiModelAdapter({ authStorage });
 
   const historyConfig = config.getHistoryConfig();
   const historyDbPath = options.dbPath ?? resolveMuaddibPath(

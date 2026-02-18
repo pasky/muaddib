@@ -17,7 +17,6 @@ import { parseModelSpec, type ModelSpec } from "./model-spec.js";
 import {
   getOverriddenProviders,
   resolveProviderOverrideModel,
-  type ProviderOverrideOptions,
 } from "./provider-overrides.js";
 
 export class PiAiModelResolutionError extends Error {
@@ -27,7 +26,7 @@ export class PiAiModelResolutionError extends Error {
   }
 }
 
-export interface PiAiModelAdapterOptions extends ProviderOverrideOptions {
+export interface PiAiModelAdapterOptions {
   authStorage?: AuthStorage;
 }
 
@@ -79,7 +78,6 @@ export class PiAiModelAdapter {
     const providerOverrideModel = resolveProviderOverrideModel(
       spec.provider,
       spec.modelId,
-      this.options,
     );
     if (providerOverrideModel) {
       return { spec, model: providerOverrideModel };
