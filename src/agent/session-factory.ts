@@ -143,6 +143,15 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
       }
 
       const stopReason = (event.message as { stopReason?: string }).stopReason;
+
+      // Warn when assistant produces text alongside tool calls — may indicate confused output
+      if (stopReason === "toolUse") {
+        const content = (event.message as { content?: Array<{ type: string }> }).content;
+        if (content && content.some((b) => b.type === "text") && content.some((b) => b.type === "toolCall")) {
+          logger.warn(`Turn ${turnCount}: assistant produced text output alongside tool_use`);
+        }
+      }
+
       if (turnCount < maxIterations && stopReason === "toolUse") {
         const parts: string[] = [];
 
@@ -169,6 +178,7 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
         }
 
         if (parts.length > 0) {
+          logger.debug(`Injecting steering meta: turnCount=${turnCount}, stopReason=${stopReason}, hasMetaReminder=${!!input.metaReminder}, hasProgressNudge=${parts.length > (input.metaReminder ? 1 : 0)}`);
           agent.steer({
             role: "user",
             content: [{ type: "text", text: `<meta>${parts.join(" ")}</meta>` }],
