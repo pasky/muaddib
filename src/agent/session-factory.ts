@@ -148,7 +148,11 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
       if (stopReason === "toolUse") {
         const content = (event.message as { content?: Array<{ type: string }> }).content;
         if (content && content.some((b) => b.type === "text") && content.some((b) => b.type === "toolCall")) {
-          logger.warn(`Turn ${turnCount}: assistant produced text output alongside tool_use`);
+          const textSnippet = content
+            .filter((b): b is { type: string; text?: string } => b.type === "text")
+            .map((b) => b.text ?? "")
+            .join(" | ");
+          logger.warn(`Turn ${turnCount}: assistant produced text output alongside tool_use: ${textSnippet}`);
         }
       }
 

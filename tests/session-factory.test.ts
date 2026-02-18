@@ -528,7 +528,7 @@ describe("createAgentSessionForInvocation", () => {
       toolResults: [{ role: "toolResult" }],
     });
     expect(logger.warn).toHaveBeenCalledWith(
-      "Turn 1: assistant produced text output alongside tool_use",
+      "Turn 1: assistant produced text output alongside tool_use: Let me search for that.",
     );
   });
 
