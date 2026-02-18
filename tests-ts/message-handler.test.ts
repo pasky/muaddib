@@ -61,7 +61,6 @@ function createHandler(options: {
   rateLimiter?: CommandRateLimiter;
   contextReducer?: ContextReducer;
   responseCleaner?: (text: string, nick: string) => string;
-  onProgressReport?: (text: string) => void | Promise<void>;
   autoChronicler?: any;
   chronicleStore?: any;
   classifyMode?: unknown;
@@ -102,7 +101,6 @@ function createHandler(options: {
     rateLimiter: options.rateLimiter,
     contextReducer: options.contextReducer,
     responseCleaner: options.responseCleaner,
-    onProgressReport: options.onProgressReport,
   });
 }
 

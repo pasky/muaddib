@@ -85,7 +85,6 @@ export interface CommandExecutorOverrides {
   runnerFactory?: CommandRunnerFactory;
   rateLimiter?: CommandRateLimiter;
   contextReducer?: ContextReducer;
-  onProgressReport?: (text: string) => void | Promise<void>;
 }
 
 // ── Executor ──
@@ -820,10 +819,8 @@ export class CommandExecutor {
     };
 
     // Build per-invocation progress callback: send to room + persist in history.
-    // Explicit override takes precedence (e.g. CLI), then fall back to sendResponse.
     const onProgressReport: ((text: string) => void | Promise<void>) | undefined =
-      this.overrides?.onProgressReport ??
-      (sendResponse
+      sendResponse
         ? async (text: string) => {
             await sendResponse(text);
             await this.history.addMessage({
@@ -832,7 +829,7 @@ export class CommandExecutor {
               content: text,
             });
           }
-        : undefined);
+        : undefined;
 
     const baseline = createBaselineAgentTools({
       ...invocationToolOptions,
