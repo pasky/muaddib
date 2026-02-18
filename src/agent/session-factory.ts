@@ -182,12 +182,17 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
         }
 
         if (parts.length > 0) {
-          logger.debug(`Injecting steering meta: turnCount=${turnCount}, stopReason=${stopReason}, hasMetaReminder=${!!input.metaReminder}, hasProgressNudge=${parts.length > (input.metaReminder ? 1 : 0)}`);
-          agent.steer({
-            role: "user",
-            content: [{ type: "text", text: `<meta>${parts.join(" ")}</meta>` }],
-            timestamp: Date.now(),
-          });
+          const hasQueuedMessages = agent.hasQueuedMessages();
+          if (hasQueuedMessages) {
+            logger.debug(`Skipping steering meta injection because agent already has queued messages: turnCount=${turnCount}, stopReason=${stopReason}`);
+          } else {
+            logger.debug(`Injecting steering meta: turnCount=${turnCount}, stopReason=${stopReason}, hasMetaReminder=${!!input.metaReminder}, hasProgressNudge=${parts.length > (input.metaReminder ? 1 : 0)}`);
+            agent.steer({
+              role: "user",
+              content: [{ type: "text", text: `<meta>${parts.join(" ")}</meta>` }],
+              timestamp: Date.now(),
+            });
+          }
         }
       }
 

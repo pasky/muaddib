@@ -14,6 +14,7 @@ vi.mock("@mariozechner/pi-agent-core", () => ({
     public replaceMessages = vi.fn();
     public setModel = vi.fn();
     public steer = vi.fn();
+    public hasQueuedMessages = vi.fn(() => false);
     public setSystemPrompt = vi.fn();
 
     constructor(public readonly config: any) {}
@@ -309,6 +310,46 @@ describe("createAgentSessionForInvocation", () => {
     const text = agent.steer.mock.calls[0][0].content[0].text;
     expect(text).toContain("Stay focused.");
     expect(text).toContain("progress_report");
+  });
+
+  it("skips steering meta injection when agent already has queued messages", () => {
+    const progressTool = { name: "progress_report", lastSentAt: 0 };
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const ctx = createAgentSessionForInvocation({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "system",
+      tools: [progressTool as any],
+      authStorage: AuthStorage.inMemory(),
+      modelAdapter: { resolve: vi.fn(() => ({
+        spec: { provider: "openai", modelId: "gpt-4o-mini" },
+        model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
+      })) } as any,
+      maxIterations: 10,
+      metaReminder: "Stay focused.",
+      progressThresholdSeconds: 0,
+      progressMinIntervalSeconds: 0,
+      logger,
+    });
+
+    const session = mockState.sessions[0];
+    const agent = ctx.agent as any;
+    agent.hasQueuedMessages.mockReturnValue(true);
+
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "t1", name: "web_search", arguments: {} }],
+        stopReason: "toolUse",
+      },
+      toolResults: [{ role: "toolResult" }],
+    });
+
+    expect(agent.hasQueuedMessages).toHaveBeenCalledTimes(1);
+    expect(agent.steer).not.toHaveBeenCalled();
+    expect(logger.debug).toHaveBeenCalledWith(
+      expect.stringContaining("Skipping steering meta injection because agent already has queued messages"),
+    );
   });
 
   it("does not inject progress nudge after a non-tool assistant turn", () => {
