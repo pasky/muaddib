@@ -9,7 +9,6 @@ interface ProgressReportToolOptions {
 }
 
 export interface ProgressReportTool extends MuaddibTool {
-  hasCallback: boolean;
   lastSentAt: number;
 }
 
@@ -17,7 +16,6 @@ export function createProgressReportTool(options: ProgressReportToolOptions = {}
   const minInterval = (options.minIntervalSeconds ?? 15) * 1000;
 
   const tool: ProgressReportTool = {
-    hasCallback: !!options.onProgressReport,
     lastSentAt: 0,
     name: "progress_report",
     persistType: "none",

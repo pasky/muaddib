@@ -134,7 +134,6 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
   const sessionStartTime = Date.now();
   const progressThreshold = input.progressThresholdSeconds;
   const progressReportTool = input.tools.find((t): t is ProgressReportTool => t.name === "progress_report") as ProgressReportTool | undefined;
-  const hasProgressCallback = progressReportTool?.hasCallback ?? false;
   const unsubscribe = session.subscribe((event) => {
     if (event.type === "turn_end") {
       turnCount += 1;
@@ -165,10 +164,9 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
 
         // Progress report nudge: fire when elapsed >= threshold (debounced from last actual
         // progress_report delivery, matching Python's max(start, executor._last_sent)).
-        // Only nudge when a progress callback exists (matches Python: progress_callback is not None).
-        if (progressThreshold != null && hasProgressCallback && turnCount < maxIterations - 2) {
+        if (progressThreshold != null && turnCount < maxIterations - 2) {
           const now = Date.now();
-          const lastActivity = Math.max(sessionStartTime, progressReportTool!.lastSentAt);
+          const lastActivity = Math.max(sessionStartTime, progressReportTool?.lastSentAt ?? 0);
           const elapsedSinceLastReport = (now - lastActivity) / 1000;
           const tl = input.thinkingLevel ?? "off";
           const isFirstTurnHighReasoning = turnCount === 1 &&

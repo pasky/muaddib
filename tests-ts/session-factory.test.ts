@@ -202,7 +202,7 @@ describe("createAgentSessionForInvocation", () => {
   });
 
   it("injects progress nudge when elapsed time exceeds threshold", async () => {
-    const progressTool = { name: "progress_report", hasCallback: true, lastSentAt: 0 };
+    const progressTool = { name: "progress_report", lastSentAt: 0 };
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
@@ -228,7 +228,7 @@ describe("createAgentSessionForInvocation", () => {
   });
 
   it("injects progress nudge on first tool-using turn with high reasoning", () => {
-    const progressTool = { name: "progress_report", hasCallback: true, lastSentAt: 0 };
+    const progressTool = { name: "progress_report", lastSentAt: 0 };
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
@@ -258,7 +258,7 @@ describe("createAgentSessionForInvocation", () => {
   });
 
   it("does not inject progress nudge near iteration limit", () => {
-    const progressTool = { name: "progress_report", hasCallback: true, lastSentAt: 0 };
+    const progressTool = { name: "progress_report", lastSentAt: 0 };
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
@@ -282,12 +282,11 @@ describe("createAgentSessionForInvocation", () => {
     expect(agent.steer).not.toHaveBeenCalled();
   });
 
-  it("does not inject progress nudge without progress callback", () => {
-    const progressTool = { name: "progress_report", hasCallback: false, lastSentAt: 0 };
+  it("injects progress nudge even without progress_report tool in tools array", () => {
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
-      tools: [progressTool as any],
+      tools: [],
       modelAdapter: { resolve: vi.fn(() => ({
         spec: { provider: "openai", modelId: "gpt-4o-mini" },
         model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
@@ -301,11 +300,19 @@ describe("createAgentSessionForInvocation", () => {
     const agent = ctx.agent as any;
 
     session.emit({ type: "turn_end", toolResults: [{ role: "toolResult" }] });
-    expect(agent.steer).not.toHaveBeenCalled();
+    expect(agent.steer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.arrayContaining([
+          expect.objectContaining({
+            text: expect.stringContaining("progress_report"),
+          }),
+        ]),
+      }),
+    );
   });
 
   it("resets progress nudge debounce when progress_report tool is used", () => {
-    const progressTool = { name: "progress_report", hasCallback: true, lastSentAt: 0 };
+    const progressTool = { name: "progress_report", lastSentAt: 0 };
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
