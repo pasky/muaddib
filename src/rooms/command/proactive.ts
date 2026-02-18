@@ -22,7 +22,7 @@ import type {
   CommandExecutorLogger,
 } from "./command-executor.js";
 import { pickModeModel } from "./command-executor.js";
-import { type RoomMessage, roomArc } from "../message.js";
+import { type RoomMessage, roomArc, STEER_PREFIX } from "../message.js";
 import { sleep } from "../../utils/index.js";
 
 // ── ProactiveConfig (resolved, all fields required) ──
@@ -164,10 +164,7 @@ export class ProactiveRunner {
     // Steer into running proactive agent if one exists
     const existing = this.activeAgents.get(channelKey);
     if (existing) {
-      const content =
-        `[Background channel message — DO NOT derail from your current task. ` +
-        `Acknowledge only if directly relevant, otherwise ignore.]\n` +
-        `<${message.nick}> ${message.content}`;
+      const content = `${STEER_PREFIX}<${message.nick}> ${message.content}`;
       existing.steer({
         role: "user",
         content: [{ type: "text", text: content }],

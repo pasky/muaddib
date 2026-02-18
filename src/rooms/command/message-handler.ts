@@ -18,7 +18,7 @@ import {
   type CommandExecutorLogger,
 } from "./command-executor.js";
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
-import { type RoomMessage, roomArc } from "../message.js";
+import { type RoomMessage, roomArc, STEER_PREFIX } from "../message.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 
 // Re-export types that external consumers depend on
@@ -172,10 +172,7 @@ export class RoomMessageHandler {
   }
 
   private steerAgent(agent: Agent, message: RoomMessage): void {
-    const content =
-      `[Background channel message — DO NOT derail from your current task. ` +
-      `Acknowledge only if directly relevant, otherwise ignore.]\n` +
-      `<${message.nick}> ${message.content}`;
+    const content = `${STEER_PREFIX}<${message.nick}> ${message.content}`;
     agent.steer({
       role: "user",
       content: [{ type: "text", text: content }],

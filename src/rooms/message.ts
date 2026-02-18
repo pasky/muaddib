@@ -14,3 +14,8 @@ export interface RoomMessage {
 export function roomArc(message: Pick<RoomMessage, "serverTag" | "channelName">): string {
   return `${message.serverTag}#${message.channelName}`;
 }
+
+/** Prefix for steered passive messages so the agent doesn't derail from its current task. */
+export const STEER_PREFIX =
+  "[Background channel message — DO NOT derail from your current task. " +
+  "Acknowledge only if directly relevant, otherwise ignore.]\n";
