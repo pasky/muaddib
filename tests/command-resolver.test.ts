@@ -124,6 +124,54 @@ describe("CommandResolver", () => {
     expect(resolved.selectedAutomatically).toBe(true);
   });
 
+  it("buildHelpMessage groups triggers by effective model, splitting trigger-level model overrides", () => {
+    const configWithModelOverride = {
+      ...commandConfig,
+      modes: {
+        ...commandConfig.modes,
+        serious: {
+          ...commandConfig.modes.serious,
+          triggers: {
+            "!s": {},
+            "!a": {
+              reasoningEffort: "medium",
+              model: "openrouter:google/gemini-pro",
+            },
+          },
+        },
+      },
+    };
+
+    const resolver = new CommandResolver(
+      configWithModelOverride as any,
+      async () => "EASY_SERIOUS",
+      "!h",
+      new Set(["!c"]),
+      (model) => String(model),
+    );
+
+    const help = resolver.buildHelpMessage("libera", "#general");
+
+    // !s and !a stay grouped with /, both models listed with /
+    expect(help).toContain("!s/!a = serious (openai:gpt-4o-mini/openrouter:google/gemini-pro)");
+  });
+
+  it("buildHelpMessage groups triggers sharing the same effective model", () => {
+    const resolver = new CommandResolver(
+      commandConfig as any,
+      async () => "EASY_SERIOUS",
+      "!h",
+      new Set(["!c"]),
+      (model) => String(model),
+    );
+
+    const help = resolver.buildHelpMessage("libera", "#general");
+
+    // !s and !a share the mode-default model (no model override on !a in base config)
+    expect(help).toContain("!s/!a = serious");
+    expect(help).not.toMatch(/!s = serious.*!a = serious/);
+  });
+
   it("supports steering bypass detection for non-steering mode", () => {
     const resolver = new CommandResolver(
       commandConfig as any,
