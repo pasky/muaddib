@@ -47,6 +47,8 @@ export function getArcWorkspacePath(arc: string): string {
 
 const vmCache = new Map<string, VM>();
 const vmCacheLocks = new Map<string, Promise<VM>>();
+/** Active session count per arcId — prevents checkpointing while another session is still running. */
+const vmActiveSessions = new Map<string, number>();
 
 async function ensureVm(
   arc: string,
@@ -354,7 +356,12 @@ export interface GondolinToolsOptions {
  */
 export function createGondolinTools(options: GondolinToolsOptions): MuaddibTool[] {
   const { arc, config, logger } = options;
+  const arcId = normalizeArcId(arc);
   const sessionDir = `/tmp/session-${randomUUID().slice(0, 8)}`;
+
+  // Register this session immediately so checkpointGondolinArc knows it is
+  // active even before the VM has been started or any tool has been called.
+  vmActiveSessions.set(arcId, (vmActiveSessions.get(arcId) ?? 0) + 1);
 
   let vmReady: Promise<VM> | null = null;
 
@@ -389,6 +396,7 @@ export { isHostBlocked, isIpInCidr };
 export function resetGondolinVmCache(): void {
   vmCache.clear();
   vmCacheLocks.clear();
+  vmActiveSessions.clear();
 }
 
 /**
@@ -405,6 +413,17 @@ export async function checkpointGondolinArc(
   logger?: Logger,
 ): Promise<void> {
   const arcId = normalizeArcId(arc);
+
+  // Decrement the active session counter for this arc.
+  const remaining = Math.max(0, (vmActiveSessions.get(arcId) ?? 0) - 1);
+  vmActiveSessions.set(arcId, remaining);
+
+  if (remaining > 0) {
+    logger?.debug(`Gondolin arc ${arcId}: ${remaining} session(s) still active, deferring checkpoint`);
+    return;
+  }
+
+  vmActiveSessions.delete(arcId);
   const vm = vmCache.get(arcId);
   if (!vm) return;
 

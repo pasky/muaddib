@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PiAiModelAdapter } from "../src/models/pi-ai-model-adapter.js";
 import {
@@ -19,7 +19,13 @@ import {
   createVisitWebpageTool,
   createWebSearchTool,
 } from "../src/agent/tools/baseline-tools.js";
-import { isHostBlocked, isIpInCidr } from "../src/agent/tools/gondolin-tools.js";
+import {
+  checkpointGondolinArc,
+  createGondolinTools,
+  isHostBlocked,
+  isIpInCidr,
+  resetGondolinVmCache,
+} from "../src/agent/tools/gondolin-tools.js";
 
 function createTools(options: Record<string, unknown>) {
   return createBaselineAgentTools({
@@ -530,5 +536,58 @@ describe("isIpInCidr", () => {
 
   it("does not cross-match IPv4 CIDR against IPv6 address", () => {
     expect(isIpInCidr("2001:db8::1", "192.168.0.0/16")).toBe(false);
+  });
+});
+
+// ── Gondolin session ref-counting ──────────────────────────────────────────
+
+describe("gondolin session ref-counting", () => {
+  const gondolinConfig = { enabled: true as const };
+
+  beforeEach(() => {
+    resetGondolinVmCache();
+  });
+
+  it("defers checkpoint while a second session is still active", async () => {
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    createGondolinTools({ arc: "test-arc", config: gondolinConfig, logger });
+    createGondolinTools({ arc: "test-arc", config: gondolinConfig, logger });
+
+    // First session ends — one still active, should defer
+    await checkpointGondolinArc("test-arc", logger);
+
+    expect(logger.debug).toHaveBeenCalledWith(
+      expect.stringContaining("1 session(s) still active"),
+    );
+    expect(logger.info).not.toHaveBeenCalledWith(expect.stringContaining("checkpointed"));
+  });
+
+  it("proceeds to checkpoint when the last session ends (no VM in cache = no-op)", async () => {
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    createGondolinTools({ arc: "test-arc", config: gondolinConfig, logger });
+
+    // Only session ends — should not defer (no VM cached, so returns early after counter hits 0)
+    await checkpointGondolinArc("test-arc", logger);
+
+    expect(logger.debug).not.toHaveBeenCalledWith(
+      expect.stringContaining("still active"),
+    );
+  });
+
+  it("counts sessions per arc independently", async () => {
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    createGondolinTools({ arc: "arc-one", config: gondolinConfig, logger });
+    createGondolinTools({ arc: "arc-two", config: gondolinConfig, logger });
+
+    // arc-one's only session ends — should not defer for arc-one
+    await checkpointGondolinArc("arc-one", logger);
+    expect(logger.debug).not.toHaveBeenCalledWith(expect.stringContaining("still active"));
+
+    // arc-two's only session ends — should also not defer
+    await checkpointGondolinArc("arc-two", logger);
+    expect(logger.debug).not.toHaveBeenCalledWith(expect.stringContaining("still active"));
   });
 });
