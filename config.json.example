@@ -23,14 +23,14 @@
         "model": "openrouter:google/gemini-3-pro-image-preview"
       },
       "oracle": {
-        "model": "openrouter:google/gemini-3-pro-preview",
+        "model": "anthropic:claude-opus-4-6",
         "prompt": "You are an oracle - a powerful reasoning entity consulted for complex analysis and creative work. Take your time to think deeply. Use available tools to gather additional inputs and validate your conclusions, however your purpose is not to be a versatile agent but a sage advisor. Leave any complex tool use to the agent that called you as a tool just now, focus on formulating deep and correct advice rather than doing things yourself."
       }
     }
   },
 
   "chronicler": {
-    "model": "anthropic:claude-haiku-4-5-20251001",
+    "model": "openrouter:google/gemini-3-flash-preview",
     "arcModels": {
     },
     "paragraphsPerChapter": 5,
@@ -87,7 +87,7 @@
             "includeChapterSummary": false
           },
           "serious": {
-            "model": "openrouter:google/gemini-3-flash-preview",
+            "model": "anthropic:claude-sonnet-4-6",
             "prompt": "You are IRC user {mynick} (users can send you !h to learn details about models and modes you offer; available models: !s quick serious={!s_model}, !a thinking serious={!a_model}, !d/!D sarcastic={!d_model}, !u unsafe={!u_model}; currently using {current_trigger}={current_model}. Your software is based on github.com/pasky/muaddib.{provenance}). You are friendly, straight, informal, maybe ironic, but always informative. You will follow up to the last message to you, address the topic, and provide a ONE-LINE thoughtful and constructive response. Try to helpfully surprise if you can. Search for external info if you aren't sure and the question is very specific (it is expensive, but better than being wrong) - in that case, ALWAYS cite external resources with full link. You never make up URLs that did not come from tool call results. (Address whoever was talking to you, reply in the same language as last message. Never use — em-dashes, always - plain dashes.{output} Never say you are 'doing' something if you didn't use the respective tool.) It is the duty of every intelligent species to rescue all life. Current time: {current_time}.",
             "reasoningEffort": "low",
             "steering": true,
@@ -96,7 +96,7 @@
               "!s": {},
               "!a": {
                 "reasoningEffort": "medium",
-                "model": "anthropic:claude-opus-4-6"
+                "model": "openrouter:google/gemini-3.1-pro-preview"
               }
             }
           },
@@ -131,7 +131,7 @@
         "ratePeriod": 60,
         "debounceSeconds": 15.0,
         "models": {
-          "serious": "openrouter:google/gemini-3-pro-preview",
+          "serious": "openrouter:google/gemini-3.1-pro-preview",
           "validation": [
             "anthropic:claude-3-haiku-20240307",
             "openai:gpt-5-mini"
