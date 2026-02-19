@@ -42,4 +42,23 @@ describe("PiAiModelAdapter", () => {
     expect(() => adapter.resolve("openai:not-a-real-model")).toThrow(PiAiModelResolutionError);
     expect(() => adapter.resolve("openai:not-a-real-model")).toThrow("Unknown model");
   });
+
+  it("resolves known openrouter model via static registry", () => {
+    const resolved = adapter.resolve("openrouter:openrouter/auto");
+
+    expect(resolved.spec.provider).toBe("openrouter");
+    expect(resolved.model.provider).toBe("openrouter");
+    expect(resolved.model.api).toBe("openai-completions");
+  });
+
+  it("resolves unknown openrouter model via dynamic fallback (zero-cost if cache not ready)", () => {
+    // In tests the background fetch may not have landed; either way the model must resolve.
+    const resolved = adapter.resolve("openrouter:google/gemini-3-1-pro-preview");
+
+    expect(resolved.spec.provider).toBe("openrouter");
+    expect(resolved.model.provider).toBe("openrouter");
+    expect(resolved.model.id).toBe("google/gemini-3-1-pro-preview");
+    expect(resolved.model.api).toBe("openai-completions");
+    expect(resolved.model.baseUrl).toBe("https://openrouter.ai/api/v1");
+  });
 });
