@@ -1151,6 +1151,39 @@ with open('test.webp', 'wb') as f:
 
     expect(result).toContain("Code executed successfully with no output");
   });
+
+  it("execute_code recreates workdir on second call if sprite restarted and wiped /tmp", async () => {
+    // Capture workdir path via logger
+    const logMessages: string[] = [];
+    const captureLogger = {
+      info: (msg: string) => logMessages.push(msg),
+      debug: (msg: string) => logMessages.push(msg),
+      warn: (msg: string) => logMessages.push(msg),
+      error: (msg: string) => logMessages.push(msg),
+    };
+
+    const executors = createDefaultToolExecutors({
+      toolsConfig: { sprites: {} },
+      authStorage: AuthStorage.inMemory({ sprites: { type: "api_key", key: "test-token" } }),
+      logger: captureLogger,
+    });
+
+    // First call establishes the workdir
+    const result1 = await executors.executeCode({ code: 'echo "first"', language: "bash" });
+    expect(result1).toContain("first");
+
+    // Extract the workdir path from log
+    const workdirLog = logMessages.find((m) => m.includes("Ensured actor workdir:"));
+    expect(workdirLog).toBeTruthy();
+    const workdir = workdirLog!.split("Ensured actor workdir: ")[1].trim();
+
+    // Simulate sprite restart: delete the workdir to mimic /tmp being wiped
+    await rm(workdir, { recursive: true, force: true });
+
+    // Second call must succeed even though the workdir was deleted
+    const result2 = await executors.executeCode({ code: 'echo "second"', language: "bash" });
+    expect(result2).toContain("second");
+  });
 });
 
 describe("core tool executors execute_code Sprites sandbox", () => {

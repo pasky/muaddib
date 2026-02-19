@@ -180,13 +180,19 @@ export function createDefaultExecuteCodeExecutor(
   }
 
   async function ensureWorkdir(sp: Sprite): Promise<string> {
-    if (workdir) return workdir;
+    if (!workdir) {
+      const actorId = randomUUID().slice(0, 8);
+      workdir = `/tmp/actor-${actorId}`;
+    }
 
-    const actorId = randomUUID().slice(0, 8);
-    workdir = `/tmp/actor-${actorId}`;
-
-    await spriteExec(sp, `mkdir -p ${shellQuote(workdir)} /workspace /artifacts`);
-    options.logger?.info(`Created actor workdir: ${workdir}`);
+    // Always recreate the workdir in case the sprite restarted and wiped /tmp.
+    const result = await spriteExec(sp, `mkdir -p ${shellQuote(workdir)}`);
+    if (result.exitCode !== 0) {
+      throw new Error(`Failed to create workdir ${workdir}: ${result.stderr}`);
+    }
+    // Best-effort: create shared dirs (may already exist or require elevated perms in some envs).
+    await spriteExec(sp, `mkdir -p /workspace /artifacts`);
+    options.logger?.info(`Ensured actor workdir: ${workdir}`);
     return workdir;
   }
 
