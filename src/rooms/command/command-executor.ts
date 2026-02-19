@@ -24,6 +24,7 @@ import {
   type BaselineToolOptions,
   type MuaddibTool,
 } from "../../agent/tools/baseline-tools.js";
+import { checkpointGondolinArc } from "../../agent/tools/gondolin-tools.js";
 import type { Message } from "@mariozechner/pi-ai";
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
@@ -523,6 +524,10 @@ export class CommandExecutor {
 
     await this.persistGeneratedToolSummary(message, agentResult, tools);
     agentResult.session?.dispose();
+
+    if (this.agentConfig.tools?.gondolin?.enabled) {
+      await checkpointGondolinArc(roomArc(message), this.logger);
+    }
 
     let responseText = agentResult.text;
     if (agentResult.refusalFallbackActivated && agentResult.refusalFallbackModel) {

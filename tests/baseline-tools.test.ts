@@ -461,6 +461,16 @@ describe("baseline tools with Gondolin enabled", () => {
     expect(byName["bash"]).toBe("summary");
   });
 
+  it("throws when gondolin is enabled but arc is not set", () => {
+    expect(() =>
+      createBaselineAgentTools({
+        modelAdapter: new PiAiModelAdapter(),
+        toolsConfig: { gondolin: { enabled: true } },
+        // arc intentionally omitted
+      } as any),
+    ).toThrow(/Gondolin requires arc/);
+  });
+
   it("keeps execute_code when gondolin is disabled", () => {
     const tools = createBaselineAgentTools({
       modelAdapter: new PiAiModelAdapter(),

@@ -12,7 +12,7 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join, posix } from "node:path";
 
 import {
@@ -64,6 +64,7 @@ async function ensureVm(
   const createPromise = (async () => {
     const {
       VM: VMClass,
+      VmCheckpoint,
       RealFSProvider,
       createHttpHooks,
     } = await import("@earendil-works/gondolin");
@@ -90,17 +91,32 @@ async function ensureVm(
       },
     });
 
-    const vm = await VMClass.create({
+    const vmOptions = {
       vfs: {
         mounts: {
           "/workspace": new RealFSProvider(workspacePath),
         },
       },
       httpHooks,
-    });
+    };
+
+    const checkpointPath = join(workspacePath, "vm-checkpoint.qcow2");
+    let vm: import("@earendil-works/gondolin").VM;
+    if (existsSync(checkpointPath)) {
+      try {
+        const checkpoint = VmCheckpoint.load(checkpointPath);
+        vm = await checkpoint.resume(vmOptions);
+        logger?.info(`Gondolin VM resumed from checkpoint for arc ${arcId}: ${checkpointPath}`);
+      } catch (err) {
+        logger?.warn(`Gondolin checkpoint restore failed, starting fresh VM for arc ${arcId}`, String(err));
+        vm = await VMClass.create(vmOptions);
+      }
+    } else {
+      vm = await VMClass.create(vmOptions);
+      logger?.info(`Gondolin VM started for arc ${arcId}, workspace: ${workspacePath}`);
+    }
 
     vmCache.set(arcId, vm);
-    logger?.info(`Gondolin VM started for arc ${arcId}, workspace: ${workspacePath}`);
     return vm;
   })();
 
@@ -373,4 +389,37 @@ export { isHostBlocked, isIpInCidr };
 export function resetGondolinVmCache(): void {
   vmCache.clear();
   vmCacheLocks.clear();
+}
+
+/**
+ * Checkpoint the Gondolin VM for an arc after a session ends.
+ *
+ * Cleans up ephemeral session directories inside /tmp, then stops the VM and
+ * persists its disk state to `$MUADDIB_HOME/workspaces/<arcId>/vm-checkpoint.qcow2`.
+ * The VM is removed from the cache so the next invocation resumes from the checkpoint.
+ *
+ * This is a no-op if no VM is running for the arc.
+ */
+export async function checkpointGondolinArc(
+  arc: string,
+  logger?: Logger,
+): Promise<void> {
+  const arcId = normalizeArcId(arc);
+  const vm = vmCache.get(arcId);
+  if (!vm) return;
+
+  const checkpointPath = join(getArcWorkspacePath(arc), "vm-checkpoint.qcow2");
+
+  try {
+    // Clean ephemeral session dirs from VM /tmp before checkpointing
+    await vm.exec(["/bin/sh", "-c", "rm -rf /tmp/session-*"]);
+    // Stop the VM and materialize the disk overlay as a checkpoint
+    await vm.checkpoint(checkpointPath);
+    vmCache.delete(arcId);
+    logger?.info(`Gondolin VM checkpointed for arc ${arcId}: ${checkpointPath}`);
+  } catch (err) {
+    logger?.error(`Gondolin checkpoint failed for arc ${arcId}`, String(err));
+    // Remove from cache regardless — a broken VM should not be reused
+    vmCache.delete(arcId);
+  }
 }
