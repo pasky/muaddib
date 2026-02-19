@@ -1,5 +1,10 @@
 # 🐁 Muaddib - a secure, multi-user AI assistant
 
+> [!WARNING]
+> **This Python package is deprecated.** Muaddib has been rewritten in TypeScript and this Python version is no longer maintained.
+> Please use the current TypeScript version at **[github.com/pasky/muaddib](https://github.com/pasky/muaddib)** (the `main` branch).
+> This release (1.2.0) is a final farewell release with no new features.
+
 <p align="center">
   <a href="https://discord.gg/rGABHaDEww"><img src="https://img.shields.io/badge/Discord-Join-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
   <a href="https://github.com/pasky/muaddib/releases"><img src="https://img.shields.io/github/v/release/pasky/muaddib?include_prereleases&style=for-the-badge" alt="GitHub release"></a>
