@@ -90,10 +90,25 @@ function collectPersistentToolCalls(messages: AgentMessage[], tools: MuaddibTool
     toolPersistMap.set(tool.name, tool.persistType);
   }
 
+  // Build a map from toolCallId → arguments by scanning assistant messages.
+  const toolCallArgs = new Map<string, unknown>();
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    const assistantMessage = message as AgentMessage & {
+      content?: Array<{ type: string; id?: string; name?: string; arguments?: unknown }>;
+    };
+    for (const block of assistantMessage.content ?? []) {
+      if (block.type === "toolCall" && block.id) {
+        toolCallArgs.set(block.id, block.arguments);
+      }
+    }
+  }
+
   return messages
     .filter((message) => message.role === "toolResult")
     .flatMap((message) => {
       const toolResult = message as AgentMessage & {
+        toolCallId?: string;
         toolName: string;
         details?: Record<string, unknown>;
         isError?: boolean;
@@ -106,9 +121,11 @@ function collectPersistentToolCalls(messages: AgentMessage[], tools: MuaddibTool
         return [];
       }
 
+      const input = toolResult.toolCallId ? toolCallArgs.get(toolResult.toolCallId) : undefined;
+
       return [{
         toolName: toolResult.toolName,
-        input: toolResult.details?.input,
+        input,
         output: toolResult,
         persistType: policy,
         artifactUrls: extractArtifactUrls(toolResult),
@@ -121,7 +138,8 @@ function buildPersistenceSummaryInput(persistentToolCalls: PersistentToolCall[])
 
   for (const call of persistentToolCalls) {
     lines.push(`\n\n# Calling tool **${call.toolName}** (persist: ${call.persistType})`);
-    lines.push(`## **Input:**\n${typeof call.input === "string" ? call.input : JSON.stringify(call.input, null, 2)}\n`);
+    const inputText = call.input === undefined ? "(unavailable)" : typeof call.input === "string" ? call.input : JSON.stringify(call.input, null, 2);
+    lines.push(`## **Input:**\n${inputText}\n`);
     lines.push(`## **Output:**\n${typeof call.output === "string" ? call.output : JSON.stringify(call.output, null, 2)}\n`);
 
     for (const artifactUrl of call.artifactUrls) {
