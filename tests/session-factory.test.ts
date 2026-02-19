@@ -256,7 +256,7 @@ describe("createAgentSessionForInvocation", () => {
     expect(logger.warn).toHaveBeenCalledWith("Exceeding max iterations, aborting session prompt loop.");
   });
 
-  it("transformContext injects metaReminder after toolUse but not after stop, and not at iteration limit", async () => {
+  it("transformContext injects metaReminder on first turn, after toolUse, but not after stop or at iteration limit", async () => {
     const REMINDER = "Stay focused on the quest.";
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
@@ -272,6 +272,13 @@ describe("createAgentSessionForInvocation", () => {
     });
 
     const transform = await getTransform(ctx);
+
+    // On the very first call (no prior assistant turns): nudge injected for metaReminder
+    const firstCall = [userMsg()];
+    const outFirst = await transform(firstCall);
+    expect(hasMetaInLast(outFirst)).toBe(true);
+    const lastMsgFirst = outFirst.at(-1) as any;
+    expect(lastMsgFirst.content[0].text).toBe(`<meta>${REMINDER}</meta>`);
 
     // After first toolUse turn: nudge injected
     const afterTurn1 = toolUseContext();
@@ -305,6 +312,27 @@ describe("createAgentSessionForInvocation", () => {
     // iteration-limit steer still happens via subscriber (not via transform)
     const agent = ctx.agent as any;
     expect(agent.steer).not.toHaveBeenCalled();
+  });
+
+  it("transformContext does NOT inject on first turn when no metaReminder is set", async () => {
+    const ctx = createAgentSessionForInvocation({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "system",
+      tools: [],
+      authStorage: AuthStorage.inMemory(),
+      modelAdapter: { resolve: vi.fn(() => ({
+        spec: { provider: "openai", modelId: "gpt-4o-mini" },
+        model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
+      })) } as any,
+      maxIterations: 10,
+      // no metaReminder
+    });
+
+    const transform = await getTransform(ctx);
+    const firstCall = [userMsg()];
+    const outFirst = await transform(firstCall);
+    expect(hasMetaInLast(outFirst)).toBe(false);
+    expect(outFirst).toHaveLength(firstCall.length);
   });
 
   it("transformContext injects both reminder and progress nudge when threshold elapsed", async () => {

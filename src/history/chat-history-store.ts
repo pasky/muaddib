@@ -220,9 +220,13 @@ export class ChatHistoryStore {
 
     const role = options.role ?? this.defaultRoleForMessage(message);
     const contentTemplate = options.contentTemplate ?? "<{nick}> {message}";
+    // Use originalContent for inbound user messages (preserves e.g. "MuaddibLLM: ...").
+    // Bot-authored messages always use content directly.
+    const isBotMessage = message.nick.toLowerCase() === message.mynick.toLowerCase();
+    const messageBody = isBotMessage ? message.content : (message.originalContent ?? message.content);
     const content = contentTemplate
       .replace("{nick}", message.nick)
-      .replace("{message}", message.content);
+      .replace("{message}", messageBody);
 
     const result = await db.run(
       `

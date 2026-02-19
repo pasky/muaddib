@@ -209,6 +209,9 @@ export class IrcRoomMonitor {
       nick: effectiveNick,
       mynick,
       content: isDirect ? cleanedMessage : normalizedMessage,
+      // Preserve the full channel message (e.g. "MuaddibLLM: keeppandoraopen.org") for history
+      // and LLM context; only set when the bot-nick prefix was actually stripped.
+      originalContent: inputMatch ? normalizedMessage : undefined,
     };
 
     const handleIncoming = async (): Promise<void> => {

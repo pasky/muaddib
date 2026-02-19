@@ -79,7 +79,12 @@ function createInternalNudgeTransform(
       (m) => m.role === "assistant",
     ).length;
 
-    // Only inject after a toolUse turn, and below the iteration ceiling.
+    // Inject on the very first call (no prior assistant turns) or after a toolUse turn,
+    // but never at or above the iteration ceiling.
+    if (turnCount >= maxIterations) {
+      return messages;
+    }
+    const isFirstTurn = turnCount === 0;
     const lastMsg = invocationMessages.at(-1) as { role?: string; stopReason?: string } | undefined;
     const lastIsToolResult = lastMsg?.role === "toolResult";
     // The most recent assistant message (immediately before the toolResult block)
@@ -87,8 +92,9 @@ function createInternalNudgeTransform(
       .reverse()
       .find((m) => m.role === "assistant");
     const lastStopReason = lastAssistant?.stopReason;
+    const isAfterToolUse = lastIsToolResult && lastStopReason === "toolUse";
 
-    if (!lastIsToolResult || lastStopReason !== "toolUse" || turnCount >= maxIterations) {
+    if (!isFirstTurn && !isAfterToolUse) {
       return messages;
     }
 
@@ -99,7 +105,7 @@ function createInternalNudgeTransform(
 
     const nudgeText = `<meta>${nudgeContent}</meta>`;
     logger.debug(
-      `internal_nudge_injected turnCount=${turnCount} lastStopReason=${lastStopReason}`,
+      `internal_nudge_injected turnCount=${turnCount} isFirstTurn=${isFirstTurn} lastStopReason=${lastStopReason}`,
     );
 
     return [

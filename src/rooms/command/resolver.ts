@@ -253,7 +253,17 @@ export class CommandResolver {
           return [];
         }
 
-        const modelDescription = modeConfig.model ? this.modelNameFormatter(modeConfig.model) : "";
+        // Collect effective model per trigger; de-duplicate consecutive identical models
+        const modeModel = modeConfig.model ?? "";
+        const effectiveModels = triggers.map((trigger) => {
+          const overrides = this.triggerOverrides[trigger] ?? {};
+          return (overrides.model as string | undefined) ?? modeModel;
+        });
+        const uniqueModels = [...new Set(effectiveModels)];
+        const modelDescription = uniqueModels
+          .map((m) => (m ? this.modelNameFormatter(m) : ""))
+          .join("/");
+
         return [`${triggers.join("/")} = ${modeKey} (${modelDescription})`];
       })
       .join(", ");

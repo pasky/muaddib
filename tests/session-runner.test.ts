@@ -36,6 +36,8 @@ describe("SessionRunner", () => {
   });
 
   it("retries empty completions and aggregates usage/tool+turn counters", async () => {
+    vi.useFakeTimers();
+    try {
     const callbacks: Array<(event: any) => void> = [];
     const unsubscribe = vi.fn();
     const session = {
@@ -99,7 +101,9 @@ describe("SessionRunner", () => {
       } as any,
     });
 
-    const result = await runner.prompt("hello");
+    const promise = runner.prompt("hello");
+    await vi.runAllTimersAsync();
+    const result = await promise;
 
     expect(result.text).toBe("final answer");
     expect(result.iterations).toBe(2);
@@ -108,6 +112,9 @@ describe("SessionRunner", () => {
     expect(result.stopReason).toBe("stop");
     expect(ensureProviderKey).toHaveBeenCalledWith("openai");
     expect(unsubscribe).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("switches to refusal fallback model when refusal error is detected", async () => {
@@ -158,36 +165,44 @@ describe("SessionRunner", () => {
   });
 
   it("throws when completion remains empty after retries", async () => {
-    const session = {
-      messages: [
-        {
-          role: "assistant",
-          content: [{ type: "text", text: "   " }],
-          usage: makeUsage(),
-          stopReason: "stop",
-        },
-      ] as any[],
-      subscribe: vi.fn(() => vi.fn()),
-      prompt: vi.fn(async () => {}),
-    };
+    vi.useFakeTimers();
+    try {
+      const session = {
+        messages: [
+          {
+            role: "assistant",
+            content: [{ type: "text", text: "   " }],
+            usage: makeUsage(),
+            stopReason: "stop",
+          },
+        ] as any[],
+        subscribe: vi.fn(() => vi.fn()),
+        prompt: vi.fn(async () => {}),
+      };
 
-    mockCreateAgentSessionForInvocation.mockReturnValue({
-      session,
-      agent: { setModel: vi.fn() },
-      ensureProviderKey: vi.fn(async () => {}),
-      getVisionFallbackActivated: () => false,
-    });
+      mockCreateAgentSessionForInvocation.mockReturnValue({
+        session,
+        agent: { setModel: vi.fn() },
+        ensureProviderKey: vi.fn(async () => {}),
+        getVisionFallbackActivated: () => false,
+      });
 
-    const runner = new SessionRunner({
-      model: "openai:gpt-4o-mini",
-      systemPrompt: "sys",
+      const runner = new SessionRunner({
+        model: "openai:gpt-4o-mini",
+        systemPrompt: "sys",
+        authStorage: AuthStorage.inMemory(),
+        logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+        modelAdapter: { resolve: () => ({ spec: { provider: "openai", modelId: "gpt-4o-mini" }, model: {} }) } as any,
+      });
 
-      authStorage: AuthStorage.inMemory(),      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-      modelAdapter: { resolve: () => ({ spec: { provider: "openai", modelId: "gpt-4o-mini" }, model: {} }) } as any,
-    });
-
-    await expect(runner.prompt("hello")).rejects.toThrow("Agent produced empty completion after 3 retries.");
-    expect(session.prompt).toHaveBeenCalledTimes(4);
+      const promise = runner.prompt("hello");
+      const assertion = expect(promise).rejects.toThrow("Agent produced empty completion after 3 retries.");
+      await vi.runAllTimersAsync();
+      await assertion;
+      expect(session.prompt).toHaveBeenCalledTimes(4);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
 
