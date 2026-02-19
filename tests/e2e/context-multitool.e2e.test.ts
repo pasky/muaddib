@@ -91,15 +91,15 @@ function scenario2Config(): Record<string, unknown> {
       common: {
         command: {
           ...cmd,
-          context_reducer: {
+          contextReducer: {
             model: "openai:gpt-4o-mini",
             prompt: "Condense the conversation history into a brief summary.",
           },
-          tool_summary: { model: "openai:gpt-4o-mini" },
+          toolSummary: { model: "openai:gpt-4o-mini" },
         },
       },
       irc: {
-        varlink: { socket_path: "/tmp/muaddib-e2e-fake.sock" },
+        varlink: { socketPath: "/tmp/muaddib-e2e-fake.sock" },
       },
     },
   });

@@ -36,21 +36,21 @@ describe("mergeRoomConfigs", () => {
       rooms: {
         common: {
           command: {
-            history_size: 20,
+            historySize: 20,
           },
-          prompt_vars: {
+          promptVars: {
             intro: "A",
           },
         },
         irc: {
           command: {
-            history_size: 40,
+            historySize: 40,
           },
-          prompt_vars: {
+          promptVars: {
             intro: "B",
           },
           varlink: {
-            socket_path: "/tmp/irc.sock",
+            socketPath: "/tmp/irc.sock",
           },
         },
       },

@@ -279,7 +279,7 @@ describe("runMuaddibMain", () => {
           },
         },
       }),
-    ).rejects.toThrow("IRC room is enabled but rooms.irc.varlink.socket_path is missing.");
+    ).rejects.toThrow("IRC room is enabled but rooms.irc.varlink.socketPath is missing.");
   });
 
   it("fails fast when command.response_max_bytes is invalid", async () => {

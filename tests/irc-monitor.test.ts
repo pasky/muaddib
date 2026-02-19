@@ -51,7 +51,7 @@ describe("IrcRoomMonitor", () => {
     await history.close();
   });
 
-  it("fromRuntime validates varlink.socket_path when IRC is enabled", async () => {
+  it("fromRuntime validates varlink.socketPath when IRC is enabled", async () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();
 
@@ -64,7 +64,7 @@ describe("IrcRoomMonitor", () => {
           enabled: true,
         },
       },
-    }, history))).toThrow("IRC room is enabled but rooms.irc.varlink.socket_path is missing.");
+    }, history))).toThrow("IRC room is enabled but rooms.irc.varlink.socketPath is missing.");
 
     await history.close();
   });

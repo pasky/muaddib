@@ -67,7 +67,7 @@ export class IrcRoomMonitor {
 
     const socketPath = requireNonEmptyString(
       roomConfig.varlink?.socketPath,
-      "IRC room is enabled but rooms.irc.varlink.socket_path is missing.",
+      "IRC room is enabled but rooms.irc.varlink.socketPath is missing.",
     );
 
     const commandHandler = new RoomMessageHandler(runtime, "irc", {

@@ -3,22 +3,6 @@ import { join } from "node:path";
 
 import { getMuaddibHome, resolveMuaddibPath } from "./paths.js";
 
-// ── snake_case → camelCase recursive key transform ─────────────────────
-
-function camelCaseKey(key: string): string {
-  return key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
-}
-
-function camelCaseKeys(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(camelCaseKeys);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([k, v]) => [camelCaseKey(k), camelCaseKeys(v)]),
-    );
-  }
-  return value;
-}
-
 // ── Config interfaces (camelCase) ──────────────────────────────────────
 
 export interface ArtifactsConfig {
@@ -273,11 +257,11 @@ export class MuaddibConfig {
 
   static load(path: string): MuaddibConfig {
     const raw = JSON.parse(readFileSync(path, "utf-8"));
-    return new MuaddibConfig(camelCaseKeys(raw) as MuaddibSettings);
+    return new MuaddibConfig(raw as MuaddibSettings);
   }
 
   static inMemory(overrides?: Record<string, unknown>): MuaddibConfig {
-    return new MuaddibConfig(camelCaseKeys(overrides ?? {}) as MuaddibSettings);
+    return new MuaddibConfig((overrides ?? {}) as MuaddibSettings);
   }
 
   toObject(): Record<string, unknown> {

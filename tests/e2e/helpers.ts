@@ -65,7 +65,7 @@ const EXAMPLE_CONFIG_PATH = resolve(
 );
 
 /**
- * Parse `config.json.example` as a raw object (snake_case, no camelCase conversion).
+ * Parse `config.json.example` as a raw object (camelCase).
  * Use as the base for test configs so the example file stays exercised by tests.
  */
 export function loadExampleConfig(): Record<string, unknown> {
@@ -268,14 +268,14 @@ export function e2eConfig(): Record<string, unknown> {
     },
     agent: {
       // Pin refusal fallback model to value asserted in refusal-fallback.e2e.test.ts
-      refusal_fallback_model: "anthropic:claude-3-5-sonnet-20241022",
+      refusalFallbackModel: "anthropic:claude-3-5-sonnet-20241022",
       tools: {
         // oracle must use anthropic so oracle-web-search test can assert modelProvider(1)==="anthropic"
         oracle: {
           model: "anthropic:claude-sonnet-4-20250514",
           prompt: "You are a knowledgeable oracle. Answer queries thoroughly.",
         },
-        image_gen: {
+        imageGen: {
           model: "openrouter:some-image-model",
         },
       },
@@ -283,7 +283,7 @@ export function e2eConfig(): Record<string, unknown> {
     rooms: {
       common: { command: baseCommandConfig() },
       irc: {
-        varlink: { socket_path: "/tmp/muaddib-e2e-fake.sock" },
+        varlink: { socketPath: "/tmp/muaddib-e2e-fake.sock" },
       },
     },
   });
