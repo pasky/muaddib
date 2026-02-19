@@ -39,6 +39,7 @@ import {
   createEditArtifactTool,
   createShareArtifactTool,
 } from "./artifact.js";
+import { createGondolinTools } from "./gondolin-tools.js";
 import type { ShareArtifactExecutor, EditArtifactExecutor } from "./artifact.js";
 import type { ChronicleReadExecutor, ChronicleAppendExecutor } from "./chronicle.js";
 import type { ExecuteCodeExecutor } from "./execute-code.js";
@@ -156,8 +157,16 @@ export function createDefaultToolExecutors(
 /**
  * Baseline tool set for command-path parity.
  * Grouped by tool domains (web, execution, artifacts, images, oracle, chronicle, quests).
+ *
+ * When Gondolin is enabled (agent.tools.gondolin.enabled = true):
+ *   - read/write/edit/bash tools are added, backed by the Gondolin VM.
+ *   - execute_code (Sprites) is excluded from the tool set.
  */
 export function createBaselineAgentTools(options: BaselineToolOptions): MuaddibTool[] {
+  // Non-null when gondolin is opted in.
+  const gondolinConfig =
+    options.toolsConfig?.gondolin?.enabled === true ? options.toolsConfig.gondolin : null;
+
   const defaultExecutors = createDefaultToolExecutors(options, options.oracleInvocation);
   const overrides = options.executors ?? {};
   const executors: BaselineToolExecutors = {
@@ -167,12 +176,26 @@ export function createBaselineAgentTools(options: BaselineToolOptions): MuaddibT
 
   const questToolGroup = getQuestToolGroup(options.currentQuestId);
 
-  const executorBackedTools = [...BASELINE_TOOL_FACTORIES, ...questToolGroup].map((factory) =>
+  // When Gondolin is enabled, drop execute_code (Sprites) from the baseline.
+  const activeFactories = gondolinConfig !== null
+    ? BASELINE_TOOL_FACTORIES.filter((f) => f !== createExecuteCodeTool)
+    : BASELINE_TOOL_FACTORIES;
+
+  const executorBackedTools = [...activeFactories, ...questToolGroup].map((factory) =>
     factory(executors),
   );
 
+  const gondolinTools: MuaddibTool[] = gondolinConfig !== null
+    ? createGondolinTools({
+        arc: options.arc ?? "default",
+        config: gondolinConfig,
+        logger: options.logger,
+      })
+    : [];
+
   return [
     ...executorBackedTools,
+    ...gondolinTools,
     createProgressReportTool(options),
     createMakePlanTool({
       chronicleStore: options.chronicleStore,

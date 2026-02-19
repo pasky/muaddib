@@ -19,6 +19,7 @@ import {
   createVisitWebpageTool,
   createWebSearchTool,
 } from "../src/agent/tools/baseline-tools.js";
+import { isHostBlocked, isIpInCidr } from "../src/agent/tools/gondolin-tools.js";
 
 function createTools(options: Record<string, unknown>) {
   return createBaselineAgentTools({
@@ -411,5 +412,121 @@ describe("baseline agent tools", () => {
     expect(startResult.content[0]).toEqual({ type: "text", text: "Quest started" });
     expect(subResult.content[0]).toEqual({ type: "text", text: "Subquest started" });
     expect(snoozeResult.content[0]).toEqual({ type: "text", text: "Quest snoozed" });
+  });
+});
+
+// ── Gondolin tool set ──────────────────────────────────────────────────────
+
+describe("baseline tools with Gondolin enabled", () => {
+  function createGondolinTools(extra?: Record<string, unknown>) {
+    return createBaselineAgentTools({
+      modelAdapter: new PiAiModelAdapter(),
+      toolsConfig: { gondolin: { enabled: true } },
+      arc: "test-arc",
+      ...extra,
+    } as any);
+  }
+
+  it("includes read/write/edit/bash and excludes execute_code when gondolin is enabled", () => {
+    const tools = createGondolinTools();
+    const names = tools.map((t) => t.name);
+    expect(names).toContain("read");
+    expect(names).toContain("write");
+    expect(names).toContain("edit");
+    expect(names).toContain("bash");
+    expect(names).not.toContain("execute_code");
+  });
+
+  it("still includes all non-execution baseline tools when gondolin is enabled", () => {
+    const tools = createGondolinTools();
+    const names = tools.map((t) => t.name);
+    expect(names).toContain("web_search");
+    expect(names).toContain("visit_webpage");
+    expect(names).toContain("share_artifact");
+    expect(names).toContain("edit_artifact");
+    expect(names).toContain("generate_image");
+    expect(names).toContain("oracle");
+    expect(names).toContain("chronicle_read");
+    expect(names).toContain("chronicle_append");
+    expect(names).toContain("progress_report");
+    expect(names).toContain("make_plan");
+  });
+
+  it("gondolin tools have correct persistTypes", () => {
+    const tools = createGondolinTools();
+    const byName = Object.fromEntries(tools.map((t) => [t.name, (t as any).persistType]));
+    expect(byName["read"]).toBe("none");
+    expect(byName["write"]).toBe("none");
+    expect(byName["edit"]).toBe("none");
+    expect(byName["bash"]).toBe("summary");
+  });
+
+  it("keeps execute_code when gondolin is disabled", () => {
+    const tools = createBaselineAgentTools({
+      modelAdapter: new PiAiModelAdapter(),
+      toolsConfig: { gondolin: { enabled: false } },
+    } as any);
+    const names = tools.map((t) => t.name);
+    expect(names).toContain("execute_code");
+    expect(names).not.toContain("read");
+    expect(names).not.toContain("bash");
+  });
+});
+
+// ── Gondolin network filtering helpers ────────────────────────────────────
+
+describe("isHostBlocked", () => {
+  it("blocks exact hostname match", () => {
+    expect(isHostBlocked("pasky.or.cz", ["pasky.or.cz"])).toBe(true);
+  });
+
+  it("blocks subdomain via wildcard pattern", () => {
+    expect(isHostBlocked("mail.pasky.or.cz", ["*.pasky.or.cz"])).toBe(true);
+  });
+
+  it("blocks apex domain via wildcard pattern", () => {
+    expect(isHostBlocked("pasky.or.cz", ["*.pasky.or.cz"])).toBe(true);
+  });
+
+  it("does not block unrelated domain", () => {
+    expect(isHostBlocked("example.com", ["pasky.or.cz", "*.pasky.or.cz"])).toBe(false);
+  });
+
+  it("does not block empty list", () => {
+    expect(isHostBlocked("pasky.or.cz", [])).toBe(false);
+  });
+
+  it("is case-insensitive", () => {
+    expect(isHostBlocked("Pasky.OR.CZ", ["pasky.or.cz"])).toBe(true);
+  });
+});
+
+describe("isIpInCidr", () => {
+  it("matches IPv4 address in /24 range", () => {
+    expect(isIpInCidr("192.168.1.5", "192.168.1.0/24")).toBe(true);
+  });
+
+  it("does not match IPv4 address outside /24 range", () => {
+    expect(isIpInCidr("192.168.2.5", "192.168.1.0/24")).toBe(false);
+  });
+
+  it("matches IPv4 exact host /32", () => {
+    expect(isIpInCidr("10.0.0.1", "10.0.0.1/32")).toBe(true);
+  });
+
+  it("matches IPv6 address in /64 range", () => {
+    expect(isIpInCidr("2001:db8:1:2::dead:beef", "2001:db8:1:2::/64")).toBe(true);
+  });
+
+  it("does not match IPv6 address outside /64 range", () => {
+    expect(isIpInCidr("2001:db8:1:3::dead:beef", "2001:db8:1:2::/64")).toBe(false);
+  });
+
+  it("matches IPv6 compressed :: notation in prefix", () => {
+    expect(isIpInCidr("::1", "::1/128")).toBe(true);
+  });
+
+  it("does not cross-match IPv4 CIDR against IPv6 address", () => {
+    expect(isIpInCidr("2001:db8::1", "192.168.0.0/16")).toBe(false);
   });
 });

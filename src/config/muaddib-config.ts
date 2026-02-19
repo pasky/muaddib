@@ -30,6 +30,22 @@ export interface SpritesConfig {
   executeTimeoutMs?: number;
 }
 
+export interface GondolinConfig {
+  /** Whether to enable Gondolin VM sandbox (replaces execute_code with read/write/edit/bash). */
+  enabled?: boolean;
+  /**
+   * Hostname patterns to block.  Supports glob-style wildcards: "*.foo.com" blocks
+   * foo.com and any subdomain.
+   */
+  blockedHosts?: string[];
+  /**
+   * IP CIDR ranges to block (both IPv4 and IPv6).
+   * Example: ["2001:db8:1:2::/64", "203.0.113.0/24"]
+   * Internal RFC-1918 and loopback ranges are always blocked regardless of this list.
+   */
+  blockedCidrs?: string[];
+}
+
 /**
  * Configuration for the agent's built-in tools (oracle, artifacts, image generation, etc.).
  * Lives under `agent.tools` in config.json.
@@ -40,6 +56,7 @@ export interface ToolsConfig {
   imageGen?: ImageGenConfig;
   jina?: JinaConfig;
   sprites?: SpritesConfig;
+  gondolin?: GondolinConfig;
 }
 
 /**
