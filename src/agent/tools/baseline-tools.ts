@@ -185,16 +185,9 @@ export function createBaselineAgentTools(options: BaselineToolOptions): MuaddibT
     factory(executors),
   );
 
-  if (gondolinConfig !== null && !options.arc) {
-    throw new Error(
-      "Gondolin requires arc to be set in ToolContext. " +
-      "Set arc: roomArc(message) when building tools for a Gondolin-enabled session.",
-    );
-  }
-
   const gondolinTools: MuaddibTool[] = gondolinConfig !== null
     ? createGondolinTools({
-        arc: options.arc!,
+        arc: options.arc,
         config: gondolinConfig,
         logger: options.logger,
       })

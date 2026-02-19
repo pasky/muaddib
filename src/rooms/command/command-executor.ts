@@ -20,10 +20,10 @@ import {
 
 import {
   createBaselineAgentTools,
-  createDefaultToolExecutors,
   type BaselineToolOptions,
   type MuaddibTool,
 } from "../../agent/tools/baseline-tools.js";
+import { createDefaultShareArtifactExecutor } from "../../agent/tools/artifact.js";
 import { checkpointGondolinArc } from "../../agent/tools/gondolin-tools.js";
 import type { Message } from "@mariozechner/pi-ai";
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
@@ -109,7 +109,7 @@ export class CommandExecutor {
   private readonly refusalFallbackModel: string | null;
   private readonly persistenceSummaryModel: string | null;
   private readonly responseMaxBytes: number;
-  private readonly shareArtifact: (content: string) => Promise<string>;
+
   private readonly agentConfig: AgentConfig;
 
   constructor(runtime: MuaddibRuntime, roomName: string, overrides?: CommandExecutorOverrides) {
@@ -189,11 +189,10 @@ export class CommandExecutor {
         logger: this.logger,
       });
 
-    const defaultExecutors = createDefaultToolExecutors(this.buildToolOptions());
-    this.shareArtifact = defaultExecutors.shareArtifact;
+
   }
 
-  private buildToolOptions(): Omit<BaselineToolOptions, "onProgressReport"> {
+  private buildToolOptions(): Omit<BaselineToolOptions, "arc" | "onProgressReport"> {
     return {
       toolsConfig: this.agentConfig.tools,
       authStorage: this.runtime.authStorage,
@@ -535,7 +534,7 @@ export class CommandExecutor {
       responseText = `${responseText} [refusal fallback to ${fallbackSpec.modelId}]`.trim();
     }
 
-    responseText = await this.applyResponseLengthPolicy(responseText);
+    responseText = await this.applyResponseLengthPolicy(responseText, roomArc(message));
     responseText = this.cleanResponseText(responseText, message.nick);
 
     return {
@@ -752,7 +751,7 @@ export class CommandExecutor {
     return this.overrides?.responseCleaner(cleaned, nick).trim();
   }
 
-  private async applyResponseLengthPolicy(responseText: string): Promise<string> {
+  private async applyResponseLengthPolicy(responseText: string, arc: string): Promise<string> {
     if (!responseText) {
       return responseText;
     }
@@ -768,11 +767,12 @@ export class CommandExecutor {
       `max_bytes=${this.responseMaxBytes}`,
     );
 
-    return await this.longResponseToArtifact(responseText);
+    return await this.longResponseToArtifact(responseText, arc);
   }
 
-  private async longResponseToArtifact(fullResponse: string): Promise<string> {
-    const artifactResult = await this.shareArtifact(fullResponse);
+  private async longResponseToArtifact(fullResponse: string, arc: string): Promise<string> {
+    const shareArtifact = createDefaultShareArtifactExecutor({ ...this.buildToolOptions(), arc });
+    const artifactResult = await shareArtifact(fullResponse);
     const artifactUrl = extractSharedArtifactUrl(artifactResult);
 
     let trimmed = trimToMaxBytes(fullResponse, this.responseMaxBytes);

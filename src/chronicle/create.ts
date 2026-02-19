@@ -136,6 +136,7 @@ function createQuestStepRunner(options: QuestStepRunnerOptions): QuestStepRunner
     const tools = createBaselineAgentTools({
       modelAdapter,
       authStorage,
+      arc: input.arc,
       currentQuestId: input.questId,
       logger: log,
     });
