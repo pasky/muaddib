@@ -1,3 +1,7 @@
+// Prevent Node.js inspector from activating on SIGUSR1, which would bind a
+// debugger to 127.0.0.1 accessible to any local process (including the agent).
+process.on("SIGUSR1", () => {});
+
 import { runCliMessageMode } from "./message-mode.js";
 
 interface ParsedArgs {

@@ -12,9 +12,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint \"{src,tests,scripts}/**/*.ts\"",
     "test": "scripts/run-vitest.sh",
-    "cli:message": "node ./dist/cli/main.js",
-    "start": "node ./dist/app/main.js",
-    "start:irc": "node ./dist/app/main.js"
+    "cli:message": "node --disable-sigusr1 ./dist/cli/main.js",
+    "start": "node --disable-sigusr1 ./dist/app/main.js",
+    "start:irc": "node --disable-sigusr1 ./dist/app/main.js"
   },
   "dependencies": {
     "@fly/sprites": "^0.0.1",
