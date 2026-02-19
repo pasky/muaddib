@@ -219,7 +219,7 @@ export function createDefaultExecuteCodeExecutor(
   async function spriteExec(
     sp: Sprite,
     command: string,
-    execOptions?: { cwd?: string; timeoutMs?: number },
+    execOptions?: { cwd?: string; timeoutMs?: number; skipTruncation?: boolean },
   ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
     const ExecError = await getExecError();
 
@@ -233,21 +233,23 @@ export function createDefaultExecuteCodeExecutor(
       cmd = `timeout ${secs} bash -c ${shellQuote(command)}`;
     }
 
+    const maybetruncate = execOptions?.skipTruncation ? (s: string) => s : truncateOutput;
+
     try {
       const result = await sp.execFile("bash", ["-c", cmd], {
         cwd: execOptions?.cwd,
       });
       return {
         exitCode: 0,
-        stdout: truncateOutput(String(result.stdout ?? "")),
-        stderr: truncateOutput(String(result.stderr ?? "")),
+        stdout: maybetruncate(String(result.stdout ?? "")),
+        stderr: maybetruncate(String(result.stderr ?? "")),
       };
     } catch (err) {
       if (err instanceof ExecError) {
         return {
           exitCode: err.exitCode ?? 1,
-          stdout: truncateOutput(String(err.stdout ?? "")),
-          stderr: truncateOutput(String(err.stderr ?? "")),
+          stdout: maybetruncate(String(err.stdout ?? "")),
+          stderr: maybetruncate(String(err.stderr ?? "")),
         };
       }
       throw err;
@@ -269,7 +271,9 @@ export function createDefaultExecuteCodeExecutor(
     sp: Sprite,
     path: string,
   ): Promise<{ data: Buffer; filename: string } | null> {
-    const result = await spriteExec(sp, `base64 ${shellQuote(path)}`);
+    // skipTruncation is critical: base64-encoded binary files can easily exceed
+    // DEFAULT_CAPTURE_LIMIT, which would corrupt the decoded output.
+    const result = await spriteExec(sp, `base64 ${shellQuote(path)}`, { skipTruncation: true });
     if (result.exitCode !== 0) {
       options.logger?.info(`Failed to read file ${path}: ${result.stderr}`);
       return null;
