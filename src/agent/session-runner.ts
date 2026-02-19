@@ -148,7 +148,10 @@ export class SessionRunner {
 
       let text = extractLastAssistantText(session.messages);
       for (let i = 0; i < 3 && !text; i += 1) {
-        const retryMsg = `Empty assistant text detected, retrying completion (${i + 1}/3)`;
+        const emptyMsg = findLastAssistantMessage(session.messages);
+        const reason = emptyMsg?.stopReason ?? "unknown";
+        const errorDetail = emptyMsg?.errorMessage ? `: ${emptyMsg.errorMessage}` : "";
+        const retryMsg = `Empty assistant text detected (stopReason=${reason}${errorDetail}), retrying completion (${i + 1}/3)`;
         this.logger.error(retryMsg);
         await this.onStatusMessage?.(retryMsg);
         await session.prompt(this.emptyCompletionRetryPrompt);
