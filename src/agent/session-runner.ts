@@ -146,21 +146,24 @@ export class SessionRunner {
         sessionCtx.ensureProviderKey,
       );
 
+      const EMPTY_RETRY_DELAYS_MS = [5_000, 20_000, 60_000];
       let text = extractLastAssistantText(session.messages);
-      for (let i = 0; i < 3 && !text; i += 1) {
+      for (let i = 0; i < EMPTY_RETRY_DELAYS_MS.length && !text; i += 1) {
         const emptyMsg = findLastAssistantMessage(session.messages);
         const reason = emptyMsg?.stopReason ?? "unknown";
         const errorDetail = emptyMsg?.errorMessage ? `: ${emptyMsg.errorMessage}` : "";
-        const retryMsg = `Empty assistant text detected (stopReason=${reason}${errorDetail}), retrying completion (${i + 1}/3)`;
+        const delaySec = EMPTY_RETRY_DELAYS_MS[i] / 1_000;
+        const retryMsg = `Empty assistant text detected (stopReason=${reason}${errorDetail}), retrying in ${delaySec}s (${i + 1}/${EMPTY_RETRY_DELAYS_MS.length})`;
         this.logger.error(retryMsg);
         await this.onStatusMessage?.(retryMsg);
+        await new Promise((resolve) => setTimeout(resolve, EMPTY_RETRY_DELAYS_MS[i]));
         await session.prompt(this.emptyCompletionRetryPrompt);
         this.logLlmIo(`after_empty_retry_${i + 1}`, session.messages);
         text = extractLastAssistantText(session.messages);
       }
 
       if (!text) {
-        throw new Error("Agent produced empty completion after 3 retries.");
+        throw new Error(`Agent produced empty completion after ${EMPTY_RETRY_DELAYS_MS.length} retries.`);
       }
 
       const lastAssistant = findLastAssistantMessage(session.messages);
