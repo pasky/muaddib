@@ -21,16 +21,40 @@ const DEFAULT_MAX_ITERATIONS = 25;
 
 // ── Internal nudge transform ──
 
-interface InternalNudgeTransformInput {
-  /** Number of preloaded context messages before this invocation started. */
-  invocationStartMessageCount: number;
-  maxIterations: number;
-  metaReminder?: string;
-  progressThresholdSeconds?: number;
-  thinkingLevel: NonNullable<CreateAgentSessionInput["thinkingLevel"]>;
-  progressReportTool?: ProgressReportTool;
-  sessionStartTime: number;
-  logger: Logger;
+/**
+ * Build a function that decides what nudge text (if any) to inject for a given
+ * assistant turn count. Encapsulates all policy: metaReminder, progress threshold,
+ * high-reasoning first-turn special case, and near-limit suppression.
+ */
+function createNudgeDecider(
+  maxIterations: number,
+  sessionStartTime: number,
+  thinkingLevel: NonNullable<CreateAgentSessionInput["thinkingLevel"]>,
+  metaReminder?: string,
+  progressThresholdSeconds?: number,
+  progressReportTool?: ProgressReportTool,
+): (turnCount: number) => string | null {
+  return (turnCount: number): string | null => {
+    const parts: string[] = [];
+
+    if (metaReminder) {
+      parts.push(metaReminder);
+    }
+
+    if (progressThresholdSeconds != null && turnCount < maxIterations - 2) {
+      const now = Date.now();
+      const lastActivity = Math.max(sessionStartTime, progressReportTool?.lastSentAt ?? 0);
+      const elapsedSinceLastReport = (now - lastActivity) / 1000;
+      const isFirstTurnHighReasoning =
+        turnCount === 1 && (thinkingLevel === "medium" || thinkingLevel === "high" || thinkingLevel === "xhigh");
+
+      if (isFirstTurnHighReasoning || elapsedSinceLastReport >= progressThresholdSeconds) {
+        parts.push("If you are going to call more tools, you MUST ALSO use the progress_report tool now.");
+      }
+    }
+
+    return parts.length > 0 ? parts.join(" ") : null;
+  };
 }
 
 /**
@@ -41,17 +65,12 @@ interface InternalNudgeTransformInput {
  * The nudge is visible to the LLM but never becomes a persistent queue entry that
  * could trigger an extra turn.
  */
-function createInternalNudgeTransform(input: InternalNudgeTransformInput) {
-  const {
-    invocationStartMessageCount,
-    maxIterations,
-    metaReminder,
-    progressThresholdSeconds,
-    thinkingLevel,
-    progressReportTool,
-    sessionStartTime,
-    logger,
-  } = input;
+function createInternalNudgeTransform(
+  invocationStartMessageCount: number,
+  maxIterations: number,
+  getNudgeText: (turnCount: number) => string | null,
+  logger: Logger,
+) {
 
   return async (messages: AgentMessage[]): Promise<AgentMessage[]> => {
     // Count assistant turns produced in this invocation (not from preloaded context).
@@ -73,31 +92,14 @@ function createInternalNudgeTransform(input: InternalNudgeTransformInput) {
       return messages;
     }
 
-    const parts: string[] = [];
-
-    if (metaReminder) {
-      parts.push(metaReminder);
-    }
-
-    if (progressThresholdSeconds != null && turnCount < maxIterations - 2) {
-      const now = Date.now();
-      const lastActivity = Math.max(sessionStartTime, progressReportTool?.lastSentAt ?? 0);
-      const elapsedSinceLastReport = (now - lastActivity) / 1000;
-      const isFirstTurnHighReasoning =
-        turnCount === 1 && (thinkingLevel === "medium" || thinkingLevel === "high" || thinkingLevel === "xhigh");
-
-      if (isFirstTurnHighReasoning || elapsedSinceLastReport >= progressThresholdSeconds) {
-        parts.push("If you are going to call more tools, you MUST ALSO use the progress_report tool now.");
-      }
-    }
-
-    if (parts.length === 0) {
+    const nudgeContent = getNudgeText(turnCount);
+    if (nudgeContent === null) {
       return messages;
     }
 
-    const nudgeText = `<meta>${parts.join(" ")}</meta>`;
+    const nudgeText = `<meta>${nudgeContent}</meta>`;
     logger.debug(
-      `internal_nudge_injected turnCount=${turnCount} lastStopReason=${lastStopReason} hasMetaReminder=${!!metaReminder} hasProgressNudge=${parts.length > (metaReminder ? 1 : 0)}`,
+      `internal_nudge_injected turnCount=${turnCount} lastStopReason=${lastStopReason}`,
     );
 
     return [
@@ -180,16 +182,16 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
   ) as ProgressReportTool | undefined;
   const invocationStartMessageCount = input.contextMessages?.length ?? 0;
 
-  const transformContext = createInternalNudgeTransform({
-    invocationStartMessageCount,
+  const getNudgeText = createNudgeDecider(
     maxIterations,
-    metaReminder: input.metaReminder,
-    progressThresholdSeconds: input.progressThresholdSeconds,
-    thinkingLevel: input.thinkingLevel ?? "off",
-    progressReportTool,
     sessionStartTime,
-    logger,
-  });
+    input.thinkingLevel ?? "off",
+    input.metaReminder,
+    input.progressThresholdSeconds,
+    progressReportTool,
+  );
+
+  const transformContext = createInternalNudgeTransform(invocationStartMessageCount, maxIterations, getNudgeText, logger);
 
   const agent = new Agent({
     initialState: {
