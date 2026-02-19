@@ -5,9 +5,11 @@
  * common config factories, and runtime construction utilities.
  */
 
+import { readFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type {
   AssistantMessage,
@@ -24,6 +26,51 @@ import { ChatHistoryStore } from "../../src/history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../src/models/pi-ai-model-adapter.js";
 import { IrcRoomMonitor } from "../../src/rooms/irc/monitor.js";
 import type { MuaddibRuntime } from "../../src/runtime.js";
+
+// ── Config utilities ──
+
+/**
+ * Deep-merge two plain-object trees. Arrays are replaced (not concatenated).
+ * Exported so test files can compose configs on top of a shared base.
+ */
+export function deepMerge(
+  base: Record<string, unknown>,
+  override: Record<string, unknown>,
+): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(override)) {
+    const baseVal = result[key];
+    if (
+      value !== null &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      baseVal !== null &&
+      typeof baseVal === "object" &&
+      !Array.isArray(baseVal)
+    ) {
+      result[key] = deepMerge(
+        baseVal as Record<string, unknown>,
+        value as Record<string, unknown>,
+      );
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+const EXAMPLE_CONFIG_PATH = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../config.json.example",
+);
+
+/**
+ * Parse `config.json.example` as a raw object (snake_case, no camelCase conversion).
+ * Use as the base for test configs so the example file stays exercised by tests.
+ */
+export function loadExampleConfig(): Record<string, unknown> {
+  return JSON.parse(readFileSync(EXAMPLE_CONFIG_PATH, "utf-8")) as Record<string, unknown>;
+}
 
 // ── Fake IRC transport ──
 
@@ -199,25 +246,34 @@ export async function createE2EContext(): Promise<E2EContext> {
 }
 
 /**
- * Shared E2E config covering all scenarios. Unused keys are harmless —
- * the agent only calls tools scripted via mockState.responses.
+ * Shared E2E config covering all scenarios.
+ *
+ * Starts from `config.json.example` (the canonical shape reference) and applies
+ * test-specific overrides:
+ *   - Fake provider API keys (including jina, which lives in `providers.jina`
+ *     rather than `agent.tools.jina` — jina auth belongs in auth.json, not config)
+ *   - Test-specific model overrides (oracle must use anthropic for assertion checks)
+ *   - Refusal fallback model pinned to the value expected by refusal-fallback tests
+ *   - IRC varlink socket path redirected to the fake test socket
+ *   - Simplified room command config so tests control which model provider is called
  */
 export function e2eConfig(): Record<string, unknown> {
-  return {
+  return deepMerge(loadExampleConfig(), {
     providers: {
       openai: { apiKey: "sk-fake-openai-key" },
       anthropic: { apiKey: "sk-fake-anthropic-key" },
       openrouter: { apiKey: "sk-fake-openrouter-key" },
+      // jina auth belongs in auth.json (providers block), not agent.tools.jina
+      jina: { apiKey: "jina-fake-key" },
     },
     agent: {
+      // Pin refusal fallback model to value asserted in refusal-fallback.e2e.test.ts
       refusal_fallback_model: "anthropic:claude-3-5-sonnet-20241022",
       tools: {
+        // oracle must use anthropic so oracle-web-search test can assert modelProvider(1)==="anthropic"
         oracle: {
           model: "anthropic:claude-sonnet-4-20250514",
           prompt: "You are a knowledgeable oracle. Answer queries thoroughly.",
-        },
-        jina: {
-          apiKey: "jina-fake-key",
         },
         image_gen: {
           model: "openrouter:some-image-model",
@@ -227,15 +283,19 @@ export function e2eConfig(): Record<string, unknown> {
     rooms: {
       common: { command: baseCommandConfig() },
       irc: {
-        command: { historySize: 40 },
-        varlink: { socketPath: "/tmp/muaddib-e2e-fake.sock" },
+        varlink: { socket_path: "/tmp/muaddib-e2e-fake.sock" },
       },
     },
-  };
+  });
 }
 
 /**
  * Extract API keys from `providers.*.apiKey` in config data into AuthStorageData format.
+ *
+ * All service credentials (including jina, sprites) must live under `providers.*`
+ * in test config objects. The `agent.tools.*` section carries only non-secret
+ * options (model names, limits, etc.); secrets go in auth.json in production
+ * and in `providers.*` in tests.
  */
 function extractAuthData(configData: Record<string, unknown>): Record<string, ApiKeyCredential> {
   const data: Record<string, ApiKeyCredential> = {};
@@ -245,11 +305,6 @@ function extractAuthData(configData: Record<string, unknown>): Record<string, Ap
       if (cfg.apiKey) data[name] = { type: "api_key", key: cfg.apiKey };
     }
   }
-  // Extract tool-level keys (jina, sprites) from agent.tools
-  const agentCfg = configData.agent as Record<string, unknown> | undefined;
-  const tools = agentCfg?.tools as Record<string, Record<string, unknown>> | undefined;
-  if (tools?.jina?.apiKey) data.jina = { type: "api_key", key: tools.jina.apiKey as string };
-  if (tools?.sprites?.token) data.sprites = { type: "api_key", key: tools.sprites.token as string };
   return data;
 }
 

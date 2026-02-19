@@ -23,7 +23,9 @@ import {
   buildRuntime,
   createE2EContext,
   createStreamMockState,
+  deepMerge,
   handleStreamSimpleCall,
+  loadExampleConfig,
   makeAssistantMessage,
   resetStreamMock,
   textStream,
@@ -78,15 +80,12 @@ function scenario2Config(): Record<string, unknown> {
   const cmd = baseCommandConfig();
   // Enable autoReduceContext on the serious mode
   (cmd.modes.serious as any).autoReduceContext = true;
-  return {
+  return deepMerge(loadExampleConfig(), {
     providers: {
       openai: { apiKey: "sk-fake-openai-key" },
       anthropic: { apiKey: "sk-fake-anthropic-key" },
-    },
-    agent: {
-      tools: {
-        jina: { apiKey: "jina-fake-key" },
-      },
+      // jina auth belongs in providers (auth.json equivalent), not agent.tools.jina
+      jina: { apiKey: "jina-fake-key" },
     },
     rooms: {
       common: {
@@ -100,11 +99,10 @@ function scenario2Config(): Record<string, unknown> {
         },
       },
       irc: {
-        command: { historySize: 40 },
-        varlink: { socketPath: "/tmp/muaddib-e2e-fake.sock" },
+        varlink: { socket_path: "/tmp/muaddib-e2e-fake.sock" },
       },
     },
-  };
+  });
 }
 
 // ── Test suite ──

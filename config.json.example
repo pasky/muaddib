@@ -13,7 +13,7 @@
         "_note": "Get token at https://sprites.dev — set in auth.json as 'sprites' key"
       },
       "jina": {
-        "_comment": "Optionally set jina API key in auth.json for 20rpm->500rpm NC use"
+        "_comment": "Jina API key goes in auth.json (key name: 'jina') for 20rpm→500rpm. No secret fields here."
       },
       "artifacts": {
         "path": "artifacts",
