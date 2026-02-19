@@ -382,8 +382,9 @@ export class CommandExecutor {
       onAgentCreated,
     });
 
+    const queryTimestamp = formatCurrentTime().slice(-5); // HH:MM in UTC, matching history format
     const { responseText, usage, toolCallsCount } = await this.invokeAndPostProcess(
-      runner, message, `<${message.nick}> ${resolved.queryText}`, runnerContext, tools, {
+      runner, message, `[${queryTimestamp}] <${message.nick}> ${resolved.queryText}`, runnerContext, tools, {
         reasoningEffort: resolved.runtime.reasoningEffort,
         visionModel: resolved.runtime.visionModel ?? undefined,
       },
