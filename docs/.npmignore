@@ -1,0 +1,3 @@
+# Exclude vim swap files from npm package
+*.sw?
+.*.sw?

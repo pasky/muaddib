@@ -1,20 +1,61 @@
 {
-  "name": "muaddib",
+  "name": "@pasky/muaddib",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
-  "description": "Muaddib TypeScript runtime",
+  "description": "Secure, multi-user AI assistant for IRC, Discord, and Slack",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "bin": {
+    "muaddib": "./dist/app/main.js",
+    "muaddib-message": "./dist/cli/main.js"
+  },
+  "files": [
+    "dist",
+    "config.json.example",
+    "auth.json.example",
+    "docs",
+    "README.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && cp src/agent/tools/artifact-viewer.html dist/agent/tools/artifact-viewer.html",
+    "build": "tsc -p tsconfig.build.json && cp src/agent/tools/artifact-viewer.html dist/agent/tools/artifact-viewer.html && printf '# Overrides dist/.gitignore so npm publish includes dist/\\n*.whl\\n*.tar.gz\\n' > dist/.npmignore",
+    "prepublishOnly": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint \"{src,tests,scripts}/**/*.ts\"",
     "test": "scripts/run-vitest.sh",
     "cli:message": "node --disable-sigusr1 ./dist/cli/main.js",
     "start": "node --disable-sigusr1 ./dist/app/main.js",
     "start:irc": "node --disable-sigusr1 ./dist/app/main.js"
+  },
+  "keywords": [
+    "ai",
+    "assistant",
+    "irc",
+    "discord",
+    "slack",
+    "claude",
+    "anthropic",
+    "chatbot",
+    "multi-user"
+  ],
+  "author": "Petr Baudis <pasky@ucw.cz>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pasky/muaddib.git"
+  },
+  "homepage": "https://github.com/pasky/muaddib#readme",
+  "bugs": {
+    "url": "https://github.com/pasky/muaddib/issues"
   },
   "dependencies": {
     "@fly/sprites": "^0.0.1",
