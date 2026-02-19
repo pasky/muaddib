@@ -1,6 +1,6 @@
 {
   "name": "@pasky/muaddib",
-  "version": "0.1.0",
+  "version": "2.0.0",
   "type": "module",
   "description": "Secure, multi-user AI assistant for IRC, Discord, and Slack",
   "main": "./dist/index.js",
@@ -39,6 +39,8 @@
   "keywords": [
     "ai",
     "assistant",
+    "pi",
+    "pi-coding-agent",
     "irc",
     "discord",
     "slack",
