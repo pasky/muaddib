@@ -216,7 +216,7 @@ describe("ChronicleStore", () => {
       chronicleStore,
       config: {
         model: "openai:gpt-4o-mini",
-        paragraphs_per_chapter: 2,
+        paragraphsPerChapter: 2,
       },
       modelAdapter,
       logger: CONSOLE_LOGGER,
@@ -322,7 +322,7 @@ describe("ChronicleStore", () => {
       chronicleStore,
       config: {
         model: "openai:gpt-4o-mini",
-        paragraphs_per_chapter: 10,
+        paragraphsPerChapter: 10,
       },
       modelAdapter: { completeSimple: vi.fn(async () => makeAssistantText("summary")) } as any,
       questRuntime,
@@ -432,7 +432,7 @@ describe("AutoChroniclerTs", () => {
       chronicleStore,
       config: {
         model: "openai:gpt-4o-mini",
-        paragraphs_per_chapter: 5,
+        paragraphsPerChapter: 5,
       },
       modelAdapter: {
         completeSimple: vi.fn(async () => makeAssistantText("Chapter summary paragraph.")),

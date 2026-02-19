@@ -68,7 +68,7 @@ export class ContextReducerTs implements ContextReducer {
           systemPrompt: this.config.prompt,
         },
         {
-          callType: "context_reducer",
+          callType: "contextReducer",
           logger: this.logger,
           streamOptions: { maxTokens: 2_048, reasoning: "low" },
         },

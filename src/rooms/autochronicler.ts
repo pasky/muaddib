@@ -16,7 +16,7 @@ export interface AutoChronicler {
 
 export interface AutoChroniclerConfig {
   model: string;
-  arc_models?: Record<string, string>;
+  arcModels?: Record<string, string>;
 }
 
 export interface AutoChroniclerTsOptions {
@@ -180,7 +180,7 @@ export class AutoChroniclerTs implements AutoChronicler {
   }
 
   private resolveChroniclerModel(arc: string): string {
-    return this.options.config.arc_models?.[arc] ?? this.options.config.model;
+    return this.options.config.arcModels?.[arc] ?? this.options.config.model;
   }
 
   private async withArcLock<T>(arc: string, fn: () => Promise<T>): Promise<T> {

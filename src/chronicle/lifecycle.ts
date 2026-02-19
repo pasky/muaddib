@@ -9,8 +9,8 @@ import { QUEST_OPEN_RE, QUEST_FINISHED_RE } from "./quest-runtime.js";
 
 export interface ChronicleLifecycleConfig {
   model: string;
-  arc_models?: Record<string, string>;
-  paragraphs_per_chapter?: number;
+  arcModels?: Record<string, string>;
+  paragraphsPerChapter?: number;
 }
 
 export interface ChronicleLifecycle {
@@ -172,17 +172,17 @@ export class ChronicleLifecycleTs implements ChronicleLifecycle {
   }
 
   private resolveSummaryModelSpec(arc: string): string {
-    return this.config.arc_models?.[arc] ?? this.config.model;
+    return this.config.arcModels?.[arc] ?? this.config.model;
   }
 
   private resolveParagraphLimit(): number {
-    if (this.config.paragraphs_per_chapter == null) {
+    if (this.config.paragraphsPerChapter == null) {
       return DEFAULT_PARAGRAPHS_PER_CHAPTER;
     }
 
-    const parsed = Number(this.config.paragraphs_per_chapter);
+    const parsed = Number(this.config.paragraphsPerChapter);
     if (!Number.isFinite(parsed) || parsed <= 0) {
-      throw new Error(`Invalid paragraphs_per_chapter: ${this.config.paragraphs_per_chapter}`);
+      throw new Error(`Invalid paragraphsPerChapter: ${this.config.paragraphsPerChapter}`);
     }
 
     return Math.trunc(parsed);

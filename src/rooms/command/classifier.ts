@@ -43,7 +43,7 @@ export function createModeClassifier(
           systemPrompt: `${prompt}\n\nReturn exactly one classifier label token. No explanation. If uncertain, pick the best label.`,
         },
         {
-          callType: "mode_classifier",
+          callType: "modeClassifier",
           logger,
           streamOptions: { reasoning: "minimal" },
         },

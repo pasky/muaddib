@@ -54,8 +54,8 @@ export async function createChronicleSubsystem(
 
   const lifecycleConfig: ChronicleLifecycleConfig = {
     model: options.model,
-    arc_models: options.arcModels,
-    paragraphs_per_chapter: options.paragraphsPerChapter,
+    arcModels: options.arcModels,
+    paragraphsPerChapter: options.paragraphsPerChapter,
   };
 
   // Quest runtime (optional)
@@ -99,7 +99,7 @@ export async function createChronicleSubsystem(
     lifecycle: chronicleLifecycle,
     config: {
       model: options.model,
-      arc_models: options.arcModels,
+      arcModels: options.arcModels,
     },
     modelAdapter: options.modelAdapter,
     logger: options.logger.getLogger("muaddib.rooms.autochronicler"),
