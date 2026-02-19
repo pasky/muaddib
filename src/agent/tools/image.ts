@@ -41,7 +41,7 @@ export function createGenerateImageTool(
     persistType: "artifact",
     label: "Generate Image",
     description:
-      "Generate image(s) using tools.image_gen.model. Optionally include reference image URLs for edits or variations.",
+      "Generate image(s) using tools.imageGen.model. Optionally include reference image URLs for edits or variations.",
     parameters: Type.Object({
       prompt: Type.String({
         description: "Text description of the image to generate.",
@@ -89,12 +89,12 @@ export function createDefaultGenerateImageExecutor(
 
     const configuredModel = toConfiguredString(options.toolsConfig?.imageGen?.model);
     if (!configuredModel) {
-      throw new Error("generate_image tool requires tools.image_gen.model configuration.");
+      throw new Error("generate_image tool requires tools.imageGen.model configuration.");
     }
 
     const modelSpec = parseModelSpec(configuredModel);
     if (modelSpec.provider !== "openrouter") {
-      throw new Error(`tools.image_gen.model must use openrouter provider, got: ${modelSpec.provider}`);
+      throw new Error(`tools.imageGen.model must use openrouter provider, got: ${modelSpec.provider}`);
     }
 
     const apiKey = await resolveOpenRouterApiKey(options);

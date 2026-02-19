@@ -170,12 +170,12 @@ export class CommandExecutor {
 
     this.refusalFallbackModel = resolveConfigModelSpec(
       agentConfig.refusalFallbackModel,
-      "agent.refusal_fallback_model",
+      "agent.refusalFallbackModel",
     ) ?? null;
 
     this.persistenceSummaryModel = resolveConfigModelSpec(
       this.commandConfig.toolSummary?.model,
-      "command.tool_summary.model",
+      "command.toolSummary.model",
     ) ?? null;
 
     this.responseMaxBytes = parseResponseMaxBytes(this.commandConfig.responseMaxBytes);
@@ -374,7 +374,7 @@ export class CommandExecutor {
       model: modelSpec,
       systemPrompt,
       tools,
-      metaReminder: modeConfig.prompt_reminder,
+      metaReminder: modeConfig.promptReminder,
       progressThresholdSeconds: progressConfig?.thresholdSeconds,
       progressMinIntervalSeconds: progressConfig?.minIntervalSeconds,
       onStatusMessage: sendResponse,
@@ -442,7 +442,7 @@ export class CommandExecutor {
       model: modelSpec,
       systemPrompt,
       tools,
-      metaReminder: this.commandConfig.modes.serious?.prompt_reminder,
+      metaReminder: this.commandConfig.modes.serious?.promptReminder,
       progressThresholdSeconds: proactiveProgressConfig?.thresholdSeconds,
       progressMinIntervalSeconds: proactiveProgressConfig?.minIntervalSeconds,
       onStatusMessage: sendResponse,

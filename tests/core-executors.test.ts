@@ -1419,7 +1419,7 @@ describe("core tool executors generate_image support", () => {
       executors.generateImage({
         prompt: "Draw a cat",
       }),
-    ).rejects.toThrow("generate_image tool requires tools.image_gen.model configuration.");
+    ).rejects.toThrow("generate_image tool requires tools.imageGen.model configuration.");
   });
 
   it("generate_image rejects non-openrouter model providers", async () => {
@@ -1432,7 +1432,7 @@ describe("core tool executors generate_image support", () => {
       executors.generateImage({
         prompt: "Draw a cat",
       }),
-    ).rejects.toThrow("tools.image_gen.model must use openrouter provider");
+    ).rejects.toThrow("tools.imageGen.model must use openrouter provider");
   });
 
   it("generate_image errors when OpenRouter returns no images", async () => {
