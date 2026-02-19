@@ -383,8 +383,9 @@ export class CommandExecutor {
     });
 
     const queryTimestamp = formatCurrentTime().slice(-5); // HH:MM in UTC, matching history format
+    const queryContent = message.originalContent ?? resolved.queryText;
     const { responseText, usage, toolCallsCount } = await this.invokeAndPostProcess(
-      runner, message, `[${queryTimestamp}] <${message.nick}> ${resolved.queryText}`, runnerContext, tools, {
+      runner, message, `[${queryTimestamp}] <${message.nick}> ${queryContent}`, runnerContext, tools, {
         reasoningEffort: resolved.runtime.reasoningEffort,
         visionModel: resolved.runtime.visionModel ?? undefined,
       },

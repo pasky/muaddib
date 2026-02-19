@@ -4,6 +4,8 @@ export interface RoomMessage {
   nick: string;
   mynick: string;
   content: string;
+  /** Full original message before the bot-nick prefix was stripped (e.g. "MuaddibLLM: keeppandoraopen.org"). Set only when the bot was explicitly mentioned in a channel message and the mention was removed to produce `content`. Used for history storage and LLM context so the full intent is preserved. */
+  originalContent?: string;
   platformId?: string;
   threadId?: string;
   threadStarterId?: number;

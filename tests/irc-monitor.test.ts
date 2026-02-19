@@ -96,6 +96,7 @@ describe("IrcRoomMonitor", () => {
 
     const sender = new FakeSender();
     const executeCalls: string[] = [];
+    const originalContentCalls: Array<string | undefined> = [];
 
     const monitor = new IrcRoomMonitor({
       roomConfig: {
@@ -107,6 +108,7 @@ describe("IrcRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async (message, options) => {
           executeCalls.push(message.content);
+          originalContentCalls.push(message.originalContent);
           if (options.isDirect && options.sendResponse) {
             await options.sendResponse("line1\nline2");
           }
@@ -133,6 +135,8 @@ describe("IrcRoomMonitor", () => {
     });
 
     expect(executeCalls).toEqual(["hello there"]);
+    // originalContent preserves the bot-nick prefix that was stripped for command dispatch
+    expect(originalContentCalls).toEqual(["muaddib: hello there"]);
     expect(sender.sent).toHaveLength(1);
     expect(sender.sent[0]).toEqual({
       target: "#test",
@@ -142,6 +146,10 @@ describe("IrcRoomMonitor", () => {
 
     const historyRows = await history.getFullHistory("libera", "#test");
     expect(historyRows).toHaveLength(2);
+    // Inbound user message stored with full original content (bot-nick preserved)
+    expect(historyRows[0].message).toBe("<alice> muaddib: hello there");
+    // Bot response stored as-is (no originalContent bleed-through)
+    expect(historyRows[1].message).toBe("<muaddib> line1\nline2");
 
     await history.close();
   });

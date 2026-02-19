@@ -302,6 +302,11 @@ export class SlackRoomMonitor {
       nick: event.username,
       mynick: event.mynick,
       content: cleanedContent,
+      // Preserve the mention context for history and LLM (e.g. "@MuaddibLLM keeppandoraopen.org").
+      // Only set for channel mentions (not DMs where there is no mention to preserve).
+      originalContent: event.mentionsBot && !event.isDirectMessage
+        ? `@${event.mynick} ${cleanedContent}`
+        : undefined,
       platformId: event.messageTs,
       threadId,
       threadStarterId,
