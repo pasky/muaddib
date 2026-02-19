@@ -69,7 +69,7 @@ export async function createMuaddibRuntime(
       logger: runtimeLogger,
       quests: chroniclerConfig.quests,
       authStorage,
-      actorConfig: config.getActorConfig(),
+      agentConfig: config.getAgentConfig(),
     });
   }
 

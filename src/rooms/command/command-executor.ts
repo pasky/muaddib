@@ -41,6 +41,7 @@ import {
 import type { ProactiveConfig } from "./proactive.js";
 import { generateToolSummaryFromSession } from "./tool-summary.js";
 import type { Logger } from "../../app/logging.js";
+import type { AgentConfig } from "../../config/muaddib-config.js";
 
 // ── Public types ──
 
@@ -108,6 +109,7 @@ export class CommandExecutor {
   private readonly persistenceSummaryModel: string | null;
   private readonly responseMaxBytes: number;
   private readonly shareArtifact: (content: string) => Promise<string>;
+  private readonly agentConfig: AgentConfig;
 
   constructor(runtime: MuaddibRuntime, roomName: string, overrides?: CommandExecutorOverrides) {
     this.runtime = runtime;
@@ -119,7 +121,8 @@ export class CommandExecutor {
       throw new Error(`rooms.${roomName}.command is missing.`);
     }
 
-    const actorConfig = runtime.config.getActorConfig();
+    const agentConfig = runtime.config.getAgentConfig();
+    this.agentConfig = agentConfig;
 
     this.commandConfig = roomConfig.command;
     this.history = runtime.history;
@@ -148,8 +151,8 @@ export class CommandExecutor {
           tools: input.tools,
           modelAdapter: this.modelAdapter,
           authStorage: runtime.authStorage,
-          maxIterations: actorConfig.maxIterations,
-          llmDebugMaxChars: actorConfig.llmDebugMaxChars,
+          maxIterations: agentConfig.maxIterations,
+          llmDebugMaxChars: agentConfig.llmDebugMaxChars,
           metaReminder: input.metaReminder,
           progressThresholdSeconds: input.progressThresholdSeconds,
           progressMinIntervalSeconds: input.progressMinIntervalSeconds,
@@ -166,13 +169,13 @@ export class CommandExecutor {
       );
 
     this.refusalFallbackModel = resolveConfigModelSpec(
-      runtime.config.getRouterConfig().refusalFallbackModel,
-      "router.refusal_fallback_model",
+      agentConfig.refusalFallbackModel,
+      "agent.refusal_fallback_model",
     ) ?? null;
 
     this.persistenceSummaryModel = resolveConfigModelSpec(
-      runtime.config.getToolsConfig().summary?.model,
-      "tools.summary.model",
+      this.commandConfig.toolSummary?.model,
+      "command.tool_summary.model",
     ) ?? null;
 
     this.responseMaxBytes = parseResponseMaxBytes(this.commandConfig.responseMaxBytes);
@@ -180,7 +183,7 @@ export class CommandExecutor {
     this.contextReducer =
       overrides?.contextReducer ??
       new ContextReducerTs({
-        config: runtime.config.getContextReducerConfig(),
+        config: this.commandConfig.contextReducer,
         modelAdapter: this.modelAdapter,
         logger: this.logger,
       });
@@ -191,7 +194,7 @@ export class CommandExecutor {
 
   private buildToolOptions(): Omit<BaselineToolOptions, "onProgressReport"> {
     return {
-      toolsConfig: this.runtime.config.getToolsConfig(),
+      toolsConfig: this.agentConfig.tools,
       authStorage: this.runtime.authStorage,
       modelAdapter: this.modelAdapter,
       logger: this.logger,
@@ -366,7 +369,7 @@ export class CommandExecutor {
 
     const tools = this.selectTools(message, resolved.runtime.allowedTools, runnerContext, sendResponse);
 
-    const progressConfig = this.runtime.config.getActorConfig().progress;
+    const progressConfig = this.agentConfig.progress;
     const runner = this.runnerFactory({
       model: modelSpec,
       systemPrompt,
@@ -434,7 +437,7 @@ export class CommandExecutor {
 
     const tools = this.selectTools(message, classifiedRuntime.allowedTools, runnerContext, sendResponse);
 
-    const proactiveProgressConfig = this.runtime.config.getActorConfig().progress;
+    const proactiveProgressConfig = this.agentConfig.progress;
     const runner = this.runnerFactory({
       model: modelSpec,
       systemPrompt,

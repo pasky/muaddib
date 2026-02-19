@@ -1,44 +1,32 @@
 {
   "_comment": "Configuration (no secrets). API keys go in auth.json — see auth.json.example.",
 
-  "router": {
-    "refusal_fallback_model": "deepseek:deepseek-reasoner"
-  },
-
-  "tools": {
-    "sprites": {
-      "_note": "Get token at https://sprites.dev — set in auth.json as 'sprites' key"
-    },
-    "jina": {
-      "_comment": "Optionally set jina API key in auth.json for 20rpm->500rpm NC use"
-    },
-    "artifacts": {
-      "path": "artifacts",
-      "url": "https://example.com/artifacts"
-    },
-    "image_gen": {
-      "model": "openrouter:google/gemini-3-pro-image-preview"
-    },
-    "summary": {
-      "model": "anthropic:claude-haiku-4-5-20251001"
-    },
-    "oracle": {
-      "model": "openrouter:google/gemini-3-pro-preview",
-      "prompt": "You are an oracle - a powerful reasoning entity consulted for complex analysis and creative work. Take your time to think deeply. Use available tools to gather additional inputs and validate your conclusions, however your purpose is not to be a versatile agent but a sage advisor. Leave any complex tool use to the agent that called you as a tool just now, focus on formulating deep and correct advice rather than doing things yourself."
-    }
-  },
-
-  "actor": {
+  "agent": {
+    "refusal_fallback_model": "deepseek:deepseek-reasoner",
     "max_iterations": 25,
     "progress": {
       "threshold_seconds": 10,
       "min_interval_seconds": 8
+    },
+    "tools": {
+      "sprites": {
+        "_note": "Get token at https://sprites.dev — set in auth.json as 'sprites' key"
+      },
+      "jina": {
+        "_comment": "Optionally set jina API key in auth.json for 20rpm->500rpm NC use"
+      },
+      "artifacts": {
+        "path": "artifacts",
+        "url": "https://example.com/artifacts"
+      },
+      "image_gen": {
+        "model": "openrouter:google/gemini-3-pro-image-preview"
+      },
+      "oracle": {
+        "model": "openrouter:google/gemini-3-pro-preview",
+        "prompt": "You are an oracle - a powerful reasoning entity consulted for complex analysis and creative work. Take your time to think deeply. Use available tools to gather additional inputs and validate your conclusions, however your purpose is not to be a versatile agent but a sage advisor. Leave any complex tool use to the agent that called you as a tool just now, focus on formulating deep and correct advice rather than doing things yourself."
+      }
     }
-  },
-
-  "context_reducer": {
-    "model": "openrouter:google/gemini-3-flash-preview",
-    "prompt": "You are a context summarizer preparing reduced conversation history for an AI that needs to best respond to the user message.\n\nGiven a conversation and the assistant's system prompt (for context on what matters), produce a condensed version that preserves:\n1. Brief summary of relevant prior discussion\n2. Verbatim quotes of critical details (names, numbers, code, URLs, commitments, specific facts, or even whole messages)\n3. The flow of who said what when it matters for understanding, and tone of voice notes\n\nOmit: chit-chat, tangents, resolved topics, redundant back-and-forth.\n\nOutput format: A condensed conversation in the same [USER]/[ASSISTANT] message structure. Each message should be a synthesis or direct quote as appropriate; omit irrelevant messages entirely. Do not add commentary - just output the condensed conversation. Your summary will be the only context the next AI receives.\n\nThe final triggering message will be provided separately to the assistant, so do NOT include it in your output."
   },
 
   "chronicler": {
@@ -70,6 +58,16 @@
         "rate_period": 900,
         "debounce": 1.5,
         "default_mode": "classifier:serious",
+
+        "context_reducer": {
+          "model": "openrouter:google/gemini-3-flash-preview",
+          "prompt": "You are a context summarizer preparing reduced conversation history for an AI that needs to best respond to the user message.\n\nGiven a conversation and the assistant's system prompt (for context on what matters), produce a condensed version that preserves:\n1. Brief summary of relevant prior discussion\n2. Verbatim quotes of critical details (names, numbers, code, URLs, commitments, specific facts, or even whole messages)\n3. The flow of who said what when it matters for understanding, and tone of voice notes\n\nOmit: chit-chat, tangents, resolved topics, redundant back-and-forth.\n\nOutput format: A condensed conversation in the same [USER]/[ASSISTANT] message structure. Each message should be a synthesis or direct quote as appropriate; omit irrelevant messages entirely. Do not add commentary - just output the condensed conversation. Your summary will be the only context the next AI receives.\n\nThe final triggering message will be provided separately to the assistant, so do NOT include it in your output."
+        },
+
+        "tool_summary": {
+          "model": "anthropic:claude-haiku-4-5-20251001"
+        },
+
         "modes": {
           "sarcastic": {
             "model": "openrouter:google/gemini-3-flash-preview",

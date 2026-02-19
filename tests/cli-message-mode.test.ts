@@ -237,13 +237,13 @@ describe("runCliMessageMode", () => {
     ).rejects.toThrow("command.response_max_bytes must be a positive integer.");
   });
 
-  it("fails fast when router.refusal_fallback_model is malformed", async () => {
+  it("fails fast when agent.refusal_fallback_model is malformed", async () => {
     const dir = await mkdtemp(join(tmpdir(), "muaddib-cli-"));
     tempDirs.push(dir);
 
     const configPath = join(dir, "config.json");
     const config = {
-      router: {
+      agent: {
         refusal_fallback_model: "gpt-4o-mini",
       },
       rooms: {
@@ -284,7 +284,7 @@ describe("runCliMessageMode", () => {
     );
   });
 
-  it("accepts router.refusal_fallback_model with deepseek provider", async () => {
+  it("accepts agent.refusal_fallback_model with deepseek provider", async () => {
     const dir = await mkdtemp(join(tmpdir(), "muaddib-cli-"));
     tempDirs.push(dir);
 
@@ -296,7 +296,7 @@ describe("runCliMessageMode", () => {
           url: "https://api.deepseek.com/anthropic/v1/messages",
         },
       },
-      router: {
+      agent: {
         refusal_fallback_model: "deepseek:deepseek-reasoner",
       },
       rooms: {
@@ -366,17 +366,12 @@ describe("runCliMessageMode", () => {
     expect(result.response).toBe("cli ok");
   });
 
-  it("fails fast when tools.summary.model is malformed", async () => {
+  it("fails fast when command.tool_summary.model is malformed", async () => {
     const dir = await mkdtemp(join(tmpdir(), "muaddib-cli-"));
     tempDirs.push(dir);
 
     const configPath = join(dir, "config.json");
     const config = {
-      tools: {
-        summary: {
-          model: "gpt-4o-mini",
-        },
-      },
       rooms: {
         common: {
           command: {
@@ -397,6 +392,9 @@ describe("runCliMessageMode", () => {
                 EASY_SERIOUS: "!s",
               },
               fallbackLabel: "EASY_SERIOUS",
+            },
+            tool_summary: {
+              model: "gpt-4o-mini",
             },
           },
         },

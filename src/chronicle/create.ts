@@ -35,7 +35,7 @@ interface CreateChronicleOptions {
     cooldown?: number;
   };
   authStorage: AuthStorage;
-  actorConfig?: { maxIterations?: number; llmDebugMaxChars?: number; progress?: { thresholdSeconds?: number; minIntervalSeconds?: number } };
+  agentConfig?: { maxIterations?: number; llmDebugMaxChars?: number; progress?: { thresholdSeconds?: number; minIntervalSeconds?: number } };
 }
 
 export async function createChronicleSubsystem(
@@ -78,7 +78,7 @@ export async function createChronicleSubsystem(
         modelAdapter: options.modelAdapter,
         authStorage: options.authStorage,
         promptReminder: questsConfig.promptReminder,
-        actorConfig: options.actorConfig,
+        agentConfig: options.agentConfig,
         logger: options.logger,
       }),
       logger: options.logger.getLogger("muaddib.chronicle.quests"),
@@ -115,12 +115,12 @@ interface QuestStepRunnerOptions {
   modelAdapter: PiAiModelAdapter;
   authStorage: AuthStorage;
   promptReminder?: string;
-  actorConfig?: { maxIterations?: number; llmDebugMaxChars?: number; progress?: { thresholdSeconds?: number; minIntervalSeconds?: number } };
+  agentConfig?: { maxIterations?: number; llmDebugMaxChars?: number; progress?: { thresholdSeconds?: number; minIntervalSeconds?: number } };
   logger: RuntimeLogWriter;
 }
 
 function createQuestStepRunner(options: QuestStepRunnerOptions): QuestStepRunner {
-  const { model, modelAdapter, authStorage, actorConfig, logger: runtimeLogger } = options;
+  const { model, modelAdapter, authStorage, agentConfig, logger: runtimeLogger } = options;
 
   return async (input) => {
     const log = runtimeLogger.getLogger(`muaddib.chronicle.quests.step.${input.questId}`);
@@ -146,11 +146,11 @@ function createQuestStepRunner(options: QuestStepRunnerOptions): QuestStepRunner
       tools,
       modelAdapter,
       authStorage,
-      maxIterations: actorConfig?.maxIterations,
-      llmDebugMaxChars: actorConfig?.llmDebugMaxChars,
+      maxIterations: agentConfig?.maxIterations,
+      llmDebugMaxChars: agentConfig?.llmDebugMaxChars,
       metaReminder: metaReminder || undefined,
-      progressThresholdSeconds: actorConfig?.progress?.thresholdSeconds,
-      progressMinIntervalSeconds: actorConfig?.progress?.minIntervalSeconds,
+      progressThresholdSeconds: agentConfig?.progress?.thresholdSeconds,
+      progressMinIntervalSeconds: agentConfig?.progress?.minIntervalSeconds,
       logger: log,
     });
 

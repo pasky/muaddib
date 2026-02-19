@@ -428,7 +428,7 @@ describe("RoomMessageHandler", () => {
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      configData: { router: { refusal_fallback_model: "anthropic:claude-3-5-haiku" } },
+      configData: { agent: { refusal_fallback_model: "anthropic:claude-3-5-haiku" } },
       logger,
       runnerFactory: () => ({
         prompt: async () =>
@@ -1089,10 +1089,12 @@ describe("RoomMessageHandler", () => {
       history,
       classifyMode: async () => "EASY_SERIOUS",
       configData: {
-        tools: {
-          artifacts: {
-            path: artifactsPath,
-            url: "https://example.com/artifacts/?",
+        agent: {
+          tools: {
+            artifacts: {
+              path: artifactsPath,
+              url: "https://example.com/artifacts/?",
+            },
           },
         },
       },
@@ -1166,7 +1168,7 @@ describe("RoomMessageHandler", () => {
       } as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      configData: { router: { refusal_fallback_model: "anthropic:claude-3-5-haiku" } },
+      configData: { agent: { refusal_fallback_model: "anthropic:claude-3-5-haiku" } },
       runnerFactory: () => ({
         prompt: async () =>
           makeRunnerResult("The AI refused to respond to this request", {
@@ -1216,7 +1218,7 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
-  it("retries on explicit refusal text with router.refusal_fallback_model and persists fallback model usage", async () => {
+  it("retries on explicit refusal text with agent.refusal_fallback_model and persists fallback model usage", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();
 
@@ -1227,7 +1229,7 @@ describe("RoomMessageHandler", () => {
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      configData: { router: { refusal_fallback_model: "anthropic:claude-3-5-haiku" } },
+      configData: { agent: { refusal_fallback_model: "anthropic:claude-3-5-haiku" } },
       runnerFactory: (input) => {
         runnerModels.push(input.model);
         return {
@@ -1267,7 +1269,7 @@ describe("RoomMessageHandler", () => {
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      configData: { router: { refusal_fallback_model: "anthropic:claude-3-5-haiku" } },
+      configData: { agent: { refusal_fallback_model: "anthropic:claude-3-5-haiku" } },
       runnerFactory: () => ({
         prompt: async () => {
           throw new Error("Agent run failed: invalid_prompt blocked for safety reasons.");
@@ -1293,7 +1295,7 @@ describe("RoomMessageHandler", () => {
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      configData: { router: { refusal_fallback_model: "anthropic:claude-3-5-haiku" } },
+      configData: { agent: { refusal_fallback_model: "anthropic:claude-3-5-haiku" } },
       runnerFactory: (input) => {
         runnerModels.push(input.model);
         return {

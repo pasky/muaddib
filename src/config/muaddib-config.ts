@@ -21,16 +21,6 @@ function camelCaseKeys(value: unknown): unknown {
 
 // ── Config interfaces (camelCase) ──────────────────────────────────────
 
-interface ActorConfig {
-  maxIterations?: number;
-  maxCompletionRetries?: number;
-  llmDebugMaxChars?: number;
-  progress?: {
-    thresholdSeconds?: number;
-    minIntervalSeconds?: number;
-  };
-}
-
 export interface ArtifactsConfig {
   path?: string;
   url?: string;
@@ -56,18 +46,33 @@ export interface SpritesConfig {
   executeTimeoutMs?: number;
 }
 
+/**
+ * Configuration for the agent's built-in tools (oracle, artifacts, image generation, etc.).
+ * Lives under `agent.tools` in config.json.
+ */
 export interface ToolsConfig {
   artifacts?: ArtifactsConfig;
   oracle?: OracleConfig;
   imageGen?: ImageGenConfig;
   jina?: JinaConfig;
   sprites?: SpritesConfig;
-  summary?: { model?: string };
 }
 
-interface ContextReducerConfig {
-  model?: string;
-  prompt?: string;
+/**
+ * Top-level agent runtime configuration.
+ * Lives under `agent` in config.json.
+ */
+export interface AgentConfig {
+  maxIterations?: number;
+  llmDebugMaxChars?: number;
+  progress?: {
+    thresholdSeconds?: number;
+    minIntervalSeconds?: number;
+  };
+  /** Model to retry with when the primary model issues a content refusal. */
+  refusalFallbackModel?: string;
+  /** Configuration for the agent's built-in tools. */
+  tools?: ToolsConfig;
 }
 
 interface ChroniclerConfig {
@@ -84,10 +89,6 @@ interface ChroniclerConfig {
 
 interface HistoryConfig {
   database?: { path?: string };
-}
-
-interface RouterConfig {
-  refusalFallbackModel?: string;
 }
 
 // ── Mode / Command config ──────────────────────────────────────────────
@@ -124,6 +125,16 @@ export interface CommandConfig {
   ignoreUsers?: string[];
   modes: Record<string, ModeConfig>;
   modeClassifier: ModeClassifierConfig;
+  /**
+   * Context reducer: condenses conversation history before feeding to the agent.
+   * Both `model` and `prompt` must be set to enable reduction.
+   */
+  contextReducer?: { model?: string; prompt?: string };
+  /**
+   * Tool summary: model used to generate a persistent internal-monologue summary
+   * of tool calls for history recall.
+   */
+  toolSummary?: { model?: string };
 }
 
 // ── Room config ────────────────────────────────────────────────────────
@@ -165,12 +176,9 @@ export interface RoomConfig {
 // ── Internal typed settings shape ──────────────────────────────────────
 
 interface MuaddibSettings {
-  actor?: ActorConfig;
-  tools?: ToolsConfig;
-  contextReducer?: ContextReducerConfig;
+  agent?: AgentConfig;
   chronicler?: ChroniclerConfig;
   history?: HistoryConfig;
-  router?: RouterConfig;
   rooms?: Record<string, RoomConfig>;
   quests?: unknown;
 }
@@ -276,28 +284,28 @@ export class MuaddibConfig {
     return this.data as unknown as Record<string, unknown>;
   }
 
-  getActorConfig(): ActorConfig {
-    return this.data.actor ?? {};
-  }
-
-  getToolsConfig(): ToolsConfig {
-    const t = this.data.tools ?? {};
-    const artifactsPathRaw = t.artifacts?.path;
+  /**
+   * Returns the agent runtime config, with artifact path resolved relative
+   * to `$MUADDIB_HOME/artifacts` if a relative path is given.
+   */
+  getAgentConfig(): AgentConfig {
+    const a = this.data.agent ?? {};
+    const tools = a.tools ?? {};
+    const artifactsPathRaw = tools.artifacts?.path;
     const resolvedArtifactsPath = artifactsPathRaw
       ? resolveMuaddibPath(artifactsPathRaw, join(getMuaddibHome(), "artifacts"))
       : undefined;
 
     return {
-      ...t,
-      artifacts: {
-        ...t.artifacts,
-        path: resolvedArtifactsPath,
+      ...a,
+      tools: {
+        ...tools,
+        artifacts: {
+          ...tools.artifacts,
+          path: resolvedArtifactsPath,
+        },
       },
     };
-  }
-
-  getContextReducerConfig(): ContextReducerConfig {
-    return this.data.contextReducer ?? {};
   }
 
   getChroniclerConfig(): ChroniclerConfig {
@@ -306,10 +314,6 @@ export class MuaddibConfig {
 
   getHistoryConfig(): HistoryConfig {
     return this.data.history ?? {};
-  }
-
-  getRouterConfig(): RouterConfig {
-    return this.data.router ?? {};
   }
 
   getRoomConfig(roomName: string): RoomConfig {

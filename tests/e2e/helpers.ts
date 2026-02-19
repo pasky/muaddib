@@ -209,19 +209,19 @@ export function e2eConfig(): Record<string, unknown> {
       anthropic: { apiKey: "sk-fake-anthropic-key" },
       openrouter: { apiKey: "sk-fake-openrouter-key" },
     },
-    router: {
-      refusalFallbackModel: "anthropic:claude-3-5-sonnet-20241022",
-    },
-    tools: {
-      oracle: {
-        model: "anthropic:claude-sonnet-4-20250514",
-        prompt: "You are a knowledgeable oracle. Answer queries thoroughly.",
-      },
-      jina: {
-        apiKey: "jina-fake-key",
-      },
-      imageGen: {
-        model: "openrouter:some-image-model",
+    agent: {
+      refusal_fallback_model: "anthropic:claude-3-5-sonnet-20241022",
+      tools: {
+        oracle: {
+          model: "anthropic:claude-sonnet-4-20250514",
+          prompt: "You are a knowledgeable oracle. Answer queries thoroughly.",
+        },
+        jina: {
+          apiKey: "jina-fake-key",
+        },
+        image_gen: {
+          model: "openrouter:some-image-model",
+        },
       },
     },
     rooms: {
@@ -245,8 +245,9 @@ function extractAuthData(configData: Record<string, unknown>): Record<string, Ap
       if (cfg.apiKey) data[name] = { type: "api_key", key: cfg.apiKey };
     }
   }
-  // Extract tool-level keys (jina, sprites)
-  const tools = configData.tools as Record<string, Record<string, unknown>> | undefined;
+  // Extract tool-level keys (jina, sprites) from agent.tools
+  const agentCfg = configData.agent as Record<string, unknown> | undefined;
+  const tools = agentCfg?.tools as Record<string, Record<string, unknown>> | undefined;
   if (tools?.jina?.apiKey) data.jina = { type: "api_key", key: tools.jina.apiKey as string };
   if (tools?.sprites?.token) data.sprites = { type: "api_key", key: tools.sprites.token as string };
   return data;

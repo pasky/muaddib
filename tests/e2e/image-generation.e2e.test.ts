@@ -126,7 +126,7 @@ describe("E2E: Image generation pipeline", () => {
     ];
 
     const config = e2eConfig();
-    (config.tools as Record<string, unknown>).artifacts = {
+    ((config.agent as Record<string, unknown>).tools as Record<string, unknown>).artifacts = {
       path: artifactsPath,
       url: artifactsUrl,
     };

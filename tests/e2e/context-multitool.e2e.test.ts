@@ -83,16 +83,22 @@ function scenario2Config(): Record<string, unknown> {
       openai: { apiKey: "sk-fake-openai-key" },
       anthropic: { apiKey: "sk-fake-anthropic-key" },
     },
-    contextReducer: {
-      model: "openai:gpt-4o-mini",
-      prompt: "Condense the conversation history into a brief summary.",
-    },
-    tools: {
-      jina: { apiKey: "jina-fake-key" },
-      summary: { model: "openai:gpt-4o-mini" },
+    agent: {
+      tools: {
+        jina: { apiKey: "jina-fake-key" },
+      },
     },
     rooms: {
-      common: { command: cmd },
+      common: {
+        command: {
+          ...cmd,
+          context_reducer: {
+            model: "openai:gpt-4o-mini",
+            prompt: "Condense the conversation history into a brief summary.",
+          },
+          tool_summary: { model: "openai:gpt-4o-mini" },
+        },
+      },
       irc: {
         command: { historySize: 40 },
         varlink: { socketPath: "/tmp/muaddib-e2e-fake.sock" },
