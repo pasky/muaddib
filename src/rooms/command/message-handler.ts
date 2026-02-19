@@ -178,10 +178,11 @@ export class RoomMessageHandler {
       content: [{ type: "text", text: content }],
       timestamp: Date.now(),
     });
-    this.logger.debug(
+    this.logger.info(
       "Steered message into active session",
       `arc=${roomArc(message)}`,
       `nick=${message.nick}`,
+      `content=${message.content}`,
     );
   }
 

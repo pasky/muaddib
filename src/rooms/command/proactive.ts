@@ -170,10 +170,11 @@ export class ProactiveRunner {
         content: [{ type: "text", text: content }],
         timestamp: Date.now(),
       });
-      this.logger.debug(
+      this.logger.info(
         "Steered passive message into proactive session",
         `arc=${roomArc(message)}`,
         `nick=${message.nick}`,
+        `content=${message.content}`,
       );
       return true;
     }
