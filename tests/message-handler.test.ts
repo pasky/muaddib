@@ -1124,7 +1124,7 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
-  it("does not convert response into artifact when response_max_bytes is not exceeded", async () => {
+  it("does not convert response into artifact when responseMaxBytes is not exceeded", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();
 
@@ -1196,7 +1196,7 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
-  it("fails fast when command.response_max_bytes is invalid", async () => {
+  it("fails fast when command.responseMaxBytes is invalid", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();
 
@@ -1213,7 +1213,7 @@ describe("RoomMessageHandler", () => {
           history,
           classifyMode: async () => "EASY_SERIOUS",
         }),
-    ).toThrow("command.response_max_bytes must be a positive integer.");
+    ).toThrow("command.responseMaxBytes must be a positive integer.");
 
     await history.close();
   });

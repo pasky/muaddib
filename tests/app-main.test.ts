@@ -282,7 +282,7 @@ describe("runMuaddibMain", () => {
     ).rejects.toThrow("IRC room is enabled but rooms.irc.varlink.socketPath is missing.");
   });
 
-  it("fails fast when command.response_max_bytes is invalid", async () => {
+  it("fails fast when command.responseMaxBytes is invalid", async () => {
     await expect(
       runWithConfig({
         history: {
@@ -309,7 +309,7 @@ describe("runMuaddibMain", () => {
           },
         },
       }),
-    ).rejects.toThrow("command.response_max_bytes must be a positive integer.");
+    ).rejects.toThrow("command.responseMaxBytes must be a positive integer.");
   });
 
   it("ignores deferred quest config knobs while allowing chronicler runtime config and proactive", async () => {

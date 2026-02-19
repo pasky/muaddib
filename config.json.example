@@ -153,7 +153,7 @@
         "output": " No markdown."
       },
       "command": {
-        "responseMaxChars": 700,
+        "responseMaxBytes": 700,
         "ignoreUsers": [],
         "channelModes": {
           "testserver##random": "classifier",
@@ -174,7 +174,7 @@
       },
       "command": {
         "historySize": 40,
-        "responseMaxChars": 1600,
+        "responseMaxBytes": 1600,
         "debounce": 3,
         "ignoreUsers": []
       },
@@ -202,7 +202,7 @@
       },
       "command": {
         "historySize": 40,
-        "responseMaxChars": 2600,
+        "responseMaxBytes": 2600,
         "debounce": 3,
         "ignoreUsers": []
       },

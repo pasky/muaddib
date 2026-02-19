@@ -915,7 +915,7 @@ function parseResponseMaxBytes(value: unknown): number {
 
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error("command.response_max_bytes must be a positive integer.");
+    throw new Error("command.responseMaxBytes must be a positive integer.");
   }
 
   return parsed;

@@ -194,7 +194,7 @@ describe("runCliMessageMode", () => {
     expect(systemLog).not.toContain("rooms.common.proactive");
   });
 
-  it("fails fast when command.response_max_bytes is invalid", async () => {
+  it("fails fast when command.responseMaxBytes is invalid", async () => {
     const dir = await mkdtemp(join(tmpdir(), "muaddib-cli-"));
     tempDirs.push(dir);
 
@@ -234,7 +234,7 @@ describe("runCliMessageMode", () => {
         configPath,
         message: "!s hi",
       }),
-    ).rejects.toThrow("command.response_max_bytes must be a positive integer.");
+    ).rejects.toThrow("command.responseMaxBytes must be a positive integer.");
   });
 
   it("fails fast when agent.refusalFallbackModel is malformed", async () => {
