@@ -349,9 +349,9 @@ export function createDefaultExecuteCodeExecutor(
         try {
           const suffix = suffixFromFilename(fileResult.filename);
           const url = await writeArtifactBytes(options, fileResult.data, suffix);
-          messages.push(`**Generated image:** ${url}`);
+          messages.push(`**Generated image:** ${url} (you must mention to the user explicitly)`);
         } catch (err) {
-          options.logger?.info(`Failed to upload generated image ${imgPath}: ${err}`);
+          options.logger?.info(`Failed to download generated image ${imgPath}: ${err}`);
         }
       }
     }
@@ -379,9 +379,9 @@ export function createDefaultExecuteCodeExecutor(
       try {
         const suffix = suffixFromFilename(fileResult.filename);
         const url = await writeArtifactBytes(options, fileResult.data, suffix);
-        messages.push(`**Downloaded file (${fileResult.filename}):** ${url}`);
+        messages.push(`**Downloaded file (${fileResult.filename}):** ${url} (you must mention to the user explicitly)`);
       } catch (err) {
-        messages.push(`**Error uploading ${fileResult.filename}:** ${err}`);
+        messages.push(`**Error downloading ${fileResult.filename}:** ${err}`);
       }
     }
 

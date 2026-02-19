@@ -155,7 +155,7 @@ export function createDefaultGenerateImageExecutor(
       });
     }
 
-    const summaryText = images.map((entry) => `Generated image: ${entry.artifactUrl}`).join("\n");
+    const summaryText = images.map((entry) => `Generated image: ${entry.artifactUrl} (you must mention to the user explicitly)`).join("\n");
 
     return {
       summaryText,
