@@ -207,9 +207,14 @@ export function createDefaultExecuteCodeExecutor(
   }
 
   /**
-   * Execute a command on the sprite, capturing stdout/stderr and exit code.
-   * The JS SDK's exec() throws ExecError on non-zero exit which already
-   * includes stdout/stderr — no need for the Python capture_on_error wrapper.
+   * Execute a command on the sprite via `execFile("bash", ["-c", cmd])`.
+   *
+   * We always route through bash explicitly because the Sprites SDK's
+   * `exec(string)` tokenises by splitting on spaces with NO quote handling —
+   * single-quoted shell words are split apart, pipes and redirects are passed
+   * as literal arguments, and nothing works.  Using `execFile` with separate
+   * argv bypasses that tokeniser entirely: bash receives the full command
+   * string as a single argument and interprets all shell features correctly.
    */
   async function spriteExec(
     sp: Sprite,
@@ -218,8 +223,10 @@ export function createDefaultExecuteCodeExecutor(
   ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
     const ExecError = await getExecError();
 
-    // Wrap with `timeout` command when a timeout is specified, so that
-    // long-running sandbox commands are killed server-side.
+    // Wrap with `timeout` when a timeout is specified so long-running sandbox
+    // commands are killed server-side.  The inner bash -c uses shellQuote so
+    // that the outer bash (invoked via execFile) can re-parse the command
+    // string with correct quote handling.
     let cmd = command;
     if (execOptions?.timeoutMs) {
       const secs = Math.max(0.1, execOptions.timeoutMs / 1000);
@@ -227,7 +234,7 @@ export function createDefaultExecuteCodeExecutor(
     }
 
     try {
-      const result = await sp.exec(cmd, {
+      const result = await sp.execFile("bash", ["-c", cmd], {
         cwd: execOptions?.cwd,
       });
       return {

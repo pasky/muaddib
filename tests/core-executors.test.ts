@@ -35,12 +35,13 @@ class MockSprite {
     this.name = name;
   }
 
-  async exec(
-    command: string,
+  async execFile(
+    file: string,
+    args: string[] = [],
     options?: { cwd?: string },
   ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
     const cwd = options?.cwd ?? "/tmp";
-    const result = spawnSync("bash", ["-c", command], {
+    const result = spawnSync(file, args, {
       cwd,
       timeout: 10_000,
       encoding: "utf-8",
@@ -57,6 +58,13 @@ class MockSprite {
       });
     }
     return { stdout, stderr, exitCode: 0 };
+  }
+
+  async exec(
+    command: string,
+    options?: { cwd?: string },
+  ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+    return this.execFile("bash", ["-c", command], options);
   }
 }
 
