@@ -220,15 +220,6 @@ function shQuote(value: string): string {
   return "'" + value.replace(/'/g, "'\\''") + "'";
 }
 
-function sanitizeEnv(env?: NodeJS.ProcessEnv): Record<string, string> | undefined {
-  if (!env) return undefined;
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(env)) {
-    if (typeof v === "string") out[k] = v;
-  }
-  return out;
-}
-
 // ── VM operations factories ────────────────────────────────────────────────
 
 function createVmReadOps(getVm: () => Promise<VM>): ReadOperations {
@@ -292,7 +283,7 @@ function createVmEditOps(getVm: () => Promise<VM>): EditOperations {
 
 function createVmBashOps(getVm: () => Promise<VM>, defaultTimeoutSeconds: number): BashOperations {
   return {
-    exec: async (command, cwd, { onData, signal, timeout, env }) => {
+    exec: async (command, cwd, { onData, signal, timeout }) => {
       const vm = await getVm();
 
       const ac = new AbortController();
@@ -319,7 +310,6 @@ function createVmBashOps(getVm: () => Promise<VM>, defaultTimeoutSeconds: number
         const proc = vm.exec(["/bin/bash", "-lc", command], {
           cwd,
           signal: ac.signal,
-          env: sanitizeEnv(env),
           stdout: "pipe",
           stderr: "pipe",
         });

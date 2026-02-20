@@ -227,3 +227,46 @@ describe("checkpointGondolinArc — concurrent checkpoint serialization", () => 
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("no active sessions registered"));
   });
 });
+
+// ── env isolation ──────────────────────────────────────────────────────────
+
+describe("gondolin bash tool — env isolation", () => {
+  it("does not forward host process.env into vm.exec", async () => {
+    // Fake proc supports both: `for await (const chunk of proc.output())` and `await proc`
+    function makeProc() {
+      return Object.assign(Promise.resolve({ ok: true, exitCode: 0, stdout: "", stderr: "" }), {
+        output: async function* () { /* no chunks */ },
+      });
+    }
+
+    const fakeVm = {
+      exec: vi.fn(() => makeProc()),
+      checkpoint: vi.fn(async (_path: string) => {}),
+    };
+
+    // Register the fake VM so ensureVm returns it
+    const gondolin = await import("@earendil-works/gondolin");
+    // @ts-expect-error test-only
+    gondolin.__fakeVms.set("__next", fakeVm);
+
+    const { tools } = createGondolinTools({ arc: "env-test-arc", config: gondolinConfig });
+    const bashTool = tools.find((t) => t.name === "bash")!;
+
+    // Set a sentinel in the host env that must NOT reach the VM
+    process.env.__MUADDIB_ENV_LEAK_TEST = "secret";
+
+    try {
+      await bashTool.execute("id", { command: "echo hi", timeout: 5 }, new AbortController().signal, () => {});
+    } finally {
+      delete process.env.__MUADDIB_ENV_LEAK_TEST;
+    }
+
+    // Find the vm.exec call that ran the bash command (not mkdir)
+    const allCalls = fakeVm.exec.mock.calls as unknown as [string[], Record<string, unknown>][];
+    const bashCall = allCalls.find(([cmdArr]) => cmdArr[0] === "/bin/bash");
+    expect(bashCall).toBeDefined();
+
+    const execOptions = bashCall![1];
+    expect(execOptions).not.toHaveProperty("env");
+  });
+});
