@@ -106,18 +106,18 @@ export function createDefaultOracleExecutor(
     const toolSet = invocation
       ? invocation.buildTools(invocation.toolOptions)
       : { tools: [] };
-    const oracleTools = toolSet.tools.filter(
-      (tool) => !ORACLE_EXCLUDED_TOOLS.has(tool.name),
-    );
+    const oracleToolSet: ToolSet = {
+      tools: toolSet.tools.filter((tool) => !ORACLE_EXCLUDED_TOOLS.has(tool.name)),
+      dispose: toolSet.dispose,
+    };
 
     const runner = new SessionRunner({
       model: configuredModel,
       systemPrompt,
-      tools: oracleTools,
+      toolSet: oracleToolSet,
       modelAdapter,
       authStorage: options.authStorage,
       maxIterations: options.toolsConfig?.oracle?.maxIterations,
-      onSessionEnd: toolSet.dispose,
       logger,
     });
 

@@ -164,8 +164,8 @@ describe("SessionRunner", () => {
     expect(agent.setModel).toHaveBeenCalledWith({ provider: "anthropic", id: "claude-sonnet-4" });
   });
 
-  it("calls onSessionEnd after successful prompt", async () => {
-    const onSessionEnd = vi.fn(async () => {});
+  it("calls toolSet.dispose after successful prompt", async () => {
+    const dispose = vi.fn(async () => {});
     const session = {
       messages: [
         {
@@ -192,15 +192,15 @@ describe("SessionRunner", () => {
       authStorage: AuthStorage.inMemory(),
       logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
       modelAdapter: { resolve: () => ({ spec: { provider: "openai", modelId: "gpt-4o-mini" }, model: {} }) } as any,
-      onSessionEnd,
+      toolSet: { tools: [], dispose },
     });
 
     await runner.prompt("hello");
-    expect(onSessionEnd).toHaveBeenCalledTimes(1);
+    expect(dispose).toHaveBeenCalledTimes(1);
   });
 
-  it("calls onSessionEnd even when prompt throws", async () => {
-    const onSessionEnd = vi.fn(async () => {});
+  it("calls toolSet.dispose even when prompt throws", async () => {
+    const dispose = vi.fn(async () => {});
     const session = {
       messages: [] as any[],
       subscribe: vi.fn(() => vi.fn()),
@@ -220,11 +220,11 @@ describe("SessionRunner", () => {
       authStorage: AuthStorage.inMemory(),
       logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
       modelAdapter: { resolve: () => ({ spec: { provider: "openai", modelId: "gpt-4o-mini" }, model: {} }) } as any,
-      onSessionEnd,
+      toolSet: { tools: [], dispose },
     });
 
     await expect(runner.prompt("hello")).rejects.toThrow("network failure");
-    expect(onSessionEnd).toHaveBeenCalledTimes(1);
+    expect(dispose).toHaveBeenCalledTimes(1);
   });
 
   it("throws when completion remains empty after retries", async () => {

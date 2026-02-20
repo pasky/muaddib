@@ -8,7 +8,7 @@
  * returns a result. All queue/session lifecycle stays in message-handler.
  */
 
-import type { Agent, AgentTool, ThinkingLevel } from "@mariozechner/pi-agent-core";
+import type { Agent, ThinkingLevel } from "@mariozechner/pi-agent-core";
 import { type Usage } from "@mariozechner/pi-ai";
 
 import { messageText } from "../../utils/index.js";
@@ -59,14 +59,13 @@ export interface CommandExecutionResult {
 export interface CommandRunnerFactoryInput {
   model: string;
   systemPrompt: string;
-  tools: AgentTool<any>[];
+  toolSet: ToolSet;
   metaReminder?: string;
   progressThresholdSeconds?: number;
   progressMinIntervalSeconds?: number;
   onStatusMessage?: (text: string) => void | Promise<void>;
   logger?: Logger;
   onAgentCreated?: (agent: Agent) => void;
-  onSessionEnd?: () => Promise<void>;
 }
 
 export type CommandRunnerFactory = (input: CommandRunnerFactoryInput) => {
@@ -150,7 +149,7 @@ export class CommandExecutor {
         new SessionRunner({
           model: input.model,
           systemPrompt: input.systemPrompt,
-          tools: input.tools,
+          toolSet: input.toolSet,
           modelAdapter: this.modelAdapter,
           authStorage: runtime.authStorage,
           maxIterations: agentConfig.maxIterations,
@@ -161,7 +160,6 @@ export class CommandExecutor {
           onStatusMessage: input.onStatusMessage,
           logger: input.logger,
           onAgentCreated: input.onAgentCreated,
-          onSessionEnd: input.onSessionEnd,
         }));
 
     this.rateLimiter =
@@ -369,26 +367,25 @@ export class CommandExecutor {
       ...selectedContext.slice(0, -1),
     ];
 
-    const { tools, dispose } = this.selectTools(message, resolved.runtime.allowedTools, runnerContext, sendResponse);
+    const toolSet = this.selectTools(message, resolved.runtime.allowedTools, runnerContext, sendResponse);
 
     const progressConfig = this.agentConfig.progress;
     const runner = this.runnerFactory({
       model: modelSpec,
       systemPrompt,
-      tools,
+      toolSet,
       metaReminder: modeConfig.promptReminder,
       progressThresholdSeconds: progressConfig?.thresholdSeconds,
       progressMinIntervalSeconds: progressConfig?.minIntervalSeconds,
       onStatusMessage: sendResponse,
       logger,
       onAgentCreated,
-      onSessionEnd: dispose,
     });
 
     const queryTimestamp = formatCurrentTime().slice(-5); // HH:MM in UTC, matching history format
     const queryContent = message.originalContent ?? resolved.queryText;
     const { responseText, usage, toolCallsCount } = await this.invokeAndPostProcess(
-      runner, message, `[${queryTimestamp}] <${message.nick}> ${queryContent}`, runnerContext, tools, {
+      runner, message, `[${queryTimestamp}] <${message.nick}> ${queryContent}`, runnerContext, toolSet.tools, {
         reasoningEffort: resolved.runtime.reasoningEffort,
         visionModel: resolved.runtime.visionModel ?? undefined,
       },
@@ -440,20 +437,19 @@ export class CommandExecutor {
       ...context.slice(0, -1),
     ];
 
-    const { tools, dispose } = this.selectTools(message, classifiedRuntime.allowedTools, runnerContext, sendResponse);
+    const toolSet = this.selectTools(message, classifiedRuntime.allowedTools, runnerContext, sendResponse);
 
     const proactiveProgressConfig = this.agentConfig.progress;
     const runner = this.runnerFactory({
       model: modelSpec,
       systemPrompt,
-      tools,
+      toolSet,
       metaReminder: this.commandConfig.modes.serious?.promptReminder,
       progressThresholdSeconds: proactiveProgressConfig?.thresholdSeconds,
       progressMinIntervalSeconds: proactiveProgressConfig?.minIntervalSeconds,
       onStatusMessage: sendResponse,
       logger,
       onAgentCreated,
-      onSessionEnd: dispose,
     });
 
     const lastMessage = context[context.length - 1];
@@ -461,7 +457,7 @@ export class CommandExecutor {
 
     let result: PromptRunResult;
     try {
-      result = await this.invokeAndPostProcess(runner, message, queryText, runnerContext, tools, {
+      result = await this.invokeAndPostProcess(runner, message, queryText, runnerContext, toolSet.tools, {
         reasoningEffort: classifiedRuntime.reasoningEffort,
       });
     } catch (error) {

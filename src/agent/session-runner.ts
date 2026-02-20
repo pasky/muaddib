@@ -10,6 +10,7 @@ import {
   type RunnerLogger,
 } from "./session-factory.js";
 import { compactJson, emptyUsage, safeJson, truncateForDebug } from "./debug-utils.js";
+import type { ToolSet } from "./tools/types.js";
 
 const DEFAULT_EMPTY_COMPLETION_RETRY_PROMPT =
   "<meta>No valid text or tool use found in response. Please try again.</meta>";
@@ -17,7 +18,12 @@ const DEFAULT_EMPTY_COMPLETION_RETRY_PROMPT =
 export interface SessionRunnerOptions {
   model: string;
   systemPrompt: string;
-  tools?: AgentTool<any>[];
+  /**
+   * Tools and their session-end cleanup.  SessionRunner extracts the tool list
+   * for the agent and automatically calls toolSet.dispose() (if present) at the
+   * end of every prompt() call — whether it succeeds or throws.
+   */
+  toolSet?: ToolSet;
   modelAdapter: PiAiModelAdapter;
   authStorage: AuthStorage;
   maxIterations?: number;
@@ -29,11 +35,6 @@ export interface SessionRunnerOptions {
   progressMinIntervalSeconds?: number;
   logger?: RunnerLogger;
   onAgentCreated?: (agent: Agent) => void;
-  /**
-   * Called after every prompt() call, whether it succeeds or throws.
-   * Use for session-scoped cleanup (e.g. Gondolin VM refcount decrement).
-   */
-  onSessionEnd?: () => Promise<void>;
 }
 
 export interface PromptOptions {
@@ -71,7 +72,7 @@ export class SessionRunner {
   constructor(options: SessionRunnerOptions) {
     this.options = options;
     this.model = options.model;
-    this.tools = options.tools ?? [];
+    this.tools = options.toolSet?.tools ?? [];
     this.modelAdapter = options.modelAdapter;
     this.logger = options.logger ?? console;
     this.emptyCompletionRetryPrompt =
@@ -190,7 +191,7 @@ export class SessionRunner {
       };
     } finally {
       unsubscribe();
-      await this.options.onSessionEnd?.();
+      await this.options.toolSet?.dispose?.();
     }
   }
 

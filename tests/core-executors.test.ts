@@ -503,7 +503,7 @@ describe("oracle executor with invocation context", () => {
     expect(buildTools).toHaveBeenCalledWith(toolOptions);
 
     // Verify excluded tools were filtered out
-    const toolNames = oracleMock.capturedOptions.tools.map((t: any) => t.name);
+    const toolNames = oracleMock.capturedOptions.toolSet.tools.map((t: any) => t.name);
     expect(toolNames).toContain("web_search");
     expect(toolNames).toContain("execute_code");
     expect(toolNames).toContain("visit_webpage");
@@ -608,7 +608,7 @@ describe("oracle executor with invocation context", () => {
     const result = await executor({ query: "no context" });
 
     expect(result).toBe("bare answer");
-    expect(oracleMock.capturedOptions.tools).toEqual([]);
+    expect(oracleMock.capturedOptions.toolSet.tools).toEqual([]);
     expect(oracleMock.promptFn).toHaveBeenCalledWith("no context", {
       contextMessages: undefined,
       thinkingLevel: "high",

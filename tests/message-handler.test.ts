@@ -699,7 +699,7 @@ describe("RoomMessageHandler", () => {
       history,
       classifyMode: async () => "EASY_SERIOUS",
       runnerFactory: (input) => {
-        seenToolNames.push(...input.tools.map((tool) => tool.name));
+        seenToolNames.push(...input.toolSet.tools.map((tool) => tool.name));
         return {
           prompt: async () => makeRunnerResult("done"),
         };
@@ -735,7 +735,7 @@ describe("RoomMessageHandler", () => {
       classifyMode: async () => "EASY_SERIOUS",
       runnerFactory: (input) => {
         // Find the oracle tool among the tools passed to the runner
-        oracleTool = input.tools.find((t) => t.name === "oracle");
+        oracleTool = input.toolSet.tools.find((t) => t.name === "oracle");
         return {
           prompt: async (_prompt: string, opts?: { contextMessages?: any[] }) => {
             seenContextMessages = opts?.contextMessages ?? [];
