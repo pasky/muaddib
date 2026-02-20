@@ -55,6 +55,8 @@ const vmCache = new Map<string, VM>();
 const vmCacheLocks = new Map<string, Promise<VM>>();
 /** Active session count per arcId — prevents checkpointing while another session is still running. */
 const vmActiveSessions = new Map<string, number>();
+/** In-flight checkpoint promise per arcId — prevents concurrent writes to the same .qcow2 file. */
+const vmCheckpointInProgress = new Map<string, Promise<void>>();
 
 async function ensureVm(
   arc: string,
@@ -390,6 +392,7 @@ export function resetGondolinVmCache(): void {
   vmCache.clear();
   vmCacheLocks.clear();
   vmActiveSessions.clear();
+  vmCheckpointInProgress.clear();
 }
 
 /**
@@ -408,7 +411,13 @@ export async function checkpointGondolinArc(
   const arcId = normalizeArcId(arc);
 
   // Decrement the active session counter for this arc.
-  const remaining = Math.max(0, (vmActiveSessions.get(arcId) ?? 0) - 1);
+  const current = vmActiveSessions.get(arcId) ?? 0;
+  if (current <= 0) {
+    // More checkpointGondolinArc calls than createGondolinTools — programming error.
+    logger?.warn(`Gondolin arc ${arcId}: checkpointGondolinArc called with no active sessions registered; ignoring`);
+    return;
+  }
+  const remaining = current - 1;
   vmActiveSessions.set(arcId, remaining);
 
   if (remaining > 0) {
@@ -420,18 +429,35 @@ export async function checkpointGondolinArc(
   const vm = vmCache.get(arcId);
   if (!vm) return;
 
+  // Serialize concurrent checkpoint attempts for the same arc.  This can only
+  // be reached if the caller somehow triggers two simultaneous end-of-session
+  // paths (e.g. a retry after a transient error).  Without this guard both
+  // calls would race to overwrite the same .qcow2 file.
+  const inFlight = vmCheckpointInProgress.get(arcId);
+  if (inFlight) {
+    logger?.debug(`Gondolin arc ${arcId}: checkpoint already in progress, waiting`);
+    return inFlight;
+  }
+
   const checkpointPath = getArcCheckpointPath(arc);
 
-  try {
-    // Clean ephemeral session dirs from VM /tmp before checkpointing
-    await vm.exec(["/bin/sh", "-c", "rm -rf /tmp/session-*"]);
-    // Stop the VM and materialize the disk overlay as a checkpoint
-    await vm.checkpoint(checkpointPath);
-    vmCache.delete(arcId);
-    logger?.info(`Gondolin VM checkpointed for arc ${arcId}: ${checkpointPath}`);
-  } catch (err) {
-    logger?.error(`Gondolin checkpoint failed for arc ${arcId}`, String(err));
-    // Remove from cache regardless — a broken VM should not be reused
-    vmCache.delete(arcId);
-  }
+  const checkpointPromise = (async () => {
+    try {
+      // Clean ephemeral session dirs from VM /tmp before checkpointing
+      await vm.exec(["/bin/sh", "-c", "rm -rf /tmp/session-*"]);
+      // Stop the VM and materialize the disk overlay as a checkpoint
+      await vm.checkpoint(checkpointPath);
+      vmCache.delete(arcId);
+      logger?.info(`Gondolin VM checkpointed for arc ${arcId}: ${checkpointPath}`);
+    } catch (err) {
+      logger?.error(`Gondolin checkpoint failed for arc ${arcId}`, String(err));
+      // Remove from cache regardless — a broken VM should not be reused
+      vmCache.delete(arcId);
+    } finally {
+      vmCheckpointInProgress.delete(arcId);
+    }
+  })();
+
+  vmCheckpointInProgress.set(arcId, checkpointPromise);
+  return checkpointPromise;
 }
