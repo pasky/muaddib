@@ -514,19 +514,23 @@ export class CommandExecutor {
     tools: MuaddibTool[],
     opts: { reasoningEffort: string; visionModel?: string },
   ): Promise<PromptRunResult> {
-    const agentResult = await runner.prompt(queryText, {
-      contextMessages,
-      thinkingLevel: normalizeThinkingLevel(opts.reasoningEffort),
-      visionFallbackModel: opts.visionModel,
-      refusalFallbackModel: this.refusalFallbackModel ?? undefined,
-    });
+    const agentResult = await runner
+      .prompt(queryText, {
+        contextMessages,
+        thinkingLevel: normalizeThinkingLevel(opts.reasoningEffort),
+        visionFallbackModel: opts.visionModel,
+        refusalFallbackModel: this.refusalFallbackModel ?? undefined,
+      })
+      .finally(async () => {
+        // Always checkpoint the Gondolin VM, even if runner.prompt() throws — prevents
+        // refcount leaks that would defer checkpointing forever.
+        if (this.agentConfig.tools?.gondolin?.enabled) {
+          await checkpointGondolinArc(roomArc(message), this.logger);
+        }
+      });
 
     await this.persistGeneratedToolSummary(message, agentResult, tools);
     agentResult.session?.dispose();
-
-    if (this.agentConfig.tools?.gondolin?.enabled) {
-      await checkpointGondolinArc(roomArc(message), this.logger);
-    }
 
     let responseText = agentResult.text;
     if (agentResult.refusalFallbackActivated && agentResult.refusalFallbackModel) {

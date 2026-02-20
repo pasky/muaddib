@@ -8,6 +8,7 @@ import type { Message } from "@mariozechner/pi-ai";
 import type { RunnerLogger } from "../session-factory.js";
 import type { ToolContext } from "./types.js";
 import { stringifyError, toConfiguredString } from "../../utils/index.js";
+import { checkpointGondolinArc } from "./gondolin-tools.js";
 
 export interface OracleInput {
   query: string;
@@ -109,6 +110,12 @@ export function createDefaultOracleExecutor(
       (tool) => !ORACLE_EXCLUDED_TOOLS.has(tool.name),
     );
 
+    // If Gondolin tools were included in the oracle's tool set, checkpointGondolinArc must be
+    // called after the oracle runner exits (success or failure) to balance the refcount increment
+    // made by createGondolinTools() inside buildTools().
+    const gondolinEnabled = !!(invocation && invocation.toolOptions.toolsConfig?.gondolin?.enabled);
+    const oracleArc = invocation?.toolOptions.arc;
+
     const runner = new SessionRunner({
       model: configuredModel,
       systemPrompt,
@@ -136,6 +143,10 @@ export function createDefaultOracleExecutor(
       }
       logger.info(`${ORACLE_LOG_SEPARATOR} Oracle failed: ${message}`);
       throw error;
+    } finally {
+      if (gondolinEnabled && oracleArc) {
+        await checkpointGondolinArc(oracleArc, logger);
+      }
     }
   };
 }

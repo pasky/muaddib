@@ -65,6 +65,16 @@ async function ensureVm(
 ): Promise<VM> {
   const arcId = normalizeArcId(arc);
 
+  // If a checkpoint is in progress for this arc, wait for it to complete before
+  // creating or returning a VM.  The checkpointing operation removes the VM from
+  // vmCache immediately, so after the await the cache miss below will trigger a
+  // fresh VM creation — preventing callers from operating on a VM that is being
+  // shut down and checkpointed.
+  const pendingCheckpoint = vmCheckpointInProgress.get(arcId);
+  if (pendingCheckpoint) {
+    await pendingCheckpoint;
+  }
+
   const cached = vmCache.get(arcId);
   if (cached) return cached;
 
@@ -441,18 +451,21 @@ export async function checkpointGondolinArc(
 
   const checkpointPath = getArcCheckpointPath(arc);
 
+  // Remove from cache immediately so concurrent ensureVm() calls for this arc
+  // don't reuse a VM that is being shut down / checkpointed.  ensureVm() waits
+  // for vmCheckpointInProgress to settle before creating a replacement VM.
+  vmCache.delete(arcId);
+
   const checkpointPromise = (async () => {
     try {
       // Clean ephemeral session dirs from VM /tmp before checkpointing
       await vm.exec(["/bin/sh", "-c", "rm -rf /tmp/session-*"]);
       // Stop the VM and materialize the disk overlay as a checkpoint
       await vm.checkpoint(checkpointPath);
-      vmCache.delete(arcId);
       logger?.info(`Gondolin VM checkpointed for arc ${arcId}: ${checkpointPath}`);
     } catch (err) {
       logger?.error(`Gondolin checkpoint failed for arc ${arcId}`, String(err));
-      // Remove from cache regardless — a broken VM should not be reused
-      vmCache.delete(arcId);
+      // VM was already removed from cache above; nothing more to do.
     } finally {
       vmCheckpointInProgress.delete(arcId);
     }

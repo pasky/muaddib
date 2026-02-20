@@ -597,4 +597,49 @@ describe("gondolin session ref-counting", () => {
     await checkpointGondolinArc("arc-two", logger);
     expect(logger.debug).not.toHaveBeenCalledWith(expect.stringContaining("still active"));
   });
+
+  // ── Issue #3: oracle nested sessions create and balance Gondolin refcounts ──
+
+  it("oracle-style nested session: parent + oracle both increment, both checkpoints needed", async () => {
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    // Parent command session opens Gondolin (refcount = 1)
+    createGondolinTools({ arc: "test-arc", config: gondolinConfig, logger });
+    // Oracle nested session also opens Gondolin for the same arc (refcount = 2)
+    createGondolinTools({ arc: "test-arc", config: gondolinConfig, logger });
+
+    // Oracle finishes and calls checkpointGondolinArc — should defer (parent still active)
+    await checkpointGondolinArc("test-arc", logger);
+    expect(logger.debug).toHaveBeenCalledWith(
+      expect.stringContaining("1 session(s) still active"),
+    );
+
+    // Parent finishes and calls checkpointGondolinArc — refcount hits 0, checkpoint triggered
+    await checkpointGondolinArc("test-arc", logger);
+    // No deferred log for the second call (no more active sessions)
+    const deferCalls = (logger.debug as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (args: unknown[]) => typeof args[0] === "string" && args[0].includes("still active"),
+    );
+    expect(deferCalls).toHaveLength(1); // Only the first oracle call deferred
+  });
+
+  // ── Issue #2: extra checkpoint call (e.g. error path) warns, doesn't corrupt state ──
+
+  it("extra checkpointGondolinArc call (more than createGondolinTools) warns and is a no-op", async () => {
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    createGondolinTools({ arc: "test-arc", config: gondolinConfig, logger });
+
+    // Normal checkpoint call — balances the one createGondolinTools above
+    await checkpointGondolinArc("test-arc", logger);
+
+    // Extra call (simulates a finally block running after a prior success-path checkpoint)
+    await checkpointGondolinArc("test-arc", logger);
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("checkpointGondolinArc called with no active sessions"),
+    );
+    // Should not throw and should not attempt to checkpoint again
+    expect(logger.error).not.toHaveBeenCalled();
+  });
 });
