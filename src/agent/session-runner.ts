@@ -14,6 +14,11 @@ import { compactJson, emptyUsage, safeJson, truncateForDebug } from "./debug-uti
 const DEFAULT_EMPTY_COMPLETION_RETRY_PROMPT =
   "<meta>No valid text or tool use found in response. Please try again.</meta>";
 
+const MESSAGE_DEBUG_JSON_OPTIONS = {
+  preserveContentText: true,
+  preserveContentThinking: true,
+} as const;
+
 export interface SessionRunnerOptions {
   model: string;
   systemPrompt: string;
@@ -115,7 +120,10 @@ export class SessionRunner {
       if (event.type === "message_end") {
         const message = event.message as { role?: string };
         if (message.role === "assistant") {
-          this.logger.debug("llm_io response agent_stream", safeJson(renderMessageForDebug(event.message, this.llmDebugMaxChars), this.llmDebugMaxChars));
+          this.logger.debug(
+            "llm_io response agent_stream",
+            safeJson(renderMessageForDebug(event.message, this.llmDebugMaxChars), this.llmDebugMaxChars, MESSAGE_DEBUG_JSON_OPTIONS),
+          );
         }
         return;
       }
@@ -190,7 +198,7 @@ export class SessionRunner {
 
   private logLlmIo(stage: string, messages: readonly unknown[]): void {
     const rendered = messages.map((message) => renderMessageForDebug(message, this.llmDebugMaxChars));
-    this.logger.debug(`llm_io ${stage}`, safeJson(rendered, this.llmDebugMaxChars));
+    this.logger.debug(`llm_io ${stage}`, safeJson(rendered, this.llmDebugMaxChars, MESSAGE_DEBUG_JSON_OPTIONS));
   }
 
   /**
@@ -284,19 +292,16 @@ function renderMessageForDebug(message: unknown, maxChars: number): Record<strin
   }
 
   const record = message as Record<string, unknown>;
-  const role = typeof record.role === "string" ? record.role : "unknown";
-
-  return {
-    role,
-    timestamp: record.timestamp,
-    toolCallId: record.toolCallId,
-    toolName: record.toolName,
-    isError: record.isError,
-    content: renderContentForDebug(record.content, maxChars),
-    stopReason: record.stopReason,
-    provider: record.provider,
-    model: record.model,
+  const rendered: Record<string, unknown> = {
+    ...record,
+    role: typeof record.role === "string" ? record.role : "unknown",
   };
+
+  if ("content" in record) {
+    rendered.content = renderContentForDebug(record.content, maxChars);
+  }
+
+  return rendered;
 }
 
 function renderContentForDebug(content: unknown, maxChars: number): unknown {
@@ -318,23 +323,23 @@ function renderContentForDebug(content: unknown, maxChars: number): unknown {
 
     if (type === "text") {
       return {
-        type,
+        ...block,
         text: truncateForDebug(String(block.text ?? ""), maxChars),
       };
     }
 
     if (type === "thinking") {
       return {
-        type,
+        ...block,
         thinking: truncateForDebug(String(block.thinking ?? ""), maxChars),
       };
     }
 
     if (type === "image") {
       const data = typeof block.data === "string" ? block.data : "";
+      const { data: _data, ...rest } = block;
       return {
-        type,
-        mimeType: block.mimeType,
+        ...rest,
         dataLength: data.length,
         dataPreview: truncateForDebug(data, Math.min(120, maxChars)),
       };
@@ -342,10 +347,7 @@ function renderContentForDebug(content: unknown, maxChars: number): unknown {
 
     if (type === "toolCall") {
       return {
-        type,
-        id: block.id,
-        name: block.name,
-        arguments: block.arguments,
+        ...block,
       };
     }
 

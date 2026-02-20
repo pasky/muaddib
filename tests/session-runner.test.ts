@@ -164,6 +164,104 @@ describe("SessionRunner", () => {
     expect(agent.setModel).toHaveBeenCalledWith({ provider: "anthropic", id: "claude-sonnet-4" });
   });
 
+  it("logs full assistant metadata and preserves long content text/thinking in message_end debug", async () => {
+    const callbacks: Array<(event: any) => void> = [];
+    const unsubscribe = vi.fn();
+    const longText = "L".repeat(5000);
+    const longThinking = "T".repeat(5000);
+    const assistantMessage = {
+      role: "assistant",
+      content: [
+        { type: "text", text: longText, textSignature: "sig-text" },
+        { type: "thinking", thinking: longThinking, thinkingSignature: "sig-thinking" },
+        {
+          type: "toolCall",
+          id: "tool-1",
+          name: "web_search",
+          arguments: { query: "muaddib" },
+          thoughtSignature: "sig-tool",
+        },
+      ],
+      usage: makeUsage(3),
+      stopReason: "length",
+      api: "openai-responses",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      errorMessage: "hit token limit",
+      timestamp: 123,
+      extraField: { nested: true },
+    };
+
+    const session = {
+      messages: [] as any[],
+      subscribe: vi.fn((callback: (event: any) => void) => {
+        callbacks.push(callback);
+        return unsubscribe;
+      }),
+      prompt: vi.fn(async () => {
+        session.messages.push(assistantMessage);
+        callbacks.forEach((cb) => cb({ type: "turn_end" }));
+        callbacks.forEach((cb) => cb({ type: "message_end", message: assistantMessage }));
+      }),
+    };
+
+    mockCreateAgentSessionForInvocation.mockReturnValue({
+      session,
+      agent: { setModel: vi.fn() },
+      ensureProviderKey: vi.fn(async () => {}),
+      getVisionFallbackActivated: () => false,
+    });
+
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const runner = new SessionRunner({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "sys",
+      authStorage: AuthStorage.inMemory(),
+      logger,
+      llmDebugMaxChars: 20_000,
+      modelAdapter: {
+        resolve: (spec: string) => ({
+          spec: { provider: spec.split(":")[0], modelId: spec.split(":")[1] },
+          model: { provider: spec.split(":")[0], id: spec.split(":")[1] },
+        }),
+      } as any,
+    });
+
+    await runner.prompt("hello");
+
+    const responseLogCall = logger.debug.mock.calls.find(
+      ([message]) => message === "llm_io response agent_stream",
+    );
+    expect(responseLogCall).toBeDefined();
+
+    const payload = JSON.parse(String(responseLogCall?.[1])) as {
+      api: string;
+      usage: Usage;
+      errorMessage: string;
+      extraField: { nested: boolean };
+      content: Array<{
+        type: string;
+        text?: string;
+        textSignature?: string;
+        thinking?: string;
+        thinkingSignature?: string;
+        thoughtSignature?: string;
+      }>;
+    };
+
+    expect(payload.api).toBe("openai-responses");
+    expect(payload.usage.totalTokens).toBe(15);
+    expect(payload.usage.cost.total).toBe(3);
+    expect(payload.errorMessage).toBe("hit token limit");
+    expect(payload.extraField).toEqual({ nested: true });
+    expect(payload.content[0].text).toBe(longText);
+    expect(payload.content[0].textSignature).toBe("sig-text");
+    expect(payload.content[1].thinking).toBe(longThinking);
+    expect(payload.content[1].thinkingSignature).toBe("sig-thinking");
+    expect(payload.content[2].thoughtSignature).toBe("sig-tool");
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
   it("throws when completion remains empty after retries", async () => {
     vi.useFakeTimers();
     try {
