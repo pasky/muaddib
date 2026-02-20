@@ -55,13 +55,7 @@ export interface GondolinConfig {
    * Default: "synthetic".
    */
   dnsMode?: "open" | "trusted" | "synthetic";
-  /**
-   * Maximum buffered upstream HTTP response body size in bytes.
-   * Applies primarily when a response hook needs to buffer the full body;
-   * large streaming downloads (pip, apt, git) are generally unaffected.
-   * When unset, gondolin's own default (64 MiB) applies.
-   */
-  maxHttpResponseBodyBytes?: number;
+
 }
 
 /**

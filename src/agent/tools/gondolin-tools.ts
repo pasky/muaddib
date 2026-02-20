@@ -99,9 +99,6 @@ async function ensureVm(
       },
       httpHooks,
       dns: { mode: config.dnsMode ?? "synthetic" },
-      ...(config.maxHttpResponseBodyBytes !== undefined && {
-        maxHttpResponseBodyBytes: config.maxHttpResponseBodyBytes,
-      }),
     };
 
     const checkpointPath = getArcCheckpointPath(arc);
