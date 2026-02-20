@@ -29,6 +29,11 @@ export interface SessionRunnerOptions {
   progressMinIntervalSeconds?: number;
   logger?: RunnerLogger;
   onAgentCreated?: (agent: Agent) => void;
+  /**
+   * Called after every prompt() call, whether it succeeds or throws.
+   * Use for session-scoped cleanup (e.g. Gondolin VM refcount decrement).
+   */
+  onSessionEnd?: () => Promise<void>;
 }
 
 export interface PromptOptions {
@@ -185,6 +190,7 @@ export class SessionRunner {
       };
     } finally {
       unsubscribe();
+      await this.options.onSessionEnd?.();
     }
   }
 

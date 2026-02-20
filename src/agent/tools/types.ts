@@ -9,6 +9,17 @@ import type { Logger } from "../../app/logging.js";
 export type ToolPersistType = "none" | "summary" | "artifact";
 
 /**
+ * Tools returned by a tool-set factory, together with an optional cleanup
+ * callback.  `dispose` is called by SessionRunner at the end of every
+ * prompt() call (success or failure) to release session-scoped resources
+ * such as Gondolin VM refcounts.
+ */
+export interface ToolSet {
+  tools: MuaddibTool[];
+  dispose?: () => Promise<void>;
+}
+
+/**
  * Extension of AgentTool with muaddib-specific metadata.
  * The `persistType` field controls how tool call results are summarised
  * and stored in the chronicle for future recall (matching the Python

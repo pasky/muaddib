@@ -133,7 +133,7 @@ function createQuestStepRunner(options: QuestStepRunnerOptions): QuestStepRunner
     const systemPrompt = `You are an AI agent executing a quest step. Current time: ${new Date().toISOString()}.`;
 
     // Build tools with quest context (currentQuestId enables correct quest tool selection)
-    const tools = createBaselineAgentTools({
+    const { tools, dispose } = createBaselineAgentTools({
       modelAdapter,
       authStorage,
       arc: input.arc,
@@ -153,6 +153,7 @@ function createQuestStepRunner(options: QuestStepRunnerOptions): QuestStepRunner
       progressThresholdSeconds: agentConfig?.progress?.thresholdSeconds,
       progressMinIntervalSeconds: agentConfig?.progress?.minIntervalSeconds,
       logger: log,
+      onSessionEnd: dispose,
     });
 
     const prompt = input.lastState

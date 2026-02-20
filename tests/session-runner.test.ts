@@ -164,6 +164,69 @@ describe("SessionRunner", () => {
     expect(agent.setModel).toHaveBeenCalledWith({ provider: "anthropic", id: "claude-sonnet-4" });
   });
 
+  it("calls onSessionEnd after successful prompt", async () => {
+    const onSessionEnd = vi.fn(async () => {});
+    const session = {
+      messages: [
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "response" }],
+          usage: makeUsage(),
+          stopReason: "stop",
+        },
+      ] as any[],
+      subscribe: vi.fn(() => vi.fn()),
+      prompt: vi.fn(async () => {}),
+    };
+
+    mockCreateAgentSessionForInvocation.mockReturnValue({
+      session,
+      agent: { setModel: vi.fn() },
+      ensureProviderKey: vi.fn(async () => {}),
+      getVisionFallbackActivated: () => false,
+    });
+
+    const runner = new SessionRunner({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "sys",
+      authStorage: AuthStorage.inMemory(),
+      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      modelAdapter: { resolve: () => ({ spec: { provider: "openai", modelId: "gpt-4o-mini" }, model: {} }) } as any,
+      onSessionEnd,
+    });
+
+    await runner.prompt("hello");
+    expect(onSessionEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls onSessionEnd even when prompt throws", async () => {
+    const onSessionEnd = vi.fn(async () => {});
+    const session = {
+      messages: [] as any[],
+      subscribe: vi.fn(() => vi.fn()),
+      prompt: vi.fn(async () => { throw new Error("network failure"); }),
+    };
+
+    mockCreateAgentSessionForInvocation.mockReturnValue({
+      session,
+      agent: { setModel: vi.fn() },
+      ensureProviderKey: vi.fn(async () => {}),
+      getVisionFallbackActivated: () => false,
+    });
+
+    const runner = new SessionRunner({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "sys",
+      authStorage: AuthStorage.inMemory(),
+      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      modelAdapter: { resolve: () => ({ spec: { provider: "openai", modelId: "gpt-4o-mini" }, model: {} }) } as any,
+      onSessionEnd,
+    });
+
+    await expect(runner.prompt("hello")).rejects.toThrow("network failure");
+    expect(onSessionEnd).toHaveBeenCalledTimes(1);
+  });
+
   it("throws when completion remains empty after retries", async () => {
     vi.useFakeTimers();
     try {

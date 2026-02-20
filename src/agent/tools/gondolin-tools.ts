@@ -32,7 +32,7 @@ import type { VM } from "@earendil-works/gondolin";
 import { getMuaddibHome } from "../../config/paths.js";
 import type { GondolinConfig } from "../../config/muaddib-config.js";
 import type { Logger } from "../../app/logging.js";
-import type { MuaddibTool } from "./types.js";
+import type { MuaddibTool, ToolSet } from "./types.js";
 
 // ── Arc ID / workspace path / checkpoint path ──────────────────────────────
 
@@ -351,13 +351,15 @@ export interface GondolinToolsOptions {
 }
 
 /**
- * Create read/write/edit/bash tools backed by a Gondolin VM.
+ * Create read/write/edit/bash tools backed by a Gondolin VM, plus a dispose
+ * callback that must be called (via SessionRunner's onSessionEnd) when the
+ * session ends — whether it succeeds or fails.
  *
  * One VM is created (and cached) per arc.  Each call to this function creates
  * a fresh ephemeral session directory at /tmp/session-{uuid}/ which becomes the
  * default working directory for bash and the base for relative path resolution.
  */
-export function createGondolinTools(options: GondolinToolsOptions): MuaddibTool[] {
+export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
   const { arc, config, logger } = options;
   const arcId = normalizeArcId(arc);
   const sessionDir = `/tmp/session-${randomUUID().slice(0, 8)}`;
@@ -386,12 +388,16 @@ export function createGondolinTools(options: GondolinToolsOptions): MuaddibTool[
   const piEditTool = createEditTool(sessionDir, { operations: createVmEditOps(getVm) });
   const piBashTool = createBashTool(sessionDir, { operations: createVmBashOps(getVm, bashTimeoutSeconds) });
 
-  return [
+  const tools: MuaddibTool[] = [
     { ...piReadTool, persistType: "none" } as MuaddibTool,
     { ...piWriteTool, persistType: "none" } as MuaddibTool,
     { ...piEditTool, persistType: "none" } as MuaddibTool,
     { ...piBashTool, persistType: "summary" } as MuaddibTool,
   ];
+
+  const dispose = () => checkpointGondolinArc(arc, logger);
+
+  return { tools, dispose };
 }
 
 // ── Exported for testing ───────────────────────────────────────────────────

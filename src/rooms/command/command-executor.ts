@@ -22,9 +22,9 @@ import {
   createBaselineAgentTools,
   type BaselineToolOptions,
   type MuaddibTool,
+  type ToolSet,
 } from "../../agent/tools/baseline-tools.js";
 import { createDefaultShareArtifactExecutor } from "../../agent/tools/artifact.js";
-import { checkpointGondolinArc } from "../../agent/tools/gondolin-tools.js";
 import type { Message } from "@mariozechner/pi-ai";
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
@@ -66,6 +66,7 @@ export interface CommandRunnerFactoryInput {
   onStatusMessage?: (text: string) => void | Promise<void>;
   logger?: Logger;
   onAgentCreated?: (agent: Agent) => void;
+  onSessionEnd?: () => Promise<void>;
 }
 
 export type CommandRunnerFactory = (input: CommandRunnerFactoryInput) => {
@@ -160,6 +161,7 @@ export class CommandExecutor {
           onStatusMessage: input.onStatusMessage,
           logger: input.logger,
           onAgentCreated: input.onAgentCreated,
+          onSessionEnd: input.onSessionEnd,
         }));
 
     this.rateLimiter =
@@ -367,7 +369,7 @@ export class CommandExecutor {
       ...selectedContext.slice(0, -1),
     ];
 
-    const tools = this.selectTools(message, resolved.runtime.allowedTools, runnerContext, sendResponse);
+    const { tools, dispose } = this.selectTools(message, resolved.runtime.allowedTools, runnerContext, sendResponse);
 
     const progressConfig = this.agentConfig.progress;
     const runner = this.runnerFactory({
@@ -380,6 +382,7 @@ export class CommandExecutor {
       onStatusMessage: sendResponse,
       logger,
       onAgentCreated,
+      onSessionEnd: dispose,
     });
 
     const queryTimestamp = formatCurrentTime().slice(-5); // HH:MM in UTC, matching history format
@@ -437,7 +440,7 @@ export class CommandExecutor {
       ...context.slice(0, -1),
     ];
 
-    const tools = this.selectTools(message, classifiedRuntime.allowedTools, runnerContext, sendResponse);
+    const { tools, dispose } = this.selectTools(message, classifiedRuntime.allowedTools, runnerContext, sendResponse);
 
     const proactiveProgressConfig = this.agentConfig.progress;
     const runner = this.runnerFactory({
@@ -450,6 +453,7 @@ export class CommandExecutor {
       onStatusMessage: sendResponse,
       logger,
       onAgentCreated,
+      onSessionEnd: dispose,
     });
 
     const lastMessage = context[context.length - 1];
@@ -514,20 +518,12 @@ export class CommandExecutor {
     tools: MuaddibTool[],
     opts: { reasoningEffort: string; visionModel?: string },
   ): Promise<PromptRunResult> {
-    const agentResult = await runner
-      .prompt(queryText, {
-        contextMessages,
-        thinkingLevel: normalizeThinkingLevel(opts.reasoningEffort),
-        visionFallbackModel: opts.visionModel,
-        refusalFallbackModel: this.refusalFallbackModel ?? undefined,
-      })
-      .finally(async () => {
-        // Always checkpoint the Gondolin VM, even if runner.prompt() throws — prevents
-        // refcount leaks that would defer checkpointing forever.
-        if (this.agentConfig.tools?.gondolin?.enabled) {
-          await checkpointGondolinArc(roomArc(message), this.logger);
-        }
-      });
+    const agentResult = await runner.prompt(queryText, {
+      contextMessages,
+      thinkingLevel: normalizeThinkingLevel(opts.reasoningEffort),
+      visionFallbackModel: opts.visionModel,
+      refusalFallbackModel: this.refusalFallbackModel ?? undefined,
+    });
 
     await this.persistGeneratedToolSummary(message, agentResult, tools);
     agentResult.session?.dispose();
@@ -828,7 +824,7 @@ export class CommandExecutor {
     allowedTools: string[] | null,
     conversationContext?: Message[],
     sendResponse?: (text: string) => Promise<void>,
-  ): MuaddibTool[] {
+  ): ToolSet {
     const invocationToolOptions: BaselineToolOptions = {
       ...this.buildToolOptions(),
       arc: roomArc(message),
@@ -848,7 +844,7 @@ export class CommandExecutor {
           }
         : undefined;
 
-    const baseline = createBaselineAgentTools({
+    const toolSet = createBaselineAgentTools({
       ...invocationToolOptions,
       onProgressReport,
       oracleInvocation: {
@@ -859,11 +855,11 @@ export class CommandExecutor {
     });
 
     if (!allowedTools) {
-      return baseline;
+      return toolSet;
     }
 
     const allowed = new Set(allowedTools);
-    return baseline.filter((tool) => allowed.has(tool.name));
+    return { tools: toolSet.tools.filter((tool) => allowed.has(tool.name)), dispose: toolSet.dispose };
   }
 }
 

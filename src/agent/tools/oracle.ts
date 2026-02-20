@@ -1,14 +1,11 @@
-import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { Type } from "@sinclair/typebox";
 
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { SessionRunner } from "../session-runner.js";
-import type { MuaddibTool } from "./types.js";
+import type { MuaddibTool, ToolContext, ToolSet } from "./types.js";
 import type { Message } from "@mariozechner/pi-ai";
 import type { RunnerLogger } from "../session-factory.js";
-import type { ToolContext } from "./types.js";
 import { stringifyError, toConfiguredString } from "../../utils/index.js";
-import { checkpointGondolinArc } from "./gondolin-tools.js";
 
 export interface OracleInput {
   query: string;
@@ -73,8 +70,9 @@ export interface OracleInvocationContext {
    * Factory that builds the full baseline tool set.
    * Injected to break the circular dependency (baseline-tools.ts → oracle.ts).
    * The oracle filters this through ORACLE_EXCLUDED_TOOLS.
+   * Returns a ToolSet so the oracle's runner can call dispose() on session end.
    */
-  buildTools: (options: ToolContext) => AgentTool<any>[];
+  buildTools: (options: ToolContext) => ToolSet;
 
   /** Tool options for building oracle's nested tools (arc, secrets, etc.). */
   toolOptions: ToolContext;
@@ -102,19 +100,15 @@ export function createDefaultOracleExecutor(
 
     const systemPrompt = toConfiguredString(options.toolsConfig?.oracle?.prompt) ?? DEFAULT_ORACLE_SYSTEM_PROMPT;
 
-    // Build tools independently (like Python's get_tools_for_arc + EXCLUDED_TOOLS filter)
-    const allTools = invocation
+    // Build tools independently (like Python's get_tools_for_arc + EXCLUDED_TOOLS filter).
+    // The returned ToolSet includes a dispose() that SessionRunner calls on session end,
+    // balancing any Gondolin VM refcount increments made during buildTools().
+    const toolSet = invocation
       ? invocation.buildTools(invocation.toolOptions)
-      : [];
-    const oracleTools = allTools.filter(
+      : { tools: [] };
+    const oracleTools = toolSet.tools.filter(
       (tool) => !ORACLE_EXCLUDED_TOOLS.has(tool.name),
     );
-
-    // If Gondolin tools were included in the oracle's tool set, checkpointGondolinArc must be
-    // called after the oracle runner exits (success or failure) to balance the refcount increment
-    // made by createGondolinTools() inside buildTools().
-    const gondolinEnabled = !!(invocation && invocation.toolOptions.toolsConfig?.gondolin?.enabled);
-    const oracleArc = invocation?.toolOptions.arc;
 
     const runner = new SessionRunner({
       model: configuredModel,
@@ -123,6 +117,7 @@ export function createDefaultOracleExecutor(
       modelAdapter,
       authStorage: options.authStorage,
       maxIterations: options.toolsConfig?.oracle?.maxIterations,
+      onSessionEnd: toolSet.dispose,
       logger,
     });
 
@@ -143,10 +138,6 @@ export function createDefaultOracleExecutor(
       }
       logger.info(`${ORACLE_LOG_SEPARATOR} Oracle failed: ${message}`);
       throw error;
-    } finally {
-      if (gondolinEnabled && oracleArc) {
-        await checkpointGondolinArc(oracleArc, logger);
-      }
     }
   };
 }

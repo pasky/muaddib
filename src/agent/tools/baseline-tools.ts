@@ -47,7 +47,7 @@ import type { GenerateImageExecutor } from "./image.js";
 import type { OracleExecutor } from "./oracle.js";
 import type { QuestStartExecutor, SubquestStartExecutor, QuestSnoozeExecutor } from "./quest.js";
 import type { WebSearchExecutor, VisitWebpageExecutor } from "./web.js";
-import type { ToolContext, MuaddibTool, ToolPersistType } from "./types.js";
+import type { ToolContext, MuaddibTool, ToolPersistType, ToolSet } from "./types.js";
 
 export interface BaselineToolExecutors {
   webSearch: WebSearchExecutor;
@@ -64,7 +64,7 @@ export interface BaselineToolExecutors {
   questSnooze: QuestSnoozeExecutor;
 }
 
-export type { ToolContext, MuaddibTool, ToolPersistType };
+export type { ToolContext, MuaddibTool, ToolPersistType, ToolSet };
 export type { EditArtifactInput, ShareArtifactExecutor, EditArtifactExecutor } from "./artifact.js";
 export type { ChronicleReadInput, ChronicleAppendInput, ChronicleReadExecutor, ChronicleAppendExecutor } from "./chronicle.js";
 export type { ExecuteCodeInput, ExecuteCodeExecutor } from "./execute-code.js";
@@ -162,7 +162,7 @@ export function createDefaultToolExecutors(
  *   - read/write/edit/bash tools are added, backed by the Gondolin VM.
  *   - execute_code (Sprites) is excluded from the tool set.
  */
-export function createBaselineAgentTools(options: BaselineToolOptions): MuaddibTool[] {
+export function createBaselineAgentTools(options: BaselineToolOptions): ToolSet {
   // Non-null when gondolin is opted in.
   const gondolinConfig =
     options.toolsConfig?.gondolin?.enabled === true ? options.toolsConfig.gondolin : null;
@@ -185,21 +185,23 @@ export function createBaselineAgentTools(options: BaselineToolOptions): MuaddibT
     factory(executors),
   );
 
-  const gondolinTools: MuaddibTool[] = gondolinConfig !== null
+  const gondolinToolSet = gondolinConfig !== null
     ? createGondolinTools({
         arc: options.arc,
         config: gondolinConfig,
         logger: options.logger,
       })
-    : [];
+    : null;
 
-  return [
+  const tools = [
     ...executorBackedTools,
-    ...gondolinTools,
+    ...(gondolinToolSet?.tools ?? []),
     createProgressReportTool(options),
     createMakePlanTool({
       chronicleStore: options.chronicleStore,
       currentQuestId: options.currentQuestId,
     }),
   ];
+
+  return { tools, dispose: gondolinToolSet?.dispose };
 }

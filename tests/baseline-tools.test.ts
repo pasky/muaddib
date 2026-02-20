@@ -34,7 +34,7 @@ function createTools(options: Record<string, unknown>) {
     modelAdapter: new PiAiModelAdapter(),
     arc: "test-arc",
     ...(options as any),
-  });
+  }).tools;
 }
 
 describe("baseline agent tools", () => {
@@ -433,7 +433,7 @@ describe("baseline tools with Gondolin enabled", () => {
       toolsConfig: { gondolin: { enabled: true } },
       arc: "test-arc",
       ...extra,
-    } as any);
+    } as any).tools;
   }
 
   it("includes read/write/edit/bash and excludes execute_code when gondolin is enabled", () => {
@@ -471,7 +471,7 @@ describe("baseline tools with Gondolin enabled", () => {
   });
 
   it("keeps execute_code when gondolin is disabled", () => {
-    const tools = createBaselineAgentTools({
+    const { tools } = createBaselineAgentTools({
       modelAdapter: new PiAiModelAdapter(),
       arc: "test-arc",
       toolsConfig: { gondolin: { enabled: false } },
@@ -480,6 +480,21 @@ describe("baseline tools with Gondolin enabled", () => {
     expect(names).toContain("execute_code");
     expect(names).not.toContain("read");
     expect(names).not.toContain("bash");
+  });
+
+  it("returns dispose when gondolin is enabled, none when disabled", () => {
+    const { dispose: withDispose } = createBaselineAgentTools({
+      modelAdapter: new PiAiModelAdapter(),
+      toolsConfig: { gondolin: { enabled: true } },
+      arc: "test-arc",
+    } as any);
+    expect(typeof withDispose).toBe("function");
+
+    const { dispose: withoutDispose } = createBaselineAgentTools({
+      modelAdapter: new PiAiModelAdapter(),
+      arc: "test-arc",
+    } as any);
+    expect(withoutDispose).toBeUndefined();
   });
 });
 

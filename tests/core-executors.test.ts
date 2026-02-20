@@ -472,16 +472,19 @@ describe("oracle executor with invocation context", () => {
   it("calls buildTools with toolOptions and filters excluded tools", async () => {
     oracleMock.promptFn.mockResolvedValue({ text: "oracle answer", stopReason: "stop", usage: {} });
 
-    const buildTools = vi.fn(() => [
-      { name: "web_search" },
-      { name: "oracle" },
-      { name: "execute_code" },
-      { name: "progress_report" },
-      { name: "quest_start" },
-      { name: "subquest_start" },
-      { name: "quest_snooze" },
-      { name: "visit_webpage" },
-    ] as any[]);
+    const buildTools = vi.fn(() => ({
+      tools: [
+        { name: "web_search" },
+        { name: "oracle" },
+        { name: "execute_code" },
+        { name: "progress_report" },
+        { name: "quest_start" },
+        { name: "subquest_start" },
+        { name: "quest_snooze" },
+        { name: "visit_webpage" },
+      ] as any[],
+      dispose: undefined,
+    }));
 
     const toolOptions = { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }};
 
@@ -524,7 +527,7 @@ describe("oracle executor with invocation context", () => {
       {
         conversationContext: context,
         toolOptions: {},
-        buildTools: () => [],
+        buildTools: () => ({ tools: [], dispose: undefined }),
       },
     );
 
@@ -544,7 +547,7 @@ describe("oracle executor with invocation context", () => {
 
     const executor = createDefaultOracleExecutor(
       { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }, logger },
-      { conversationContext: [], toolOptions: {}, buildTools: () => [] },
+      { conversationContext: [], toolOptions: {}, buildTools: () => ({ tools: [], dispose: undefined }) },
     );
 
     await executor({ query: "deep question" });
@@ -565,7 +568,7 @@ describe("oracle executor with invocation context", () => {
 
     const executor = createDefaultOracleExecutor(
       { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }, logger },
-      { conversationContext: [], toolOptions: {}, buildTools: () => [] },
+      { conversationContext: [], toolOptions: {}, buildTools: () => ({ tools: [], dispose: undefined }) },
     );
 
     await expect(executor({ query: "will fail" })).rejects.toThrow("connection refused");
@@ -582,7 +585,7 @@ describe("oracle executor with invocation context", () => {
 
     const executor = createDefaultOracleExecutor(
       { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }, logger },
-      { conversationContext: [], toolOptions: {}, buildTools: () => [] },
+      { conversationContext: [], toolOptions: {}, buildTools: () => ({ tools: [], dispose: undefined }) },
     );
 
     const result = await executor({ query: "complex task" });
@@ -619,7 +622,7 @@ describe("oracle executor with invocation context", () => {
 
     const executor = createDefaultOracleExecutor(
       { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }, logger },
-      { conversationContext: [], toolOptions: {}, buildTools: () => [] },
+      { conversationContext: [], toolOptions: {}, buildTools: () => ({ tools: [], dispose: undefined }) },
     );
 
     await executor({ query: "test" });
