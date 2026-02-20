@@ -5,6 +5,7 @@
  * the host filesystem.  One VM per arc (persistent, reused across invocations).
  * Each invocation gets an ephemeral working directory at /tmp/session-{uuid}/.
  * Persistent workspace is mounted from $MUADDIB_HOME/workspaces/<arcId>/ at /workspace.
+ * VM disk checkpoint stored at $MUADDIB_HOME/checkpoints/<arcId>.qcow2 (outside the VFS mount).
  *
  * Network policy:
  *   - Internal RFC-1918 and loopback ranges are blocked by default (gondolin default).
@@ -33,7 +34,7 @@ import type { GondolinConfig } from "../../config/muaddib-config.js";
 import type { Logger } from "../../app/logging.js";
 import type { MuaddibTool } from "./types.js";
 
-// ── Arc ID / workspace path ────────────────────────────────────────────────
+// ── Arc ID / workspace path / checkpoint path ──────────────────────────────
 
 export function normalizeArcId(arc: string): string {
   return createHash("sha256").update(arc).digest("hex").slice(0, 16);
@@ -41,6 +42,11 @@ export function normalizeArcId(arc: string): string {
 
 export function getArcWorkspacePath(arc: string): string {
   return join(getMuaddibHome(), "workspaces", normalizeArcId(arc));
+}
+
+/** Checkpoint file lives *outside* the VFS-mounted workspace so the VM cannot tamper with it. */
+export function getArcCheckpointPath(arc: string): string {
+  return join(getMuaddibHome(), "checkpoints", normalizeArcId(arc) + ".qcow2");
 }
 
 // ── VM cache: one VM per arc ───────────────────────────────────────────────
@@ -73,6 +79,7 @@ async function ensureVm(
 
     const workspacePath = getArcWorkspacePath(arc);
     mkdirSync(workspacePath, { recursive: true });
+    mkdirSync(join(getMuaddibHome(), "checkpoints"), { recursive: true });
 
     const blockedCidrs = config.blockedCidrs ?? [];
 
@@ -84,16 +91,20 @@ async function ensureVm(
       },
     });
 
-    const vmOptions = {
+    const vmOptions: import("@earendil-works/gondolin").VMOptions = {
       vfs: {
         mounts: {
           "/workspace": new RealFSProvider(workspacePath),
         },
       },
       httpHooks,
+      dns: { mode: config.dnsMode ?? "synthetic" },
+      ...(config.maxHttpResponseBodyBytes !== undefined && {
+        maxHttpResponseBodyBytes: config.maxHttpResponseBodyBytes,
+      }),
     };
 
-    const checkpointPath = join(workspacePath, "vm-checkpoint.qcow2");
+    const checkpointPath = getArcCheckpointPath(arc);
     let vm: import("@earendil-works/gondolin").VM;
     if (existsSync(checkpointPath)) {
       try {
@@ -270,7 +281,7 @@ function createVmEditOps(getVm: () => Promise<VM>): EditOperations {
   };
 }
 
-function createVmBashOps(getVm: () => Promise<VM>): BashOperations {
+function createVmBashOps(getVm: () => Promise<VM>, defaultTimeoutSeconds: number): BashOperations {
   return {
     exec: async (command, cwd, { onData, signal, timeout, env }) => {
       const vm = await getVm();
@@ -279,13 +290,20 @@ function createVmBashOps(getVm: () => Promise<VM>): BashOperations {
       const onAbort = () => ac.abort();
       signal?.addEventListener("abort", onAbort, { once: true });
 
+      // Apply default timeout when caller supplies none; cap caller-supplied
+      // timeouts so no bash command can run indefinitely inside the VM.
+      const effectiveTimeout =
+        timeout && timeout > 0
+          ? Math.min(timeout, defaultTimeoutSeconds)
+          : defaultTimeoutSeconds;
+
       let timedOut = false;
       const timer =
-        timeout && timeout > 0
+        effectiveTimeout > 0
           ? setTimeout(() => {
               timedOut = true;
               ac.abort();
-            }, timeout * 1000)
+            }, effectiveTimeout * 1000)
           : undefined;
 
       try {
@@ -305,7 +323,7 @@ function createVmBashOps(getVm: () => Promise<VM>): BashOperations {
         return { exitCode: r.exitCode };
       } catch (err) {
         if (signal?.aborted) throw new Error("aborted", { cause: err });
-        if (timedOut) throw new Error(`timeout:${timeout}`, { cause: err });
+        if (timedOut) throw new Error(`timeout:${effectiveTimeout}`, { cause: err });
         throw err;
       } finally {
         if (timer) clearTimeout(timer);
@@ -352,10 +370,12 @@ export function createGondolinTools(options: GondolinToolsOptions): MuaddibTool[
     return vmReady;
   }
 
+  const bashTimeoutSeconds = config.bashTimeoutSeconds ?? 270;
+
   const piReadTool = createReadTool(sessionDir, { operations: createVmReadOps(getVm) });
   const piWriteTool = createWriteTool(sessionDir, { operations: createVmWriteOps(getVm) });
   const piEditTool = createEditTool(sessionDir, { operations: createVmEditOps(getVm) });
-  const piBashTool = createBashTool(sessionDir, { operations: createVmBashOps(getVm) });
+  const piBashTool = createBashTool(sessionDir, { operations: createVmBashOps(getVm, bashTimeoutSeconds) });
 
   return [
     { ...piReadTool, persistType: "none" } as MuaddibTool,
@@ -403,7 +423,7 @@ export async function checkpointGondolinArc(
   const vm = vmCache.get(arcId);
   if (!vm) return;
 
-  const checkpointPath = join(getArcWorkspacePath(arc), "vm-checkpoint.qcow2");
+  const checkpointPath = getArcCheckpointPath(arc);
 
   try {
     // Clean ephemeral session dirs from VM /tmp before checkpointing

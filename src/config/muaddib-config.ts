@@ -39,6 +39,28 @@ export interface GondolinConfig {
    * Internal RFC-1918 and loopback ranges are always blocked regardless of this list.
    */
   blockedCidrs?: string[];
+  /**
+   * Default bash command timeout in seconds.  Applied when the bash tool caller
+   * does not supply an explicit timeout, and also acts as an upper bound on any
+   * caller-supplied timeout.
+   * Default: 270 (just under Claude's 5-minute token-cache expiry).
+   */
+  bashTimeoutSeconds?: number;
+  /**
+   * DNS resolution mode inside the VM.
+   *   "open"      – real DNS servers (default upstream gondolin behaviour).
+   *   "trusted"   – forward to specific trusted resolvers (set trustedDnsServers).
+   *   "synthetic" – gondolin intercepts DNS and returns synthetic IPs, forcing all
+   *                 HTTP/HTTPS traffic through the MITM layer (stronger sandboxing).
+   * Default: "synthetic".
+   */
+  dnsMode?: "open" | "trusted" | "synthetic";
+  /**
+   * Maximum buffered upstream HTTP response body size in bytes.
+   * Requests that exceed this limit are blocked.
+   * When unset, gondolin's own default applies.
+   */
+  maxHttpResponseBodyBytes?: number;
 }
 
 /**

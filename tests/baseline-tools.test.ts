@@ -22,7 +22,10 @@ import {
 import {
   checkpointGondolinArc,
   createGondolinTools,
+  getArcCheckpointPath,
+  getArcWorkspacePath,
   isIpInCidr,
+  normalizeArcId,
   resetGondolinVmCache,
 } from "../src/agent/tools/gondolin-tools.js";
 
@@ -477,6 +480,37 @@ describe("baseline tools with Gondolin enabled", () => {
     expect(names).toContain("execute_code");
     expect(names).not.toContain("read");
     expect(names).not.toContain("bash");
+  });
+});
+
+// ── Gondolin checkpoint path ───────────────────────────────────────────────
+
+describe("getArcCheckpointPath", () => {
+  it("checkpoint path is under checkpoints/ not workspaces/", () => {
+    const checkpointPath = getArcCheckpointPath("test-arc");
+    expect(checkpointPath).toContain("/checkpoints/");
+    expect(checkpointPath).not.toContain("/workspaces/");
+  });
+
+  it("checkpoint path ends with .qcow2", () => {
+    expect(getArcCheckpointPath("test-arc")).toMatch(/\.qcow2$/);
+  });
+
+  it("checkpoint path is not inside the workspace directory", () => {
+    const arc = "test-arc";
+    const checkpointPath = getArcCheckpointPath(arc);
+    const workspacePath = getArcWorkspacePath(arc);
+    expect(checkpointPath.startsWith(workspacePath)).toBe(false);
+  });
+
+  it("checkpoint filename contains the arc hash", () => {
+    const arc = "test-arc";
+    const arcId = normalizeArcId(arc);
+    expect(getArcCheckpointPath(arc)).toContain(arcId);
+  });
+
+  it("different arcs produce different checkpoint paths", () => {
+    expect(getArcCheckpointPath("arc-one")).not.toBe(getArcCheckpointPath("arc-two"));
   });
 });
 
