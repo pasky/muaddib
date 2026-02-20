@@ -27,12 +27,12 @@
         "prompt": "You are an oracle - a powerful reasoning entity consulted for complex analysis and creative work. Take your time to think deeply. Use available tools to gather additional inputs and validate your conclusions, however your purpose is not to be a versatile agent but a sage advisor. Leave any complex tool use to the agent that called you as a tool just now, focus on formulating deep and correct advice rather than doing things yourself."
       },
       "gondolin": {
-        "_comment": "Alpine Linux micro-VM sandbox. When enabled, replaces execute_code (Sprites) with read/write/edit/bash tools running inside QEMU. One VM per arc; workspace at $MUADDIB_HOME/workspaces/<arcId>/ is mounted at /workspace inside the VM and persists across sessions. VM disk checkpoint stored at $MUADDIB_HOME/checkpoints/<arcId>.qcow2 (outside the VFS mount, not accessible to the VM). Network: only HTTP and HTTPS egress is permitted by default (raw TCP on other ports is blocked at the protocol level). dnsMode defaults to 'synthetic' (gondolin intercepts DNS and returns synthetic IPs, forcing all HTTP/HTTPS through the MITM layer). blockedCidrs applies to HTTP/HTTPS traffic via the MITM layer (IP-level check after DNS resolution). RFC-1918/loopback are always blocked. bashTimeoutSeconds caps individual bash command execution (default 270, just under Claude's 5-minute token-cache expiry).",
+        "_comment": "Alpine Linux micro-VM sandbox. When enabled, replaces execute_code (Sprites) with read/write/edit/bash tools running inside QEMU. One VM per arc; workspace at $MUADDIB_HOME/workspaces/<arcId>/ is mounted at /workspace inside the VM and persists across sessions. VM disk checkpoint stored at $MUADDIB_HOME/checkpoints/<arcId>.qcow2 (outside the VFS mount, not accessible to the VM). Network: only HTTP and HTTPS egress is permitted by default (raw TCP on other ports is blocked at the protocol level). dnsMode defaults to 'synthetic' (gondolin intercepts DNS and returns synthetic IPs, forcing all HTTP/HTTPS through the MITM layer). blockedCidrs applies to HTTP/HTTPS traffic via the MITM layer (IP-level check after DNS resolution). RFC-1918/loopback are always blocked. bashTimeoutSeconds caps individual bash command execution (default 270, just under Claude's 5-minute token-cache expiry). maxHttpResponseBodyBytes limits buffered HTTP response bodies (primarily relevant if a response hook is installed; streaming downloads like pip/apt/git are generally unaffected); default is gondolin's 64 MiB.",
         "enabled": false,
         "blockedCidrs": ["203.0.113.0/24", "2001:db8:1::/48"],
         "bashTimeoutSeconds": 270,
         "dnsMode": "synthetic",
-        "maxHttpResponseBodyBytes": 10485760
+        "maxHttpResponseBodyBytes": 1073741824
       }
     }
   },
