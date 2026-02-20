@@ -22,7 +22,6 @@ import {
 import {
   checkpointGondolinArc,
   createGondolinTools,
-  isHostBlocked,
   isIpInCidr,
   resetGondolinVmCache,
 } from "../src/agent/tools/gondolin-tools.js";
@@ -482,32 +481,6 @@ describe("baseline tools with Gondolin enabled", () => {
 });
 
 // ── Gondolin network filtering helpers ────────────────────────────────────
-
-describe("isHostBlocked", () => {
-  it("blocks exact hostname match", () => {
-    expect(isHostBlocked("pasky.or.cz", ["pasky.or.cz"])).toBe(true);
-  });
-
-  it("blocks subdomain via wildcard pattern", () => {
-    expect(isHostBlocked("mail.pasky.or.cz", ["*.pasky.or.cz"])).toBe(true);
-  });
-
-  it("blocks apex domain via wildcard pattern", () => {
-    expect(isHostBlocked("pasky.or.cz", ["*.pasky.or.cz"])).toBe(true);
-  });
-
-  it("does not block unrelated domain", () => {
-    expect(isHostBlocked("example.com", ["pasky.or.cz", "*.pasky.or.cz"])).toBe(false);
-  });
-
-  it("does not block empty list", () => {
-    expect(isHostBlocked("pasky.or.cz", [])).toBe(false);
-  });
-
-  it("is case-insensitive", () => {
-    expect(isHostBlocked("Pasky.OR.CZ", ["pasky.or.cz"])).toBe(true);
-  });
-});
 
 describe("isIpInCidr", () => {
   it("matches IPv4 address in /24 range", () => {

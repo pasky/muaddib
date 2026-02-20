@@ -74,19 +74,10 @@ async function ensureVm(
     const workspacePath = getArcWorkspacePath(arc);
     mkdirSync(workspacePath, { recursive: true });
 
-    const blockedHosts = config.blockedHosts ?? [];
     const blockedCidrs = config.blockedCidrs ?? [];
 
     const { httpHooks } = createHttpHooks({
       blockInternalRanges: true,
-      isRequestAllowed: (req) => {
-        try {
-          const url = new URL(req.url);
-          return !isHostBlocked(url.hostname, blockedHosts);
-        } catch {
-          return false;
-        }
-      },
       isIpAllowed: (info) => {
         if (blockedCidrs.length === 0) return true;
         return !blockedCidrs.some((cidr) => isIpInCidr(info.ip, cidr));
@@ -132,21 +123,6 @@ async function ensureVm(
 }
 
 // ── Network filtering helpers ──────────────────────────────────────────────
-
-function isHostBlocked(hostname: string, blockedHosts: string[]): boolean {
-  const host = hostname.toLowerCase();
-  for (const pattern of blockedHosts) {
-    const p = pattern.toLowerCase();
-    if (p.startsWith("*.")) {
-      // "*.foo.com" matches "foo.com" and "bar.foo.com"
-      const suffix = p.slice(1); // ".foo.com"
-      if (host === suffix.slice(1) || host.endsWith(suffix)) return true;
-    } else {
-      if (host === p) return true;
-    }
-  }
-  return false;
-}
 
 function isIpInCidr(ip: string, cidr: string): boolean {
   const slashIdx = cidr.lastIndexOf("/");
@@ -391,7 +367,7 @@ export function createGondolinTools(options: GondolinToolsOptions): MuaddibTool[
 
 // ── Exported for testing ───────────────────────────────────────────────────
 
-export { isHostBlocked, isIpInCidr };
+export { isIpInCidr };
 
 export function resetGondolinVmCache(): void {
   vmCache.clear();
