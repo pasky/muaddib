@@ -6,6 +6,8 @@ RUN apt-get update && \
         curl \
         git \
         build-essential \
+        qemu-system-x86 \
+        qemu-utils \
         && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

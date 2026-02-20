@@ -50,7 +50,7 @@ So is Slack - including threads:
 ## Features
 
 - **AI Integrations**: Anthropic Claude (Opus 4.5 recommended), OpenAI, DeepSeek, any OpenRouter model (including Gemini models)
-- **Agentic Capability**: Ability to visit websites, view images, perform deep research, execute Python/Bash code via Sprites, publish artifacts
+- **Agentic Capability**: Ability to visit websites, view images, perform deep research, fully sandboxed and isolated code execution and long-term state maintenance, publish artifacts
 - **Restartable and Persistent Memory**: All state is persisted; AI agent maintains a continuous chronicle of events and experiences to refer to
 - **Command System**: Automatic model routing (to balance cost, speed and intelligence) plus extensible command-based interaction with prefixes for various modes
 - **Proactive Interjecting**: Channel-based whitelist system for automatic participation in relevant conversations
@@ -71,6 +71,8 @@ All muaddib data lives in `$MUADDIB_HOME` (defaults to `~/.muaddib/`):
 ├── chat_history.db     # Chat history database
 ├── chronicle.db        # Chronicle database
 ├── artifacts/          # Published artifacts
+├── workspaces/         # Gondolin VM persistent workspaces (one subdir per arc)
+├── checkpoints/        # Gondolin VM disk checkpoints (.qcow2, one per arc)
 └── logs/               # Per-message log files
 ```
 
