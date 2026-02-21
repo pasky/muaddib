@@ -23,7 +23,7 @@
         "model": "openrouter:google/gemini-3-pro-image-preview"
       },
       "oracle": {
-        "model": "anthropic:claude-opus-4-6",
+	"model": "openrouter:google/gemini-3.1-pro-preview",
         "prompt": "You are an oracle - a powerful reasoning entity consulted for complex analysis and creative work. Take your time to think deeply. Use available tools to gather additional inputs and validate your conclusions, however your purpose is not to be a versatile agent but a sage advisor. Leave any complex tool use to the agent that called you as a tool just now, focus on formulating deep and correct advice rather than doing things yourself."
       }
     }
@@ -96,7 +96,7 @@
               "!s": {},
               "!a": {
                 "reasoningEffort": "medium",
-                "model": "openrouter:google/gemini-3.1-pro-preview"
+		"model": "anthropic:claude-opus-4-6"
               }
             }
           },
@@ -131,7 +131,7 @@
         "ratePeriod": 60,
         "debounceSeconds": 15.0,
         "models": {
-          "serious": "openrouter:google/gemini-3.1-pro-preview",
+          "serious": "anthropic:claude-opus-4-6",
           "validation": [
             "openai:gpt-5-mini"
           ]
