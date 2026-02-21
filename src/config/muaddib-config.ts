@@ -49,12 +49,11 @@ export interface GondolinConfig {
   /**
    * DNS resolution mode inside the VM.
    *   "open"      – real DNS servers (default upstream gondolin behaviour).
-   *   "trusted"   – forward to specific trusted resolvers (set trustedDnsServers).
    *   "synthetic" – gondolin intercepts DNS and returns synthetic IPs, forcing all
    *                 HTTP/HTTPS traffic through the MITM layer (stronger sandboxing).
    * Default: "synthetic".
    */
-  dnsMode?: "open" | "trusted" | "synthetic";
+  dnsMode?: "open" | "synthetic";
 
 }
 

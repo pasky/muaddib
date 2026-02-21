@@ -482,6 +482,14 @@ describe("baseline tools with Gondolin enabled", () => {
     expect(names).not.toContain("bash");
   });
 
+  it("rejects deprecated dnsMode=trusted", () => {
+    expect(() => createBaselineAgentTools({
+      modelAdapter: new PiAiModelAdapter(),
+      arc: "test-arc",
+      toolsConfig: { gondolin: { enabled: true, dnsMode: "trusted" } },
+    } as any)).toThrow(/dnsMode.*trusted/i);
+  });
+
   it("returns dispose when gondolin is enabled, none when disabled", () => {
     const { dispose: withDispose } = createBaselineAgentTools({
       modelAdapter: new PiAiModelAdapter(),
@@ -558,6 +566,22 @@ describe("isIpInCidr", () => {
 
   it("does not cross-match IPv4 CIDR against IPv6 address", () => {
     expect(isIpInCidr("2001:db8::1", "192.168.0.0/16")).toBe(false);
+  });
+
+  it("rejects non-numeric CIDR prefix length", () => {
+    expect(isIpInCidr("192.168.1.5", "192.168.1.0/x")).toBe(false);
+  });
+
+  it("rejects negative CIDR prefix length", () => {
+    expect(isIpInCidr("192.168.1.5", "192.168.1.0/-1")).toBe(false);
+  });
+
+  it("rejects out-of-range IPv4 CIDR prefix length", () => {
+    expect(isIpInCidr("192.168.1.5", "192.168.1.0/33")).toBe(false);
+  });
+
+  it("rejects out-of-range IPv6 CIDR prefix length", () => {
+    expect(isIpInCidr("2001:db8:1:2::dead:beef", "2001:db8:1:2::/129")).toBe(false);
   });
 });
 

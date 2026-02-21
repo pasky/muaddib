@@ -58,9 +58,25 @@ const vmActiveSessions = new Map<string, number>();
 /** In-flight checkpoint promise per arcId — prevents concurrent writes to the same .qcow2 file. */
 const vmCheckpointInProgress = new Map<string, Promise<void>>();
 
+type SupportedDnsMode = NonNullable<GondolinConfig["dnsMode"]>;
+
+function resolveDnsMode(dnsMode: unknown): SupportedDnsMode {
+  if (dnsMode === undefined) return "synthetic";
+  if (dnsMode === "open" || dnsMode === "synthetic") return dnsMode;
+  if (dnsMode === "trusted") {
+    throw new Error(
+      "agent.tools.gondolin.dnsMode=\"trusted\" is no longer supported; use \"synthetic\" or \"open\"",
+    );
+  }
+  throw new Error(
+    `Invalid agent.tools.gondolin.dnsMode: ${JSON.stringify(dnsMode)} (expected "synthetic" or "open")`,
+  );
+}
+
 async function ensureVm(
   arc: string,
   config: GondolinConfig,
+  dnsMode: SupportedDnsMode,
   logger?: Logger,
 ): Promise<VM> {
   const arcId = normalizeArcId(arc);
@@ -110,7 +126,7 @@ async function ensureVm(
         },
       },
       httpHooks,
-      dns: { mode: config.dnsMode ?? "synthetic" },
+      dns: { mode: dnsMode },
     };
 
     const checkpointPath = getArcCheckpointPath(arc);
@@ -144,16 +160,27 @@ async function ensureVm(
 
 // ── Network filtering helpers ──────────────────────────────────────────────
 
+function parseCidrPrefixLength(rawLength: string, maxLength: number): number | null {
+  if (!/^\d+$/.test(rawLength)) return null;
+  const prefixLength = Number(rawLength);
+  if (!Number.isInteger(prefixLength) || prefixLength < 0 || prefixLength > maxLength) return null;
+  return prefixLength;
+}
+
 function isIpInCidr(ip: string, cidr: string): boolean {
   const slashIdx = cidr.lastIndexOf("/");
   if (slashIdx === -1) return false;
   const prefix = cidr.slice(0, slashIdx);
-  const prefixLength = parseInt(cidr.slice(slashIdx + 1), 10);
+  const rawLength = cidr.slice(slashIdx + 1);
 
   if (prefix.includes(":") && ip.includes(":")) {
+    const prefixLength = parseCidrPrefixLength(rawLength, 128);
+    if (prefixLength === null) return false;
     return isIPv6InPrefix(ip, prefix, prefixLength);
   }
   if (!prefix.includes(":") && !ip.includes(":")) {
+    const prefixLength = parseCidrPrefixLength(rawLength, 32);
+    if (prefixLength === null) return false;
     return isIPv4InPrefix(ip, prefix, prefixLength);
   }
   return false;
@@ -351,6 +378,7 @@ export interface GondolinToolsOptions {
  */
 export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
   const { arc, config, logger } = options;
+  const dnsMode = resolveDnsMode(config.dnsMode);
   const arcId = normalizeArcId(arc);
   const sessionDir = `/tmp/session-${randomUUID().slice(0, 8)}`;
 
@@ -362,7 +390,7 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
 
   function getVm(): Promise<VM> {
     if (!vmReady) {
-      vmReady = ensureVm(arc, config, logger).then(async (vm) => {
+      vmReady = ensureVm(arc, config, dnsMode, logger).then(async (vm) => {
         await vm.exec(["/bin/mkdir", "-p", sessionDir]);
         logger?.info(`Gondolin session dir: ${sessionDir} (arc: ${normalizeArcId(arc)})`);
         return vm;
