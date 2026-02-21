@@ -1694,6 +1694,69 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("drops proactive NULL sentinel responses instead of sending them", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const proactiveRoomConfig = {
+      ...roomConfig,
+      proactive: {
+        interjecting: ["libera##test"],
+        debounceSeconds: 0.05,
+        historySize: 10,
+        rateLimit: 10,
+        ratePeriod: 60,
+        interjectThreshold: 1,
+        models: {
+          validation: ["openai:gpt-4o-mini"],
+          serious: "openai:gpt-4o-mini",
+        },
+        prompts: {
+          interject: "Score this: {message}",
+          seriousExtra: "Respond with NULL when abstaining.",
+        },
+      },
+    };
+
+    const sent: string[] = [];
+    const proactivePromptReached = createDeferred<void>();
+
+    const handler = createHandler({
+      roomConfig: proactiveRoomConfig as any,
+      history,
+      runnerFactory: () => ({
+        prompt: async () => {
+          proactivePromptReached.resolve();
+          return makeRunnerResult("NULL");
+        },
+      }),
+      modelAdapter: {
+        completeSimple: async (_model: string, _payload: unknown, callOptions?: { callType?: string }) => {
+          if (callOptions?.callType === "modeClassifier") {
+            return { content: [{ type: "text", text: "EASY_SERIOUS" }] };
+          }
+          return { content: [{ type: "text", text: "Score: 9/10" }] };
+        },
+      },
+    });
+
+    await history.addMessage(makeMessage("seed message"));
+
+    await handler.handleIncomingMessage(makeMessage("should I jump in?"), {
+      isDirect: false,
+      sendResponse: async (text) => { sent.push(text); },
+    });
+
+    await proactivePromptReached.promise;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(sent).toEqual([]);
+    const rows = await history.getFullHistory("libera", "#test");
+    expect(rows.filter((row) => row.role === "assistant")).toHaveLength(0);
+
+    await history.close();
+  });
+
   it("does not start proactive session on passive message in non-proactive channel", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();

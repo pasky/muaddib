@@ -465,7 +465,8 @@ export class CommandExecutor {
       return false;
     }
 
-    if (!result.responseText || result.responseText.startsWith("Error: ")) {
+    const proactiveText = result.responseText.trim();
+    if (!proactiveText || proactiveText.startsWith("Error: ") || isNullSentinel(proactiveText)) {
       logger.info(
         "Agent decided not to interject proactively",
         `arc=${roomArc(message)}`,
@@ -473,7 +474,7 @@ export class CommandExecutor {
       return false;
     }
 
-    const responseText = `[${modelStrCore(modelSpec)}] ${result.responseText}`;
+    const responseText = `[${modelStrCore(modelSpec)}] ${proactiveText}`;
 
     logger.info(
       "Sending proactive response",
@@ -962,7 +963,11 @@ function stripLeadingIrcContextEchoPrefixes(text: string): string {
   return text.replace(LEADING_IRC_CONTEXT_ECHO_PREFIX_RE, "").replace(BARE_COMMAND_PREFIX_RE, "");
 }
 
-
+function isNullSentinel(text: string): boolean {
+  const trimmed = text.trim();
+  const unquoted = trimmed.replace(/^["'`]|["'`]$/g, "").trim();
+  return /^null$/iu.test(unquoted);
+}
 
 function formatCurrentTime(date = new Date()): string {
   // Use UTC to match the chat history timestamps (SQLite CURRENT_TIMESTAMP is UTC).
