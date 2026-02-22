@@ -83,5 +83,4 @@ echo ""
 "$GONDOLIN" build --config "$BUILD_CONFIG" --output "$OUTPUT_DIR"
 
 echo ""
-echo "Done. Add to your config.json under agent.tools.gondolin:"
-echo "  \"guestDir\": \"$OUTPUT_DIR\""
+echo "Done. Muaddib will use this image automatically on next start."

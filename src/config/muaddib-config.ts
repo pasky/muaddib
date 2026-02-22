@@ -34,12 +34,6 @@ export interface GondolinConfig {
   /** Whether to enable Gondolin VM sandbox (replaces execute_code with read/write/edit/bash). */
   enabled?: boolean;
   /**
-   * Path to a directory containing custom-built guest assets (kernel, initramfs, rootfs,
-   * manifest.json).  When set, overrides the default cached assets downloaded by gondolin.
-   * Build a custom image with: `./scripts/build-gondolin-image.sh [output-dir]`
-   */
-  guestDir?: string;
-  /**
    * IP CIDR ranges to block (both IPv4 and IPv6).
    * Example: ["2001:db8:1:2::/64", "203.0.113.0/24"]
    * Internal RFC-1918 and loopback ranges are always blocked regardless of this list.

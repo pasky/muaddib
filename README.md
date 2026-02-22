@@ -122,23 +122,11 @@ For a more capable environment (Python 3 with pip/numpy/matplotlib, Node.js 24, 
 
 ```bash
 # requires e2fsprogs (apt install e2fsprogs / brew install e2fsprogs)
-./scripts/build-gondolin-image.sh [output-dir]   # default: ~/.muaddib/gondolin-image
+./scripts/build-gondolin-image.sh
 ```
 
-Then point muaddib at it in `config.json`:
-
-```json
-"agent": {
-  "tools": {
-    "gondolin": {
-      "enabled": true,
-      "guestDir": "/home/you/.muaddib/gondolin-image"
-    }
-  }
-}
-```
-
-The 1 GB rootfs gives the agent space to `apk add` or `pip install` further packages that persist across checkpoints within an arc.
+The image is written to `$MUADDIB_HOME/gondolin-image/` and picked up automatically on next start.
+The 1 GB rootfs gives the agent room to `apk add` or `pip install` further packages; those changes persist across checkpoints within an arc.
 
 ### Commands
 

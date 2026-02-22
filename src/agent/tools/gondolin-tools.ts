@@ -207,8 +207,11 @@ async function ensureVm(
         createHttpHooks,
       } = await import("@earendil-works/gondolin");
 
-      if (config.guestDir) {
-        process.env.GONDOLIN_GUEST_DIR = config.guestDir;
+      if (!process.env.GONDOLIN_GUEST_DIR) {
+        const customImageDir = join(getMuaddibHome(), "gondolin-image");
+        if (existsSync(customImageDir)) {
+          process.env.GONDOLIN_GUEST_DIR = customImageDir;
+        }
       }
 
       const workspacePath = getArcWorkspacePath(arc);
