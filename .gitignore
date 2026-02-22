@@ -8,6 +8,9 @@ debug.log
 logs/
 irssi-data
 artifacts
+gondolin-image/
+checkpoints/
+workspaces/
 
 node_modules/
 dist/

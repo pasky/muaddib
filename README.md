@@ -121,7 +121,9 @@ The default image downloaded by gondolin is a minimal Alpine Linux with basic ut
 For a more capable environment (Python 3 with pip/numpy/matplotlib, Node.js 24, npm, uv, 1 GB rootfs), build a custom image:
 
 ```bash
-# requires e2fsprogs (apt install e2fsprogs / brew install e2fsprogs)
+# Requires e2fsprogs (for mke2fs + debugfs) and either lz4 or python3-lz4:
+#   Debian/Ubuntu: sudo apt install e2fsprogs lz4
+#                  (python3-lz4 can substitute if lz4 CLI is unavailable)
 ./scripts/build-gondolin-image.sh
 ```
 
