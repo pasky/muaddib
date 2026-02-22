@@ -4,7 +4,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { ToolContext } from "./types.js";
+import type { ArtifactContext } from "./types.js";
 
 const ARTIFACT_ID_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 const ARTIFACT_VIEWER_HTML = loadArtifactViewerHtml();
@@ -30,7 +30,7 @@ function loadArtifactViewerHtml(): string {
 }
 
 export async function writeArtifactText(
-  options: ToolContext,
+  options: ArtifactContext,
   content: string,
   suffix: string,
 ): Promise<string> {
@@ -38,7 +38,7 @@ export async function writeArtifactText(
 }
 
 export async function writeArtifactBytes(
-  options: ToolContext,
+  options: ArtifactContext,
   data: Buffer,
   suffix: string,
 ): Promise<string> {
@@ -46,7 +46,7 @@ export async function writeArtifactBytes(
 }
 
 async function writeArtifact(
-  options: ToolContext,
+  options: ArtifactContext,
   data: string | Buffer,
   suffix: string,
   encoding?: BufferEncoding,

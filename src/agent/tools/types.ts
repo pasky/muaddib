@@ -34,17 +34,26 @@ export interface MuaddibTool<T = any> extends AgentTool<any, T> {
 }
 
 /**
+ * Minimal context needed by artifact storage (writeArtifactText/writeArtifactBytes)
+ * and artifact tool executors. Only requires the artifacts config and a logger.
+ */
+export interface ArtifactContext {
+  toolsConfig?: Pick<ToolsConfig, "artifacts">;
+  logger?: Logger;
+}
+
+/**
  * Shared context passed to tool executor factories.
  *
  * Each tool executor picks the fields it needs — no tool uses all of them.
  */
-export interface ToolContext {
+export interface ToolContext extends ArtifactContext {
   // ── Config (tools resolve their own settings from these) ──
+  // Widens ArtifactContext's Pick<ToolsConfig, "artifacts"> to the full config.
   toolsConfig?: ToolsConfig;
   // ── Runtime services ──
   authStorage: AuthStorage;
   modelAdapter: PiAiModelAdapter;
-  logger?: Logger;
   chronicleStore?: ChronicleStore;
   chronicleLifecycle?: {
     appendParagraph: (arc: string, text: string) => Promise<unknown>;

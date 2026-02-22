@@ -146,9 +146,6 @@ describe("core tool executors artifact support", () => {
       {
         toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" } },
         logger: logger as any,
-        authStorage: AuthStorage.inMemory(),
-        modelAdapter: new PiAiModelAdapter(),
-        arc: "test",
       },
       mockReadFile,
     );
@@ -234,11 +231,7 @@ describe("core tool executors artifact support", () => {
   it("fails fast when share_artifact is called without artifacts config", async () => {
     const mockReadFile = vi.fn(async () => Buffer.from("data"));
     const executor = createDefaultShareArtifactExecutor(
-      {
-        authStorage: AuthStorage.inMemory(),
-        modelAdapter: new PiAiModelAdapter(),
-        arc: "test",
-      },
+      {},
       mockReadFile,
     );
 

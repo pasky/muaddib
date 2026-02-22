@@ -33,7 +33,7 @@ import { getMuaddibHome } from "../../config/paths.js";
 import type { GondolinConfig } from "../../config/muaddib-config.js";
 import type { ToolsConfig } from "../../config/muaddib-config.js";
 import type { Logger } from "../../app/logging.js";
-import type { MuaddibTool, ToolContext, ToolSet } from "./types.js";
+import type { ArtifactContext, MuaddibTool, ToolSet } from "./types.js";
 import {
   createShareArtifactTool,
   createDefaultShareArtifactExecutor,
@@ -575,16 +575,8 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
     const content = await vm.readFile(absolutePath);
     return Buffer.isBuffer(content) ? content : Buffer.from(content);
   };
-  const toolContext: ToolContext = {
-    toolsConfig,
-    // share_artifact only needs toolsConfig + logger from ToolContext; the rest
-    // are unused but required by the interface — provide safe no-op stubs.
-    authStorage: { getApiKey: async () => null } as any,
-    modelAdapter: undefined as any,
-    arc,
-    logger,
-  };
-  const shareArtifactExecutor = createDefaultShareArtifactExecutor(toolContext, sandboxReadFile);
+  const artifactContext: ArtifactContext = { toolsConfig, logger };
+  const shareArtifactExecutor = createDefaultShareArtifactExecutor(artifactContext, sandboxReadFile);
   const shareArtifactTool = createShareArtifactTool({ shareArtifact: shareArtifactExecutor });
 
   const tools: MuaddibTool[] = [

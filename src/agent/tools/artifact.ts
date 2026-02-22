@@ -3,7 +3,7 @@ import { extname, isAbsolute, relative, resolve } from "node:path";
 
 import { Type } from "@sinclair/typebox";
 
-import type { ToolContext, MuaddibTool } from "./types.js";
+import type { ArtifactContext, ToolContext, MuaddibTool } from "./types.js";
 import { stringifyError } from "../../utils/index.js";
 import { extractFilenameFromUrl, extractLocalArtifactPath, looksLikeImageUrl } from "./url-utils.js";
 
@@ -56,7 +56,7 @@ export function createShareArtifactTool(
 }
 
 export function createDefaultShareArtifactExecutor(
-  options: ToolContext,
+  options: ArtifactContext,
   readFile: SandboxReadFile,
 ): ShareArtifactExecutor {
   return async (input: ShareArtifactInput): Promise<string> => {

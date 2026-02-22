@@ -764,11 +764,12 @@ export class CommandExecutor {
       `max_bytes=${this.responseMaxBytes}`,
     );
 
-    return await this.longResponseToArtifact(responseText, arc);
+    return await this.longResponseToArtifact(responseText);
   }
 
-  private async longResponseToArtifact(fullResponse: string, arc: string): Promise<string> {
-    const artifactUrl = await writeArtifactText({ ...this.buildToolOptions(), arc }, fullResponse, ".txt");
+  private async longResponseToArtifact(fullResponse: string): Promise<string> {
+    const { toolsConfig, logger } = this.buildToolOptions();
+    const artifactUrl = await writeArtifactText({ toolsConfig, logger }, fullResponse, ".txt");
 
     let trimmed = trimToMaxBytes(fullResponse, this.responseMaxBytes);
 
