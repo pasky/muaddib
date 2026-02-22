@@ -33,6 +33,28 @@ describe("debug-utils", () => {
       expect(parsed[0].length).toBeLessThanOrEqual(2048);
       expect(parsed[0]).toContain("...");
     });
+
+    it("can preserve content text strings", () => {
+      const long = "c".repeat(3000);
+      const result = safeJson(
+        { content: [{ type: "text", text: long }] },
+        10000,
+        { preserveContentText: true },
+      );
+      const parsed = JSON.parse(result) as { content: Array<{ type: string; text: string }> };
+      expect(parsed.content[0].text).toBe(long);
+    });
+
+    it("can preserve content thinking strings", () => {
+      const long = "d".repeat(3000);
+      const result = safeJson(
+        { content: [{ type: "thinking", thinking: long }] },
+        10000,
+        { preserveContentThinking: true },
+      );
+      const parsed = JSON.parse(result) as { content: Array<{ type: string; thinking: string }> };
+      expect(parsed.content[0].thinking).toBe(long);
+    });
   });
 
   describe("truncateForDebug", () => {
