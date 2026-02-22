@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { extname, isAbsolute, relative, resolve } from "node:path";
 
 import { Type } from "@sinclair/typebox";
 
@@ -13,10 +13,20 @@ export interface EditArtifactInput {
   new_string: string;
 }
 
-export type ShareArtifactExecutor = (content: string) => Promise<string>;
+export interface ShareArtifactInput {
+  file_path: string;
+}
+
+export type ShareArtifactExecutor = (input: ShareArtifactInput) => Promise<string>;
 export type EditArtifactExecutor = (input: EditArtifactInput) => Promise<string>;
-import { writeArtifactText } from "./artifact-storage.js";
+import { writeArtifactBytes, writeArtifactText } from "./artifact-storage.js";
 import { createDefaultVisitWebpageExecutor, type VisitWebpageExecutor } from "./web.js";
+
+/**
+ * Read a file from the sandbox VM as a Buffer.
+ * Injected by the gondolin tool set.
+ */
+export type SandboxReadFile = (absolutePath: string) => Promise<Buffer>;
 
 export function createShareArtifactTool(
   executors: { shareArtifact: ShareArtifactExecutor },
@@ -26,21 +36,39 @@ export function createShareArtifactTool(
     persistType: "none",
     label: "Share Artifact",
     description:
-      "Share additional content as an artifact and return a public URL. Use for scripts, reports, or large outputs.",
+      "Publish a file from the sandbox as a shareable artifact URL. Use for scripts, reports, images, data files, or any large output.",
     parameters: Type.Object({
-      content: Type.String({
-        description: "The text content to publish as an artifact.",
+      file_path: Type.String({
+        description: "Path to the file inside the sandbox to publish as an artifact.",
       }),
     }),
-    execute: async (_toolCallId, params) => {
-      const output = await executors.shareArtifact(params.content);
+    execute: async (_toolCallId, params: ShareArtifactInput) => {
+      const output = await executors.shareArtifact(params);
       return {
         content: [{ type: "text", text: output }],
         details: {
           kind: "share_artifact",
+          filePath: params.file_path,
         },
       };
     },
+  };
+}
+
+export function createDefaultShareArtifactExecutor(
+  options: ToolContext,
+  readFile: SandboxReadFile,
+): ShareArtifactExecutor {
+  return async (input: ShareArtifactInput): Promise<string> => {
+    const filePath = input.file_path?.trim();
+    if (!filePath) {
+      throw new Error("share_artifact.file_path must be non-empty.");
+    }
+
+    const data = await readFile(filePath);
+    const suffix = extname(filePath) || ".bin";
+    const artifactUrl = await writeArtifactBytes(options, data, suffix);
+    return `Artifact shared: ${artifactUrl}`;
   };
 }
 
@@ -73,19 +101,6 @@ export function createEditArtifactTool(executors: { editArtifact: EditArtifactEx
         },
       };
     },
-  };
-}
-
-export function createDefaultShareArtifactExecutor(
-  options: ToolContext,
-): ShareArtifactExecutor {
-  return async (content: string): Promise<string> => {
-    if (!content.trim()) {
-      throw new Error("share_artifact.content must be non-empty.");
-    }
-
-    const artifactUrl = await writeArtifactText(options, content, ".txt");
-    return `Artifact shared: ${artifactUrl}`;
   };
 }
 

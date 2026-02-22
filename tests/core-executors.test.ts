@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { createDefaultToolExecutors as createDefaultToolExecutorsRaw } from "../src/agent/tools/baseline-tools.js";
+import { createDefaultShareArtifactExecutor } from "../src/agent/tools/artifact.js";
 import { createDefaultOracleExecutor as createDefaultOracleExecutorRaw } from "../src/agent/tools/oracle.js";
 import { PiAiModelAdapter } from "../src/models/pi-ai-model-adapter.js";
 import { resetSpriteCache } from "../src/agent/tools/execute-code.js";
@@ -136,24 +137,32 @@ function createDefaultOracleExecutor(options: Record<string, unknown> = {}, invo
 }
 
 describe("core tool executors artifact support", () => {
-  it("share_artifact writes text artifact and returns viewer URL", async () => {
+  it("share_artifact reads file from sandbox and publishes as artifact preserving extension", async () => {
     const { artifactsPath } = await makeArtifactsDir();
     const logger = { info: vi.fn() };
 
-    const executors = createDefaultToolExecutors({
-      toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" } },
-      logger,
-    });
+    const mockReadFile = vi.fn(async () => Buffer.from("hello from sandbox"));
+    const executor = createDefaultShareArtifactExecutor(
+      {
+        toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" } },
+        logger: logger as any,
+        authStorage: AuthStorage.inMemory(),
+        modelAdapter: new PiAiModelAdapter(),
+        arc: "test",
+      },
+      mockReadFile,
+    );
 
-    const result = await executors.shareArtifact("hello from ts");
+    const result = await executor({ file_path: "/workspace/report.csv" });
 
+    expect(mockReadFile).toHaveBeenCalledWith("/workspace/report.csv");
     expect(result.startsWith("Artifact shared: https://example.com/artifacts/?")).toBe(true);
-    expect(result.endsWith(".txt")).toBe(true);
+    expect(result.endsWith(".csv")).toBe(true);
 
     const artifactUrl = extractSharedUrl(result);
     const filename = extractFilenameFromViewerUrl(artifactUrl);
     const content = await readFile(join(artifactsPath, filename), "utf-8");
-    expect(content).toBe("hello from ts");
+    expect(content).toBe("hello from sandbox");
 
     const indexHtml = await readFile(join(artifactsPath, "index.html"), "utf-8");
     expect(indexHtml).toContain("<title>Artifact Viewer</title>");
@@ -223,9 +232,17 @@ describe("core tool executors artifact support", () => {
   });
 
   it("fails fast when share_artifact is called without artifacts config", async () => {
-    const executors = createDefaultToolExecutors();
+    const mockReadFile = vi.fn(async () => Buffer.from("data"));
+    const executor = createDefaultShareArtifactExecutor(
+      {
+        authStorage: AuthStorage.inMemory(),
+        modelAdapter: new PiAiModelAdapter(),
+        arc: "test",
+      },
+      mockReadFile,
+    );
 
-    await expect(executors.shareArtifact("content")).rejects.toThrow(
+    await expect(executor({ file_path: "/workspace/file.txt" })).rejects.toThrow(
       "Artifact tools require tools.artifacts.path and tools.artifacts.url configuration.",
     );
   });

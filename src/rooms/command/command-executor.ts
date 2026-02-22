@@ -24,7 +24,7 @@ import {
   type MuaddibTool,
   type ToolSet,
 } from "../../agent/tools/baseline-tools.js";
-import { createDefaultShareArtifactExecutor } from "../../agent/tools/artifact.js";
+import { writeArtifactText } from "../../agent/tools/artifact-storage.js";
 import type { Message } from "@mariozechner/pi-ai";
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
@@ -768,9 +768,7 @@ export class CommandExecutor {
   }
 
   private async longResponseToArtifact(fullResponse: string, arc: string): Promise<string> {
-    const shareArtifact = createDefaultShareArtifactExecutor({ ...this.buildToolOptions(), arc });
-    const artifactResult = await shareArtifact(fullResponse);
-    const artifactUrl = extractSharedArtifactUrl(artifactResult);
+    const artifactUrl = await writeArtifactText({ ...this.buildToolOptions(), arc }, fullResponse, ".txt");
 
     let trimmed = trimToMaxBytes(fullResponse, this.responseMaxBytes);
 
@@ -992,15 +990,4 @@ function trimToMaxBytes(text: string, maxBytes: number): string {
   return new TextDecoder("utf-8", { fatal: false }).decode(
     Buffer.from(text, "utf-8").subarray(0, maxBytes),
   ).replace(/\uFFFD$/, "");
-}
-
-function extractSharedArtifactUrl(result: string): string {
-  const prefix = "Artifact shared: ";
-  if (!result.startsWith(prefix)) {
-    throw new Error(
-      `response_max_bytes artifact fallback expected 'Artifact shared: <url>' but got: ${result}`,
-    );
-  }
-
-  return result.slice(prefix.length).trim();
 }

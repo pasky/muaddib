@@ -36,12 +36,10 @@ import {
 } from "./web.js";
 import {
   createDefaultEditArtifactExecutor,
-  createDefaultShareArtifactExecutor,
   createEditArtifactTool,
-  createShareArtifactTool,
 } from "./artifact.js";
 import { createGondolinTools } from "./gondolin-tools.js";
-import type { ShareArtifactExecutor, EditArtifactExecutor } from "./artifact.js";
+import type { EditArtifactExecutor } from "./artifact.js";
 import type { ChronicleReadExecutor, ChronicleAppendExecutor } from "./chronicle.js";
 import type { ExecuteCodeExecutor } from "./execute-code.js";
 import type { GenerateImageExecutor } from "./image.js";
@@ -54,7 +52,6 @@ export interface BaselineToolExecutors {
   webSearch: WebSearchExecutor;
   visitWebpage: VisitWebpageExecutor;
   executeCode: ExecuteCodeExecutor;
-  shareArtifact: ShareArtifactExecutor;
   editArtifact: EditArtifactExecutor;
   oracle: OracleExecutor;
   generateImage: GenerateImageExecutor;
@@ -66,7 +63,7 @@ export interface BaselineToolExecutors {
 }
 
 export type { ToolContext, MuaddibTool, ToolPersistType, ToolSet };
-export type { EditArtifactInput, ShareArtifactExecutor, EditArtifactExecutor } from "./artifact.js";
+export type { EditArtifactInput, ShareArtifactInput, ShareArtifactExecutor, EditArtifactExecutor } from "./artifact.js";
 export type { ChronicleReadInput, ChronicleAppendInput, ChronicleReadExecutor, ChronicleAppendExecutor } from "./chronicle.js";
 export type { ExecuteCodeInput, ExecuteCodeExecutor } from "./execute-code.js";
 export type { GenerateImageInput, GenerateImageResult, GeneratedImageResultItem, GenerateImageExecutor } from "./image.js";
@@ -85,7 +82,6 @@ export {
   createProgressReportTool,
   createQuestSnoozeTool,
   createQuestStartTool,
-  createShareArtifactTool,
   createSubquestStartTool,
   createVisitWebpageTool,
   createWebSearchTool,
@@ -127,7 +123,6 @@ const BASELINE_TOOL_FACTORIES: ReadonlyArray<ExecutorBackedToolFactory> = [
   createWebSearchTool,
   createVisitWebpageTool,
   createExecuteCodeTool,
-  createShareArtifactTool,
   createEditArtifactTool,
   (executors, options) => createGenerateImageTool(executors, toConfiguredString(options.toolsConfig?.imageGen?.model)),
   createOracleTool,
@@ -143,7 +138,6 @@ export function createDefaultToolExecutors(
     webSearch: createDefaultWebSearchExecutor(options),
     visitWebpage: createDefaultVisitWebpageExecutor(options),
     executeCode: createDefaultExecuteCodeExecutor(options),
-    shareArtifact: createDefaultShareArtifactExecutor(options),
     editArtifact: createDefaultEditArtifactExecutor(options),
     generateImage: createDefaultGenerateImageExecutor(options),
     oracle: createDefaultOracleExecutor(options, oracleInvocation),
@@ -190,6 +184,7 @@ export function createBaselineAgentTools(options: BaselineToolOptions): ToolSet 
     ? createGondolinTools({
         arc: options.arc,
         config: gondolinConfig,
+        toolsConfig: options.toolsConfig,
         logger: options.logger,
       })
     : null;

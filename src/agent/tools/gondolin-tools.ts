@@ -31,8 +31,14 @@ import type { VM } from "@earendil-works/gondolin";
 
 import { getMuaddibHome } from "../../config/paths.js";
 import type { GondolinConfig } from "../../config/muaddib-config.js";
+import type { ToolsConfig } from "../../config/muaddib-config.js";
 import type { Logger } from "../../app/logging.js";
-import type { MuaddibTool, ToolSet } from "./types.js";
+import type { MuaddibTool, ToolContext, ToolSet } from "./types.js";
+import {
+  createShareArtifactTool,
+  createDefaultShareArtifactExecutor,
+  type SandboxReadFile,
+} from "./artifact.js";
 
 // ── Arc ID / workspace path / checkpoint path ──────────────────────────────
 
@@ -520,6 +526,7 @@ function createVmBashOps(getVm: () => Promise<VM>, defaultTimeoutSeconds: number
 export interface GondolinToolsOptions {
   arc: string;
   config: GondolinConfig;
+  toolsConfig?: ToolsConfig;
   logger?: Logger;
 }
 
@@ -533,7 +540,7 @@ export interface GondolinToolsOptions {
  * default working directory for bash and the base for relative path resolution.
  */
 export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
-  const { arc, config, logger } = options;
+  const { arc, config, toolsConfig, logger } = options;
   const dnsMode = resolveDnsMode(config.dnsMode);
   const arcId = normalizeArcId(arc);
   const sessionDir = `/tmp/session-${randomUUID().slice(0, 8)}`;
@@ -562,11 +569,30 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
   const piEditTool = createEditTool(sessionDir, { operations: createVmEditOps(getVm) });
   const piBashTool = createBashTool(sessionDir, { operations: createVmBashOps(getVm, bashTimeoutSeconds) });
 
+  // share_artifact reads files from the VM and publishes them to the artifact store.
+  const sandboxReadFile: SandboxReadFile = async (absolutePath: string): Promise<Buffer> => {
+    const vm = await getVm();
+    const content = await vm.readFile(absolutePath);
+    return Buffer.isBuffer(content) ? content : Buffer.from(content);
+  };
+  const toolContext: ToolContext = {
+    toolsConfig,
+    // share_artifact only needs toolsConfig + logger from ToolContext; the rest
+    // are unused but required by the interface — provide safe no-op stubs.
+    authStorage: { getApiKey: async () => null } as any,
+    modelAdapter: undefined as any,
+    arc,
+    logger,
+  };
+  const shareArtifactExecutor = createDefaultShareArtifactExecutor(toolContext, sandboxReadFile);
+  const shareArtifactTool = createShareArtifactTool({ shareArtifact: shareArtifactExecutor });
+
   const tools: MuaddibTool[] = [
     { ...piReadTool, persistType: "none" } as MuaddibTool,
     { ...piWriteTool, persistType: "none" } as MuaddibTool,
     { ...piEditTool, persistType: "none" } as MuaddibTool,
     { ...piBashTool, persistType: "summary" } as MuaddibTool,
+    shareArtifactTool,
   ];
 
   const systemPromptSuffix = `Filesystem: /workspace persists across sessions; ${sessionDir} is your ephemeral working directory.`;

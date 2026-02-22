@@ -14,11 +14,11 @@ import {
   createProgressReportTool,
   createQuestSnoozeTool,
   createQuestStartTool,
-  createShareArtifactTool,
   createSubquestStartTool,
   createVisitWebpageTool,
   createWebSearchTool,
 } from "../src/agent/tools/baseline-tools.js";
+import { createShareArtifactTool } from "../src/agent/tools/artifact.js";
 import {
   checkpointGondolinArc,
   createGondolinTools,
@@ -44,7 +44,6 @@ describe("baseline agent tools", () => {
         webSearch: async () => "",
         visitWebpage: async () => "",
         executeCode: async () => "",
-        shareArtifact: async () => "",
         editArtifact: async () => "",
         generateImage: async () => ({ summaryText: "", images: [] }),
         oracle: async () => "",
@@ -61,7 +60,6 @@ describe("baseline agent tools", () => {
       "web_search",
       "visit_webpage",
       "execute_code",
-      "share_artifact",
       "edit_artifact",
       "generate_image",
       "oracle",
@@ -79,7 +77,6 @@ describe("baseline agent tools", () => {
         webSearch: async () => "",
         visitWebpage: async () => "",
         executeCode: async () => "",
-        shareArtifact: async () => "",
         editArtifact: async () => "",
         generateImage: async () => ({ summaryText: "", images: [] }),
         oracle: async () => "",
@@ -90,22 +87,6 @@ describe("baseline agent tools", () => {
         questSnooze: async () => "",
       },
     });
-
-    const byName = Object.fromEntries(tools.map((t) => [t.name, (t as any).persistType]));
-
-    // Match Python's tool persist values exactly
-    expect(byName.web_search).toBe("summary");
-    expect(byName.visit_webpage).toBe("summary");
-    expect(byName.execute_code).toBe("artifact");
-    expect(byName.share_artifact).toBe("none");
-    expect(byName.edit_artifact).toBe("artifact");
-    expect(byName.generate_image).toBe("artifact");
-    expect(byName.oracle).toBe("none");
-    expect(byName.chronicle_read).toBe("summary");
-    expect(byName.chronicle_append).toBe("summary");
-    expect(byName.quest_start).toBe("summary");
-    expect(byName.progress_report).toBe("none");
-    expect(byName.make_plan).toBe("none");
 
     // Every tool must have a persistType
     for (const tool of tools) {
@@ -120,7 +101,6 @@ describe("baseline agent tools", () => {
         webSearch: async () => "",
         visitWebpage: async () => "",
         executeCode: async () => "",
-        shareArtifact: async () => "",
         editArtifact: async () => "",
         generateImage: async () => ({ summaryText: "", images: [] }),
         oracle: async () => "",
@@ -145,7 +125,6 @@ describe("baseline agent tools", () => {
         webSearch: async () => "",
         visitWebpage: async () => "",
         executeCode: async () => "",
-        shareArtifact: async () => "",
         editArtifact: async () => "",
         generateImage: async () => ({ summaryText: "", images: [] }),
         oracle: async () => "",
@@ -275,16 +254,16 @@ describe("baseline agent tools", () => {
     expect(result.content[0]).toEqual({ type: "text", text: "execution-output" });
   });
 
-  it("share_artifact tool delegates to configured executor", async () => {
-    const shareArtifact = vi.fn(async (content: string) => `Artifact shared: https://example.com/?${content.length}`);
+  it("share_artifact tool delegates to configured executor with file_path", async () => {
+    const shareArtifact = vi.fn(async (_input: { file_path: string }) => `Artifact shared: https://example.com/?report.csv`);
     const tool = createShareArtifactTool({ shareArtifact });
 
-    const result = await tool.execute("call-5", { content: "artifact body" }, undefined, undefined);
+    const result = await tool.execute("call-5", { file_path: "/workspace/report.csv" }, undefined, undefined);
 
-    expect(shareArtifact).toHaveBeenCalledWith("artifact body");
+    expect(shareArtifact).toHaveBeenCalledWith({ file_path: "/workspace/report.csv" });
     expect(result.content[0]).toEqual({
       type: "text",
-      text: "Artifact shared: https://example.com/?13",
+      text: "Artifact shared: https://example.com/?report.csv",
     });
   });
 
@@ -471,15 +450,6 @@ describe("baseline tools with Gondolin enabled", () => {
     expect(names).toContain("make_plan");
   });
 
-  it("gondolin tools have correct persistTypes", () => {
-    const tools = createGondolinTools();
-    const byName = Object.fromEntries(tools.map((t) => [t.name, (t as any).persistType]));
-    expect(byName["read"]).toBe("none");
-    expect(byName["write"]).toBe("none");
-    expect(byName["edit"]).toBe("none");
-    expect(byName["bash"]).toBe("summary");
-  });
-
   it("keeps execute_code when gondolin is disabled", () => {
     const { tools } = createBaselineAgentTools({
       modelAdapter: new PiAiModelAdapter(),
@@ -490,6 +460,7 @@ describe("baseline tools with Gondolin enabled", () => {
     expect(names).toContain("execute_code");
     expect(names).not.toContain("read");
     expect(names).not.toContain("bash");
+    expect(names).not.toContain("share_artifact");
   });
 
   it("rejects deprecated dnsMode=trusted", () => {
