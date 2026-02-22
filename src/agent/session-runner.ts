@@ -87,9 +87,13 @@ export class SessionRunner {
   }
 
   async prompt(prompt: string, options: PromptOptions = {}): Promise<PromptResult> {
+    const suffix = this.options.toolSet?.systemPromptSuffix;
+    const systemPrompt = suffix
+      ? `${this.options.systemPrompt}\n\n${suffix}`
+      : this.options.systemPrompt;
     const sessionCtx = createAgentSessionForInvocation({
       model: this.model,
-      systemPrompt: this.options.systemPrompt,
+      systemPrompt,
       tools: this.tools,
       modelAdapter: this.modelAdapter,
       authStorage: this.options.authStorage,

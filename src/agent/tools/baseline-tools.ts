@@ -203,5 +203,5 @@ export function createBaselineAgentTools(options: BaselineToolOptions): ToolSet 
     }),
   ];
 
-  return { tools, dispose: gondolinToolSet?.dispose };
+  return { tools, dispose: gondolinToolSet?.dispose, systemPromptSuffix: gondolinToolSet?.systemPromptSuffix };
 }

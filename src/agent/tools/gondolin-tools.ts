@@ -556,9 +556,11 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
     { ...piBashTool, persistType: "summary" } as MuaddibTool,
   ];
 
+  const systemPromptSuffix = `Filesystem: /workspace persists across sessions; ${sessionDir} is your ephemeral working directory.`;
+
   const dispose = () => checkpointGondolinArc(arc, logger);
 
-  return { tools, dispose };
+  return { tools, dispose, systemPromptSuffix };
 }
 
 // ── Exported for testing ───────────────────────────────────────────────────

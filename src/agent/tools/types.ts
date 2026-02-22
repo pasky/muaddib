@@ -13,10 +13,14 @@ export type ToolPersistType = "none" | "summary" | "artifact";
  * callback.  `dispose` is called by SessionRunner at the end of every
  * prompt() call (success or failure) to release session-scoped resources
  * such as Gondolin VM refcounts.
+ *
+ * `systemPromptSuffix` is appended to the system prompt by SessionRunner
+ * when present — used to inject sandbox-specific context (e.g. directory layout).
  */
 export interface ToolSet {
   tools: MuaddibTool[];
   dispose?: () => Promise<void>;
+  systemPromptSuffix?: string;
 }
 
 /**
