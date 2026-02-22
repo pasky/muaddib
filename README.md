@@ -114,6 +114,31 @@ Manual for IRC ("bring your own irssi"):
 3. Build runtime: `npm run build`
 4. Run the service: `npm run start`
 
+### Gondolin Sandbox Image
+
+When `agent.tools.gondolin.enabled` is `true`, Muaddib runs agent code in isolated QEMU micro-VMs.
+The default image downloaded by gondolin is a minimal Alpine Linux with basic utilities.
+For a more capable environment (Python 3 with pip/numpy/matplotlib, Node.js 24, npm, uv, 1 GB rootfs), build a custom image:
+
+```bash
+# requires e2fsprogs (apt install e2fsprogs / brew install e2fsprogs)
+./scripts/build-gondolin-image.sh [output-dir]   # default: ~/.muaddib/gondolin-image
+```
+
+Then point muaddib at it in `config.json`:
+
+```json
+"agent": {
+  "tools": {
+    "gondolin": {
+      "enabled": true,
+      "guestDir": "/home/you/.muaddib/gondolin-image"
+    }
+  }
+}
+```
+
+The 1 GB rootfs gives the agent space to `apk add` or `pip install` further packages that persist across checkpoints within an arc.
 
 ### Commands
 

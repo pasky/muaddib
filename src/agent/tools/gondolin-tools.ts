@@ -207,6 +207,10 @@ async function ensureVm(
         createHttpHooks,
       } = await import("@earendil-works/gondolin");
 
+      if (config.guestDir) {
+        process.env.GONDOLIN_GUEST_DIR = config.guestDir;
+      }
+
       const workspacePath = getArcWorkspacePath(arc);
       mkdirSync(workspacePath, { recursive: true });
       mkdirSync(join(getMuaddibHome(), "checkpoints"), { recursive: true });
