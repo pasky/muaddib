@@ -92,6 +92,25 @@ export class RoomMessageHandler {
     message: RoomMessage,
     options: { isDirect: boolean; sendResponse?: (text: string) => Promise<void> },
   ): Promise<CommandExecutionResult | null> {
+    // ── Synchronous steer fast-path ──
+    // Check for an active session BEFORE the async addMessage call.  Without
+    // this, the addMessage await creates a gap during which the session can
+    // complete and remove itself from activeSteers, causing the later check
+    // in handleCommandMessage / handlePassiveMessage to miss it.
+    const canSteer = !options.isDirect || !this.resolver.shouldBypassSteering(message);
+    if (canSteer) {
+      const key = sessionKey(message);
+      const existing = this.activeSteers.get(key);
+      if (existing) {
+        existing(message);
+        // Persist to history without blocking the steer path.
+        this.history.addMessage(message).catch((err) => {
+          this.logger.error("Failed to persist steered message to history", String(err));
+        });
+        return null;
+      }
+    }
+
     const triggerMessageId = await this.history.addMessage(message);
 
     if (!options.isDirect) {
