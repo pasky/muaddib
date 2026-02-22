@@ -105,7 +105,7 @@ export interface BaselineToolOptions extends ToolContext {
   oracleInvocation?: OracleInvocationContext;
 }
 
-type ExecutorBackedToolFactory = (executors: BaselineToolExecutors) => MuaddibTool;
+type ExecutorBackedToolFactory = (executors: BaselineToolExecutors, options: BaselineToolOptions) => MuaddibTool;
 
 /**
  * Select quest tools based on active quest context, matching Python parity:
@@ -123,15 +123,13 @@ function getQuestToolGroup(currentQuestId?: string | null): ReadonlyArray<Execut
   return [createQuestSnoozeTool];
 }
 
-const PRE_IMAGE_TOOL_FACTORIES: ReadonlyArray<ExecutorBackedToolFactory> = [
+const BASELINE_TOOL_FACTORIES: ReadonlyArray<ExecutorBackedToolFactory> = [
   createWebSearchTool,
   createVisitWebpageTool,
   createExecuteCodeTool,
   createShareArtifactTool,
   createEditArtifactTool,
-];
-
-const POST_IMAGE_TOOL_FACTORIES: ReadonlyArray<ExecutorBackedToolFactory> = [
+  (executors, options) => createGenerateImageTool(executors, toConfiguredString(options.toolsConfig?.imageGen?.model)),
   createOracleTool,
   createChronicleReadTool,
   createChronicleAppendTool,
@@ -180,17 +178,13 @@ export function createBaselineAgentTools(options: BaselineToolOptions): ToolSet 
   const questToolGroup = getQuestToolGroup(options.currentQuestId);
 
   // When Gondolin is enabled, drop execute_code (Sprites) from the baseline.
-  const activePreFactories = gondolinConfig !== null
-    ? PRE_IMAGE_TOOL_FACTORIES.filter((f) => f !== createExecuteCodeTool)
-    : PRE_IMAGE_TOOL_FACTORIES;
+  const activeFactories = gondolinConfig !== null
+    ? BASELINE_TOOL_FACTORIES.filter((f) => f !== createExecuteCodeTool)
+    : BASELINE_TOOL_FACTORIES;
 
-  const imageGenModelId = toConfiguredString(options.toolsConfig?.imageGen?.model);
-  const executorBackedTools = [
-    ...activePreFactories.map((factory) => factory(executors)),
-    createGenerateImageTool(executors, imageGenModelId),
-    ...POST_IMAGE_TOOL_FACTORIES.map((factory) => factory(executors)),
-    ...questToolGroup.map((factory) => factory(executors)),
-  ];
+  const executorBackedTools = [...activeFactories, ...questToolGroup].map((factory) =>
+    factory(executors, options),
+  );
 
   const gondolinToolSet = gondolinConfig !== null
     ? createGondolinTools({
