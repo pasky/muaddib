@@ -53,9 +53,14 @@ export function getArcCheckpointPath(arc: string): string {
 
 /** Close all cached VMs. Exported for testing and used by process exit handlers. */
 export async function closeAllVms(): Promise<void> {
+  const vmCount = vmCache.size;
   const vms = [...vmCache.values()];
   vmCache.clear();
   await Promise.allSettled(vms.map((vm) => vm.close().catch(() => {})));
+  // Release one slot per VM that was running so waiting callers can proceed.
+  for (let i = 0; i < vmCount; i++) {
+    releaseVmSlot();
+  }
 }
 
 function installProcessCleanupHandlers() {
@@ -97,6 +102,43 @@ const vmActiveSessions = new Map<string, number>();
 /** In-flight checkpoint promise per arcId — prevents concurrent writes to the same .qcow2 file. */
 const vmCheckpointInProgress = new Map<string, Promise<void>>();
 
+// ── Global QEMU concurrency semaphore ──────────────────────────────────────
+
+/** Current maximum number of simultaneously running arc VMs.  Never unlimited. */
+let vmSlotLimit = 8;
+/** How many arc VMs are currently running (held slots). */
+let vmSlotActive = 0;
+/** Resolve callbacks for callers waiting to acquire a slot. */
+const vmSlotWaiters: Array<() => void> = [];
+
+function resolveVmSlotLimit(value: unknown): number {
+  if (value === undefined || value === null) return 8;
+  if (!Number.isInteger(value) || (value as number) < 1) {
+    throw new Error(
+      `agent.tools.gondolin.maxConcurrentVms must be a positive integer, got ${JSON.stringify(value)}`,
+    );
+  }
+  return value as number;
+}
+
+/** Block until a QEMU slot is available, then claim it. */
+async function acquireVmSlot(limit: number): Promise<void> {
+  vmSlotLimit = limit;
+  if (vmSlotActive < vmSlotLimit) {
+    vmSlotActive++;
+    return;
+  }
+  await new Promise<void>((resolve) => vmSlotWaiters.push(resolve));
+  vmSlotActive++;
+}
+
+/** Release a previously acquired QEMU slot and wake the next waiter if any. */
+function releaseVmSlot(): void {
+  vmSlotActive = Math.max(0, vmSlotActive - 1);
+  const waiter = vmSlotWaiters.shift();
+  if (waiter) waiter();
+}
+
 type SupportedDnsMode = NonNullable<GondolinConfig["dnsMode"]>;
 
 function resolveDnsMode(dnsMode: unknown): SupportedDnsMode {
@@ -137,55 +179,67 @@ async function ensureVm(
   if (pending) return pending;
 
   const createPromise = (async () => {
-    const {
-      VM: VMClass,
-      VmCheckpoint,
-      RealFSProvider,
-      createHttpHooks,
-    } = await import("@earendil-works/gondolin");
+    const slotLimit = resolveVmSlotLimit(config.maxConcurrentVms);
+    await acquireVmSlot(slotLimit);
 
-    const workspacePath = getArcWorkspacePath(arc);
-    mkdirSync(workspacePath, { recursive: true });
-    mkdirSync(join(getMuaddibHome(), "checkpoints"), { recursive: true });
+    let slotAcquired = true;
+    try {
+      const {
+        VM: VMClass,
+        VmCheckpoint,
+        RealFSProvider,
+        createHttpHooks,
+      } = await import("@earendil-works/gondolin");
 
-    const blockedCidrs = config.blockedCidrs ?? [];
+      const workspacePath = getArcWorkspacePath(arc);
+      mkdirSync(workspacePath, { recursive: true });
+      mkdirSync(join(getMuaddibHome(), "checkpoints"), { recursive: true });
 
-    const { httpHooks } = createHttpHooks({
-      blockInternalRanges: true,
-      isIpAllowed: (info) => {
-        if (blockedCidrs.length === 0) return true;
-        return !blockedCidrs.some((cidr) => isIpInCidr(info.ip, cidr));
-      },
-    });
+      const blockedCidrs = config.blockedCidrs ?? [];
 
-    const vmOptions: import("@earendil-works/gondolin").VMOptions = {
-      vfs: {
-        mounts: {
-          "/workspace": new RealFSProvider(workspacePath),
+      const { httpHooks } = createHttpHooks({
+        blockInternalRanges: true,
+        isIpAllowed: (info) => {
+          if (blockedCidrs.length === 0) return true;
+          return !blockedCidrs.some((cidr) => isIpInCidr(info.ip, cidr));
         },
-      },
-      httpHooks,
-      dns: { mode: dnsMode },
-    };
+      });
 
-    const checkpointPath = getArcCheckpointPath(arc);
-    let vm: import("@earendil-works/gondolin").VM;
-    if (existsSync(checkpointPath)) {
-      try {
-        const checkpoint = VmCheckpoint.load(checkpointPath);
-        vm = await checkpoint.resume(vmOptions);
-        logger?.info(`Gondolin VM resumed from checkpoint for arc ${arcId}: ${checkpointPath}`);
-      } catch (err) {
-        logger?.warn(`Gondolin checkpoint restore failed, starting fresh VM for arc ${arcId}`, String(err));
+      const vmOptions: import("@earendil-works/gondolin").VMOptions = {
+        vfs: {
+          mounts: {
+            "/workspace": new RealFSProvider(workspacePath),
+          },
+        },
+        httpHooks,
+        dns: { mode: dnsMode },
+      };
+
+      const checkpointPath = getArcCheckpointPath(arc);
+      let vm: import("@earendil-works/gondolin").VM;
+      if (existsSync(checkpointPath)) {
+        try {
+          const checkpoint = VmCheckpoint.load(checkpointPath);
+          vm = await checkpoint.resume(vmOptions);
+          logger?.info(`Gondolin VM resumed from checkpoint for arc ${arcId}: ${checkpointPath}`);
+        } catch (err) {
+          logger?.warn(`Gondolin checkpoint restore failed, starting fresh VM for arc ${arcId}`, String(err));
+          vm = await VMClass.create(vmOptions);
+        }
+      } else {
         vm = await VMClass.create(vmOptions);
+        logger?.info(`Gondolin VM started for arc ${arcId}, workspace: ${workspacePath}`);
       }
-    } else {
-      vm = await VMClass.create(vmOptions);
-      logger?.info(`Gondolin VM started for arc ${arcId}, workspace: ${workspacePath}`);
-    }
 
-    vmCache.set(arcId, vm);
-    return vm;
+      vmCache.set(arcId, vm);
+      slotAcquired = false; // slot is now owned by the VM lifetime, released on checkpoint/close
+      return vm;
+    } finally {
+      if (slotAcquired) {
+        // VM creation failed — release the slot so waiters can proceed.
+        releaseVmSlot();
+      }
+    }
   })();
 
   vmCacheLocks.set(arcId, createPromise);
@@ -501,11 +555,20 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
 
 export { isIpInCidr };
 
+/** Returns current semaphore state — for tests only. */
+export function getVmSlotState(): { active: number; limit: number; waiters: number } {
+  return { active: vmSlotActive, limit: vmSlotLimit, waiters: vmSlotWaiters.length };
+}
+
 export function resetGondolinVmCache(): void {
   vmCache.clear();
   vmCacheLocks.clear();
   vmActiveSessions.clear();
   vmCheckpointInProgress.clear();
+  // Reset semaphore state — unblock any waiters left from previous tests.
+  vmSlotActive = 0;
+  vmSlotLimit = 8;
+  vmSlotWaiters.splice(0);
 }
 
 /**
@@ -573,6 +636,8 @@ export async function checkpointGondolinArc(
       await vm.close().catch(() => {});
     } finally {
       vmCheckpointInProgress.delete(arcId);
+      // Release the concurrency slot so waiting arcs can proceed.
+      releaseVmSlot();
     }
   })();
 

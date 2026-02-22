@@ -54,7 +54,14 @@ export interface GondolinConfig {
    * Default: "synthetic".
    */
   dnsMode?: "open" | "synthetic";
-
+  /**
+   * Maximum number of arc QEMU VMs that may run concurrently across all arcs.
+   * When this limit is reached, new arc invocations block until a slot is freed
+   * (i.e. another arc's session ends and its VM is checkpointed).
+   * Must be a positive integer; unlimited concurrency is not supported.
+   * Default: 8.
+   */
+  maxConcurrentVms?: number;
 }
 
 /**
