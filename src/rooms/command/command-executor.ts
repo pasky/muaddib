@@ -856,7 +856,7 @@ export class CommandExecutor {
     }
 
     const allowed = new Set(allowedTools);
-    return { tools: toolSet.tools.filter((tool) => allowed.has(tool.name)), dispose: toolSet.dispose };
+    return { tools: toolSet.tools.filter((tool) => allowed.has(tool.name)), dispose: toolSet.dispose, systemPromptSuffix: toolSet.systemPromptSuffix };
   }
 }
 

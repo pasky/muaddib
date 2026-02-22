@@ -325,6 +325,65 @@ describe("SessionRunner", () => {
     expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 
+  function makeMinimalSession(text = "ok"): any {
+    const callbacks: Array<(event: any) => void> = [];
+    const session = {
+      messages: [{ role: "assistant", content: [{ type: "text", text }], usage: makeUsage(), stopReason: "stop" }] as any[],
+      subscribe: vi.fn((cb: (event: any) => void) => { callbacks.push(cb); return vi.fn(); }),
+      prompt: vi.fn(async () => { callbacks.forEach((cb) => cb({ type: "turn_end" })); callbacks.forEach((cb) => cb({ type: "message_end", message: session.messages[0] })); }),
+    };
+    return session;
+  }
+
+  const minimalModelAdapter = { resolve: () => ({ spec: { provider: "openai", modelId: "gpt-4o-mini" }, model: {} }) } as any;
+  const minimalLogger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+  it("appends toolSet.systemPromptSuffix to system prompt passed to LLM", async () => {
+    mockCreateAgentSessionForInvocation.mockReturnValue({
+      session: makeMinimalSession(),
+      agent: { setModel: vi.fn() },
+      ensureProviderKey: vi.fn(async () => {}),
+      getVisionFallbackActivated: () => false,
+    });
+
+    const runner = new SessionRunner({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "base prompt",
+      authStorage: AuthStorage.inMemory(),
+      logger: minimalLogger,
+      modelAdapter: minimalModelAdapter,
+      toolSet: { tools: [], systemPromptSuffix: "Filesystem: /workspace persists; /tmp/session-abc is your ephemeral working directory." },
+    });
+
+    await runner.prompt("hello");
+
+    const calledWith = mockCreateAgentSessionForInvocation.mock.calls[0]![0] as { systemPrompt: string };
+    expect(calledWith.systemPrompt).toBe("base prompt\n\nFilesystem: /workspace persists; /tmp/session-abc is your ephemeral working directory.");
+  });
+
+  it("passes system prompt unchanged when toolSet has no systemPromptSuffix", async () => {
+    mockCreateAgentSessionForInvocation.mockReturnValue({
+      session: makeMinimalSession(),
+      agent: { setModel: vi.fn() },
+      ensureProviderKey: vi.fn(async () => {}),
+      getVisionFallbackActivated: () => false,
+    });
+
+    const runner = new SessionRunner({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "base prompt",
+      authStorage: AuthStorage.inMemory(),
+      logger: minimalLogger,
+      modelAdapter: minimalModelAdapter,
+      toolSet: { tools: [] },
+    });
+
+    await runner.prompt("hello");
+
+    const calledWith = mockCreateAgentSessionForInvocation.mock.calls[0]![0] as { systemPrompt: string };
+    expect(calledWith.systemPrompt).toBe("base prompt");
+  });
+
   it("throws when completion remains empty after retries", async () => {
     vi.useFakeTimers();
     try {
