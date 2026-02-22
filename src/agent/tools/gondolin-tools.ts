@@ -247,6 +247,23 @@ function shQuote(value: string): string {
   return "'" + value.replace(/'/g, "'\\''") + "'";
 }
 
+// ── Output cap ────────────────────────────────────────────────────────────
+
+/**
+ * Maximum bytes forwarded from VM bash output to the upstream bash tool.
+ *
+ * The upstream pi bash tool (createBashTool) writes full output to a host
+ * /tmp/pi-bash-*.log file and appends that path to the response when output
+ * exceeds its DEFAULT_MAX_BYTES limit (50 KB).  In Gondolin mode the agent
+ * cannot read that host path through the VM's read tool, and exposing it
+ * leaks host filesystem details into the agent's context.
+ *
+ * By capping what we deliver via onData to strictly below 50 KB, we ensure
+ * the upstream tool's temp-file branch is never triggered.  When the cap is
+ * hit we append a VM-specific truncation notice in place of the host path.
+ */
+const VM_BASH_OUTPUT_CAP_BYTES = 48 * 1024; // 48 KB — below upstream's 50 KB threshold
+
 // ── VM operations factories ────────────────────────────────────────────────
 
 function createVmReadOps(getVm: () => Promise<VM>): ReadOperations {
@@ -341,8 +358,31 @@ function createVmBashOps(getVm: () => Promise<VM>, defaultTimeoutSeconds: number
           stderr: "pipe",
         });
 
+        let totalBytes = 0;
+        let capped = false;
         for await (const chunk of proc.output()) {
-          onData(chunk.data);
+          if (capped) {
+            // Drain remaining chunks so the process can finish naturally.
+            continue;
+          }
+          const data = chunk.data;
+          const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+          const newTotal = totalBytes + buf.length;
+          if (newTotal > VM_BASH_OUTPUT_CAP_BYTES) {
+            const remaining = VM_BASH_OUTPUT_CAP_BYTES - totalBytes;
+            if (remaining > 0) {
+              onData(buf.subarray(0, remaining));
+            }
+            onData(
+              Buffer.from(
+                `\n[output truncated — VM stream capped at ${VM_BASH_OUTPUT_CAP_BYTES / 1024}KB]\n`,
+              ),
+            );
+            capped = true;
+          } else {
+            totalBytes = newTotal;
+            onData(data);
+          }
         }
 
         const r = await proc;

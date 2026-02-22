@@ -230,6 +230,125 @@ describe("checkpointGondolinArc — concurrent checkpoint serialization", () => 
 
 // ── env isolation ──────────────────────────────────────────────────────────
 
+describe("gondolin bash tool — output capping", () => {
+  it("caps output below 50KB so upstream bash tool never writes to host /tmp", async () => {
+    // Produce ~60KB of output in chunks — enough to exceed the upstream 50KB threshold.
+    const CHUNK_SIZE = 4096;
+    const TOTAL_OUTPUT_BYTES = 60 * 1024;
+
+    function makeLargeOutputProc() {
+      return Object.assign(
+        Promise.resolve({ ok: true, exitCode: 0, stdout: "", stderr: "" }),
+        {
+          output: async function* () {
+            let sent = 0;
+            while (sent < TOTAL_OUTPUT_BYTES) {
+              const size = Math.min(CHUNK_SIZE, TOTAL_OUTPUT_BYTES - sent);
+              yield { data: Buffer.alloc(size, 0x41 /* 'A' */) };
+              sent += size;
+            }
+          },
+        },
+      );
+    }
+
+    const fakeVm = {
+      exec: vi.fn((cmd: string[]) => {
+        if (cmd[0] === "/bin/bash") return makeLargeOutputProc();
+        // mkdir -p for session dir
+        return Object.assign(
+          Promise.resolve({ ok: true, exitCode: 0, stdout: "", stderr: "" }),
+          { output: async function* () {} },
+        );
+      }),
+      checkpoint: vi.fn(async (_path: string) => {}),
+    };
+
+    const gondolin = await import("@earendil-works/gondolin");
+    // @ts-expect-error test-only
+    gondolin.__fakeVms.set("__next", fakeVm);
+
+    const { tools } = createGondolinTools({ arc: "cap-test-arc", config: gondolinConfig });
+    const bashTool = tools.find((t) => t.name === "bash")!;
+
+    const updates: string[] = [];
+    const result = await bashTool.execute(
+      "cap-call-1",
+      { command: "yes A | head -c 61440" },
+      new AbortController().signal,
+      (update: { content: Array<{ type: string; text?: string }> }) => {
+        const text = update.content.find((b) => b.type === "text")?.text;
+        if (text) updates.push(text);
+      },
+    );
+
+    const resultText = result.content
+      .filter((b): b is { type: "text"; text: string } => b.type === "text")
+      .map((b) => b.text)
+      .join("\n");
+
+    // Must not contain a host /tmp path from the upstream bash tool's overflow file.
+    expect(resultText).not.toMatch(/\/tmp\/pi-bash-/);
+
+    // Must contain the VM-specific truncation notice.
+    expect(resultText).toContain("[output truncated — VM stream capped at 48KB]");
+
+    // Total text delivered should be ≤ 50KB (upstream DEFAULT_MAX_BYTES) so it
+    // fits entirely in the upstream's rolling buffer with no temp file created.
+    const totalResultBytes = Buffer.byteLength(resultText, "utf8");
+    expect(totalResultBytes).toBeLessThanOrEqual(50 * 1024);
+  });
+
+  it("does not truncate or append notice when output is within the 48KB cap", async () => {
+    const SMALL_OUTPUT = "hello gondolin\n";
+
+    function makeSmallOutputProc() {
+      return Object.assign(
+        Promise.resolve({ ok: true, exitCode: 0, stdout: "", stderr: "" }),
+        {
+          output: async function* () {
+            yield { data: Buffer.from(SMALL_OUTPUT) };
+          },
+        },
+      );
+    }
+
+    const fakeVm = {
+      exec: vi.fn((cmd: string[]) => {
+        if (cmd[0] === "/bin/bash") return makeSmallOutputProc();
+        return Object.assign(
+          Promise.resolve({ ok: true, exitCode: 0, stdout: "", stderr: "" }),
+          { output: async function* () {} },
+        );
+      }),
+      checkpoint: vi.fn(async (_path: string) => {}),
+    };
+
+    const gondolin = await import("@earendil-works/gondolin");
+    // @ts-expect-error test-only
+    gondolin.__fakeVms.set("__next", fakeVm);
+
+    const { tools } = createGondolinTools({ arc: "small-output-arc", config: gondolinConfig });
+    const bashTool = tools.find((t) => t.name === "bash")!;
+
+    const result = await bashTool.execute(
+      "small-call-1",
+      { command: "echo 'hello gondolin'" },
+      new AbortController().signal,
+      () => {},
+    );
+
+    const resultText = result.content
+      .filter((b): b is { type: "text"; text: string } => b.type === "text")
+      .map((b) => b.text)
+      .join("\n");
+
+    expect(resultText).toContain(SMALL_OUTPUT.trim());
+    expect(resultText).not.toContain("[output truncated");
+    expect(resultText).not.toMatch(/\/tmp\/pi-bash-/);
+  });
+});
+
 describe("gondolin bash tool — env isolation", () => {
   it("does not forward host process.env into vm.exec", async () => {
     // Fake proc supports both: `for await (const chunk of proc.output())` and `await proc`
