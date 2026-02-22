@@ -51,6 +51,45 @@ export function getArcCheckpointPath(arc: string): string {
 
 // ── VM cache: one VM per arc ───────────────────────────────────────────────
 
+/** Close all cached VMs. Exported for testing and used by process exit handlers. */
+export async function closeAllVms(): Promise<void> {
+  const vms = [...vmCache.values()];
+  vmCache.clear();
+  await Promise.allSettled(vms.map((vm) => vm.close().catch(() => {})));
+}
+
+function installProcessCleanupHandlers() {
+  let cleanupDone = false;
+
+  const asyncCleanup = async (signal: string) => {
+    if (cleanupDone) return;
+    cleanupDone = true;
+    await closeAllVms();
+    // Re-raise the signal so the default handler runs (exit code reflects signal).
+    process.kill(process.pid, signal as NodeJS.Signals);
+  };
+
+  process.on("SIGTERM", () => void asyncCleanup("SIGTERM"));
+  process.on("SIGINT", () => void asyncCleanup("SIGINT"));
+
+  // 'exit' handler must be synchronous — best-effort: destroy VMs synchronously
+  // if they expose a sync path (close() is async, so we can only attempt it).
+  process.on("exit", () => {
+    for (const vm of vmCache.values()) {
+      try {
+        // Fire-and-forget: the process is exiting, but this may still kill
+        // the child QEMU process if close() initiates the kill synchronously.
+        vm.close().catch(() => {});
+      } catch {
+        // ignore
+      }
+    }
+    vmCache.clear();
+  });
+}
+
+installProcessCleanupHandlers();
+
 const vmCache = new Map<string, VM>();
 const vmCacheLocks = new Map<string, Promise<VM>>();
 /** Active session count per arcId — prevents checkpointing while another session is still running. */
@@ -529,7 +568,9 @@ export async function checkpointGondolinArc(
       logger?.info(`Gondolin VM checkpointed for arc ${arcId}: ${checkpointPath}`);
     } catch (err) {
       logger?.error(`Gondolin checkpoint failed for arc ${arcId}`, String(err));
-      // VM was already removed from cache above; nothing more to do.
+      // VM was already removed from cache above; close the QEMU process so it
+      // doesn't leak as an orphan.
+      await vm.close().catch(() => {});
     } finally {
       vmCheckpointInProgress.delete(arcId);
     }

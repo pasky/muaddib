@@ -13,6 +13,7 @@ import {
   createGondolinTools,
   checkpointGondolinArc,
   resetGondolinVmCache,
+  closeAllVms,
 } from "../src/agent/tools/gondolin-tools.js";
 
 // We reach into the module's Maps via the exported reset helper and a small
@@ -27,8 +28,16 @@ function makeFakeVm() {
   let checkpointResolve: (() => void) | null = null;
   let checkpointPromise: Promise<void> | null = null;
 
+  function makeExecResult() {
+    return Object.assign(
+      Promise.resolve({ ok: true, exitCode: 0, stdout: "", stderr: "" }),
+      { output: async function* () {} },
+    );
+  }
+
   const vm = {
-    exec: vi.fn().mockResolvedValue({ ok: true, exitCode: 0, stdout: "", stderr: "" }),
+    exec: vi.fn(() => makeExecResult()),
+    close: vi.fn().mockResolvedValue(undefined),
     checkpoint: vi.fn(async (path: string) => {
       checkpointCalls.push(path);
       if (checkpointPromise) await checkpointPromise;
@@ -225,6 +234,84 @@ describe("checkpointGondolinArc — concurrent checkpoint serialization", () => 
 
     expect(logger.warn).toHaveBeenCalledTimes(1);
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("no active sessions registered"));
+  });
+});
+
+describe("checkpointGondolinArc — vm.close on checkpoint failure", () => {
+  it("calls vm.close() when vm.checkpoint() throws so QEMU process does not leak", async () => {
+    const fakeVm = makeFakeVm();
+    fakeVm.checkpoint.mockRejectedValueOnce(new Error("disk full"));
+    await registerFakeVm(fakeVm);
+
+    const logger = makeLogger();
+    const { tools } = createGondolinTools({ arc: "close-on-fail-arc", config: gondolinConfig });
+
+    // Force VM creation by invoking a tool (bash calls getVm)
+    const bashTool = tools.find((t) => t.name === "bash")!;
+    await bashTool.execute("id", { command: "echo hi" }, new AbortController().signal, () => {});
+
+    // Now checkpoint — should fail but still call vm.close()
+    await checkpointGondolinArc("close-on-fail-arc", logger);
+
+    expect(fakeVm.checkpoint).toHaveBeenCalledTimes(1);
+    expect(fakeVm.close).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining("checkpoint failed"),
+      expect.stringContaining("disk full"),
+    );
+  });
+
+  it("does not call vm.close() when checkpoint succeeds", async () => {
+    const fakeVm = makeFakeVm();
+    await registerFakeVm(fakeVm);
+
+    const logger = makeLogger();
+    const { tools } = createGondolinTools({ arc: "no-close-arc", config: gondolinConfig });
+
+    const bashTool = tools.find((t) => t.name === "bash")!;
+    await bashTool.execute("id", { command: "echo hi" }, new AbortController().signal, () => {});
+
+    await checkpointGondolinArc("no-close-arc", logger);
+
+    expect(fakeVm.checkpoint).toHaveBeenCalledTimes(1);
+    // close() should NOT be called on success — checkpoint already stops the VM
+    expect(fakeVm.close).not.toHaveBeenCalled();
+  });
+});
+
+describe("closeAllVms — process-level cleanup", () => {
+  it("closes all cached VMs and clears the cache", async () => {
+    const fakeVm1 = makeFakeVm();
+    const fakeVm2 = makeFakeVm();
+    await registerFakeVm(fakeVm1);
+    const { tools: tools1 } = createGondolinTools({ arc: "cleanup-arc-1", config: gondolinConfig });
+    // Force VM creation
+    const bash1 = tools1.find((t) => t.name === "bash")!;
+    await bash1.execute("id", { command: "echo 1" }, new AbortController().signal, () => {});
+
+    await registerFakeVm(fakeVm2);
+    const { tools: tools2 } = createGondolinTools({ arc: "cleanup-arc-2", config: gondolinConfig });
+    const bash2 = tools2.find((t) => t.name === "bash")!;
+    await bash2.execute("id", { command: "echo 2" }, new AbortController().signal, () => {});
+
+    await closeAllVms();
+
+    expect(fakeVm1.close).toHaveBeenCalledTimes(1);
+    expect(fakeVm2.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("tolerates vm.close() throwing", async () => {
+    const fakeVm = makeFakeVm();
+    fakeVm.close.mockRejectedValueOnce(new Error("already dead"));
+    await registerFakeVm(fakeVm);
+
+    const { tools } = createGondolinTools({ arc: "cleanup-err-arc", config: gondolinConfig });
+    const bash = tools.find((t) => t.name === "bash")!;
+    await bash.execute("id", { command: "echo hi" }, new AbortController().signal, () => {});
+
+    // Should not throw
+    await closeAllVms();
+    expect(fakeVm.close).toHaveBeenCalledTimes(1);
   });
 });
 
