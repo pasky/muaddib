@@ -104,8 +104,12 @@ const vmCheckpointInProgress = new Map<string, Promise<void>>();
 
 // ── Global QEMU concurrency semaphore ──────────────────────────────────────
 
-/** Current maximum number of simultaneously running arc VMs.  Never unlimited. */
-let vmSlotLimit = 8;
+/**
+ * Current maximum number of simultaneously running arc VMs.
+ * Undefined until the first VM is created (limit is taken from the first config seen).
+ * All subsequent VM creations must agree with this value — mismatches throw.
+ */
+let vmSlotLimit: number | undefined = undefined;
 /** How many arc VMs are currently running (held slots). */
 let vmSlotActive = 0;
 /** Resolve callbacks for callers waiting to acquire a slot. */
@@ -123,7 +127,13 @@ function resolveVmSlotLimit(value: unknown): number {
 
 /** Block until a QEMU slot is available, then claim it. */
 async function acquireVmSlot(limit: number): Promise<void> {
-  vmSlotLimit = limit;
+  if (vmSlotLimit === undefined) {
+    vmSlotLimit = limit;
+  } else if (vmSlotLimit !== limit) {
+    throw new Error(
+      `agent.tools.gondolin.maxConcurrentVms conflict: limit is already set to ${vmSlotLimit}, cannot change to ${limit} at runtime`,
+    );
+  }
   if (vmSlotActive < vmSlotLimit) {
     vmSlotActive++;
     return;
@@ -556,7 +566,7 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
 export { isIpInCidr };
 
 /** Returns current semaphore state — for tests only. */
-export function getVmSlotState(): { active: number; limit: number; waiters: number } {
+export function getVmSlotState(): { active: number; limit: number | undefined; waiters: number } {
   return { active: vmSlotActive, limit: vmSlotLimit, waiters: vmSlotWaiters.length };
 }
 
@@ -567,7 +577,7 @@ export function resetGondolinVmCache(): void {
   vmCheckpointInProgress.clear();
   // Reset semaphore state — unblock any waiters left from previous tests.
   vmSlotActive = 0;
-  vmSlotLimit = 8;
+  vmSlotLimit = undefined;
   vmSlotWaiters.splice(0);
 }
 

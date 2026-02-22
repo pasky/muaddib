@@ -494,17 +494,42 @@ describe("gondolin — maxConcurrentVms semaphore", () => {
     };
   }
 
-  it("throws when maxConcurrentVms is zero", () => {
-    expect(() =>
-      createGondolinTools({ arc: "bad-limit-arc", config: { ...gondolinConfig, maxConcurrentVms: 0 } }),
-    ).not.toThrow(); // createGondolinTools itself doesn't throw — validation is in ensureVm
-    // Verify at the validation helper level:
-    const { resolveVmSlotLimitForTest } = (() => {
-      // Indirect test: the error is thrown when we try to start the VM.
-      // We verify the observable effect by attempting to launch with a bad config.
-      return { resolveVmSlotLimitForTest: null };
-    })();
-    void resolveVmSlotLimitForTest; // suppress unused
+  it("rejects VM creation when maxConcurrentVms is zero or negative", async () => {
+    for (const bad of [0, -1, -99]) {
+      resetGondolinVmCache();
+      const { tools } = createGondolinTools({
+        arc: `bad-limit-arc-${bad}`,
+        config: { ...gondolinConfig, maxConcurrentVms: bad },
+      });
+      const bash = tools.find((t) => t.name === "bash")!;
+      await expect(
+        bash.execute("id", { command: "echo hi" }, new AbortController().signal, () => {}),
+      ).rejects.toThrow("maxConcurrentVms must be a positive integer");
+    }
+  });
+
+  it("rejects VM creation when a second arc uses a different maxConcurrentVms limit", async () => {
+    const vm1 = makeSimpleVm();
+    await registerFakeVm(vm1 as unknown as FakeVm);
+
+    // Start first arc with limit=2 — establishes the global limit
+    const { tools: tools1 } = createGondolinTools({
+      arc: "conflict-arc-1",
+      config: { ...gondolinConfig, maxConcurrentVms: 2 },
+    });
+    await tools1.find((t) => t.name === "bash")!.execute("id", { command: "echo 1" }, new AbortController().signal, () => {});
+
+    // Second arc with a different limit should fail
+    const { tools: tools2 } = createGondolinTools({
+      arc: "conflict-arc-2",
+      config: { ...gondolinConfig, maxConcurrentVms: 4 },
+    });
+    await expect(
+      tools2.find((t) => t.name === "bash")!.execute("id", { command: "echo 2" }, new AbortController().signal, () => {}),
+    ).rejects.toThrow("maxConcurrentVms conflict");
+
+    // Clean up arc-1
+    await checkpointGondolinArc("conflict-arc-1");
   });
 
   it("slot is acquired when a VM starts and released after checkpoint", async () => {
