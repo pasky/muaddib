@@ -35,13 +35,15 @@ const IMAGE_SUFFIX_BY_MIME_TYPE: Record<string, string> = {
 
 export function createGenerateImageTool(
   executors: { generateImage: GenerateImageExecutor },
+  modelId?: string,
 ): MuaddibTool {
+  const modelClause = modelId ? `using ${modelId}` : "using the configured image generation model";
   return {
     name: "generate_image",
     persistType: "artifact",
     label: "Generate Image",
     description:
-      "Generate image(s) using tools.imageGen.model. Optionally include reference image URLs for edits or variations.",
+      `Generate image(s) ${modelClause}. Optionally include reference image URLs for edits or variations.`,
     parameters: Type.Object({
       prompt: Type.String({
         description: "Text description of the image to generate.",

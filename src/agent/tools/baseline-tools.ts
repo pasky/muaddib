@@ -1,3 +1,4 @@
+import { toConfiguredString } from "../../utils/index.js";
 import { createMakePlanTool, createProgressReportTool } from "./control.js";
 import {
   createChronicleAppendTool,
@@ -122,13 +123,15 @@ function getQuestToolGroup(currentQuestId?: string | null): ReadonlyArray<Execut
   return [createQuestSnoozeTool];
 }
 
-const BASELINE_TOOL_FACTORIES: ReadonlyArray<ExecutorBackedToolFactory> = [
+const PRE_IMAGE_TOOL_FACTORIES: ReadonlyArray<ExecutorBackedToolFactory> = [
   createWebSearchTool,
   createVisitWebpageTool,
   createExecuteCodeTool,
   createShareArtifactTool,
   createEditArtifactTool,
-  createGenerateImageTool,
+];
+
+const POST_IMAGE_TOOL_FACTORIES: ReadonlyArray<ExecutorBackedToolFactory> = [
   createOracleTool,
   createChronicleReadTool,
   createChronicleAppendTool,
@@ -177,13 +180,17 @@ export function createBaselineAgentTools(options: BaselineToolOptions): ToolSet 
   const questToolGroup = getQuestToolGroup(options.currentQuestId);
 
   // When Gondolin is enabled, drop execute_code (Sprites) from the baseline.
-  const activeFactories = gondolinConfig !== null
-    ? BASELINE_TOOL_FACTORIES.filter((f) => f !== createExecuteCodeTool)
-    : BASELINE_TOOL_FACTORIES;
+  const activePreFactories = gondolinConfig !== null
+    ? PRE_IMAGE_TOOL_FACTORIES.filter((f) => f !== createExecuteCodeTool)
+    : PRE_IMAGE_TOOL_FACTORIES;
 
-  const executorBackedTools = [...activeFactories, ...questToolGroup].map((factory) =>
-    factory(executors),
-  );
+  const imageGenModelId = toConfiguredString(options.toolsConfig?.imageGen?.model);
+  const executorBackedTools = [
+    ...activePreFactories.map((factory) => factory(executors)),
+    createGenerateImageTool(executors, imageGenModelId),
+    ...POST_IMAGE_TOOL_FACTORIES.map((factory) => factory(executors)),
+    ...questToolGroup.map((factory) => factory(executors)),
+  ];
 
   const gondolinToolSet = gondolinConfig !== null
     ? createGondolinTools({

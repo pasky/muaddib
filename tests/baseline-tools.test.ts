@@ -318,7 +318,7 @@ describe("baseline agent tools", () => {
         },
       ],
     }));
-    const tool = createGenerateImageTool({ generateImage });
+    const tool = createGenerateImageTool({ generateImage }, "openrouter:google/gemini-2-flash-exp");
 
     const params = {
       prompt: "Draw a cat",
@@ -332,6 +332,16 @@ describe("baseline agent tools", () => {
       { type: "text", text: "Generated image: https://example.com/artifacts/?img.png" },
       { type: "image", data: "aW1n", mimeType: "image/png" },
     ]);
+  });
+
+  it("generate_image tool description includes configured model ID", () => {
+    const tool = createGenerateImageTool({ generateImage: async () => ({ summaryText: "", images: [] }) }, "openrouter:google/gemini-2-flash-exp");
+    expect(tool.description).toContain("openrouter:google/gemini-2-flash-exp");
+  });
+
+  it("generate_image tool description falls back gracefully when no model ID given", () => {
+    const tool = createGenerateImageTool({ generateImage: async () => ({ summaryText: "", images: [] }) });
+    expect(tool.description).not.toContain("tools.imageGen.model");
   });
 
   it("oracle tool delegates to configured executor", async () => {
