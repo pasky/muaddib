@@ -70,12 +70,18 @@ function installProcessCleanupHandlers() {
     if (cleanupDone) return;
     cleanupDone = true;
     await closeAllVms();
-    // Re-raise the signal so the default handler runs (exit code reflects signal).
+    // Remove our handlers before re-raising so the default handler fires
+    // instead of being caught again by our listener (which would swallow it).
+    process.removeListener("SIGTERM", sigtermHandler);
+    process.removeListener("SIGINT", sigintHandler);
     process.kill(process.pid, signal as NodeJS.Signals);
   };
 
-  process.on("SIGTERM", () => void asyncCleanup("SIGTERM"));
-  process.on("SIGINT", () => void asyncCleanup("SIGINT"));
+  const sigintHandler = () => void asyncCleanup("SIGINT");
+  const sigtermHandler = () => void asyncCleanup("SIGTERM");
+
+  process.on("SIGTERM", sigtermHandler);
+  process.on("SIGINT", sigintHandler);
 
   // 'exit' handler must be synchronous — best-effort: destroy VMs synchronously
   // if they expose a sync path (close() is async, so we can only attempt it).

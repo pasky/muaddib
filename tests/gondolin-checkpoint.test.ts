@@ -314,6 +314,44 @@ describe("closeAllVms — process-level cleanup", () => {
     await closeAllVms();
     expect(fakeVm.close).toHaveBeenCalledTimes(1);
   });
+
+  it("SIGINT handler removes itself before re-raising so the signal is not swallowed", async () => {
+    // Spy on process.kill to prevent actually killing the test runner, and on
+    // process.removeListener to verify the handler deregisters itself first.
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+    const removeSpy = vi.spyOn(process, "removeListener");
+
+    try {
+      // Emit SIGINT — the handler installed by gondolin-tools at module load fires.
+      // It is async (closes VMs then re-raises), so we wait a tick.
+      process.emit("SIGINT");
+
+      // Give the microtask queue time to complete the async cleanup.
+      await new Promise((r) => setTimeout(r, 20));
+
+      // The handler must have removed BOTH listeners before calling process.kill
+      // so the default handler fires on re-raise (not our custom listener again).
+      const removedSignals = removeSpy.mock.calls.map((c) => c[0]);
+      expect(removedSignals).toContain("SIGINT");
+      expect(removedSignals).toContain("SIGTERM");
+
+      // And must have re-raised SIGINT (not swallowed it).
+      expect(killSpy).toHaveBeenCalledWith(process.pid, "SIGINT");
+
+      // removeListener must have been called BEFORE process.kill (both fire in
+      // the same async function: removeListener(); removeListener(); kill()).
+      const killCallOrder = killSpy.mock.invocationCallOrder[0];
+      const signalRemoveOrders = removeSpy.mock.calls
+        .map((call, i) => ({ signal: call[0], order: removeSpy.mock.invocationCallOrder[i] }))
+        .filter((e) => e.signal === "SIGINT" || e.signal === "SIGTERM")
+        .map((e) => e.order);
+      expect(signalRemoveOrders.length).toBeGreaterThanOrEqual(2);
+      expect(signalRemoveOrders.every((o) => o < killCallOrder)).toBe(true);
+    } finally {
+      killSpy.mockRestore();
+      removeSpy.mockRestore();
+    }
+  });
 });
 
 // ── env isolation ──────────────────────────────────────────────────────────
