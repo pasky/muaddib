@@ -265,11 +265,11 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
-  it("keeps <quest> payloads while stripping non-quest IRC echo prefixes", async () => {
+  it("strips IRC echo prefixes including angle-bracketed nicks", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();
 
-    const incoming = makeMessage("!s quest update");
+    const incoming = makeMessage("!s some update");
 
     const handler = createHandler({
       roomConfig: roomConfig as any,
@@ -277,13 +277,13 @@ describe("RoomMessageHandler", () => {
       classifyMode: async () => "EASY_SERIOUS",
       runnerFactory: () => ({
         prompt: async () =>
-          makeRunnerResult("[serious] [02:32] <MuaddibLLM> <quest id=\"q1\">Done.</quest>"),
+          makeRunnerResult("[serious] [02:32] <MuaddibLLM> Here is the answer."),
       }),
     });
 
     const result = await handler.execute(incoming);
 
-    expect(result.response).toBe("<quest id=\"q1\">Done.</quest>");
+    expect(result.response).toBe("Here is the answer.");
 
     await history.close();
   });

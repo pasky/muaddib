@@ -947,9 +947,8 @@ function resolveConfigModelSpec(
  *   "[12:34] <SomeUser>"
  *   "[claude-sonnet-4] !s <SomeUser>"
  *   "[15:00] <Bot> !q <User>"
- * The negative lookahead `(?!\/?quest)` avoids stripping quest markers.
  */
-const LEADING_IRC_CONTEXT_ECHO_PREFIX_RE = /^(?:\s*(?:\[[^\]]+\]\s*)?(?:![A-Za-z][\w-]*\s+)?(?:\[?\d{1,2}:\d{2}\]?\s*)?(?:<(?!\/?quest(?:_finished)?\b)[^>]+>))*\s*/iu;
+const LEADING_IRC_CONTEXT_ECHO_PREFIX_RE = /^(?:\s*(?:\[[^\]]+\]\s*)?(?:![A-Za-z][\w-]*\s+)?(?:\[?\d{1,2}:\d{2}\]?\s*)?(?:<[^>]+>))*\s*/iu;
 
 /**
  * Matches a bare command-dispatch prefix the LLM may echo without IRC angle brackets,
