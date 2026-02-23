@@ -8,8 +8,10 @@
  * VM disk checkpoint stored at $MUADDIB_HOME/checkpoints/<arcId>.qcow2 (outside the VFS mount).
  *
  * Network policy:
- *   - Internal RFC-1918 and loopback ranges are blocked by default (gondolin default).
- *   - Additional blocked hosts and CIDR ranges are taken from config.
+ *   - Internal RFC-1918 and loopback ranges are blocked by default.
+ *   - Hostname from tools.artifacts.url is exempt from that internal-range block
+ *     so the agent can fetch shared artifacts even when hosted on private IPs.
+ *   - Additional blocked CIDR ranges are taken from config.
  */
 
 import { createHash, randomUUID } from "node:crypto";
@@ -187,6 +189,7 @@ async function ensureVm(
   config: GondolinConfig,
   dnsMode: SupportedDnsMode,
   skills: LoadedSkill[],
+  artifactHostname: string | undefined,
   logger?: Logger,
 ): Promise<VM> {
   const arcId = normalizeArcId(arc);
@@ -235,8 +238,17 @@ async function ensureVm(
       const blockedCidrs = config.blockedCidrs ?? [];
 
       const { httpHooks } = createHttpHooks({
-        blockInternalRanges: true,
+        // We implement internal-range blocking ourselves so tools.artifacts.url
+        // hostname can bypass that check while preserving the same default block.
+        blockInternalRanges: false,
         isIpAllowed: (info) => {
+          const isArtifactHostname =
+            artifactHostname !== undefined && info.hostname.toLowerCase() === artifactHostname;
+
+          if (!isArtifactHostname && isInternalHttpBlockedIp(info.ip)) {
+            return false;
+          }
+
           if (blockedCidrs.length === 0) return true;
           return !blockedCidrs.some((cidr) => isIpInCidr(info.ip, cidr));
         },
@@ -302,6 +314,53 @@ async function ensureVm(
 }
 
 // ── Network filtering helpers ──────────────────────────────────────────────
+
+const INTERNAL_HTTP_BLOCKED_CIDRS = [
+  // IPv4
+  "0.0.0.0/8",
+  "10.0.0.0/8",
+  "127.0.0.0/8",
+  "169.254.0.0/16",
+  "172.16.0.0/12",
+  "192.168.0.0/16",
+  "100.64.0.0/10",
+  "255.0.0.0/8",
+  // IPv6
+  "::/128",
+  "::1/128",
+  "fc00::/7",
+  "fe80::/10",
+] as const;
+
+function extractIPv4MappedIp(ip: string): string | null {
+  const lower = ip.toLowerCase();
+  if (!lower.startsWith("::ffff:")) return null;
+  const mapped = ip.slice("::ffff:".length);
+  return mapped.includes(".") ? mapped : null;
+}
+
+function isInternalHttpBlockedIp(ip: string): boolean {
+  if (INTERNAL_HTTP_BLOCKED_CIDRS.some((cidr) => isIpInCidr(ip, cidr))) {
+    return true;
+  }
+
+  const mappedIpv4 = extractIPv4MappedIp(ip);
+  if (!mappedIpv4) return false;
+  return INTERNAL_HTTP_BLOCKED_CIDRS.some((cidr) => isIpInCidr(mappedIpv4, cidr));
+}
+
+function resolveArtifactHostname(artifactsUrl: string | undefined, logger?: Logger): string | undefined {
+  if (!artifactsUrl) return undefined;
+  try {
+    return new URL(artifactsUrl).hostname.toLowerCase();
+  } catch (err) {
+    logger?.warn(
+      `Ignoring invalid tools.artifacts.url for Gondolin HTTP allowlist: ${artifactsUrl}`,
+      String(err),
+    );
+    return undefined;
+  }
+}
 
 function parseCidrPrefixLength(rawLength: string, maxLength: number): number | null {
   if (!/^\d+$/.test(rawLength)) return null;
@@ -598,12 +657,13 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
   vmActiveSessions.set(arcId, (vmActiveSessions.get(arcId) ?? 0) + 1);
 
   const skills = getBundledSkills();
+  const artifactHostname = resolveArtifactHostname(toolsConfig?.artifacts?.url, logger);
 
   let vmReady: Promise<VM> | null = null;
 
   function getVm(): Promise<VM> {
     if (!vmReady) {
-      vmReady = ensureVm(arc, config, dnsMode, skills, logger).then(async (vm) => {
+      vmReady = ensureVm(arc, config, dnsMode, skills, artifactHostname, logger).then(async (vm) => {
         await vm.exec(["/bin/mkdir", "-p", sessionDir]);
         logger?.info(`Gondolin session dir: ${sessionDir} (arc: ${normalizeArcId(arc)})`);
         return vm;

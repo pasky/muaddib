@@ -799,6 +799,72 @@ describe("gondolin — bundled skills", () => {
   });
 });
 
+// ── Artifact hostname HTTP policy exemption ────────────────────────────────
+
+describe("gondolin — artifact hostname HTTP policy exemption", () => {
+  it("allows private IPs for tools.artifacts.url hostname while keeping other private IPs blocked", async () => {
+    const fakeVm = makeFakeVm();
+    await registerFakeVm(fakeVm);
+
+    const { tools } = createGondolinTools({
+      arc: "artifact-host-policy-arc",
+      config: { ...gondolinConfig, blockedCidrs: ["203.0.113.0/24"] },
+      toolsConfig: { artifacts: { path: "/tmp/artifacts", url: "https://artifacts.internal/files" } },
+    });
+
+    // Force VM creation so createHttpHooks is called with policy callbacks.
+    const bashTool = tools.find((t) => t.name === "bash")!;
+    await bashTool.execute("id", { command: "echo hi" }, new AbortController().signal, () => {});
+
+    const gondolin = await import("@earendil-works/gondolin");
+    // @ts-expect-error test-only
+    const httpHookOptions = gondolin.createHttpHooks.mock.calls.at(-1)?.[0] as {
+      blockInternalRanges: boolean;
+      isIpAllowed: (info: {
+        hostname: string;
+        ip: string;
+        family: 4 | 6;
+        port: number;
+        protocol: "http" | "https";
+      }) => Promise<boolean> | boolean;
+    };
+
+    expect(httpHookOptions.blockInternalRanges).toBe(false);
+
+    expect(
+      await Promise.resolve(httpHookOptions.isIpAllowed({
+        hostname: "artifacts.internal",
+        ip: "10.0.0.5",
+        family: 4,
+        port: 443,
+        protocol: "https",
+      })),
+    ).toBe(true);
+
+    expect(
+      await Promise.resolve(httpHookOptions.isIpAllowed({
+        hostname: "elsewhere.internal",
+        ip: "10.0.0.5",
+        family: 4,
+        port: 443,
+        protocol: "https",
+      })),
+    ).toBe(false);
+
+    // The artifact hostname bypasses only the internal-range block; explicit
+    // blockedCidrs still apply.
+    expect(
+      await Promise.resolve(httpHookOptions.isIpAllowed({
+        hostname: "artifacts.internal",
+        ip: "203.0.113.42",
+        family: 4,
+        port: 443,
+        protocol: "https",
+      })),
+    ).toBe(false);
+  });
+});
+
 // ── Artifact URL in system prompt suffix ───────────────────────────────────
 
 describe("gondolin — artifact URL in systemPromptSuffix", () => {

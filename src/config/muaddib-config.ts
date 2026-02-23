@@ -30,7 +30,9 @@ export interface GondolinConfig {
   /**
    * IP CIDR ranges to block (both IPv4 and IPv6).
    * Example: ["2001:db8:1:2::/64", "203.0.113.0/24"]
-   * Internal RFC-1918 and loopback ranges are always blocked regardless of this list.
+   * Internal RFC-1918 and loopback ranges are blocked by default.
+   * Exception: hostname from tools.artifacts.url is allowed even when it resolves
+   * to those ranges, so the sandbox can fetch shared artifacts.
    */
   blockedCidrs?: string[];
   /**
