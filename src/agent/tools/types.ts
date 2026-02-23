@@ -60,7 +60,7 @@ export interface ToolContext extends ArtifactContext {
   };
 
   // ── Per-invocation context ──
-  /** Arc identifier (e.g. "libera##test"), used for Sprites isolation and chronicle scoping. */
+  /** Arc identifier (e.g. "libera##test"), used for Gondolin VM isolation and chronicle scoping. */
   arc: string;
   currentQuestId?: string | null;
   /** HTTP header secrets for authenticated web requests. */
