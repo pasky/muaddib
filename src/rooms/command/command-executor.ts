@@ -748,7 +748,7 @@ export class CommandExecutor {
     return this.overrides?.responseCleaner(cleaned, nick).trim();
   }
 
-  private async applyResponseLengthPolicy(responseText: string, arc: string): Promise<string> {
+  private async applyResponseLengthPolicy(responseText: string, _arc: string): Promise<string> {
     if (!responseText) {
       return responseText;
     }

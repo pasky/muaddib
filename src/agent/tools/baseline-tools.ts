@@ -34,12 +34,7 @@ import {
   createVisitWebpageTool,
   createWebSearchTool,
 } from "./web.js";
-import {
-  createDefaultEditArtifactExecutor,
-  createEditArtifactTool,
-} from "./artifact.js";
 import { createGondolinTools } from "./gondolin-tools.js";
-import type { EditArtifactExecutor } from "./artifact.js";
 import type { ChronicleReadExecutor, ChronicleAppendExecutor } from "./chronicle.js";
 import type { ExecuteCodeExecutor } from "./execute-code.js";
 import type { GenerateImageExecutor } from "./image.js";
@@ -52,7 +47,6 @@ export interface BaselineToolExecutors {
   webSearch: WebSearchExecutor;
   visitWebpage: VisitWebpageExecutor;
   executeCode: ExecuteCodeExecutor;
-  editArtifact: EditArtifactExecutor;
   oracle: OracleExecutor;
   generateImage: GenerateImageExecutor;
   chronicleRead: ChronicleReadExecutor;
@@ -63,7 +57,7 @@ export interface BaselineToolExecutors {
 }
 
 export type { ToolContext, MuaddibTool, ToolPersistType, ToolSet };
-export type { EditArtifactInput, ShareArtifactInput, ShareArtifactExecutor, EditArtifactExecutor } from "./artifact.js";
+export type { ShareArtifactInput, ShareArtifactExecutor } from "./artifact.js";
 export type { ChronicleReadInput, ChronicleAppendInput, ChronicleReadExecutor, ChronicleAppendExecutor } from "./chronicle.js";
 export type { ExecuteCodeInput, ExecuteCodeExecutor } from "./execute-code.js";
 export type { GenerateImageInput, GenerateImageResult, GeneratedImageResultItem, GenerateImageExecutor } from "./image.js";
@@ -74,7 +68,6 @@ export type { VisitWebpageImageResult, VisitWebpageResult, WebSearchExecutor, Vi
 export {
   createChronicleAppendTool,
   createChronicleReadTool,
-  createEditArtifactTool,
   createExecuteCodeTool,
   createGenerateImageTool,
   createMakePlanTool,
@@ -123,7 +116,6 @@ const BASELINE_TOOL_FACTORIES: ReadonlyArray<ExecutorBackedToolFactory> = [
   createWebSearchTool,
   createVisitWebpageTool,
   createExecuteCodeTool,
-  createEditArtifactTool,
   (executors, options) => createGenerateImageTool(executors, toConfiguredString(options.toolsConfig?.imageGen?.model)),
   createOracleTool,
   createChronicleReadTool,
@@ -138,7 +130,6 @@ export function createDefaultToolExecutors(
     webSearch: createDefaultWebSearchExecutor(options),
     visitWebpage: createDefaultVisitWebpageExecutor(options),
     executeCode: createDefaultExecuteCodeExecutor(options),
-    editArtifact: createDefaultEditArtifactExecutor(options),
     generateImage: createDefaultGenerateImageExecutor(options),
     oracle: createDefaultOracleExecutor(options, oracleInvocation),
     chronicleRead: createDefaultChronicleReadExecutor(options),

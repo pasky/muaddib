@@ -1,26 +1,15 @@
-import { readFile } from "node:fs/promises";
-import { extname, isAbsolute, relative, resolve } from "node:path";
+import { extname } from "node:path";
 
 import { Type } from "@sinclair/typebox";
 
-import type { ArtifactContext, ToolContext, MuaddibTool } from "./types.js";
-import { stringifyError } from "../../utils/index.js";
-import { extractFilenameFromUrl, extractLocalArtifactPath, looksLikeImageUrl } from "./url-utils.js";
-
-export interface EditArtifactInput {
-  artifact_url: string;
-  old_string: string;
-  new_string: string;
-}
+import type { ArtifactContext, MuaddibTool } from "./types.js";
+import { writeArtifactBytes } from "./artifact-storage.js";
 
 export interface ShareArtifactInput {
   file_path: string;
 }
 
 export type ShareArtifactExecutor = (input: ShareArtifactInput) => Promise<string>;
-export type EditArtifactExecutor = (input: EditArtifactInput) => Promise<string>;
-import { writeArtifactBytes, writeArtifactText } from "./artifact-storage.js";
-import { createDefaultVisitWebpageExecutor, type VisitWebpageExecutor } from "./web.js";
 
 /**
  * Read a file from the sandbox VM as a Buffer.
@@ -70,161 +59,4 @@ export function createDefaultShareArtifactExecutor(
     const artifactUrl = await writeArtifactBytes(options, data, suffix);
     return `Artifact shared: ${artifactUrl}`;
   };
-}
-
-export function createEditArtifactTool(executors: { editArtifact: EditArtifactExecutor }): MuaddibTool {
-  return {
-    name: "edit_artifact",
-    persistType: "artifact",
-    label: "Edit Artifact",
-    description:
-      "Edit an existing artifact by replacing a unique old_string with new_string and return a new artifact URL.",
-    parameters: Type.Object({
-      artifact_url: Type.String({
-        format: "uri",
-        description: "Artifact URL to edit.",
-      }),
-      old_string: Type.String({
-        description: "Exact text to replace; must match uniquely.",
-      }),
-      new_string: Type.String({
-        description: "Replacement text (can be empty).",
-      }),
-    }),
-    execute: async (_toolCallId, params: EditArtifactInput) => {
-      const output = await executors.editArtifact(params);
-      return {
-        content: [{ type: "text", text: output }],
-        details: {
-          artifactUrl: params.artifact_url,
-          kind: "edit_artifact",
-        },
-      };
-    },
-  };
-}
-
-export function createDefaultEditArtifactExecutor(
-  options: ToolContext,
-): EditArtifactExecutor {
-  const visitWebpage = createDefaultVisitWebpageExecutor(options);
-
-  return async (input: EditArtifactInput): Promise<string> => {
-    const artifactUrl = input.artifact_url.trim();
-    if (!artifactUrl) {
-      throw new Error("edit_artifact.artifact_url must be non-empty.");
-    }
-
-    if (!input.old_string) {
-      throw new Error("edit_artifact.old_string must be non-empty.");
-    }
-
-    if (!input.new_string && input.new_string !== "") {
-      throw new Error("edit_artifact.new_string must be provided.");
-    }
-
-    let sourceContent: string;
-    try {
-      sourceContent = await loadArtifactContentForEdit(options, artifactUrl, visitWebpage);
-    } catch (error) {
-      const message = stringifyError(error);
-      if (message.includes("Cannot edit binary artifacts")) {
-        throw new Error(message, { cause: error });
-      }
-      throw new Error(`Failed to fetch artifact: ${message}`, { cause: error });
-    }
-
-    if (!sourceContent.includes(input.old_string)) {
-      throw new Error("edit_artifact.old_string not found in artifact content.");
-    }
-
-    const occurrences = countOccurrences(sourceContent, input.old_string);
-    if (occurrences > 1) {
-      throw new Error(
-        `edit_artifact.old_string appears ${occurrences} times; add more surrounding context to make it unique.`,
-      );
-    }
-
-    const updatedContent = sourceContent.replace(input.old_string, input.new_string);
-    const suffix = deriveArtifactSuffixFromUrl(artifactUrl);
-    const updatedArtifactUrl = await writeArtifactText(options, updatedContent, suffix);
-
-    return `Artifact edited successfully. New version: ${updatedArtifactUrl}`;
-  };
-}
-
-async function loadArtifactContentForEdit(
-  options: ToolContext,
-  artifactUrl: string,
-  visitWebpage: VisitWebpageExecutor,
-): Promise<string> {
-  const localArtifactPath = extractLocalArtifactPath(artifactUrl, options.toolsConfig?.artifacts?.url);
-  if (localArtifactPath && options.toolsConfig?.artifacts?.path) {
-    if (looksLikeImageUrl(localArtifactPath)) {
-      throw new Error("Cannot edit binary artifacts (images).");
-    }
-
-    return await readLocalArtifact(options.toolsConfig.artifacts.path, localArtifactPath);
-  }
-
-  const fetchedContent = await visitWebpage(artifactUrl);
-  if (typeof fetchedContent !== "string") {
-    throw new Error("Cannot edit binary artifacts (images).");
-  }
-
-  return unwrapVisitWebpageResponse(fetchedContent);
-}
-
-async function readLocalArtifact(artifactsPath: string, relativeArtifactPath: string): Promise<string> {
-  const artifactsBasePath = resolve(artifactsPath);
-  const resolvedArtifactPath = resolve(artifactsBasePath, relativeArtifactPath);
-  const relativeToBase = relative(artifactsBasePath, resolvedArtifactPath);
-
-  if (relativeToBase.startsWith("..") || isAbsolute(relativeToBase)) {
-    throw new Error("Path traversal detected in artifact URL.");
-  }
-
-  return await readFile(resolvedArtifactPath, "utf-8");
-}
-
-function deriveArtifactSuffixFromUrl(url: string): string {
-  const filename = extractFilenameFromUrl(url) ?? "";
-  if (!filename.includes(".")) {
-    return ".txt";
-  }
-
-  const parts = filename.split(".");
-  return `.${parts.slice(1).join(".")}`;
-}
-
-function unwrapVisitWebpageResponse(content: string): string {
-  if (!content.startsWith("## Content from ")) {
-    return content;
-  }
-
-  const parts = content.split("\n\n", 2);
-  if (parts.length !== 2) {
-    return content;
-  }
-
-  return parts[1];
-}
-
-function countOccurrences(content: string, needle: string): number {
-  if (!needle) {
-    return 0;
-  }
-
-  let index = 0;
-  let count = 0;
-
-  while (true) {
-    const found = content.indexOf(needle, index);
-    if (found === -1) {
-      return count;
-    }
-
-    count += 1;
-    index = found + needle.length;
-  }
 }

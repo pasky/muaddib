@@ -5,7 +5,6 @@ import {
   createBaselineAgentTools,
   createChronicleAppendTool,
   createChronicleReadTool,
-  createEditArtifactTool,
   createExecuteCodeTool,
   createGenerateImageTool,
   createOracleTool,
@@ -44,7 +43,6 @@ describe("baseline agent tools", () => {
         webSearch: async () => "",
         visitWebpage: async () => "",
         executeCode: async () => "",
-        editArtifact: async () => "",
         generateImage: async () => ({ summaryText: "", images: [] }),
         oracle: async () => "",
         chronicleRead: async () => "",
@@ -60,7 +58,6 @@ describe("baseline agent tools", () => {
       "web_search",
       "visit_webpage",
       "execute_code",
-      "edit_artifact",
       "generate_image",
       "oracle",
       "chronicle_read",
@@ -77,7 +74,6 @@ describe("baseline agent tools", () => {
         webSearch: async () => "",
         visitWebpage: async () => "",
         executeCode: async () => "",
-        editArtifact: async () => "",
         generateImage: async () => ({ summaryText: "", images: [] }),
         oracle: async () => "",
         chronicleRead: async () => "",
@@ -101,7 +97,6 @@ describe("baseline agent tools", () => {
         webSearch: async () => "",
         visitWebpage: async () => "",
         executeCode: async () => "",
-        editArtifact: async () => "",
         generateImage: async () => ({ summaryText: "", images: [] }),
         oracle: async () => "",
         chronicleRead: async () => "",
@@ -125,7 +120,6 @@ describe("baseline agent tools", () => {
         webSearch: async () => "",
         visitWebpage: async () => "",
         executeCode: async () => "",
-        editArtifact: async () => "",
         generateImage: async () => ({ summaryText: "", images: [] }),
         oracle: async () => "",
         chronicleRead: async () => "",
@@ -264,25 +258,6 @@ describe("baseline agent tools", () => {
     expect(result.content[0]).toEqual({
       type: "text",
       text: "Artifact shared: https://example.com/?report.csv",
-    });
-  });
-
-  it("edit_artifact tool delegates to configured executor", async () => {
-    const editArtifact = vi.fn(async () => "Artifact edited successfully. New version: https://example.com/?next.py");
-    const tool = createEditArtifactTool({ editArtifact });
-
-    const params = {
-      artifact_url: "https://example.com/?orig.py",
-      old_string: "return 1",
-      new_string: "return 2",
-    };
-
-    const result = await tool.execute("call-6", params, undefined, undefined);
-
-    expect(editArtifact).toHaveBeenCalledWith(params);
-    expect(result.content[0]).toEqual({
-      type: "text",
-      text: "Artifact edited successfully. New version: https://example.com/?next.py",
     });
   });
 
@@ -441,7 +416,6 @@ describe("baseline tools with Gondolin enabled", () => {
     expect(names).toContain("web_search");
     expect(names).toContain("visit_webpage");
     expect(names).toContain("share_artifact");
-    expect(names).toContain("edit_artifact");
     expect(names).toContain("generate_image");
     expect(names).toContain("oracle");
     expect(names).toContain("chronicle_read");

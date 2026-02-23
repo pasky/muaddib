@@ -167,67 +167,6 @@ describe("core tool executors artifact support", () => {
     expect(logger.info).toHaveBeenCalledWith(expect.stringMatching(/^Created artifact file: /));
   });
 
-  it("edit_artifact edits local artifact and preserves extension in derived artifact", async () => {
-    const { artifactsPath } = await makeArtifactsDir();
-
-    await writeFile(join(artifactsPath, "source.py"), "def answer():\n    return 41\n", "utf-8");
-
-    const executors = createDefaultToolExecutors({
-      toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" } },
-    });
-
-    const result = await executors.editArtifact({
-      artifact_url: "https://example.com/artifacts/?source.py",
-      old_string: "return 41",
-      new_string: "return 42",
-    });
-
-    expect(result.startsWith("Artifact edited successfully. New version: https://example.com/artifacts/?")).toBe(true);
-    expect(result.endsWith(".py")).toBe(true);
-
-    const editedUrl = extractSharedUrl(result);
-    const editedFilename = extractFilenameFromViewerUrl(editedUrl);
-    const editedContent = await readFile(join(artifactsPath, editedFilename), "utf-8");
-    expect(editedContent).toContain("return 42");
-    expect(editedContent).not.toContain("return 41");
-  });
-
-  it("edit_artifact fails when old_string is missing", async () => {
-    const { artifactsPath } = await makeArtifactsDir();
-
-    await writeFile(join(artifactsPath, "source.txt"), "alpha\nbeta\n", "utf-8");
-
-    const executors = createDefaultToolExecutors({
-      toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" } },
-    });
-
-    await expect(
-      executors.editArtifact({
-        artifact_url: "https://example.com/artifacts/?source.txt",
-        old_string: "gamma",
-        new_string: "delta",
-      }),
-    ).rejects.toThrow("edit_artifact.old_string not found");
-  });
-
-  it("edit_artifact fails when old_string is not unique", async () => {
-    const { artifactsPath } = await makeArtifactsDir();
-
-    await writeFile(join(artifactsPath, "source.txt"), "same\nsame\n", "utf-8");
-
-    const executors = createDefaultToolExecutors({
-      toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" } },
-    });
-
-    await expect(
-      executors.editArtifact({
-        artifact_url: "https://example.com/artifacts/?source.txt",
-        old_string: "same",
-        new_string: "different",
-      }),
-    ).rejects.toThrow("appears 2 times");
-  });
-
   it("fails fast when share_artifact is called without artifacts config", async () => {
     const mockReadFile = vi.fn(async () => Buffer.from("data"));
     const executor = createDefaultShareArtifactExecutor(
@@ -240,59 +179,7 @@ describe("core tool executors artifact support", () => {
     );
   });
 
-  it("edit_artifact rejects binary remote artifacts", async () => {
-    const { artifactsPath } = await makeArtifactsDir();
 
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url === "https://external.example/photo.png" && init?.method === "HEAD") {
-        return new Response("", {
-          status: 200,
-          headers: {
-            "content-type": "image/png",
-          },
-        });
-      }
-
-      if (url === "https://external.example/photo.png") {
-        return new Response(Uint8Array.from([1, 2, 3]), {
-          status: 200,
-          headers: {
-            "content-type": "image/png",
-          },
-        });
-      }
-
-      throw new Error(`Unexpected fetch URL in test: ${url}`);
-    });
-
-    const executors = createDefaultToolExecutors({ toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" } },
-    });
-
-    await expect(
-      executors.editArtifact({
-        artifact_url: "https://external.example/photo.png",
-        old_string: "x",
-        new_string: "y",
-      }),
-    ).rejects.toThrow("Cannot edit binary artifacts (images)");
-  });
-
-  it("edit_artifact blocks local path traversal via artifact URLs", async () => {
-    const { artifactsPath } = await makeArtifactsDir();
-
-    const executors = createDefaultToolExecutors({
-      toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" } },
-    });
-
-    await expect(
-      executors.editArtifact({
-        artifact_url: "https://example.com/artifacts/?..%2F..%2Fetc%2Fpasswd",
-        old_string: "root",
-        new_string: "muaddib",
-      }),
-    ).rejects.toThrow("Path traversal detected in artifact URL");
-  });
 });
 
 describe("core tool executors webpage secret header support", () => {
