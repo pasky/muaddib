@@ -207,6 +207,15 @@ export class RoomMessageHandler {
     );
   }
 
+  /** Check if any command session is active for the given channel arc (serverTag#channelName). */
+  private hasActiveCommandSessionForChannel(arc: string): boolean {
+    const prefix = `${arc}\0`;
+    for (const key of this.activeSteers.keys()) {
+      if (key.startsWith(prefix)) return true;
+    }
+    return false;
+  }
+
   // ── Session lifecycle: passives ──
 
   private async handlePassiveMessage(
@@ -222,11 +231,14 @@ export class RoomMessageHandler {
       return;
     }
 
-    // Try proactive: steer into running proactive agent, or start new session
+    // Try proactive: steer into running proactive agent, or start new session.
+    // Check ANY active command session in the same channel (not just same nick)
+    // to avoid launching a proactive agent that duplicates an in-flight command.
+    const arc = roomArc(message);
     this.proactiveRunner?.steerOrStart(
       message,
       sendResponse,
-      () => this.activeSteers.has(sessionKey(message)),
+      () => this.hasActiveCommandSessionForChannel(arc),
     );
 
     await this.executor.triggerAutoChronicler(message);

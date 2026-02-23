@@ -1846,6 +1846,75 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("command from different nick preempts proactive debounce session", async () => {
+    const history = new ChatHistoryStore(":memory:", 40);
+    await history.initialize();
+
+    const proactiveRoomConfig = {
+      ...roomConfig,
+      proactive: {
+        interjecting: ["libera##test"],
+        debounceSeconds: 5, // Long debounce — command should preempt
+        historySize: 10,
+        rateLimit: 10,
+        ratePeriod: 60,
+        interjectThreshold: 1,
+        models: {
+          validation: ["openai:gpt-4o-mini"],
+          serious: "openai:gpt-4o-mini",
+        },
+        prompts: {
+          interject: "Score: {message}",
+          seriousExtra: "",
+        },
+      },
+    };
+
+    const sent: string[] = [];
+    let runnerPrompts: string[] = [];
+
+    const handler = createHandler({
+      roomConfig: proactiveRoomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: () => ({
+        prompt: async (prompt) => {
+          runnerPrompts.push(prompt);
+          return makeRunnerResult("command response");
+        },
+      }),
+    });
+
+    // Passive message from alice starts proactive debounce
+    const passivePersisted = waitForPersistedMessage(
+      history,
+      (message) => message.content === "background chatter",
+    );
+    const passivePromise = handler.handleIncomingMessage(makeMessage("background chatter"), {
+      isDirect: false,
+    });
+
+    await passivePersisted;
+
+    // Command from bob (different nick) — should preempt the proactive debounce
+    const commandResult = await handler.handleIncomingMessage(
+      { ...makeMessage("!s direct question"), nick: "bob" },
+      {
+        isDirect: true,
+        sendResponse: async (text) => { sent.push(text); },
+      },
+    );
+
+    await passivePromise;
+
+    // The command should have been executed
+    expect(commandResult?.response).toBe("command response");
+    expect(sent).toContain("command response");
+    expect(runnerPrompts.some(p => p.includes("direct question"))).toBe(true);
+
+    await history.close();
+  });
+
   it("passive messages steer into running proactive agent session", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();
