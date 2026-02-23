@@ -11,7 +11,7 @@
 import type { Agent, ThinkingLevel } from "@mariozechner/pi-agent-core";
 import { type Usage } from "@mariozechner/pi-ai";
 
-import { messageText } from "../../utils/index.js";
+import { formatUtcTime, messageText } from "../../utils/index.js";
 import {
   SessionRunner,
   type PromptOptions,
@@ -382,7 +382,7 @@ export class CommandExecutor {
       onAgentCreated,
     });
 
-    const queryTimestamp = formatCurrentTime().slice(-5); // HH:MM in UTC, matching history format
+    const queryTimestamp = formatUtcTime().slice(-5); // HH:MM in UTC, matching history format
     const queryContent = message.originalContent ?? resolved.queryText;
     const { responseText, usage, toolCallsCount } = await this.invokeAndPostProcess(
       runner, message, `[${queryTimestamp}] <${message.nick}> ${queryContent}`, runnerContext, toolSet.tools, {
@@ -716,7 +716,7 @@ export class CommandExecutor {
     const vars: Record<string, string> = {
       ...promptVars,
       mynick,
-      current_time: formatCurrentTime(),
+      current_time: formatUtcTime(),
       ...(selectedTrigger ? { current_trigger: selectedTrigger } : {}),
       ...(selectedTrigger && triggerModelVars[`${selectedTrigger}_model`]
         ? { current_model: triggerModelVars[`${selectedTrigger}_model`] }
@@ -969,15 +969,7 @@ function isNullSentinel(text: string): boolean {
   return /^null$/iu.test(unquoted);
 }
 
-function formatCurrentTime(date = new Date()): string {
-  // Use UTC to match the chat history timestamps (SQLite CURRENT_TIMESTAMP is UTC).
-  const fmt = new Intl.DateTimeFormat("sv-SE", {
-    year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", hour12: false,
-    timeZone: "UTC",
-  });
-  return fmt.format(date);
-}
+
 
 function byteLengthUtf8(text: string): number {
   return Buffer.byteLength(text, "utf8");

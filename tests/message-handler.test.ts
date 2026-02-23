@@ -1924,6 +1924,8 @@ describe("RoomMessageHandler", () => {
 
     for (const msg of steeredMessages) {
       expect(msg).toContain("Background channel message");
+      // Steered messages must include a [HH:MM] UTC timestamp before the nick
+      expect(msg).toMatch(/\[\d{2}:\d{2}\] </);
     }
     expect(steeredMessages[0]).toContain("<bob> bob says hi");
     expect(steeredMessages[1]).toContain("<carol> carol chimes in");

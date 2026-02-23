@@ -10,7 +10,7 @@
 import type { Agent } from "@mariozechner/pi-agent-core";
 import type { Message } from "@mariozechner/pi-ai";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
-import { messageText } from "../../utils/index.js";
+import { formatUtcTime, messageText } from "../../utils/index.js";
 import type { ProactiveRoomConfig } from "../../config/muaddib-config.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import type { CommandConfig } from "./resolver.js";
@@ -164,7 +164,8 @@ export class ProactiveRunner {
     // Steer into running proactive agent if one exists
     const existing = this.activeAgents.get(channelKey);
     if (existing) {
-      const content = `${STEER_PREFIX}<${message.nick}> ${message.content}`;
+      const ts = formatUtcTime().slice(-5);
+      const content = `${STEER_PREFIX}[${ts}] <${message.nick}> ${message.content}`;
       existing.steer({
         role: "user",
         content: [{ type: "text", text: content }],

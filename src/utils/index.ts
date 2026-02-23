@@ -71,6 +71,19 @@ export function normalizeName(name: string): string {
   return name.trim().split(/\s+/u).join("_");
 }
 
+/**
+ * Format a Date (default: now) as "YYYY-MM-DD HH:MM" in UTC.
+ * The last 5 characters give "HH:MM" for compact timestamps.
+ */
+export function formatUtcTime(date = new Date()): string {
+  const fmt = new Intl.DateTimeFormat("sv-SE", {
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+    timeZone: "UTC",
+  });
+  return fmt.format(date);
+}
+
 /** Current wall-clock time in fractional seconds (for debounce comparisons). */
 export function nowMonotonicSeconds(): number {
   return Date.now() / 1_000;

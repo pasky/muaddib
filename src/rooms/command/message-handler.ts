@@ -20,6 +20,7 @@ import {
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { type RoomMessage, roomArc, STEER_PREFIX } from "../message.js";
 import type { MuaddibRuntime } from "../../runtime.js";
+import { formatUtcTime } from "../../utils/index.js";
 
 // Re-export types that external consumers depend on
 export type {
@@ -191,7 +192,8 @@ export class RoomMessageHandler {
   }
 
   private steerAgent(agent: Agent, message: RoomMessage): void {
-    const content = `${STEER_PREFIX}<${message.nick}> ${message.content}`;
+    const ts = formatUtcTime().slice(-5);
+    const content = `${STEER_PREFIX}[${ts}] <${message.nick}> ${message.content}`;
     agent.steer({
       role: "user",
       content: [{ type: "text", text: content }],
