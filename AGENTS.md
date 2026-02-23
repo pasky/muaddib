@@ -21,6 +21,7 @@
   - Slack: `src/rooms/slack/monitor.ts`, `src/rooms/slack/transport.ts`
 - **Command Handling**: `src/rooms/command/*` (resolver, classifier, handler, rate limiter, context reduction)
 - **Agent Runtime**: `src/agent/session-runner.ts` + `src/agent/session-factory.ts` + `src/agent/tools/*`
+- **Gondolin Sandbox**: `src/agent/tools/gondolin-tools.ts` — agent read/write/edit/bash tools run inside per-arc QEMU micro-VMs, not on the host.
 
 - **Persistence**:
   - Chat history: `src/history/chat-history-store.ts`
