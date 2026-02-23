@@ -27,7 +27,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && cp src/agent/tools/artifact-viewer.html dist/agent/tools/artifact-viewer.html && printf '# Overrides dist/.gitignore so npm publish includes dist/\\n*.whl\\n*.tar.gz\\n' > dist/.npmignore",
+    "build": "tsc -p tsconfig.build.json && cp src/agent/tools/artifact-viewer.html dist/agent/tools/artifact-viewer.html && cp -r src/agent/skills/download-artifact dist/agent/skills/download-artifact && printf '# Overrides dist/.gitignore so npm publish includes dist/\\n*.whl\\n*.tar.gz\\n' > dist/.npmignore",
     "prepublishOnly": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint \"{src,tests,scripts}/**/*.ts\"",

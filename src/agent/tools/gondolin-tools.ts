@@ -39,6 +39,12 @@ import {
   createDefaultShareArtifactExecutor,
   type SandboxReadFile,
 } from "./artifact.js";
+import {
+  loadBundledSkills,
+  formatSkillsForVmPrompt,
+  VM_SKILLS_BASE,
+  type LoadedSkill,
+} from "../skills/load-skills.js";
 
 // ── Arc ID / workspace path / checkpoint path ──────────────────────────────
 
@@ -386,6 +392,27 @@ function shQuote(value: string): string {
  */
 const VM_BASH_OUTPUT_CAP_BYTES = 48 * 1024; // 48 KB — below upstream's 50 KB threshold
 
+// ── Bundled skills (loaded once, installed into every VM) ──────────────────
+
+let cachedSkills: LoadedSkill[] | undefined;
+
+function getBundledSkills(): LoadedSkill[] {
+  if (!cachedSkills) {
+    cachedSkills = loadBundledSkills();
+  }
+  return cachedSkills;
+}
+
+/** Install bundled skill files into the VM at /skills/<name>/SKILL.md. */
+async function installSkillsInVm(vm: VM, skills: LoadedSkill[]): Promise<void> {
+  if (skills.length === 0) return;
+  await vm.exec(["/bin/mkdir", "-p", ...skills.map((s) => `${VM_SKILLS_BASE}/${s.name}`)]);
+  for (const skill of skills) {
+    const vmPath = `${VM_SKILLS_BASE}/${skill.name}/SKILL.md`;
+    await vm.writeFile(vmPath, skill.content, { encoding: "utf8" });
+  }
+}
+
 // ── VM operations factories ────────────────────────────────────────────────
 
 function createVmReadOps(getVm: () => Promise<VM>, logger?: Logger): ReadOperations {
@@ -565,12 +592,15 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
   // active even before the VM has been started or any tool has been called.
   vmActiveSessions.set(arcId, (vmActiveSessions.get(arcId) ?? 0) + 1);
 
+  const skills = getBundledSkills();
+
   let vmReady: Promise<VM> | null = null;
 
   function getVm(): Promise<VM> {
     if (!vmReady) {
       vmReady = ensureVm(arc, config, dnsMode, logger).then(async (vm) => {
         await vm.exec(["/bin/mkdir", "-p", sessionDir]);
+        await installSkillsInVm(vm, skills);
         logger?.info(`Gondolin session dir: ${sessionDir} (arc: ${normalizeArcId(arc)})`);
         return vm;
       });
@@ -603,7 +633,10 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
     shareArtifactTool,
   ];
 
-  const systemPromptSuffix = `Filesystem: /workspace persists across sessions; ${sessionDir} is your ephemeral working directory.`;
+  const skillsSection = formatSkillsForVmPrompt(skills);
+  const systemPromptSuffix =
+    `Filesystem: /workspace persists across sessions; ${sessionDir} is your ephemeral working directory.` +
+    skillsSection;
 
   const dispose = () => checkpointGondolinArc(arc, logger);
 

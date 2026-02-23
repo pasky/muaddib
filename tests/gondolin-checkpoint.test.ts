@@ -17,6 +17,11 @@ import {
   getVmSlotState,
 } from "../src/agent/tools/gondolin-tools.js";
 
+import {
+  loadBundledSkills,
+  formatSkillsForVmPrompt,
+} from "../src/agent/skills/load-skills.js";
+
 // We reach into the module's Maps via the exported reset helper and a small
 // test-only shim: we import the Maps indirectly by calling createGondolinTools
 // with a fake gondolin module.
@@ -38,6 +43,7 @@ function makeFakeVm() {
 
   const vm = {
     exec: vi.fn(() => makeExecResult()),
+    writeFile: vi.fn().mockResolvedValue(undefined),
     close: vi.fn().mockResolvedValue(undefined),
     checkpoint: vi.fn(async (path: string) => {
       checkpointCalls.push(path);
@@ -387,6 +393,7 @@ describe("gondolin bash tool — output capping", () => {
           { output: async function* () {} },
         );
       }),
+      writeFile: vi.fn().mockResolvedValue(undefined),
       checkpoint: vi.fn(async (_path: string) => {}),
     };
 
@@ -447,6 +454,7 @@ describe("gondolin bash tool — output capping", () => {
           { output: async function* () {} },
         );
       }),
+      writeFile: vi.fn().mockResolvedValue(undefined),
       checkpoint: vi.fn(async (_path: string) => {}),
     };
 
@@ -486,6 +494,7 @@ describe("gondolin bash tool — env isolation", () => {
 
     const fakeVm = {
       exec: vi.fn(() => makeProc()),
+      writeFile: vi.fn().mockResolvedValue(undefined),
       checkpoint: vi.fn(async (_path: string) => {}),
     };
 
@@ -527,6 +536,7 @@ describe("gondolin — maxConcurrentVms semaphore", () => {
     }
     return {
       exec: vi.fn(() => makeProc()),
+      writeFile: vi.fn().mockResolvedValue(undefined),
       close: vi.fn().mockResolvedValue(undefined),
       checkpoint: vi.fn().mockResolvedValue(undefined),
     };
@@ -706,5 +716,78 @@ describe("gondolin — maxConcurrentVms semaphore", () => {
     // Slot must be released so subsequent arcs are not blocked
     expect(getVmSlotState().active).toBe(0);
     expect(getVmSlotState().waiters).toBe(0);
+  });
+});
+
+// ── Bundled skills ─────────────────────────────────────────────────────────
+
+describe("gondolin — bundled skills", () => {
+  it("installs skill files into the VM and includes skills in systemPromptSuffix", async () => {
+    const fakeVm = makeFakeVm();
+    await registerFakeVm(fakeVm);
+
+    const { tools, systemPromptSuffix } = createGondolinTools({ arc: "skills-arc", config: gondolinConfig });
+
+    // Force VM creation by invoking bash
+    const bashTool = tools.find((t) => t.name === "bash")!;
+    await bashTool.execute("id", { command: "echo hi" }, new AbortController().signal, () => {});
+
+    // Skills should have been written into the VM
+    expect(fakeVm.writeFile).toHaveBeenCalledWith(
+      "/skills/download-artifact/SKILL.md",
+      expect.stringContaining("Download Artifact"),
+      { encoding: "utf8" },
+    );
+
+    // System prompt suffix should contain skills listing
+    expect(systemPromptSuffix).toContain("<available_skills>");
+    expect(systemPromptSuffix).toContain("download-artifact");
+    expect(systemPromptSuffix).toContain("/skills/download-artifact/SKILL.md");
+  });
+
+  it("creates /skills directory via mkdir in the VM", async () => {
+    const fakeVm = makeFakeVm();
+    await registerFakeVm(fakeVm);
+
+    const { tools } = createGondolinTools({ arc: "skills-mkdir-arc", config: gondolinConfig });
+    const bashTool = tools.find((t) => t.name === "bash")!;
+    await bashTool.execute("id", { command: "echo hi" }, new AbortController().signal, () => {});
+
+    // Should have called mkdir for /skills/<name>
+    const mkdirCalls = fakeVm.exec.mock.calls.filter(
+      (call: unknown[]) => {
+        const args = call[0] as string[];
+        return args[0] === "/bin/mkdir" && args.some((a: string) => a.includes("/skills/"));
+      },
+    );
+    expect(mkdirCalls.length).toBeGreaterThan(0);
+  });
+});
+
+// ── Skill loader unit tests ────────────────────────────────────────────────
+
+describe("loadBundledSkills", () => {
+  it("loads the download-artifact skill with content", () => {
+    const skills = loadBundledSkills();
+    const downloadArtifact = skills.find((s) => s.name === "download-artifact");
+    expect(downloadArtifact).toBeDefined();
+    expect(downloadArtifact!.description).toContain("artifact");
+    expect(downloadArtifact!.content).toContain("Download Artifact");
+    expect(downloadArtifact!.content).toContain("curl");
+  });
+});
+
+describe("formatSkillsForVmPrompt", () => {
+  it("formats skills with VM-local paths", () => {
+    const skills = loadBundledSkills();
+    const prompt = formatSkillsForVmPrompt(skills);
+    expect(prompt).toContain("<available_skills>");
+    expect(prompt).toContain("/skills/download-artifact/SKILL.md");
+    expect(prompt).toContain("</available_skills>");
+  });
+
+  it("returns empty string when no skills are visible", () => {
+    const prompt = formatSkillsForVmPrompt([]);
+    expect(prompt).toBe("");
   });
 });
