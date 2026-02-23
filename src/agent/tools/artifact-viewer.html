@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Artifact Viewer</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11/styles/github-dark.min.css">
   <style>
     :root {
       color-scheme: light dark;
@@ -44,6 +45,7 @@
       text-decoration: none;
       font-size: 1rem;
       line-height: 1;
+      z-index: 10;
     }
 
     .raw-icon:hover {
@@ -70,6 +72,13 @@
 
     code {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    p code, li code, td code {
+      background: #1e293b;
+      padding: 0.15em 0.35em;
+      border-radius: 4px;
+      font-size: 0.9em;
     }
 
     img {
@@ -102,6 +111,41 @@
     th {
       background: #0b1220;
     }
+
+    blockquote {
+      border-left: 3px solid var(--accent);
+      margin: 0.75rem 0;
+      padding: 0.25rem 1rem;
+      color: var(--muted);
+      background: #0b1220;
+      border-radius: 0 6px 6px 0;
+    }
+
+    hr {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 1.5rem 0;
+    }
+
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.25rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .mermaid {
+      background: #1e293b;
+      border-radius: 8px;
+      padding: 1rem;
+      text-align: center;
+    }
+
+    .task-list-item {
+      list-style: none;
+    }
+
+    .task-list-item input[type="checkbox"] {
+      margin-right: 0.4em;
+    }
   </style>
 </head>
 <body>
@@ -109,6 +153,9 @@
   <div class="wrap">
     <div id="content"></div>
   </div>
+  <script src="https://cdn.jsdelivr.net/npm/marked@17/lib/marked.umd.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
   <script>
     function escapeHtml(text) {
       return text
@@ -119,95 +166,91 @@
         .replaceAll("'", "&#39;");
     }
 
-    function inlineMd(text) {
-      let out = escapeHtml(text);
-      out = out.replace(/`([^`]+)`/g, "<code>$1</code>");
-      out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-      out = out.replace(/\*([^*]+)\*/g, "<em>$1</em>");
-      out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
-      out = out.replace(/(^|[^"'>])(https?:\/\/[^\s<&]+)/g, '$1<a href="$2">$2</a>');
-      return out;
+    const CODE_EXTS = {
+      ".py": "python", ".pyw": "python",
+      ".js": "javascript", ".mjs": "javascript", ".cjs": "javascript",
+      ".ts": "typescript", ".tsx": "typescript", ".jsx": "javascript",
+      ".json": "json", ".jsonc": "json",
+      ".html": "xml", ".htm": "xml", ".xml": "xml", ".xsl": "xml", ".svg": "xml",
+      ".css": "css", ".scss": "scss", ".less": "less",
+      ".sh": "bash", ".bash": "bash", ".zsh": "bash", ".fish": "bash",
+      ".yml": "yaml", ".yaml": "yaml",
+      ".sql": "sql",
+      ".rb": "ruby", ".erb": "ruby",
+      ".go": "go",
+      ".rs": "rust",
+      ".java": "java",
+      ".c": "c", ".h": "c",
+      ".cpp": "cpp", ".cc": "cpp", ".cxx": "cpp", ".hpp": "cpp", ".hxx": "cpp",
+      ".cs": "csharp",
+      ".php": "php",
+      ".swift": "swift",
+      ".kt": "kotlin", ".kts": "kotlin",
+      ".r": "r",
+      ".lua": "lua",
+      ".pl": "perl", ".pm": "perl",
+      ".toml": "ini", ".ini": "ini", ".cfg": "ini",
+      ".diff": "diff", ".patch": "diff",
+      ".dockerfile": "dockerfile",
+      ".makefile": "makefile",
+      ".cmake": "cmake",
+      ".tf": "hcl",
+      ".proto": "protobuf",
+      ".graphql": "graphql", ".gql": "graphql",
+      ".zig": "zig",
+      ".ex": "elixir", ".exs": "elixir",
+      ".erl": "erlang",
+      ".hs": "haskell",
+      ".ml": "ocaml", ".mli": "ocaml",
+      ".clj": "clojure", ".cljs": "clojure",
+      ".scala": "scala",
+      ".vim": "vim",
+      ".el": "lisp",
+      ".nix": "nix",
+    };
+
+    const BASENAME_LANGS = {
+      "dockerfile": "dockerfile",
+      "makefile": "makefile",
+      "cmakelists.txt": "cmake",
+      "gemfile": "ruby",
+      "rakefile": "ruby",
+      ".bashrc": "bash",
+      ".zshrc": "bash",
+      ".profile": "bash",
+      ".gitignore": "plaintext",
+      ".env": "ini",
+    };
+
+    function getFileMode(filename) {
+      const lower = filename.toLowerCase();
+      if (lower.endsWith(".md") || lower.endsWith(".markdown") || lower.endsWith(".txt")) {
+        return "markdown";
+      }
+      const ext = lower.includes(".") ? "." + lower.split(".").pop() : "";
+      if (CODE_EXTS[ext]) return CODE_EXTS[ext];
+      const base = lower.split("/").pop();
+      if (BASENAME_LANGS[base]) return BASENAME_LANGS[base];
+      return "markdown";
     }
 
-    function splitTableRow(row) {
-      let value = row.trim();
-      if (value.startsWith("|")) value = value.slice(1);
-      if (value.endsWith("|")) value = value.slice(0, -1);
-      return value.split("|").map((cell) => cell.trim());
-    }
-
-    function renderTable(lines) {
-      if (lines.length < 2) return null;
-      if (!lines[0].includes("|") || !lines[1].includes("|")) return null;
-
-      const headers = splitTableRow(lines[0]);
-      const sep = splitTableRow(lines[1]);
-      if (!headers.length || headers.length !== sep.length) return null;
-      if (!sep.every((cell) => /^:?-{3,}:?$/.test(cell))) return null;
-
-      const aligns = sep.map((cell) => {
-        const left = cell.startsWith(":");
-        const right = cell.endsWith(":");
-        if (left && right) return "center";
-        if (right) return "right";
-        return "left";
-      });
-
-      const rows = lines.slice(2).filter((line) => line.trim());
-      const parsedRows = rows.map(splitTableRow);
-      if (parsedRows.some((cells) => cells.length !== headers.length)) return null;
-
-      const thead = `<thead><tr>${headers
-        .map((cell, i) => `<th style="text-align:${aligns[i]}">${inlineMd(cell)}</th>`)
-        .join("")}</tr></thead>`;
-      const tbody = `<tbody>${parsedRows
-        .map(
-          (cells) =>
-            `<tr>${cells
-              .map((cell, i) => `<td style="text-align:${aligns[i]}">${inlineMd(cell)}</td>`)
-              .join("")}</tr>`,
-        )
-        .join("")}</tbody>`;
-
-      return `<table>${thead}${tbody}</table>`;
-    }
-
-    function renderMarkdown(md) {
-      const blocks = [];
-      let tmp = md.replace(/```([\w-]+)?\n([\s\S]*?)```/g, (_, lang, code) => {
-        const token = `__CODE_${blocks.length}__`;
-        const klass = lang ? ` class="language-${escapeHtml(lang)}"` : "";
-        blocks.push(`<pre><code${klass}>${escapeHtml(code)}</code></pre>`);
-        return token;
-      });
-
-      tmp = tmp.replace(/\r\n/g, "\n");
-      const parts = tmp.split(/\n\s*\n/);
-      const html = parts
-        .map((part) => {
-          const line = part.trim();
-          if (!line) return "";
-          if (line.startsWith("### ")) return `<h3>${inlineMd(line.slice(4))}</h3>`;
-          if (line.startsWith("## ")) return `<h2>${inlineMd(line.slice(3))}</h2>`;
-          if (line.startsWith("# ")) return `<h1>${inlineMd(line.slice(2))}</h1>`;
-
-          const lines = line.split("\n");
-
-          const tableHtml = renderTable(lines);
-          if (tableHtml) return tableHtml;
-
-          if (lines.every((l) => l.trim().startsWith("- "))) {
-            return `<ul>${lines
-              .map((l) => `<li>${inlineMd(l.trim().slice(2))}</li>`)
-              .join("")}</ul>`;
+    // Configure marked with highlight.js for code blocks and mermaid support
+    marked.use({
+      gfm: true,
+      renderer: {
+        code({ text, lang }) {
+          if (lang === "mermaid") {
+            return '<pre class="mermaid">' + escapeHtml(text) + "</pre>";
           }
-
-          return `<p>${inlineMd(line).replace(/\n/g, "<br>")}</p>`;
-        })
-        .join("\n");
-
-      return html.replace(/__CODE_(\d+)__/g, (_, idx) => blocks[Number(idx)] || "");
-    }
+          if (lang && hljs.getLanguage(lang)) {
+            const highlighted = hljs.highlight(text, { language: lang }).value;
+            return '<pre><code class="hljs language-' + escapeHtml(lang) + '">' + highlighted + "</code></pre>";
+          }
+          const auto = hljs.highlightAuto(text);
+          return '<pre><code class="hljs">' + auto.value + "</code></pre>";
+        },
+      },
+    });
 
     function readFilenameFromQuery() {
       const raw = window.location.search.startsWith("?")
@@ -237,28 +280,50 @@
       const rawHref = encodeURI(filename);
       rawLink.href = rawHref;
       rawLink.download = filename;
-      rawLink.title = `Download raw: ${filename}`;
+      rawLink.title = "Download raw: " + filename;
 
       try {
         const response = await fetch(rawHref, { cache: "no-store" });
         if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
+          throw new Error("HTTP " + response.status);
         }
 
         const contentType = (response.headers.get("content-type") || "").toLowerCase();
         const lower = filename.toLowerCase();
         const imageExts = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp"];
-        const isImage = contentType.startsWith("image/") || imageExts.some((ext) => lower.endsWith(ext));
+        const isImage = contentType.startsWith("image/") || imageExts.some(function (ext) { return lower.endsWith(ext); });
 
         if (isImage) {
-          content.innerHTML = `<img src="${rawHref}" alt="${escapeHtml(filename)}" />`;
+          content.innerHTML = '<img src="' + rawHref + '" alt="' + escapeHtml(filename) + '" />';
           return;
         }
 
         const text = await response.text();
-        content.innerHTML = renderMarkdown(text);
+        const mode = getFileMode(filename);
+
+        if (mode === "markdown") {
+          const rawHtml = marked.parse(text);
+          content.innerHTML = DOMPurify.sanitize(rawHtml, { ADD_TAGS: ["pre"], ADD_ATTR: ["class"] });
+        } else {
+          const highlighted = hljs.getLanguage(mode)
+            ? hljs.highlight(text, { language: mode }).value
+            : escapeHtml(text);
+          content.innerHTML = '<pre><code class="hljs language-' + escapeHtml(mode) + '">' + highlighted + "</code></pre>";
+        }
+
+        // Render mermaid diagrams if any exist
+        var mermaidEls = document.querySelectorAll(".mermaid");
+        if (mermaidEls.length > 0) {
+          var mermaidScript = document.createElement("script");
+          mermaidScript.src = "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js";
+          mermaidScript.onload = function () {
+            mermaid.initialize({ startOnLoad: false, theme: "dark" });
+            mermaid.run({ querySelector: ".mermaid" });
+          };
+          document.body.appendChild(mermaidScript);
+        }
       } catch (err) {
-        content.innerHTML = `<p class="error">Failed to load ${escapeHtml(filename)}: ${escapeHtml(String(err))}</p>`;
+        content.innerHTML = '<p class="error">Failed to load ' + escapeHtml(filename) + ": " + escapeHtml(String(err)) + "</p>";
       }
     }
 
