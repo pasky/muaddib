@@ -638,8 +638,13 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
   ];
 
   const skillsSection = formatSkillsForVmPrompt(skills);
+  const artifactsUrl = options.toolsConfig?.artifacts?.url;
+  const artifactsSuffix = artifactsUrl
+    ? ` Artifacts: your previously produced output attachments - any URLs that start with ${artifactsUrl}, read with download_artifact skill.`
+    : "";
   const systemPromptSuffix =
     `Filesystem: /workspace persists across sessions; ${sessionDir} is your ephemeral working directory.` +
+    artifactsSuffix +
     skillsSection;
 
   const dispose = () => checkpointGondolinArc(arc, logger);

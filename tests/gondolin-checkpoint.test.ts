@@ -799,6 +799,28 @@ describe("gondolin — bundled skills", () => {
   });
 });
 
+// ── Artifact URL in system prompt suffix ───────────────────────────────────
+
+describe("gondolin — artifact URL in systemPromptSuffix", () => {
+  it("includes artifact URL hint when toolsConfig.artifacts.url is set", () => {
+    const { systemPromptSuffix } = createGondolinTools({
+      arc: "artifact-url-arc",
+      config: gondolinConfig,
+      toolsConfig: { artifacts: { path: "/tmp/artifacts", url: "https://art.example.com/files" } },
+    });
+    expect(systemPromptSuffix).toContain("download_artifact");
+    expect(systemPromptSuffix).toContain("https://art.example.com/files");
+  });
+
+  it("omits artifact hint when toolsConfig.artifacts is not configured", () => {
+    const { systemPromptSuffix } = createGondolinTools({
+      arc: "no-artifact-arc",
+      config: gondolinConfig,
+    });
+    expect(systemPromptSuffix).not.toContain("download_artifact");
+  });
+});
+
 // ── Skill loader unit tests ────────────────────────────────────────────────
 
 describe("loadBundledSkills", () => {
