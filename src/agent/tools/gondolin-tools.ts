@@ -186,6 +186,7 @@ async function ensureVm(
   arc: string,
   config: GondolinConfig,
   dnsMode: SupportedDnsMode,
+  skills: LoadedSkill[],
   logger?: Logger,
 ): Promise<VM> {
   const arcId = normalizeArcId(arc);
@@ -216,6 +217,7 @@ async function ensureVm(
         VM: VMClass,
         VmCheckpoint,
         RealFSProvider,
+        MemoryProvider: MemProviderClass,
         createHttpHooks,
       } = await import("@earendil-works/gondolin");
 
@@ -240,12 +242,25 @@ async function ensureVm(
         },
       });
 
+      // Serve bundled skills as a readonly in-memory mount so the agent can
+      // read them via the sandbox read tool without any file-copy overhead.
+      const mounts: Record<string, import("@earendil-works/gondolin").VirtualProvider> = {
+        "/workspace": new RealFSProvider(workspacePath),
+      };
+      if (skills.length > 0) {
+        const skillsFs = new MemProviderClass();
+        for (const skill of skills) {
+          skillsFs.mkdirSync(`${skill.name}`, { recursive: true });
+          // MemoryProvider always implements writeFileSync; the optional typing
+          // comes from VirtualProvider's base interface.
+          skillsFs.writeFileSync!(`${skill.name}/SKILL.md`, skill.content, { encoding: "utf8" });
+        }
+        skillsFs.setReadOnly();
+        mounts[VM_SKILLS_BASE] = skillsFs;
+      }
+
       const vmOptions: import("@earendil-works/gondolin").VMOptions = {
-        vfs: {
-          mounts: {
-            "/workspace": new RealFSProvider(workspacePath),
-          },
-        },
+        vfs: { mounts },
         httpHooks,
         dns: { mode: dnsMode },
       };
@@ -401,16 +416,6 @@ function getBundledSkills(): LoadedSkill[] {
     cachedSkills = loadBundledSkills();
   }
   return cachedSkills;
-}
-
-/** Install bundled skill files into the VM at /skills/<name>/SKILL.md. */
-async function installSkillsInVm(vm: VM, skills: LoadedSkill[]): Promise<void> {
-  if (skills.length === 0) return;
-  await vm.exec(["/bin/mkdir", "-p", ...skills.map((s) => `${VM_SKILLS_BASE}/${s.name}`)]);
-  for (const skill of skills) {
-    const vmPath = `${VM_SKILLS_BASE}/${skill.name}/SKILL.md`;
-    await vm.writeFile(vmPath, skill.content, { encoding: "utf8" });
-  }
 }
 
 // ── VM operations factories ────────────────────────────────────────────────
@@ -598,9 +603,8 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
 
   function getVm(): Promise<VM> {
     if (!vmReady) {
-      vmReady = ensureVm(arc, config, dnsMode, logger).then(async (vm) => {
+      vmReady = ensureVm(arc, config, dnsMode, skills, logger).then(async (vm) => {
         await vm.exec(["/bin/mkdir", "-p", sessionDir]);
-        await installSkillsInVm(vm, skills);
         logger?.info(`Gondolin session dir: ${sessionDir} (arc: ${normalizeArcId(arc)})`);
         return vm;
       });
