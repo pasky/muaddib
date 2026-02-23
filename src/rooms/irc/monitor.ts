@@ -3,7 +3,7 @@ import type { RoomConfig } from "../../config/muaddib-config.js";
 import { CONSOLE_LOGGER, RuntimeLogWriter, type Logger } from "../../app/logging.js";
 import { escapeRegExp, requireNonEmptyString, sleep } from "../../utils/index.js";
 import type { MuaddibRuntime } from "../../runtime.js";
-import type { RoomMessage } from "../message.js";
+import { fsSafeArc, type RoomMessage } from "../message.js";
 import { RoomMessageHandler } from "../command/message-handler.js";
 import { VarlinkClient, VarlinkSender } from "./varlink.js";
 
@@ -229,7 +229,7 @@ export class IrcRoomMonitor {
       return;
     }
 
-    const arc = `${server}#${channelName}`;
+    const arc = fsSafeArc(`${server}#${channelName}`);
     const runDirectMessage = async (): Promise<void> => {
       this.logger.debug("Processing direct IRC message", `arc=${arc}`, `nick=${effectiveNick}`);
       await handleIncoming();

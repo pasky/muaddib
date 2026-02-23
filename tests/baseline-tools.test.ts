@@ -20,9 +20,9 @@ import {
   getArcCheckpointPath,
   getArcWorkspacePath,
   isIpInCidr,
-  normalizeArcId,
   resetGondolinVmCache,
 } from "../src/agent/tools/gondolin-tools.js";
+import { fsSafeArc } from "../src/rooms/message.js";
 
 function createTools(options: Record<string, unknown>) {
   return createBaselineAgentTools({
@@ -316,6 +316,31 @@ describe("baseline tools with Gondolin", () => {
   });
 });
 
+// ── fsSafeArc (percent-encoding) ───────────────────────────────────────────
+
+describe("fsSafeArc", () => {
+  it("passes through simple arc names unchanged", () => {
+    expect(fsSafeArc("irc-libera#general")).toBe("irc-libera#general");
+  });
+
+  it("encodes slashes as %2F", () => {
+    expect(fsSafeArc("irc-libera#foo/bar")).toBe("irc-libera#foo%2Fbar");
+  });
+
+  it("encodes percent signs as %25 before encoding slashes", () => {
+    expect(fsSafeArc("arc%2F")).toBe("arc%252F");
+  });
+
+  it("handles multiple slashes and percents", () => {
+    expect(fsSafeArc("a/b%c/d")).toBe("a%2Fb%25c%2Fd");
+  });
+
+  it("different arcs produce different ids (no collisions)", () => {
+    // "foo/bar" and "foo%2Fbar" must not collide
+    expect(fsSafeArc("foo/bar")).not.toBe(fsSafeArc("foo%2Fbar"));
+  });
+});
+
 // ── Gondolin checkpoint path ───────────────────────────────────────────────
 
 describe("getArcCheckpointPath", () => {
@@ -336,10 +361,9 @@ describe("getArcCheckpointPath", () => {
     expect(checkpointPath.startsWith(workspacePath)).toBe(false);
   });
 
-  it("checkpoint filename contains the arc hash", () => {
+  it("checkpoint filename contains the arc id", () => {
     const arc = "test-arc";
-    const arcId = normalizeArcId(arc);
-    expect(getArcCheckpointPath(arc)).toContain(arcId);
+    expect(getArcCheckpointPath(arc)).toContain(arc);
   });
 
   it("different arcs produce different checkpoint paths", () => {

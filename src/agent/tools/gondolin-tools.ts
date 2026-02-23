@@ -14,7 +14,7 @@
  *   - Additional blocked CIDR ranges are taken from config.
  */
 
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, posix } from "node:path";
 
@@ -49,18 +49,16 @@ import {
 } from "../skills/load-skills.js";
 
 // ── Arc ID / workspace path / checkpoint path ──────────────────────────────
-
-export function normalizeArcId(arc: string): string {
-  return createHash("sha256").update(arc).digest("hex").slice(0, 16);
-}
+// Arc IDs are already filesystem-safe (percent-encoded at construction in
+// roomArc / fsSafeArc).  No further normalisation needed here.
 
 export function getArcWorkspacePath(arc: string): string {
-  return join(getMuaddibHome(), "workspaces", normalizeArcId(arc));
+  return join(getMuaddibHome(), "workspaces", arc);
 }
 
 /** Checkpoint file lives *outside* the VFS-mounted workspace so the VM cannot tamper with it. */
 export function getArcCheckpointPath(arc: string): string {
-  return join(getMuaddibHome(), "checkpoints", normalizeArcId(arc) + ".qcow2");
+  return join(getMuaddibHome(), "checkpoints", arc + ".qcow2");
 }
 
 // ── VM cache: one VM per arc ───────────────────────────────────────────────
@@ -192,22 +190,20 @@ async function ensureVm(
   artifactHostname: string | undefined,
   logger?: Logger,
 ): Promise<VM> {
-  const arcId = normalizeArcId(arc);
-
   // If a checkpoint is in progress for this arc, wait for it to complete before
   // creating or returning a VM.  The checkpointing operation removes the VM from
   // vmCache immediately, so after the await the cache miss below will trigger a
   // fresh VM creation — preventing callers from operating on a VM that is being
   // shut down and checkpointed.
-  const pendingCheckpoint = vmCheckpointInProgress.get(arcId);
+  const pendingCheckpoint = vmCheckpointInProgress.get(arc);
   if (pendingCheckpoint) {
     await pendingCheckpoint;
   }
 
-  const cached = vmCache.get(arcId);
+  const cached = vmCache.get(arc);
   if (cached) return cached;
 
-  const pending = vmCacheLocks.get(arcId);
+  const pending = vmCacheLocks.get(arc);
   if (pending) return pending;
 
   const createPromise = (async () => {
@@ -283,17 +279,17 @@ async function ensureVm(
         try {
           const checkpoint = VmCheckpoint.load(checkpointPath);
           vm = await checkpoint.resume(vmOptions);
-          logger?.info(`Gondolin VM resumed from checkpoint for arc ${arcId}: ${checkpointPath}`);
+          logger?.info(`Gondolin VM resumed from checkpoint for arc ${arc}: ${checkpointPath}`);
         } catch (err) {
-          logger?.warn(`Gondolin checkpoint restore failed, starting fresh VM for arc ${arcId}`, String(err));
+          logger?.warn(`Gondolin checkpoint restore failed, starting fresh VM for arc ${arc}`, String(err));
           vm = await VMClass.create(vmOptions);
         }
       } else {
         vm = await VMClass.create(vmOptions);
-        logger?.info(`Gondolin VM started for arc ${arcId}, workspace: ${workspacePath}`);
+        logger?.info(`Gondolin VM started for arc ${arc}, workspace: ${workspacePath}`);
       }
 
-      vmCache.set(arcId, vm);
+      vmCache.set(arc, vm);
       slotAcquired = false; // slot is now owned by the VM lifetime, released on checkpoint/close
       return vm;
     } finally {
@@ -304,12 +300,12 @@ async function ensureVm(
     }
   })();
 
-  vmCacheLocks.set(arcId, createPromise);
+  vmCacheLocks.set(arc, createPromise);
   try {
     const vm = await createPromise;
     return vm;
   } finally {
-    vmCacheLocks.delete(arcId);
+    vmCacheLocks.delete(arc);
   }
 }
 
@@ -641,7 +637,6 @@ export interface GondolinToolsOptions {
 export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
   const { arc, config, toolsConfig, logger } = options;
   const dnsMode = resolveDnsMode(config.dnsMode);
-  const arcId = normalizeArcId(arc);
   const sessionDir = `/tmp/session-${randomUUID().slice(0, 8)}`;
 
   // Ensure the workspace directory exists and stamp the arc name into it so
@@ -654,7 +649,7 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
 
   // Register this session immediately so checkpointGondolinArc knows it is
   // active even before the VM has been started or any tool has been called.
-  vmActiveSessions.set(arcId, (vmActiveSessions.get(arcId) ?? 0) + 1);
+  vmActiveSessions.set(arc, (vmActiveSessions.get(arc) ?? 0) + 1);
 
   const skills = getBundledSkills();
   const artifactHostname = resolveArtifactHostname(toolsConfig?.artifacts?.url, logger);
@@ -665,7 +660,7 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
     if (!vmReady) {
       vmReady = ensureVm(arc, config, dnsMode, skills, artifactHostname, logger).then(async (vm) => {
         await vm.exec(["/bin/mkdir", "-p", sessionDir]);
-        logger?.info(`Gondolin session dir: ${sessionDir} (arc: ${normalizeArcId(arc)})`);
+        logger?.info(`Gondolin session dir: ${sessionDir} (arc: ${arc})`);
         return vm;
       });
     }
@@ -745,34 +740,32 @@ export async function checkpointGondolinArc(
   arc: string,
   logger?: Logger,
 ): Promise<void> {
-  const arcId = normalizeArcId(arc);
-
   // Decrement the active session counter for this arc.
-  const current = vmActiveSessions.get(arcId) ?? 0;
+  const current = vmActiveSessions.get(arc) ?? 0;
   if (current <= 0) {
     // More checkpointGondolinArc calls than createGondolinTools — programming error.
-    logger?.warn(`Gondolin arc ${arcId}: checkpointGondolinArc called with no active sessions registered; ignoring`);
+    logger?.warn(`Gondolin arc ${arc}: checkpointGondolinArc called with no active sessions registered; ignoring`);
     return;
   }
   const remaining = current - 1;
-  vmActiveSessions.set(arcId, remaining);
+  vmActiveSessions.set(arc, remaining);
 
   if (remaining > 0) {
-    logger?.debug(`Gondolin arc ${arcId}: ${remaining} session(s) still active, deferring checkpoint`);
+    logger?.debug(`Gondolin arc ${arc}: ${remaining} session(s) still active, deferring checkpoint`);
     return;
   }
 
-  vmActiveSessions.delete(arcId);
-  const vm = vmCache.get(arcId);
+  vmActiveSessions.delete(arc);
+  const vm = vmCache.get(arc);
   if (!vm) return;
 
   // Serialize concurrent checkpoint attempts for the same arc.  This can only
   // be reached if the caller somehow triggers two simultaneous end-of-session
   // paths (e.g. a retry after a transient error).  Without this guard both
   // calls would race to overwrite the same .qcow2 file.
-  const inFlight = vmCheckpointInProgress.get(arcId);
+  const inFlight = vmCheckpointInProgress.get(arc);
   if (inFlight) {
-    logger?.debug(`Gondolin arc ${arcId}: checkpoint already in progress, waiting`);
+    logger?.debug(`Gondolin arc ${arc}: checkpoint already in progress, waiting`);
     return inFlight;
   }
 
@@ -781,7 +774,7 @@ export async function checkpointGondolinArc(
   // Remove from cache immediately so concurrent ensureVm() calls for this arc
   // don't reuse a VM that is being shut down / checkpointed.  ensureVm() waits
   // for vmCheckpointInProgress to settle before creating a replacement VM.
-  vmCache.delete(arcId);
+  vmCache.delete(arc);
 
   const checkpointPromise = (async () => {
     try {
@@ -789,19 +782,19 @@ export async function checkpointGondolinArc(
       await vm.exec(["/bin/sh", "-c", "rm -rf /tmp/session-*"]);
       // Stop the VM and materialize the disk overlay as a checkpoint
       await vm.checkpoint(checkpointPath);
-      logger?.info(`Gondolin VM checkpointed for arc ${arcId}: ${checkpointPath}`);
+      logger?.info(`Gondolin VM checkpointed for arc ${arc}: ${checkpointPath}`);
     } catch (err) {
-      logger?.error(`Gondolin checkpoint failed for arc ${arcId}`, String(err));
+      logger?.error(`Gondolin checkpoint failed for arc ${arc}`, String(err));
       // VM was already removed from cache above; close the QEMU process so it
       // doesn't leak as an orphan.
       await vm.close().catch(() => {});
     } finally {
-      vmCheckpointInProgress.delete(arcId);
+      vmCheckpointInProgress.delete(arc);
       // Release the concurrency slot so waiting arcs can proceed.
       releaseVmSlot();
     }
   })();
 
-  vmCheckpointInProgress.set(arcId, checkpointPromise);
+  vmCheckpointInProgress.set(arc, checkpointPromise);
   return checkpointPromise;
 }

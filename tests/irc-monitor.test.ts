@@ -497,7 +497,7 @@ describe("IrcRoomMonitor", () => {
     });
 
     const datePath = fixedNow.toISOString().slice(0, 10);
-    const arcDir = join(logsHome, "logs", datePath, "libera_main##ops_room");
+    const arcDir = join(logsHome, "logs", datePath, "libera%2Fmain##ops_room");
     const arcFiles = await readdir(arcDir);
 
     expect(arcFiles).toHaveLength(1);

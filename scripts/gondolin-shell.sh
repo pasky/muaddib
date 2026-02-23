@@ -12,8 +12,8 @@ set -euo pipefail
 #   ./scripts/gondolin-shell.sh --list
 #
 # ARC_NAME is the full arc identifier, e.g. "irc-freenode#mychannel".
-# The arc ID is the first 16 hex chars of sha256(ARC_NAME), matching
-# the normalizeArcId() function in gondolin-tools.ts.
+# The arc ID is the percent-encoded ARC_NAME (% → %25, / → %2F),
+# matching the fsSafeArc() function in rooms/message.ts.
 #
 # Options:
 #   --list    List known arcs (workspace directories) and exit
@@ -42,19 +42,17 @@ if [ "${1:-}" = "--list" ]; then
   fi
   echo "Known arc workspaces ($WORKSPACES_DIR):"
   echo ""
-  printf "  %-18s  %-10s  %s\n" "ARC ID" "CHECKPOINT" "ARC NAME"
-  printf "  %-18s  %-10s  %s\n" "------" "----------" "--------"
+  printf "  %-40s  %s\n" "ARC" "CHECKPOINT"
+  printf "  %-40s  %s\n" "---" "----------"
   for dir in "$WORKSPACES_DIR"/*/; do
     [ -d "$dir" ] || continue
     arcId=$(basename "$dir")
     checkpoint="$CHECKPOINTS_DIR/${arcId}.qcow2"
-    arcName=""
-    [ -f "$dir/.arc-name" ] && arcName=$(cat "$dir/.arc-name")
     if [ -f "$checkpoint" ]; then
       size=$(du -h "$checkpoint" | cut -f1)
-      printf "  %-18s  %-10s  %s\n" "$arcId" "yes (${size})" "$arcName"
+      printf "  %-40s  %s\n" "$arcId" "yes (${size})"
     else
-      printf "  %-18s  %-10s  %s\n" "$arcId" "no" "$arcName"
+      printf "  %-40s  %s\n" "$arcId" "no"
     fi
   done
   exit 0
@@ -88,9 +86,10 @@ if [ -z "$ARC_NAME" ]; then
   exit 1
 fi
 
-# ── Compute arc ID (must match normalizeArcId in gondolin-tools.ts) ─────────
+# ── Compute arc ID (must match fsSafeArc in rooms/message.ts) ──────────────
+# Percent-encode: '%' → '%25' first, then '/' → '%2F'.
 
-ARC_ID=$(echo -n "$ARC_NAME" | sha256sum | cut -c1-16)
+ARC_ID=$(echo -n "$ARC_NAME" | sed 's/%/%25/g; s|/|%2F|g')
 WORKSPACE_DIR="$MUADDIB_HOME/workspaces/$ARC_ID"
 CHECKPOINT_PATH="$MUADDIB_HOME/checkpoints/${ARC_ID}.qcow2"
 
