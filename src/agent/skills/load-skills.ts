@@ -12,7 +12,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { loadSkillsFromDir, type Skill } from "@mariozechner/pi-coding-agent";
+import { formatSkillsForPrompt, loadSkillsFromDir, type Skill } from "@mariozechner/pi-coding-agent";
 
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 
@@ -45,7 +45,11 @@ export interface LoadedSkill extends Skill {
 
 /**
  * Load all bundled skills with their file contents.
- * Returns skills ready to be installed into a Gondolin VM.
+ *
+ * After loading, each skill's `filePath` is rewritten to the VM-local path
+ * (`/skills/<name>/SKILL.md`) so that `formatSkillsForPrompt` emits
+ * locations the agent can actually read inside the sandbox.  The host path
+ * is only needed during `readFileSync` here and is not referenced afterward.
  */
 export function loadBundledSkills(): LoadedSkill[] {
   const dir = getSkillsDir();
@@ -54,6 +58,7 @@ export function loadBundledSkills(): LoadedSkill[] {
   return skills.map((skill) => ({
     ...skill,
     content: readFileSync(skill.filePath, "utf-8"),
+    filePath: `${VM_SKILLS_BASE}/${skill.name}/SKILL.md`,
   }));
 }
 
@@ -62,38 +67,12 @@ export const VM_SKILLS_BASE = "/skills";
 
 /**
  * Format a skills listing for inclusion in the system prompt suffix.
- * Points the agent to VM-local paths (not host paths).
+ *
+ * Delegates to pi-agent-core's `formatSkillsForPrompt` which emits the
+ * standard Agent Skills XML.  Because `loadBundledSkills` already rewrites
+ * each skill's `filePath` to the VM-local path, the `<location>` elements
+ * point where the agent can actually read them inside the sandbox.
  */
 export function formatSkillsForVmPrompt(skills: LoadedSkill[]): string {
-  const visible = skills.filter((s) => !s.disableModelInvocation);
-  if (visible.length === 0) return "";
-
-  const lines = [
-    "",
-    "The following skills provide specialized instructions for specific tasks.",
-    "Use the read tool to load a skill's file when the task matches its description.",
-    "",
-    "<available_skills>",
-  ];
-
-  for (const skill of visible) {
-    const vmPath = `${VM_SKILLS_BASE}/${skill.name}/SKILL.md`;
-    lines.push("  <skill>");
-    lines.push(`    <name>${escapeXml(skill.name)}</name>`);
-    lines.push(`    <description>${escapeXml(skill.description)}</description>`);
-    lines.push(`    <location>${escapeXml(vmPath)}</location>`);
-    lines.push("  </skill>");
-  }
-
-  lines.push("</available_skills>");
-  return lines.join("\n");
-}
-
-function escapeXml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
+  return formatSkillsForPrompt(skills);
 }
