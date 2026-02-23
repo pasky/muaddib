@@ -22,7 +22,7 @@ export function createShareArtifactTool(
 ): MuaddibTool {
   return {
     name: "share_artifact",
-    persistType: "none",
+    persistType: "summary",
     label: "Share Artifact",
     description:
       "Publish a file from the sandbox as a shareable artifact URL. Use for scripts, reports, images, data files, or any large output.",
