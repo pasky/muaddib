@@ -26,13 +26,7 @@ export interface JinaConfig {
   maxImageBytes?: number;
 }
 
-export interface SpritesConfig {
-  executeTimeoutMs?: number;
-}
-
 export interface GondolinConfig {
-  /** Whether to enable Gondolin VM sandbox (replaces execute_code with read/write/edit/bash). */
-  enabled?: boolean;
   /**
    * IP CIDR ranges to block (both IPv4 and IPv6).
    * Example: ["2001:db8:1:2::/64", "203.0.113.0/24"]
@@ -73,7 +67,6 @@ export interface ToolsConfig {
   oracle?: OracleConfig;
   imageGen?: ImageGenConfig;
   jina?: JinaConfig;
-  sprites?: SpritesConfig;
   gondolin?: GondolinConfig;
 }
 

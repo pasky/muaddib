@@ -292,7 +292,7 @@ export function e2eConfig(): Record<string, unknown> {
 /**
  * Extract API keys from `providers.*.apiKey` in config data into AuthStorageData format.
  *
- * All service credentials (including jina, sprites) must live under `providers.*`
+ * All service credentials (including jina) must live under `providers.*`
  * in test config objects. The `agent.tools.*` section carries only non-secret
  * options (model names, limits, etc.); secrets go in auth.json in production
  * and in `providers.*` in tests.

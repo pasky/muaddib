@@ -48,10 +48,10 @@ describe("SessionRunner", () => {
       }),
       prompt: vi.fn(async (promptText: string) => {
         callbacks.forEach((cb) => cb({ type: "turn_end" }));
-        callbacks.forEach((cb) => cb({ type: "tool_execution_start", toolName: "execute_code", args: { x: 1 } }));
+        callbacks.forEach((cb) => cb({ type: "tool_execution_start", toolName: "bash", args: { x: 1 } }));
         callbacks.forEach((cb) => cb({
           type: "tool_execution_end",
-          toolName: "execute_code",
+          toolName: "bash",
           isError: false,
           result: [{ type: "text", text: "ok" }],
         }));

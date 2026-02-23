@@ -56,7 +56,7 @@ So is Slack - including threads:
 - **Proactive Interjecting**: Channel-based whitelist system for automatic participation in relevant conversations
 - [BETA] **Long-running Projects**: A *quest* mode (opt-in) that enables Muaddib to work on longer-horizon, many-step tasks in public, using the channel for long-term context and external steering
 
-Muaddib has been **battle-tested since July 2025** in a (slightly) hostile IRC environment, lurking at a variety of [libera.chat](https://libera.chat/) channels.  However, bugs are possible (no warranty etc.) and LLM usage carries some inherent risks (e.g. a Sprites code execution sandbox with your API keys preloaded *plus* an access to the internet [*can* be fooled](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/) by a highly crafted malicious website that the agent visits to upload these API keys somewhere).
+Muaddib has been **battle-tested since July 2025** in a (slightly) hostile IRC environment, lurking at a variety of [libera.chat](https://libera.chat/) channels.  However, bugs are possible (no warranty etc.) and LLM usage carries some inherent risks (e.g. a code execution sandbox with your API keys preloaded *plus* an access to the internet [*can* be fooled](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/) by a highly crafted malicious website that the agent visits to upload these API keys somewhere).
 
 ## Getting Started
 
@@ -84,7 +84,7 @@ All muaddib data lives in `$MUADDIB_HOME` (defaults to `~/.muaddib/`):
 
 2. Copy `auth.json.example` to `~/.muaddib/auth.json` and set your API keys:
    - Provider keys (`anthropic`, `openai`, `openrouter`, `deepseek`, etc.)
-   - Tool keys (`sprites`, `jina`, `brave`)
+   - Tool keys (`jina`, `brave`)
    - Room tokens (`discord`, `slack-app`, `slack-{workspaceId}`)
 
 **Tip:** Set `MUADDIB_HOME=.` to use the current directory (useful for development).
@@ -116,7 +116,7 @@ Manual for IRC ("bring your own irssi"):
 
 ### Gondolin Sandbox Image
 
-When `agent.tools.gondolin.enabled` is `true`, Muaddib runs agent code in isolated QEMU micro-VMs.
+Muaddib runs agent code in isolated QEMU micro-VMs (Gondolin).
 The default image downloaded by gondolin is a minimal Alpine Linux with basic utilities.
 For a more capable environment (Python 3 with pip/numpy/matplotlib, Node.js 24, npm, uv, 1 GB rootfs), build a custom image:
 

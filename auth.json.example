@@ -6,7 +6,6 @@
   "openai": { "type": "api_key", "key": "your-openai-api-key-here" },
   "openrouter": { "type": "api_key", "key": "your-openrouter-api-key-here" },
 
-  "sprites": { "type": "api_key", "key": "your-sprites-token-here" },
   "jina": { "type": "api_key", "key": "your-jina-api-key-here" },
 
   "discord": { "type": "api_key", "key": "your-discord-bot-token-here" },

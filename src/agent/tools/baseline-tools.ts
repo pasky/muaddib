@@ -7,10 +7,6 @@ import {
   createDefaultChronicleReadExecutor,
 } from "./chronicle.js";
 import {
-  createDefaultExecuteCodeExecutor,
-  createExecuteCodeTool,
-} from "./execute-code.js";
-import {
   createDefaultGenerateImageExecutor,
   createGenerateImageTool,
 } from "./image.js";
@@ -36,7 +32,6 @@ import {
 } from "./web.js";
 import { createGondolinTools } from "./gondolin-tools.js";
 import type { ChronicleReadExecutor, ChronicleAppendExecutor } from "./chronicle.js";
-import type { ExecuteCodeExecutor } from "./execute-code.js";
 import type { GenerateImageExecutor } from "./image.js";
 import type { OracleExecutor } from "./oracle.js";
 import type { QuestStartExecutor, SubquestStartExecutor, QuestSnoozeExecutor } from "./quest.js";
@@ -46,7 +41,6 @@ import type { ToolContext, MuaddibTool, ToolPersistType, ToolSet } from "./types
 export interface BaselineToolExecutors {
   webSearch: WebSearchExecutor;
   visitWebpage: VisitWebpageExecutor;
-  executeCode: ExecuteCodeExecutor;
   oracle: OracleExecutor;
   generateImage: GenerateImageExecutor;
   chronicleRead: ChronicleReadExecutor;
@@ -59,7 +53,6 @@ export interface BaselineToolExecutors {
 export type { ToolContext, MuaddibTool, ToolPersistType, ToolSet };
 export type { ShareArtifactInput, ShareArtifactExecutor } from "./artifact.js";
 export type { ChronicleReadInput, ChronicleAppendInput, ChronicleReadExecutor, ChronicleAppendExecutor } from "./chronicle.js";
-export type { ExecuteCodeInput, ExecuteCodeExecutor } from "./execute-code.js";
 export type { GenerateImageInput, GenerateImageResult, GeneratedImageResultItem, GenerateImageExecutor } from "./image.js";
 export type { OracleInput, OracleExecutor } from "./oracle.js";
 export type { QuestStartInput, SubquestStartInput, QuestSnoozeInput, QuestStartExecutor, SubquestStartExecutor, QuestSnoozeExecutor } from "./quest.js";
@@ -68,7 +61,6 @@ export type { VisitWebpageImageResult, VisitWebpageResult, WebSearchExecutor, Vi
 export {
   createChronicleAppendTool,
   createChronicleReadTool,
-  createExecuteCodeTool,
   createGenerateImageTool,
   createMakePlanTool,
   createOracleTool,
@@ -115,7 +107,6 @@ function getQuestToolGroup(currentQuestId?: string | null): ReadonlyArray<Execut
 const BASELINE_TOOL_FACTORIES: ReadonlyArray<ExecutorBackedToolFactory> = [
   createWebSearchTool,
   createVisitWebpageTool,
-  createExecuteCodeTool,
   (executors, options) => createGenerateImageTool(executors, toConfiguredString(options.toolsConfig?.imageGen?.model)),
   createOracleTool,
   createChronicleReadTool,
@@ -129,7 +120,6 @@ export function createDefaultToolExecutors(
   return {
     webSearch: createDefaultWebSearchExecutor(options),
     visitWebpage: createDefaultVisitWebpageExecutor(options),
-    executeCode: createDefaultExecuteCodeExecutor(options),
     generateImage: createDefaultGenerateImageExecutor(options),
     oracle: createDefaultOracleExecutor(options, oracleInvocation),
     chronicleRead: createDefaultChronicleReadExecutor(options),
@@ -142,16 +132,12 @@ export function createDefaultToolExecutors(
 
 /**
  * Baseline tool set for command-path parity.
- * Grouped by tool domains (web, execution, artifacts, images, oracle, chronicle, quests).
+ * Grouped by tool domains (web, sandbox, artifacts, images, oracle, chronicle, quests).
  *
- * When Gondolin is enabled (agent.tools.gondolin.enabled = true):
- *   - read/write/edit/bash tools are added, backed by the Gondolin VM.
- *   - execute_code (Sprites) is excluded from the tool set.
+ * Gondolin read/write/edit/bash tools are always included, backed by a per-arc micro-VM.
  */
 export function createBaselineAgentTools(options: BaselineToolOptions): ToolSet {
-  // Non-null when gondolin is opted in.
-  const gondolinConfig =
-    options.toolsConfig?.gondolin?.enabled === true ? options.toolsConfig.gondolin : null;
+  const gondolinConfig = options.toolsConfig?.gondolin ?? {};
 
   const defaultExecutors = createDefaultToolExecutors(options, options.oracleInvocation);
   const overrides = options.executors ?? {};
@@ -162,27 +148,20 @@ export function createBaselineAgentTools(options: BaselineToolOptions): ToolSet 
 
   const questToolGroup = getQuestToolGroup(options.currentQuestId);
 
-  // When Gondolin is enabled, drop execute_code (Sprites) from the baseline.
-  const activeFactories = gondolinConfig !== null
-    ? BASELINE_TOOL_FACTORIES.filter((f) => f !== createExecuteCodeTool)
-    : BASELINE_TOOL_FACTORIES;
-
-  const executorBackedTools = [...activeFactories, ...questToolGroup].map((factory) =>
+  const executorBackedTools = [...BASELINE_TOOL_FACTORIES, ...questToolGroup].map((factory) =>
     factory(executors, options),
   );
 
-  const gondolinToolSet = gondolinConfig !== null
-    ? createGondolinTools({
-        arc: options.arc,
-        config: gondolinConfig,
-        toolsConfig: options.toolsConfig,
-        logger: options.logger,
-      })
-    : null;
+  const gondolinToolSet = createGondolinTools({
+    arc: options.arc,
+    config: gondolinConfig,
+    toolsConfig: options.toolsConfig,
+    logger: options.logger,
+  });
 
   const tools = [
     ...executorBackedTools,
-    ...(gondolinToolSet?.tools ?? []),
+    ...gondolinToolSet.tools,
     createProgressReportTool(options),
     createMakePlanTool({
       chronicleStore: options.chronicleStore,
@@ -190,5 +169,5 @@ export function createBaselineAgentTools(options: BaselineToolOptions): ToolSet 
     }),
   ];
 
-  return { tools, dispose: gondolinToolSet?.dispose, systemPromptSuffix: gondolinToolSet?.systemPromptSuffix };
+  return { tools, dispose: gondolinToolSet.dispose, systemPromptSuffix: gondolinToolSet.systemPromptSuffix };
 }

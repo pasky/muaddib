@@ -49,11 +49,6 @@ if (config.tools?.jina?.api_key?.trim()) {
   auth.jina = { type: "api_key", key: config.tools.jina.api_key.trim() };
   extracted.push("tools.jina.api_key");
 }
-if (config.tools?.sprites?.token?.trim()) {
-  auth.sprites = { type: "api_key", key: config.tools.sprites.token.trim() };
-  extracted.push("tools.sprites.token");
-}
-
 // Extract room tokens
 const rooms = config.rooms ?? {};
 

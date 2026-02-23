@@ -5,7 +5,6 @@ import {
   createBaselineAgentTools,
   createChronicleAppendTool,
   createChronicleReadTool,
-  createExecuteCodeTool,
   createGenerateImageTool,
   createOracleTool,
   ORACLE_EXCLUDED_TOOLS,
@@ -42,7 +41,6 @@ describe("baseline agent tools", () => {
       executors: {
         webSearch: async () => "",
         visitWebpage: async () => "",
-        executeCode: async () => "",
         generateImage: async () => ({ summaryText: "", images: [] }),
         oracle: async () => "",
         chronicleRead: async () => "",
@@ -54,15 +52,20 @@ describe("baseline agent tools", () => {
     });
 
     // No currentQuestId → only quest_start (no subquest_start or quest_snooze)
+    // Gondolin tools (read/write/edit/bash/share_artifact) are always included.
     expect(tools.map((tool) => tool.name)).toEqual([
       "web_search",
       "visit_webpage",
-      "execute_code",
       "generate_image",
       "oracle",
       "chronicle_read",
       "chronicle_append",
       "quest_start",
+      "read",
+      "write",
+      "edit",
+      "bash",
+      "share_artifact",
       "progress_report",
       "make_plan",
     ]);
@@ -73,7 +76,6 @@ describe("baseline agent tools", () => {
       executors: {
         webSearch: async () => "",
         visitWebpage: async () => "",
-        executeCode: async () => "",
         generateImage: async () => ({ summaryText: "", images: [] }),
         oracle: async () => "",
         chronicleRead: async () => "",
@@ -96,7 +98,7 @@ describe("baseline agent tools", () => {
       executors: {
         webSearch: async () => "",
         visitWebpage: async () => "",
-        executeCode: async () => "",
+
         generateImage: async () => ({ summaryText: "", images: [] }),
         oracle: async () => "",
         chronicleRead: async () => "",
@@ -119,7 +121,7 @@ describe("baseline agent tools", () => {
       executors: {
         webSearch: async () => "",
         visitWebpage: async () => "",
-        executeCode: async () => "",
+
         generateImage: async () => ({ summaryText: "", images: [] }),
         oracle: async () => "",
         chronicleRead: async () => "",
@@ -237,17 +239,6 @@ describe("baseline agent tools", () => {
     });
   });
 
-  it("execute_code tool delegates to configured executor and defaults language", async () => {
-    const executeCode = vi.fn(async () => "execution-output");
-    const tool = createExecuteCodeTool({ executeCode });
-
-    const result = await tool.execute("call-4", { code: "print('hi')" }, undefined, undefined);
-
-    expect(executeCode).toHaveBeenCalledWith({ code: "print('hi')" });
-    expect(result.details.language).toBe("python");
-    expect(result.content[0]).toEqual({ type: "text", text: "execution-output" });
-  });
-
   it("share_artifact tool delegates to configured executor with file_path", async () => {
     const shareArtifact = vi.fn(async (_input: { file_path: string }) => `Artifact shared: https://example.com/?report.csv`);
     const tool = createShareArtifactTool({ shareArtifact });
@@ -326,7 +317,6 @@ describe("baseline agent tools", () => {
     expect(ORACLE_EXCLUDED_TOOLS).toContain("quest_snooze");
     // Useful tools should NOT be excluded
     expect(ORACLE_EXCLUDED_TOOLS).not.toContain("web_search");
-    expect(ORACLE_EXCLUDED_TOOLS).not.toContain("execute_code");
   });
 
   it("chronicle tools delegate to configured executors", async () => {
@@ -390,32 +380,29 @@ describe("baseline agent tools", () => {
 
 // ── Gondolin tool set ──────────────────────────────────────────────────────
 
-describe("baseline tools with Gondolin enabled", () => {
-  function createGondolinTools(extra?: Record<string, unknown>) {
-    return createBaselineAgentTools({
+describe("baseline tools with Gondolin", () => {
+  it("always includes read/write/edit/bash and share_artifact", () => {
+    const { tools } = createBaselineAgentTools({
       modelAdapter: new PiAiModelAdapter(),
-      toolsConfig: { gondolin: { enabled: true } },
       arc: "test-arc",
-      ...extra,
-    } as any).tools;
-  }
-
-  it("includes read/write/edit/bash and excludes execute_code when gondolin is enabled", () => {
-    const tools = createGondolinTools();
+    } as any);
     const names = tools.map((t) => t.name);
     expect(names).toContain("read");
     expect(names).toContain("write");
     expect(names).toContain("edit");
     expect(names).toContain("bash");
+    expect(names).toContain("share_artifact");
     expect(names).not.toContain("execute_code");
   });
 
-  it("still includes all non-execution baseline tools when gondolin is enabled", () => {
-    const tools = createGondolinTools();
+  it("includes all baseline tools alongside gondolin tools", () => {
+    const { tools } = createBaselineAgentTools({
+      modelAdapter: new PiAiModelAdapter(),
+      arc: "test-arc",
+    } as any);
     const names = tools.map((t) => t.name);
     expect(names).toContain("web_search");
     expect(names).toContain("visit_webpage");
-    expect(names).toContain("share_artifact");
     expect(names).toContain("generate_image");
     expect(names).toContain("oracle");
     expect(names).toContain("chronicle_read");
@@ -424,40 +411,20 @@ describe("baseline tools with Gondolin enabled", () => {
     expect(names).toContain("make_plan");
   });
 
-  it("keeps execute_code when gondolin is disabled", () => {
-    const { tools } = createBaselineAgentTools({
-      modelAdapter: new PiAiModelAdapter(),
-      arc: "test-arc",
-      toolsConfig: { gondolin: { enabled: false } },
-    } as any);
-    const names = tools.map((t) => t.name);
-    expect(names).toContain("execute_code");
-    expect(names).not.toContain("read");
-    expect(names).not.toContain("bash");
-    expect(names).not.toContain("share_artifact");
-  });
-
   it("rejects deprecated dnsMode=trusted", () => {
     expect(() => createBaselineAgentTools({
       modelAdapter: new PiAiModelAdapter(),
       arc: "test-arc",
-      toolsConfig: { gondolin: { enabled: true, dnsMode: "trusted" } },
+      toolsConfig: { gondolin: { dnsMode: "trusted" } },
     } as any)).toThrow(/dnsMode.*trusted/i);
   });
 
-  it("returns dispose when gondolin is enabled, none when disabled", () => {
-    const { dispose: withDispose } = createBaselineAgentTools({
-      modelAdapter: new PiAiModelAdapter(),
-      toolsConfig: { gondolin: { enabled: true } },
-      arc: "test-arc",
-    } as any);
-    expect(typeof withDispose).toBe("function");
-
-    const { dispose: withoutDispose } = createBaselineAgentTools({
+  it("always returns dispose function", () => {
+    const { dispose } = createBaselineAgentTools({
       modelAdapter: new PiAiModelAdapter(),
       arc: "test-arc",
     } as any);
-    expect(withoutDispose).toBeUndefined();
+    expect(typeof dispose).toBe("function");
   });
 });
 
@@ -543,7 +510,7 @@ describe("isIpInCidr", () => {
 // ── Gondolin session ref-counting ──────────────────────────────────────────
 
 describe("gondolin session ref-counting", () => {
-  const gondolinConfig = { enabled: true as const };
+  const gondolinConfig = {};
 
   beforeEach(() => {
     resetGondolinVmCache();
