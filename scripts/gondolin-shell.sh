@@ -42,22 +42,21 @@ if [ "${1:-}" = "--list" ]; then
   fi
   echo "Known arc workspaces ($WORKSPACES_DIR):"
   echo ""
-  printf "  %-18s  %s\n" "ARC ID" "CHECKPOINT"
-  printf "  %-18s  %s\n" "------" "----------"
+  printf "  %-18s  %-10s  %s\n" "ARC ID" "CHECKPOINT" "ARC NAME"
+  printf "  %-18s  %-10s  %s\n" "------" "----------" "--------"
   for dir in "$WORKSPACES_DIR"/*/; do
     [ -d "$dir" ] || continue
     arcId=$(basename "$dir")
     checkpoint="$CHECKPOINTS_DIR/${arcId}.qcow2"
+    arcName=""
+    [ -f "$dir/.arc-name" ] && arcName=$(cat "$dir/.arc-name")
     if [ -f "$checkpoint" ]; then
       size=$(du -h "$checkpoint" | cut -f1)
-      printf "  %-18s  %s (%s)\n" "$arcId" "yes" "$size"
+      printf "  %-18s  %-10s  %s\n" "$arcId" "yes (${size})" "$arcName"
     else
-      printf "  %-18s  %s\n" "$arcId" "no"
+      printf "  %-18s  %-10s  %s\n" "$arcId" "no" "$arcName"
     fi
   done
-  echo ""
-  echo "Tip: to find which arc name maps to an ID, compute:"
-  echo "  echo -n 'serverTag#channel' | sha256sum | cut -c1-16"
   exit 0
 fi
 

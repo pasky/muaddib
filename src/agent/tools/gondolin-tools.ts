@@ -13,7 +13,7 @@
  */
 
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, posix } from "node:path";
 
 import {
@@ -552,6 +552,14 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
   const dnsMode = resolveDnsMode(config.dnsMode);
   const arcId = normalizeArcId(arc);
   const sessionDir = `/tmp/session-${randomUUID().slice(0, 8)}`;
+
+  // Ensure the workspace directory exists and stamp the arc name into it so
+  // external tools (e.g. scripts/gondolin-shell.sh) can identify which arc
+  // owns a given workspace ID.  Written eagerly on every attach so the file
+  // stays current even if the arc name was never recorded before.
+  const workspacePath = getArcWorkspacePath(arc);
+  mkdirSync(workspacePath, { recursive: true });
+  writeFileSync(join(workspacePath, ".arc-name"), arc, "utf8");
 
   // Register this session immediately so checkpointGondolinArc knows it is
   // active even before the VM has been started or any tool has been called.
