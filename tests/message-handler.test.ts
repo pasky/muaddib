@@ -1647,7 +1647,7 @@ describe("RoomMessageHandler", () => {
       ...roomConfig,
       proactive: {
         interjecting: ["libera##test"],
-        debounceSeconds: 0.05,
+        debounceSeconds: 0,
         historySize: 10,
         rateLimit: 10,
         ratePeriod: 60,
@@ -1702,7 +1702,7 @@ describe("RoomMessageHandler", () => {
       ...roomConfig,
       proactive: {
         interjecting: ["libera##test"],
-        debounceSeconds: 0.05,
+        debounceSeconds: 0,
         historySize: 10,
         rateLimit: 10,
         ratePeriod: 60,
@@ -1748,7 +1748,8 @@ describe("RoomMessageHandler", () => {
     });
 
     await proactivePromptReached.promise;
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Yield to let the fire-and-forget proactive pipeline finish cleanup
+    await new Promise((r) => setImmediate(r));
 
     expect(sent).toEqual([]);
     const rows = await history.getFullHistory("libera", "#test");
@@ -1853,7 +1854,7 @@ describe("RoomMessageHandler", () => {
       ...roomConfig,
       proactive: {
         interjecting: ["libera##test"],
-        debounceSeconds: 0.05,
+        debounceSeconds: 0,
         historySize: 10,
         rateLimit: 10,
         ratePeriod: 60,
@@ -1933,8 +1934,8 @@ describe("RoomMessageHandler", () => {
     // Release the agent and let the proactive session finish
     releaseAgent.resolve();
     await passivePromise;
-    // Give the fire-and-forget proactive pipeline time to complete cleanup
-    await new Promise((r) => setTimeout(r, 100));
+    // Yield to let fire-and-forget proactive pipeline finish cleanup
+    await new Promise((r) => setImmediate(r));
 
     // After proactive session ends, passive messages should no longer steer
     steeredMessages.length = 0;
@@ -1955,7 +1956,7 @@ describe("RoomMessageHandler", () => {
       ...roomConfig,
       proactive: {
         interjecting: ["libera##test"],
-        debounceSeconds: 0.05,
+        debounceSeconds: 0,
         historySize: 10,
         rateLimit: 10,
         ratePeriod: 60,
