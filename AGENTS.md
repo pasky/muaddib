@@ -22,7 +22,6 @@
 - **Command Handling**: `src/rooms/command/*` (resolver, classifier, handler, rate limiter, context reduction)
 - **Agent Runtime**: `src/agent/session-runner.ts` + `src/agent/session-factory.ts` + `src/agent/tools/*`
 - **Gondolin Sandbox**: `src/agent/tools/gondolin-tools.ts` — agent read/write/edit/bash tools run inside per-arc QEMU micro-VMs, not on the host.
-
 - **Persistence**:
   - Chat history: `src/history/chat-history-store.ts`
   - Chronicle: `src/chronicle/*`
@@ -43,6 +42,7 @@
 - **No silent normalization**: If a config/input value is present but has the wrong type or range, throw — don't silently coerce to a default. Use `?? default` only for genuinely absent values, never to paper over invalid ones.
 - **No deprecated shims**: Never add `@deprecated` type aliases or compatibility wrappers. Delete the old thing and update all references.
 - **No over-engineering for single use cases**: If a function, class, or abstraction has exactly one call site and adds no testability or clarity, inline it. This includes: single-re-export barrel files, identity wrapper functions, custom error classes with no discriminant fields, normalize wrappers that just set one default.
+- **CLAUDE.md** is a symlink to **AGENTS.md**
 
 ## Testing
 - Vitest behavioral tests in `tests/`
