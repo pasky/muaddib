@@ -675,7 +675,7 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
-  it("filters baseline tools via allowed_tools including chronicler/quest tool names", async () => {
+  it("filters baseline tools via allowed_tools including chronicler tool names", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();
 
@@ -691,7 +691,7 @@ describe("RoomMessageHandler", () => {
             ...roomConfig.command.modes,
             serious: {
               ...roomConfig.command.modes.serious,
-              allowedTools: ["chronicle_read", "quest_start", "make_plan"],
+              allowedTools: ["chronicle_read", "chronicle_append", "make_plan"],
             },
           },
         },
@@ -709,7 +709,7 @@ describe("RoomMessageHandler", () => {
     const result = await handler.execute(incoming);
 
     expect(result.response).toBe("done");
-    expect(seenToolNames).toEqual(["chronicle_read", "quest_start", "make_plan"]);
+    expect(seenToolNames).toEqual(["chronicle_read", "chronicle_append", "make_plan"]);
 
     await history.close();
   });

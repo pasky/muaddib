@@ -10,9 +10,6 @@ import {
   ORACLE_EXCLUDED_TOOLS,
   createMakePlanTool,
   createProgressReportTool,
-  createQuestSnoozeTool,
-  createQuestStartTool,
-  createSubquestStartTool,
   createVisitWebpageTool,
   createWebSearchTool,
 } from "../src/agent/tools/baseline-tools.js";
@@ -45,13 +42,9 @@ describe("baseline agent tools", () => {
         oracle: async () => "",
         chronicleRead: async () => "",
         chronicleAppend: async () => "",
-        questStart: async () => "",
-        subquestStart: async () => "",
-        questSnooze: async () => "",
       },
     });
 
-    // No currentQuestId → only quest_start (no subquest_start or quest_snooze)
     // Gondolin tools (read/write/edit/bash/share_artifact) are always included.
     expect(tools.map((tool) => tool.name)).toEqual([
       "web_search",
@@ -60,7 +53,6 @@ describe("baseline agent tools", () => {
       "oracle",
       "chronicle_read",
       "chronicle_append",
-      "quest_start",
       "read",
       "write",
       "edit",
@@ -80,9 +72,6 @@ describe("baseline agent tools", () => {
         oracle: async () => "",
         chronicleRead: async () => "",
         chronicleAppend: async () => "",
-        questStart: async () => "",
-        subquestStart: async () => "",
-        questSnooze: async () => "",
       },
     });
 
@@ -90,52 +79,6 @@ describe("baseline agent tools", () => {
     for (const tool of tools) {
       expect((tool as any).persistType, `${tool.name} missing persistType`).toBeDefined();
     }
-  });
-
-  it("includes subquest_start and quest_snooze for top-level quest", () => {
-    const tools = createTools({
-      currentQuestId: "my-quest",
-      executors: {
-        webSearch: async () => "",
-        visitWebpage: async () => "",
-
-        generateImage: async () => ({ summaryText: "", images: [] }),
-        oracle: async () => "",
-        chronicleRead: async () => "",
-        chronicleAppend: async () => "",
-        questStart: async () => "",
-        subquestStart: async () => "",
-        questSnooze: async () => "",
-      },
-    });
-
-    const names = tools.map((t) => t.name);
-    expect(names).toContain("subquest_start");
-    expect(names).toContain("quest_snooze");
-    expect(names).not.toContain("quest_start");
-  });
-
-  it("includes only quest_snooze for sub-quest (dotted ID)", () => {
-    const tools = createTools({
-      currentQuestId: "my-quest.sub1",
-      executors: {
-        webSearch: async () => "",
-        visitWebpage: async () => "",
-
-        generateImage: async () => ({ summaryText: "", images: [] }),
-        oracle: async () => "",
-        chronicleRead: async () => "",
-        chronicleAppend: async () => "",
-        questStart: async () => "",
-        subquestStart: async () => "",
-        questSnooze: async () => "",
-      },
-    });
-
-    const names = tools.map((t) => t.name);
-    expect(names).toContain("quest_snooze");
-    expect(names).not.toContain("quest_start");
-    expect(names).not.toContain("subquest_start");
   });
 
   it("progress_report tool invokes callback and returns OK", async () => {
@@ -188,27 +131,6 @@ describe("baseline agent tools", () => {
 
     expect(result.content[0]).toEqual({ type: "text", text: "OK, follow this plan" });
     expect(result.details.plan).toBe("Step 1: research. Step 2: execute.");
-  });
-
-  it("make_plan persists plan to chronicle store when quest is active", async () => {
-    const questSetPlan = vi.fn(async () => true);
-    const fakeStore = { questSetPlan } as any;
-    const tool = createMakePlanTool({ chronicleStore: fakeStore, currentQuestId: "q-123" });
-
-    const result = await tool.execute("call-1", { plan: "my plan" }, undefined, undefined);
-
-    expect(questSetPlan).toHaveBeenCalledWith("q-123", "my plan");
-    expect((result.content[0] as { text: string }).text).toMatch(/stored for future quest steps/);
-  });
-
-  it("make_plan skips persistence when no quest is active", async () => {
-    const questSetPlan = vi.fn(async () => true);
-    const fakeStore = { questSetPlan } as any;
-    const tool = createMakePlanTool({ chronicleStore: fakeStore });
-
-    await tool.execute("call-1", { plan: "my plan" }, undefined, undefined);
-
-    expect(questSetPlan).not.toHaveBeenCalled();
   });
 
   it("web_search tool delegates to configured executor", async () => {
@@ -312,9 +234,6 @@ describe("baseline agent tools", () => {
   it("ORACLE_EXCLUDED_TOOLS prevents recursion and irrelevant nested tools", () => {
     expect(ORACLE_EXCLUDED_TOOLS).toContain("oracle");
     expect(ORACLE_EXCLUDED_TOOLS).toContain("progress_report");
-    expect(ORACLE_EXCLUDED_TOOLS).toContain("quest_start");
-    expect(ORACLE_EXCLUDED_TOOLS).toContain("subquest_start");
-    expect(ORACLE_EXCLUDED_TOOLS).toContain("quest_snooze");
     // Useful tools should NOT be excluded
     expect(ORACLE_EXCLUDED_TOOLS).not.toContain("web_search");
   });
@@ -345,37 +264,6 @@ describe("baseline agent tools", () => {
     expect(appendResult.content[0]).toEqual({ type: "text", text: "OK" });
   });
 
-  it("quest tools delegate to configured executors", async () => {
-    const questStart = vi.fn(async () => "Quest started");
-    const subquestStart = vi.fn(async () => "Subquest started");
-    const questSnooze = vi.fn(async () => "Quest snoozed");
-
-    const questStartTool = createQuestStartTool({ questStart });
-    const subquestStartTool = createSubquestStartTool({ subquestStart });
-    const questSnoozeTool = createQuestSnoozeTool({ questSnooze });
-
-    const startParams = {
-      id: "migration-quest",
-      goal: "Close parity gaps",
-      success_criteria: "All tests pass",
-    };
-
-    const startResult = await questStartTool.execute("call-11", startParams, undefined, undefined);
-    const subResult = await subquestStartTool.execute("call-12", startParams, undefined, undefined);
-    const snoozeResult = await questSnoozeTool.execute(
-      "call-13",
-      { until: "14:30" },
-      undefined,
-      undefined,
-    );
-
-    expect(questStart).toHaveBeenCalledWith(startParams);
-    expect(subquestStart).toHaveBeenCalledWith(startParams);
-    expect(questSnooze).toHaveBeenCalledWith({ until: "14:30" });
-    expect(startResult.content[0]).toEqual({ type: "text", text: "Quest started" });
-    expect(subResult.content[0]).toEqual({ type: "text", text: "Subquest started" });
-    expect(snoozeResult.content[0]).toEqual({ type: "text", text: "Quest snoozed" });
-  });
 });
 
 // ── Gondolin tool set ──────────────────────────────────────────────────────

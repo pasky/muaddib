@@ -23,9 +23,6 @@ const DEFAULT_ORACLE_SYSTEM_PROMPT =
 export const ORACLE_EXCLUDED_TOOLS = new Set([
   "oracle",
   "progress_report",
-  "quest_start",
-  "subquest_start",
-  "quest_snooze",
 ]);
 
 const ORACLE_LOG_SEPARATOR = "----------------------------------------------";

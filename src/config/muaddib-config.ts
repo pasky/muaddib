@@ -94,11 +94,6 @@ interface ChroniclerConfig {
   database?: { path?: string };
   paragraphsPerChapter?: number;
   arcModels?: Record<string, string>;
-  quests?: {
-    arcs?: string[];
-    promptReminder?: string;
-    cooldown?: number;
-  };
 }
 
 interface HistoryConfig {
@@ -194,7 +189,6 @@ interface MuaddibSettings {
   chronicler?: ChroniclerConfig;
   history?: HistoryConfig;
   rooms?: Record<string, RoomConfig>;
-  quests?: unknown;
 }
 
 /** Recursively makes all properties optional. */

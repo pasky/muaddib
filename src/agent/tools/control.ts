@@ -1,5 +1,4 @@
 import { Type } from "@sinclair/typebox";
-import type { ChronicleStore } from "../../chronicle/chronicle-store.js";
 import type { MuaddibTool } from "./types.js";
 
 interface ProgressReportToolOptions {
@@ -59,12 +58,7 @@ export function createProgressReportTool(options: ProgressReportToolOptions = {}
   return tool;
 }
 
-interface MakePlanToolOptions {
-  chronicleStore?: ChronicleStore;
-  currentQuestId?: string | null;
-}
-
-export function createMakePlanTool(options: MakePlanToolOptions = {}): MuaddibTool {
+export function createMakePlanTool(): MuaddibTool {
   return {
     name: "make_plan",
     persistType: "none",
@@ -76,16 +70,8 @@ export function createMakePlanTool(options: MakePlanToolOptions = {}): MuaddibTo
       }),
     }),
     execute: async (_toolCallId, params) => {
-      if (options.chronicleStore && options.currentQuestId) {
-        await options.chronicleStore.questSetPlan(options.currentQuestId, params.plan);
-      }
-
-      const suffix = options.currentQuestId
-        ? " (stored for future quest steps)"
-        : "";
-
       return {
-        content: [{ type: "text", text: `OK, follow this plan${suffix}` }],
+        content: [{ type: "text", text: "OK, follow this plan" }],
         details: {
           plan: params.plan,
         },

@@ -157,7 +157,7 @@ describe("core tool executors webpage secret header support", () => {
   });
 });
 
-describe("core tool executors chronicler/quest support", () => {
+describe("core tool executors chronicler support", () => {
   it("chronicle_read and chronicle_append operate when chronicle store context is provided", async () => {
     const chronicleStore = new ChronicleStore(":memory:");
     await chronicleStore.initialize();
@@ -210,36 +210,6 @@ describe("core tool executors chronicler/quest support", () => {
     );
   });
 
-  it("quest tools return deferred-runtime rejection while validating input", async () => {
-    const executors = createDefaultToolExecutors();
-
-    await expect(
-      executors.questStart({
-        id: "quest-1",
-        goal: "Do a thing",
-        success_criteria: "Done",
-      }),
-    ).resolves.toContain("REJECTED");
-
-    await expect(
-      executors.subquestStart({
-        id: "sub-1",
-        goal: "Do sub thing",
-        success_criteria: "Done",
-      }),
-    ).resolves.toBe("Error: subquest_start requires an active quest context.");
-
-    await expect(executors.questSnooze({ until: "tomorrow" })).resolves.toBe(
-      "Error: quest_snooze requires an active quest context.",
-    );
-
-    const result = await executors.questStart({
-      id: " ",
-      goal: "Do a thing",
-      success_criteria: "Done",
-    });
-    expect(result).toContain("Error:");
-  });
 });
 
 describe("core tool executors oracle support", () => {
@@ -300,9 +270,6 @@ describe("oracle executor with invocation context", () => {
         { name: "oracle" },
         { name: "bash" },
         { name: "progress_report" },
-        { name: "quest_start" },
-        { name: "subquest_start" },
-        { name: "quest_snooze" },
         { name: "visit_webpage" },
       ] as any[],
       dispose: undefined,
@@ -331,9 +298,6 @@ describe("oracle executor with invocation context", () => {
     expect(toolNames).toContain("visit_webpage");
     expect(toolNames).not.toContain("oracle");
     expect(toolNames).not.toContain("progress_report");
-    expect(toolNames).not.toContain("quest_start");
-    expect(toolNames).not.toContain("subquest_start");
-    expect(toolNames).not.toContain("quest_snooze");
   });
 
   it("passes conversation context and thinkingLevel high to SessionRunner.prompt", async () => {
@@ -746,81 +710,6 @@ describe("core tool executors visit_webpage binary content support", () => {
   });
 });
 
-
-describe("core tool executors quest validation with active quest", () => {
-  it("subquest_start returns deferred message with active quest context", async () => {
-    const executors = createDefaultToolExecutors({ currentQuestId: "active-quest" });
-
-    const result = await executors.subquestStart({
-      id: "sub-1",
-      goal: "Do sub thing",
-      success_criteria: "Done",
-    });
-
-    expect(result).toContain("REJECTED");
-  });
-
-  it("subquest_start validates input with active quest context", async () => {
-    const executors = createDefaultToolExecutors({ currentQuestId: "active-quest" });
-
-    const emptyId = await executors.subquestStart({ id: " ", goal: "g", success_criteria: "s" });
-    expect(emptyId).toContain("Error:");
-
-    const dotId = await executors.subquestStart({ id: "a.b", goal: "g", success_criteria: "s" });
-    expect(dotId).toContain("Error:");
-    expect(dotId).toContain("dots");
-
-    const longId = await executors.subquestStart({ id: "a".repeat(65), goal: "g", success_criteria: "s" });
-    expect(longId).toContain("Error:");
-    expect(longId).toContain("too long");
-
-    await expect(
-      executors.subquestStart({ id: "x", goal: " ", success_criteria: "s" }),
-    ).rejects.toThrow("subquest_start.goal must be non-empty");
-
-    await expect(
-      executors.subquestStart({ id: "x", goal: "g", success_criteria: " " }),
-    ).rejects.toThrow("subquest_start.success_criteria must be non-empty");
-  });
-
-  it("quest_snooze validates time format with active quest context", async () => {
-    const executors = createDefaultToolExecutors({ currentQuestId: "active-quest" });
-
-    const result = await executors.questSnooze({ until: "14:30" });
-    expect(result).toContain("REJECTED");
-
-    const badFormat = await executors.questSnooze({ until: "tomorrow" });
-    expect(badFormat).toContain("Invalid time format");
-
-    const badHour = await executors.questSnooze({ until: "25:00" });
-    expect(badHour).toContain("Invalid time");
-
-    const badMinute = await executors.questSnooze({ until: "12:60" });
-    expect(badMinute).toContain("Invalid time");
-  });
-
-  it("quest_start validates all required fields", async () => {
-    const executors = createDefaultToolExecutors();
-
-    const emptyId = await executors.questStart({ id: "", goal: "g", success_criteria: "s" });
-    expect(emptyId).toContain("Error:");
-
-    const dotId = await executors.questStart({ id: "a.b", goal: "g", success_criteria: "s" });
-    expect(dotId).toContain("Error:");
-    expect(dotId).toContain("dots");
-
-    const badChars = await executors.questStart({ id: "a b", goal: "g", success_criteria: "s" });
-    expect(badChars).toContain("Error:");
-
-    await expect(
-      executors.questStart({ id: "x", goal: " ", success_criteria: "s" }),
-    ).rejects.toThrow("quest_start.goal must be non-empty");
-
-    await expect(
-      executors.questStart({ id: "x", goal: "g", success_criteria: " " }),
-    ).rejects.toThrow("quest_start.success_criteria must be non-empty");
-  });
-});
 
 describe("core tool executors generate_image support", () => {
   it("generate_image calls OpenRouter, writes artifact image, and returns image payload", async () => {

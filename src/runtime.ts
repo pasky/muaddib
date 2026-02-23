@@ -2,7 +2,6 @@ import { join } from "node:path";
 
 import { AuthStorage } from "@mariozechner/pi-coding-agent";
 
-import { assertNoDeferredFeatureConfig } from "./config/deferred-features.js";
 import { getMuaddibHome, resolveMuaddibPath } from "./config/paths.js";
 import { RuntimeLogWriter } from "./app/logging.js";
 import { createChronicleSubsystem, type ChronicleSubsystem } from "./chronicle/create.js";
@@ -35,7 +34,6 @@ export async function createMuaddibRuntime(
   const log = runtimeLogger.getLogger("muaddib.runtime");
 
   const config = MuaddibConfig.load(options.configPath);
-  assertNoDeferredFeatureConfig(config, log);
 
   const authStorage = AuthStorage.create(join(muaddibHome, "auth.json"));
   const modelAdapter = new PiAiModelAdapter({ authStorage });
@@ -67,9 +65,6 @@ export async function createMuaddibRuntime(
       history,
       modelAdapter,
       logger: runtimeLogger,
-      quests: chroniclerConfig.quests,
-      authStorage,
-      agentConfig: config.getAgentConfig(),
     });
   }
 
