@@ -388,7 +388,7 @@ const VM_BASH_OUTPUT_CAP_BYTES = 48 * 1024; // 48 KB — below upstream's 50 KB 
 
 // ── VM operations factories ────────────────────────────────────────────────
 
-function createVmReadOps(getVm: () => Promise<VM>): ReadOperations {
+function createVmReadOps(getVm: () => Promise<VM>, logger?: Logger): ReadOperations {
   return {
     readFile: async (absolutePath) => {
       const vm = await getVm();
@@ -409,10 +409,18 @@ function createVmReadOps(getVm: () => Promise<VM>): ReadOperations {
           "-lc",
           `file --mime-type -b ${shQuote(absolutePath)}`,
         ]);
-        if (!r.ok) return null;
+        if (!r.ok) {
+          logger?.warn(`Gondolin detectImageMimeType: 'file' failed for ${absolutePath} (exit ${r.exitCode}): ${r.stderr}`);
+          return null;
+        }
         const m = r.stdout.trim();
-        return ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(m) ? m : null;
-      } catch {
+        const supported = ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(m);
+        if (!supported && m.startsWith("image/")) {
+          logger?.info(`Gondolin detectImageMimeType: unsupported image MIME type '${m}' for ${absolutePath}`);
+        }
+        return supported ? m : null;
+      } catch (err) {
+        logger?.warn(`Gondolin detectImageMimeType: exception for ${absolutePath}`, String(err));
         return null;
       }
     },
@@ -437,8 +445,8 @@ function createVmWriteOps(getVm: () => Promise<VM>): WriteOperations {
   };
 }
 
-function createVmEditOps(getVm: () => Promise<VM>): EditOperations {
-  const readOps = createVmReadOps(getVm);
+function createVmEditOps(getVm: () => Promise<VM>, logger?: Logger): EditOperations {
+  const readOps = createVmReadOps(getVm, logger);
   const writeOps = createVmWriteOps(getVm);
   return {
     readFile: readOps.readFile,
@@ -564,9 +572,9 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
 
   const bashTimeoutSeconds = config.bashTimeoutSeconds ?? 270;
 
-  const piReadTool = createReadTool(sessionDir, { operations: createVmReadOps(getVm) });
+  const piReadTool = createReadTool(sessionDir, { operations: createVmReadOps(getVm, logger) });
   const piWriteTool = createWriteTool(sessionDir, { operations: createVmWriteOps(getVm) });
-  const piEditTool = createEditTool(sessionDir, { operations: createVmEditOps(getVm) });
+  const piEditTool = createEditTool(sessionDir, { operations: createVmEditOps(getVm, logger) });
   const piBashTool = createBashTool(sessionDir, { operations: createVmBashOps(getVm, bashTimeoutSeconds) });
 
   // share_artifact reads files from the VM and publishes them to the artifact store.

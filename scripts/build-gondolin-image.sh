@@ -140,6 +140,7 @@ cat > "$BUILD_CONFIG" << EOF
       "bash",
       "ca-certificates",
       "curl",
+      "file",
       "python3",
       "py3-pip",
       "py3-numpy",
