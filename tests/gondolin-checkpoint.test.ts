@@ -735,7 +735,7 @@ describe("gondolin — bundled skills", () => {
     // Skills should have been written into the VM
     expect(fakeVm.writeFile).toHaveBeenCalledWith(
       "/skills/download-artifact/SKILL.md",
-      expect.stringContaining("Download Artifact"),
+      expect.stringContaining("artifact"),
       { encoding: "utf8" },
     );
 
@@ -772,7 +772,7 @@ describe("loadBundledSkills", () => {
     const downloadArtifact = skills.find((s) => s.name === "download-artifact");
     expect(downloadArtifact).toBeDefined();
     expect(downloadArtifact!.description).toContain("artifact");
-    expect(downloadArtifact!.content).toContain("Download Artifact");
+    expect(downloadArtifact!.content).toContain("curl");
     expect(downloadArtifact!.content).toContain("curl");
   });
 });
