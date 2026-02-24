@@ -10,8 +10,6 @@ import { createDefaultShareArtifactExecutor } from "../src/agent/tools/artifact.
 import { createDefaultOracleExecutor as createDefaultOracleExecutorRaw } from "../src/agent/tools/oracle.js";
 import { PiAiModelAdapter } from "../src/models/pi-ai-model-adapter.js";
 import { resetWebRateLimiters, jinaRetryConfig } from "../src/agent/tools/web.js";
-import { ChronicleStore } from "../src/chronicle/chronicle-store.js";
-
 const tempDirs: string[] = [];
 const originalJinaRetryDelays = [...jinaRetryConfig.delaysMs];
 
@@ -155,61 +153,6 @@ describe("core tool executors webpage secret header support", () => {
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
     expect((globalThis.fetch as any).mock.calls.map((call: unknown[]) => String(call[0]))).toEqual([privateUrl, privateUrl]);
   });
-});
-
-describe("core tool executors chronicler support", () => {
-  it("chronicle_read and chronicle_append operate when chronicle store context is provided", async () => {
-    const chronicleStore = new ChronicleStore(":memory:");
-    await chronicleStore.initialize();
-
-    const executors = createDefaultToolExecutors({
-      chronicleStore,
-      arc: "libera##test",
-    });
-
-    const appendResult = await executors.chronicleAppend({ text: "Noted." });
-    const readResult = await executors.chronicleRead({ relative_chapter_id: 0 });
-
-    expect(appendResult).toBe("OK");
-    expect(readResult).toContain("Arc: libera##test");
-    expect(readResult).toContain("Noted.");
-
-    await chronicleStore.close();
-  });
-
-  it("chronicle_append uses lifecycle automation when lifecycle hook is provided", async () => {
-    const chronicleStore = new ChronicleStore(":memory:");
-    await chronicleStore.initialize();
-
-    const appendParagraph = vi.fn(async () => ({ id: 1 }));
-
-    const executors = createDefaultToolExecutors({
-      chronicleStore,
-      arc: "libera##test",
-      chronicleLifecycle: {
-        appendParagraph,
-      },
-    });
-
-    const appendResult = await executors.chronicleAppend({ text: "Lifecycle append." });
-
-    expect(appendResult).toBe("OK");
-    expect(appendParagraph).toHaveBeenCalledWith("libera##test", "Lifecycle append.");
-
-    await chronicleStore.close();
-  });
-
-  it("chronicle tools return deferred guidance when store context is missing", async () => {
-    const executors = createDefaultToolExecutors();
-
-    await expect(executors.chronicleRead({ relative_chapter_id: 0 })).resolves.toContain(
-      "deferred in the TypeScript runtime",
-    );
-    await expect(executors.chronicleAppend({ text: "memory" })).resolves.toContain(
-      "deferred in the TypeScript runtime",
-    );
-  });
-
 });
 
 describe("core tool executors oracle support", () => {

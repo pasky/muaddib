@@ -37,10 +37,7 @@
     "model": "openrouter:google/gemini-3-flash-preview",
     "arcModels": {
     },
-    "paragraphsPerChapter": 5,
-    "database": {
-      "path": "chronicle.db"
-    }
+    "paragraphsPerChapter": 5
   },
 
   "rooms": {

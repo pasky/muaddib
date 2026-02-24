@@ -54,10 +54,8 @@ export interface ToolContext extends ArtifactContext {
   // ── Runtime services ──
   authStorage: AuthStorage;
   modelAdapter: PiAiModelAdapter;
+  /** Chronicle store — used for gondolin VM mounting and context prepending. */
   chronicleStore?: ChronicleStore;
-  chronicleLifecycle?: {
-    appendParagraph: (arc: string, text: string) => Promise<unknown>;
-  };
 
   // ── Per-invocation context ──
   /** Arc identifier (e.g. "libera##test"), used for Gondolin VM isolation and chronicle scoping. */

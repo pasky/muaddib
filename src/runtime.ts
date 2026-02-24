@@ -60,7 +60,6 @@ export async function createMuaddibRuntime(
       model: chroniclerConfig.model,
       arcModels: chroniclerConfig.arcModels,
       paragraphsPerChapter: chroniclerConfig.paragraphsPerChapter,
-      databasePath: chroniclerConfig.database?.path,
       muaddibHome,
       history,
       modelAdapter,

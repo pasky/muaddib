@@ -1,96 +1,67 @@
-import { open, type Database } from "sqlite";
-import sqlite3 from "sqlite3";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Message, UserMessage } from "@mariozechner/pi-ai";
-import { requireLastID } from "../utils/index.js";
 
 export interface Chapter {
-  id: number;
-  arcId: number;
+  number: number;
   openedAt: string;
   closedAt: string | null;
-  metaJson: string | null;
+  summary: string | null;
 }
 
-interface ParagraphRow {
-  id: number;
-  chapter_id: number;
-  ts: string;
-  content: string;
+interface ParsedChapter {
+  openedAt: string;
+  closedAt: string | null;
+  summary: string | null;
+  paragraphs: Array<{ ts: string; content: string }>;
 }
 
 export class ChronicleStore {
-  private readonly dbPath: string;
-  private db: Database | null = null;
+  private readonly basePath: string;
 
-  constructor(dbPath: string) {
-    this.dbPath = dbPath;
+  constructor(basePath: string) {
+    this.basePath = basePath;
   }
 
   async initialize(): Promise<void> {
-    if (!this.db) {
-      this.db = await open({
-        filename: this.dbPath,
-        driver: sqlite3.Database,
-      });
-    }
-
-    const db = this.requireDb();
-
-    await db.exec(`
-      PRAGMA foreign_keys = ON;
-
-      CREATE TABLE IF NOT EXISTS arcs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL UNIQUE,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      );
-
-      CREATE TABLE IF NOT EXISTS chapters (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        arc_id INTEGER NOT NULL,
-        opened_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        closed_at DATETIME,
-        meta_json TEXT,
-        FOREIGN KEY (arc_id) REFERENCES arcs(id) ON DELETE CASCADE
-      );
-
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_chapters_arc_open
-      ON chapters(arc_id)
-      WHERE closed_at IS NULL;
-
-      CREATE TABLE IF NOT EXISTS paragraphs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        chapter_id INTEGER NOT NULL,
-        ts DATETIME DEFAULT CURRENT_TIMESTAMP,
-        content TEXT NOT NULL,
-        FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE CASCADE
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_paragraphs_chapter_ts
-      ON paragraphs(chapter_id, ts);
-
-      CREATE INDEX IF NOT EXISTS idx_chapters_arc_opened
-      ON chapters(arc_id, opened_at);
-
-    `);
+    mkdirSync(this.basePath, { recursive: true });
   }
 
   async close(): Promise<void> {
-    if (!this.db) {
-      return;
-    }
-
-    await this.db.close();
-    this.db = null;
+    // no-op for filesystem store
   }
 
   async getOrOpenCurrentChapter(arc: string): Promise<Chapter> {
-    const [arcId, isNewArc] = await this.getOrCreateArc(arc);
+    const dir = this.arcDir(arc);
+    mkdirSync(dir, { recursive: true });
 
-    let chapter = await this.getOpenChapter(arcId);
-    if (!chapter) {
-      chapter = await this.openNewChapter(arcId);
+    const files = this.listChapterFiles(arc);
+    if (files.length > 0) {
+      const lastFile = files[files.length - 1];
+      const parsed = this.parseChapterFile(join(dir, lastFile));
+      if (!parsed.closedAt) {
+        return {
+          number: this.chapterNumberFromFilename(lastFile),
+          openedAt: parsed.openedAt,
+          closedAt: null,
+          summary: null,
+        };
+      }
     }
+
+    // Open a new chapter
+    const nextNumber = files.length > 0
+      ? this.chapterNumberFromFilename(files[files.length - 1]) + 1
+      : 1;
+    const isNewArc = files.length === 0;
+    const now = new Date().toISOString();
+    const chapter: Chapter = {
+      number: nextNumber,
+      openedAt: now,
+      closedAt: null,
+      summary: null,
+    };
+    this.writeChapterFile(join(dir, this.chapterFilename(nextNumber)), chapter, []);
 
     if (isNewArc) {
       await this.appendParagraph(arc, "<meta>This is a beginning of an entirely new story arc!</meta>");
@@ -99,326 +70,195 @@ export class ChronicleStore {
     return chapter;
   }
 
-  async appendParagraph(arc: string, content: string): Promise<ParagraphRow> {
+  async appendParagraph(arc: string, content: string): Promise<{ chapter_number: number; ts: string; content: string }> {
     if (!content.trim()) {
       throw new Error("content must be non-empty");
     }
 
-    const db = this.requireDb();
     const chapter = await this.getOrOpenCurrentChapter(arc);
+    const dir = this.arcDir(arc);
+    const filePath = join(dir, this.chapterFilename(chapter.number));
+    const parsed = this.parseChapterFile(filePath);
 
-    const result = await db.run(
-      "INSERT INTO paragraphs(chapter_id, content) VALUES (?, ?)",
-      chapter.id,
-      content,
-    );
+    const ts = new Date().toISOString();
+    parsed.paragraphs.push({ ts, content });
+    this.writeChapterFile(filePath, chapter, parsed.paragraphs);
 
-    const row = await db.get<ParagraphRow>(
-      "SELECT id, chapter_id, ts, content FROM paragraphs WHERE id = ?",
-      requireLastID(result),
-    );
+    return { chapter_number: chapter.number, ts, content };
+  }
 
-    if (!row) {
-      throw new Error("Failed to load inserted paragraph.");
+  async countParagraphsInChapter(chapterNumber: number, arc: string): Promise<number> {
+    const dir = this.arcDir(arc);
+    const filePath = join(dir, this.chapterFilename(chapterNumber));
+    if (!existsSync(filePath)) {
+      return 0;
     }
-
-    return row;
+    const parsed = this.parseChapterFile(filePath);
+    return parsed.paragraphs.length;
   }
 
-  async countParagraphsInChapter(chapterId: number): Promise<number> {
-    const db = this.requireDb();
-    const row = await db.get<{ count: number }>(
-      "SELECT COUNT(*) as count FROM paragraphs WHERE chapter_id = ?",
-      chapterId,
-    );
+  async closeChapterWithSummary(chapterNumber: number, arc: string, summary: string): Promise<void> {
+    const dir = this.arcDir(arc);
+    const filePath = join(dir, this.chapterFilename(chapterNumber));
+    const parsed = this.parseChapterFile(filePath);
 
-    return Number(row?.count ?? 0);
+    const chapter: Chapter = {
+      number: chapterNumber,
+      openedAt: parsed.openedAt,
+      closedAt: new Date().toISOString(),
+      summary,
+    };
+    this.writeChapterFile(filePath, chapter, parsed.paragraphs);
   }
 
-  async closeChapterWithSummary(chapterId: number, summary: string): Promise<void> {
-    const db = this.requireDb();
-    const metaJson = JSON.stringify({ summary });
-
-    await db.run(
-      "UPDATE chapters SET closed_at = CURRENT_TIMESTAMP, meta_json = ? WHERE id = ?",
-      metaJson,
-      chapterId,
-    );
-  }
-
-  async readChapter(chapterId: number): Promise<string[]> {
-    const db = this.requireDb();
-    const rows = await db.all<Array<{ content: string }>>(
-      "SELECT content FROM paragraphs WHERE chapter_id = ? ORDER BY ts ASC",
-      chapterId,
-    );
-
-    return rows.map((row) => row.content);
+  async readChapter(chapterNumber: number, arc: string): Promise<string[]> {
+    const dir = this.arcDir(arc);
+    const filePath = join(dir, this.chapterFilename(chapterNumber));
+    if (!existsSync(filePath)) {
+      return [];
+    }
+    const parsed = this.parseChapterFile(filePath);
+    return parsed.paragraphs.map((p) => p.content);
   }
 
   async getChapterContextMessages(arc: string): Promise<Message[]> {
     const chapter = await this.getOrOpenCurrentChapter(arc);
-    const db = this.requireDb();
-    const rows = await db.all<Array<{ content: string; ts: string }>>(
-      "SELECT content, ts FROM paragraphs WHERE chapter_id = ? ORDER BY ts ASC",
-      chapter.id,
-    );
+    const dir = this.arcDir(arc);
+    const filePath = join(dir, this.chapterFilename(chapter.number));
+    const parsed = this.parseChapterFile(filePath);
 
-    return rows.map((row): UserMessage => ({
+    return parsed.paragraphs.map((p): UserMessage => ({
       role: "user",
-      content: `<context_summary>${row.content}</context_summary>`,
-      timestamp: new Date(row.ts + "Z").getTime() || 0,
+      content: `<context_summary>${p.content}</context_summary>`,
+      timestamp: new Date(p.ts).getTime() || 0,
     }));
   }
 
-  async renderChapter(arc: string, chapterId?: number, lastN?: number): Promise<string> {
-    const resolvedChapter = await this.resolveChapter(arc, chapterId);
-    if (!resolvedChapter) {
-      return `# Arc: ${arc} — No chapters yet\n\n(Empty)`;
+  /**
+   * Read all chapter files for an arc. Returns an array of { number, content }
+   * where content is the raw markdown string. Used for gondolin VM mounting.
+   */
+  readAllChapterFiles(arc: string): Array<{ filename: string; content: string }> {
+    const dir = this.arcDir(arc);
+    if (!existsSync(dir)) {
+      return [];
     }
-
-    let title = `# Arc: ${arc} — Chapter ${resolvedChapter.id} (opened ${resolvedChapter.openedAt.split(".")[0]})`;
-    if (resolvedChapter.closedAt) {
-      title += `, closed ${resolvedChapter.closedAt.split(".")[0]}`;
-    }
-
-    return this.formatChapterParagraphs(resolvedChapter, lastN, title);
+    const files = this.listChapterFiles(arc);
+    return files.map((filename) => ({
+      filename,
+      content: readFileSync(join(dir, filename), "utf-8"),
+    }));
   }
 
-  async renderChapterRelative(arc: string, relativeChapterId: number, lastN?: number): Promise<string> {
-    if (!Number.isInteger(relativeChapterId)) {
-      throw new Error("relativeChapterId must be an integer.");
-    }
+  // ── Internal helpers ──
 
-    const resolvedChapter = await this.resolveChapterRelative(arc, relativeChapterId);
-    if (!resolvedChapter) {
-      return `# Arc: ${arc} — No chapters at relative offset ${relativeChapterId}\n\n(Empty)`;
-    }
-
-    const relativeDesc =
-      relativeChapterId === 0
-        ? "current"
-        : `${Math.abs(relativeChapterId)} chapter${Math.abs(relativeChapterId) > 1 ? "s" : ""} ${relativeChapterId < 0 ? "back" : "forward"}`;
-
-    let title = `# Arc: ${arc} — Chapter ${resolvedChapter.id} (${relativeDesc}, opened ${resolvedChapter.openedAt.split(".")[0]})`;
-    if (resolvedChapter.closedAt) {
-      title += `, closed ${resolvedChapter.closedAt.split(".")[0]}`;
-    }
-
-    return this.formatChapterParagraphs(resolvedChapter, lastN, title);
+  private arcDir(arc: string): string {
+    return join(this.basePath, arc);
   }
 
-  private async formatChapterParagraphs(chapter: Chapter, lastN: number | undefined, title: string): Promise<string> {
-    const db = this.requireDb();
-    const rows = await db.all<Array<{ ts: string; content: string }>>(
-      "SELECT ts, content FROM paragraphs WHERE chapter_id = ? ORDER BY ts ASC",
-      chapter.id,
-    );
-
-    const selectedRows = lastN && lastN > 0 ? rows.slice(-lastN) : rows;
-
-    const lines = [title, "", "Paragraphs:"];
-    for (const row of selectedRows) {
-      const hhmm = row.ts.length >= 16 ? row.ts.slice(11, 16) : row.ts;
-      lines.push(`[${hhmm}] ${row.content}`);
-    }
-
-    if (selectedRows.length === 0) {
-      lines.push("(No paragraphs)");
-    }
-
-    return lines.join("\n");
+  private chapterFilename(number: number): string {
+    return `${String(number).padStart(6, "0")}.md`;
   }
 
-  private async getOrCreateArc(arc: string): Promise<[number, boolean]> {
-    const db = this.requireDb();
-    const existing = await db.get<{ id: number }>("SELECT id FROM arcs WHERE name = ?", arc);
-    if (existing) {
-      return [Number(existing.id), false];
-    }
-
-    const result = await db.run("INSERT INTO arcs(name) VALUES (?)", arc);
-    return [requireLastID(result), true];
+  private chapterNumberFromFilename(filename: string): number {
+    return parseInt(filename.replace(/\.md$/, ""), 10);
   }
 
-  private async getOpenChapter(arcId: number): Promise<Chapter | null> {
-    const db = this.requireDb();
-    const row = await db.get<{
-      id: number;
-      arc_id: number;
-      opened_at: string;
-      closed_at: string | null;
-      meta_json: string | null;
-    }>(
-      `
-      SELECT id, arc_id, opened_at, closed_at, meta_json
-      FROM chapters
-      WHERE arc_id = ? AND closed_at IS NULL
-      `,
-      arcId,
-    );
-
-    if (!row) {
-      return null;
+  private listChapterFiles(arc: string): string[] {
+    const dir = this.arcDir(arc);
+    if (!existsSync(dir)) {
+      return [];
     }
-
-    return {
-      id: Number(row.id),
-      arcId: Number(row.arc_id),
-      openedAt: String(row.opened_at),
-      closedAt: row.closed_at,
-      metaJson: row.meta_json,
-    };
+    return readdirSync(dir)
+      .filter((f) => /^\d{6}\.md$/.test(f))
+      .sort();
   }
 
-  private async openNewChapter(arcId: number): Promise<Chapter> {
-    const db = this.requireDb();
-    const result = await db.run("INSERT INTO chapters(arc_id) VALUES (?)", arcId);
-
-    const row = await db.get<{
-      id: number;
-      arc_id: number;
-      opened_at: string;
-      closed_at: string | null;
-      meta_json: string | null;
-    }>(
-      "SELECT id, arc_id, opened_at, closed_at, meta_json FROM chapters WHERE id = ?",
-      requireLastID(result),
-    );
-
-    if (!row) {
-      throw new Error("Failed to open chapter.");
-    }
-
-    return {
-      id: Number(row.id),
-      arcId: Number(row.arc_id),
-      openedAt: String(row.opened_at),
-      closedAt: row.closed_at,
-      metaJson: row.meta_json,
-    };
+  private parseChapterFile(filePath: string): ParsedChapter {
+    const raw = readFileSync(filePath, "utf-8");
+    return parseChapterMarkdown(raw);
   }
 
-  private async resolveChapterRelative(arc: string, relativeChapterId: number): Promise<Chapter | null> {
-    const db = this.requireDb();
-    const [arcId] = await this.getOrCreateArc(arc);
-
-    // Find the current chapter (open, or latest closed) then offset from it in SQL.
-    // Uses a CTE to rank chapters by opened_at, find the current chapter's rank,
-    // then select the one at rank + relativeChapterId.
-    const row = await db.get<{
-      id: number;
-      arc_id: number;
-      opened_at: string;
-      closed_at: string | null;
-      meta_json: string | null;
-    }>(
-      `WITH ranked AS (
-         SELECT id, arc_id, opened_at, closed_at, meta_json,
-                ROW_NUMBER() OVER (ORDER BY opened_at ASC) AS rn
-         FROM chapters
-         WHERE arc_id = ?
-       ),
-       current_chapter AS (
-         SELECT rn FROM ranked
-         WHERE closed_at IS NULL
-         UNION ALL
-         SELECT MAX(rn) FROM ranked
-         LIMIT 1
-       )
-       SELECT r.id, r.arc_id, r.opened_at, r.closed_at, r.meta_json
-       FROM ranked r, current_chapter c
-       WHERE r.rn = c.rn + ?`,
-      arcId,
-      relativeChapterId,
-    );
-
-    if (!row) {
-      return null;
+  private writeChapterFile(filePath: string, chapter: Chapter, paragraphs: Array<{ ts: string; content: string }>): void {
+    const lines: string[] = ["---"];
+    lines.push(`openedAt: "${chapter.openedAt}"`);
+    if (chapter.closedAt) {
+      lines.push(`closedAt: "${chapter.closedAt}"`);
     }
+    if (chapter.summary) {
+      lines.push(`summary: ${JSON.stringify(chapter.summary)}`);
+    }
+    lines.push("---");
+    lines.push("");
 
-    return {
-      id: Number(row.id),
-      arcId: Number(row.arc_id),
-      openedAt: String(row.opened_at),
-      closedAt: row.closed_at,
-      metaJson: row.meta_json,
-    };
-  }
-
-  private async resolveChapter(arc: string, chapterId?: number): Promise<Chapter | null> {
-    const db = this.requireDb();
-    const [arcId] = await this.getOrCreateArc(arc);
-
-    if (chapterId !== undefined) {
-      const row = await db.get<{
-        id: number;
-        arc_id: number;
-        opened_at: string;
-        closed_at: string | null;
-        meta_json: string | null;
-      }>(
-        `
-        SELECT id, arc_id, opened_at, closed_at, meta_json
-        FROM chapters
-        WHERE id = ? AND arc_id = ?
-        `,
-        chapterId,
-        arcId,
-      );
-
-      if (!row) {
-        return null;
+    for (let i = 0; i < paragraphs.length; i++) {
+      const p = paragraphs[i];
+      const tsPrefix = p.ts.slice(0, 16).replace("T", "T"); // YYYY-MM-DDTHH:MM
+      lines.push(`[${tsPrefix}] ${p.content}`);
+      if (i < paragraphs.length - 1) {
+        lines.push("");
       }
-
-      return {
-        id: Number(row.id),
-        arcId: Number(row.arc_id),
-        openedAt: String(row.opened_at),
-        closedAt: row.closed_at,
-        metaJson: row.meta_json,
-      };
     }
 
-    const open = await this.getOpenChapter(arcId);
-    if (open) {
-      return open;
+    const content = lines.join("\n") + "\n";
+    const tmpPath = filePath + ".tmp";
+    writeFileSync(tmpPath, content, "utf-8");
+    renameSync(tmpPath, filePath);
+  }
+}
+
+// ── Frontmatter parser (no YAML library) ──
+
+function parseChapterMarkdown(raw: string): ParsedChapter {
+  let openedAt = new Date().toISOString();
+  let closedAt: string | null = null;
+  let summary: string | null = null;
+  const paragraphs: Array<{ ts: string; content: string }> = [];
+
+  const frontmatterMatch = raw.match(/^---\n([\s\S]*?)\n---\n/);
+  let body = raw;
+
+  if (frontmatterMatch) {
+    const frontmatter = frontmatterMatch[1];
+    body = raw.slice(frontmatterMatch[0].length);
+
+    const openedAtMatch = frontmatter.match(/^openedAt:\s*"(.+)"/m);
+    if (openedAtMatch) {
+      openedAt = openedAtMatch[1];
     }
 
-    const latest = await db.get<{
-      id: number;
-      arc_id: number;
-      opened_at: string;
-      closed_at: string | null;
-      meta_json: string | null;
-    }>(
-      `
-      SELECT id, arc_id, opened_at, closed_at, meta_json
-      FROM chapters
-      WHERE arc_id = ?
-      ORDER BY opened_at DESC
-      LIMIT 1
-      `,
-      arcId,
-    );
-
-    if (!latest) {
-      return null;
+    const closedAtMatch = frontmatter.match(/^closedAt:\s*"(.+)"/m);
+    if (closedAtMatch) {
+      closedAt = closedAtMatch[1];
     }
 
-    return {
-      id: Number(latest.id),
-      arcId: Number(latest.arc_id),
-      openedAt: String(latest.opened_at),
-      closedAt: latest.closed_at,
-      metaJson: latest.meta_json,
-    };
+    const summaryMatch = frontmatter.match(/^summary:\s*(.+)/m);
+    if (summaryMatch) {
+      const rawSummary = summaryMatch[1].trim();
+      // Handle JSON-quoted strings
+      if (rawSummary.startsWith('"') && rawSummary.endsWith('"')) {
+        try {
+          summary = JSON.parse(rawSummary);
+        } catch {
+          summary = rawSummary.slice(1, -1);
+        }
+      } else {
+        summary = rawSummary;
+      }
+    }
   }
 
-  private requireDb(): Database {
-    if (!this.db) {
-      throw new Error("ChronicleStore not initialized. Call initialize() first.");
+  // Parse paragraphs from body
+  const paragraphBlocks = body.split(/\n\n+/).filter((block) => block.trim());
+  for (const block of paragraphBlocks) {
+    const match = block.trim().match(/^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})\]\s+([\s\S]+)$/);
+    if (match) {
+      paragraphs.push({
+        ts: match[1] + ":00.000Z",
+        content: match[2].trim(),
+      });
     }
-    return this.db;
   }
+
+  return { openedAt, closedAt, summary, paragraphs };
 }

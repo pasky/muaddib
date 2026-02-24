@@ -1,6 +1,10 @@
 
 
-import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { describe, expect, it, vi, afterEach } from "vitest";
 
 import { CONSOLE_LOGGER } from "../src/app/logging.js";
 import { ChronicleStore } from "../src/chronicle/chronicle-store.js";
@@ -27,6 +31,20 @@ function makeAssistantText(text: string) {
     timestamp: Date.now(),
   };
 }
+
+const tempDirs: string[] = [];
+
+function makeTempDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), "muaddib-chronicle-test-"));
+  tempDirs.push(dir);
+  return dir;
+}
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0, tempDirs.length)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 describe("ChatHistoryStore", () => {
   it("stores messages and returns chronological context with assistant mode prefix", async () => {
@@ -179,11 +197,12 @@ describe("ChatHistoryStore", () => {
 
 describe("ChronicleStore", () => {
   it("opens chapter, appends paragraph, and returns context messages", async () => {
-    const store = new ChronicleStore(":memory:");
+    const dir = makeTempDir();
+    const store = new ChronicleStore(dir);
     await store.initialize();
 
     const chapter = await store.getOrOpenCurrentChapter("libera##test");
-    expect(chapter.id).toBeGreaterThan(0);
+    expect(chapter.number).toBeGreaterThan(0);
 
     await store.appendParagraph("libera##test", "Important update");
 
@@ -192,19 +211,12 @@ describe("ChronicleStore", () => {
       message.role === "user" && typeof message.content === "string" && message.content.includes("Important update"),
     )).toBe(true);
 
-    const rendered = await store.renderChapter("libera##test");
-    expect(rendered).toContain("Arc: libera##test");
-    expect(rendered).toContain("Important update");
-
-    const relativeRendered = await store.renderChapterRelative("libera##test", 0);
-    expect(relativeRendered).toContain("current");
-    expect(relativeRendered).toContain("Important update");
-
     await store.close();
   });
 
   it("rolls chapters at threshold and inserts recap paragraph via lifecycle automation", async () => {
-    const chronicleStore = new ChronicleStore(":memory:");
+    const dir = makeTempDir();
+    const chronicleStore = new ChronicleStore(dir);
     await chronicleStore.initialize();
 
     const modelAdapter = {
@@ -227,16 +239,29 @@ describe("ChronicleStore", () => {
     await lifecycle.appendParagraph("libera##test", "Second operational note.");
     const chapterAfter = await chronicleStore.getOrOpenCurrentChapter("libera##test");
 
-    expect(chapterAfter.id).toBeGreaterThan(chapterBefore.id);
+    expect(chapterAfter.number).toBeGreaterThan(chapterBefore.number);
     expect(modelAdapter.completeSimple).toHaveBeenCalledTimes(1);
 
-    const currentChapter = await chronicleStore.renderChapterRelative("libera##test", 0);
-    expect(currentChapter).toContain("Previous chapter recap: Chapter summary paragraph.");
-    expect(currentChapter).toContain("Second operational note.");
+    const currentParagraphs = await chronicleStore.readChapter(chapterAfter.number, "libera##test");
+    expect(currentParagraphs.some((p) => p.includes("Previous chapter recap: Chapter summary paragraph."))).toBe(true);
+    expect(currentParagraphs.some((p) => p.includes("Second operational note."))).toBe(true);
 
     await chronicleStore.close();
   });
 
+  it("readAllChapterFiles returns all chapter files for gondolin mounting", async () => {
+    const dir = makeTempDir();
+    const store = new ChronicleStore(dir);
+    await store.initialize();
+
+    await store.getOrOpenCurrentChapter("libera##test");
+    await store.appendParagraph("libera##test", "Some content");
+
+    const files = store.readAllChapterFiles("libera##test");
+    expect(files.length).toBeGreaterThan(0);
+    expect(files[0].filename).toMatch(/^\d{6}\.md$/);
+    expect(files[0].content).toContain("Some content");
+  });
 });
 
 describe("AutoChroniclerTs", () => {
@@ -252,7 +277,8 @@ describe("AutoChroniclerTs", () => {
       content: "only one",
     });
 
-    const chronicleStore = new ChronicleStore(":memory:");
+    const dir = makeTempDir();
+    const chronicleStore = new ChronicleStore(dir);
     await chronicleStore.initialize();
 
     const lifecycle = new ChronicleLifecycleTs({
@@ -310,7 +336,8 @@ describe("AutoChroniclerTs", () => {
       content: "two",
     });
 
-    const chronicleStore = new ChronicleStore(":memory:");
+    const dir = makeTempDir();
+    const chronicleStore = new ChronicleStore(dir);
     await chronicleStore.initialize();
 
     const lifecycle = new ChronicleLifecycleTs({
@@ -349,8 +376,9 @@ describe("AutoChroniclerTs", () => {
     expect(modelAdapter.completeSimple).toHaveBeenCalledTimes(1);
     expect(await history.countRecentUnchronicled("libera", "#test", 7)).toBe(0);
 
-    const currentChapter = await chronicleStore.renderChapter("libera##test");
-    expect(currentChapter).toContain("Auto chronicled paragraph.");
+    const currentChapter = await chronicleStore.getOrOpenCurrentChapter("libera##test");
+    const paragraphs = await chronicleStore.readChapter(currentChapter.number, "libera##test");
+    expect(paragraphs.some((p) => p.includes("Auto chronicled paragraph."))).toBe(true);
 
     await history.close();
     await chronicleStore.close();

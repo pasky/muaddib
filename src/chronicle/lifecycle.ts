@@ -13,7 +13,7 @@ export interface ChronicleLifecycleConfig {
 }
 
 export interface ChronicleLifecycle {
-  appendParagraph(arc: string, text: string): Promise<{ id: number; chapter_id: number; ts: string; content: string }>;
+  appendParagraph(arc: string, text: string): Promise<{ chapter_number: number; ts: string; content: string }>;
 }
 
 export interface ChronicleLifecycleTsOptions {
@@ -50,7 +50,7 @@ export class ChronicleLifecycleTs implements ChronicleLifecycle {
   async appendParagraph(
     arc: string,
     text: string,
-  ): Promise<{ id: number; chapter_id: number; ts: string; content: string }> {
+  ): Promise<{ chapter_number: number; ts: string; content: string }> {
     const trimmed = text.trim();
     if (!trimmed) {
       throw new Error("paragraph_text must be non-empty");
@@ -66,20 +66,20 @@ export class ChronicleLifecycleTs implements ChronicleLifecycle {
   }
 
   private async rollChapterIfNeeded(arc: string, currentChapter: Chapter): Promise<void> {
-    const paragraphCount = await this.chronicleStore.countParagraphsInChapter(currentChapter.id);
+    const paragraphCount = await this.chronicleStore.countParagraphsInChapter(currentChapter.number, arc);
     const maxParagraphs = this.resolveParagraphLimit();
 
     if (paragraphCount < maxParagraphs) {
       return;
     }
 
-    const chapterParagraphs = await this.chronicleStore.readChapter(currentChapter.id);
+    const chapterParagraphs = await this.chronicleStore.readChapter(currentChapter.number, arc);
     if (chapterParagraphs.length === 0) {
-      throw new Error(`Chapter ${currentChapter.id} should have paragraphs but found none.`);
+      throw new Error(`Chapter ${currentChapter.number} should have paragraphs but found none.`);
     }
 
     const summary = await this.generateChapterSummary(arc, chapterParagraphs);
-    await this.chronicleStore.closeChapterWithSummary(currentChapter.id, summary);
+    await this.chronicleStore.closeChapterWithSummary(currentChapter.number, arc, summary);
 
     await this.chronicleStore.getOrOpenCurrentChapter(arc);
     await this.chronicleStore.appendParagraph(arc, `Previous chapter recap: ${summary}`);

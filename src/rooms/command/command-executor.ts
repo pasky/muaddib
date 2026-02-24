@@ -199,7 +199,6 @@ export class CommandExecutor {
       modelAdapter: this.modelAdapter,
       logger: this.logger,
       chronicleStore: this.runtime.chronicle?.chronicleStore,
-      chronicleLifecycle: this.runtime.chronicle?.chronicleLifecycle,
     };
   }
 

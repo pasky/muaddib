@@ -35,6 +35,7 @@ import { getMuaddibHome } from "../../config/paths.js";
 import type { GondolinConfig } from "../../config/muaddib-config.js";
 import type { ToolsConfig } from "../../config/muaddib-config.js";
 import type { Logger } from "../../app/logging.js";
+import type { ChronicleStore } from "../../chronicle/chronicle-store.js";
 import type { ArtifactContext, MuaddibTool, ToolSet } from "./types.js";
 import {
   createShareArtifactTool,
@@ -187,6 +188,7 @@ async function ensureVm(
   config: GondolinConfig,
   dnsMode: SupportedDnsMode,
   skills: LoadedSkill[],
+  chronicleFiles: Array<{ filename: string; content: string }>,
   artifactHostname: string | undefined,
   logger?: Logger,
 ): Promise<VM> {
@@ -265,6 +267,15 @@ async function ensureVm(
         }
         skillsFs.setReadOnly();
         mounts[VM_SKILLS_BASE] = skillsFs;
+      }
+
+      if (chronicleFiles.length > 0) {
+        const chronicleFs = new MemProviderClass();
+        for (const file of chronicleFiles) {
+          chronicleFs.writeFileSync!(file.filename, file.content, { encoding: "utf8" });
+        }
+        chronicleFs.setReadOnly();
+        mounts["/chronicle"] = chronicleFs;
       }
 
       const vmOptions: import("@earendil-works/gondolin").VMOptions = {
@@ -622,6 +633,7 @@ export interface GondolinToolsOptions {
   arc: string;
   config: GondolinConfig;
   toolsConfig?: ToolsConfig;
+  chronicleStore?: ChronicleStore;
   logger?: Logger;
 }
 
@@ -652,13 +664,14 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
   vmActiveSessions.set(arc, (vmActiveSessions.get(arc) ?? 0) + 1);
 
   const skills = getBundledSkills();
+  const chronicleFiles = options.chronicleStore?.readAllChapterFiles(arc) ?? [];
   const artifactHostname = resolveArtifactHostname(toolsConfig?.artifacts?.url, logger);
 
   let vmReady: Promise<VM> | null = null;
 
   function getVm(): Promise<VM> {
     if (!vmReady) {
-      vmReady = ensureVm(arc, config, dnsMode, skills, artifactHostname, logger).then(async (vm) => {
+      vmReady = ensureVm(arc, config, dnsMode, skills, chronicleFiles, artifactHostname, logger).then(async (vm) => {
         await vm.exec(["/bin/mkdir", "-p", sessionDir]);
         logger?.info(`Gondolin session dir: ${sessionDir} (arc: ${arc})`);
         return vm;
@@ -697,8 +710,12 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
   const artifactsSuffix = artifactsUrl
     ? ` Artifacts: your previously produced output attachments - any URLs that start with ${artifactsUrl}, read with download_artifact skill.`
     : "";
+  const chronicleSuffix = chronicleFiles.length > 0
+    ? " Chronicle: your memory chapters are at /chronicle/ (read-only)."
+    : "";
   const systemPromptSuffix =
     `Filesystem: /workspace persists across sessions; ${sessionDir} is your ephemeral working directory.` +
+    chronicleSuffix +
     artifactsSuffix +
     skillsSection;
 

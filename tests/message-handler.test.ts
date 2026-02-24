@@ -625,6 +625,7 @@ describe("RoomMessageHandler", () => {
 
     const chronicleStore = {
       getChapterContextMessages: vi.fn(async () => chapterContext),
+      readAllChapterFiles: vi.fn(() => []),
     };
 
     const runnerContextWithSummary: string[][] = [];
@@ -675,7 +676,7 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
-  it("filters baseline tools via allowed_tools including chronicler tool names", async () => {
+  it("filters baseline tools via allowed_tools", async () => {
     const history = new ChatHistoryStore(":memory:", 40);
     await history.initialize();
 
@@ -691,7 +692,7 @@ describe("RoomMessageHandler", () => {
             ...roomConfig.command.modes,
             serious: {
               ...roomConfig.command.modes.serious,
-              allowedTools: ["chronicle_read", "chronicle_append", "make_plan"],
+              allowedTools: ["web_search", "make_plan"],
             },
           },
         },
@@ -709,7 +710,7 @@ describe("RoomMessageHandler", () => {
     const result = await handler.execute(incoming);
 
     expect(result.response).toBe("done");
-    expect(seenToolNames).toEqual(["chronicle_read", "chronicle_append", "make_plan"]);
+    expect(seenToolNames).toEqual(["web_search", "make_plan"]);
 
     await history.close();
   });

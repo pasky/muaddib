@@ -1,12 +1,6 @@
 import { toConfiguredString } from "../../utils/index.js";
 import { createMakePlanTool, createProgressReportTool } from "./control.js";
 import {
-  createChronicleAppendTool,
-  createChronicleReadTool,
-  createDefaultChronicleAppendExecutor,
-  createDefaultChronicleReadExecutor,
-} from "./chronicle.js";
-import {
   createDefaultGenerateImageExecutor,
   createGenerateImageTool,
 } from "./image.js";
@@ -23,7 +17,6 @@ import {
   createWebSearchTool,
 } from "./web.js";
 import { createGondolinTools } from "./gondolin-tools.js";
-import type { ChronicleReadExecutor, ChronicleAppendExecutor } from "./chronicle.js";
 import type { GenerateImageExecutor } from "./image.js";
 import type { OracleExecutor } from "./oracle.js";
 import type { WebSearchExecutor, VisitWebpageExecutor } from "./web.js";
@@ -34,20 +27,15 @@ export interface BaselineToolExecutors {
   visitWebpage: VisitWebpageExecutor;
   oracle: OracleExecutor;
   generateImage: GenerateImageExecutor;
-  chronicleRead: ChronicleReadExecutor;
-  chronicleAppend: ChronicleAppendExecutor;
 }
 
 export type { ToolContext, MuaddibTool, ToolPersistType, ToolSet };
 export type { ShareArtifactInput, ShareArtifactExecutor } from "./artifact.js";
-export type { ChronicleReadInput, ChronicleAppendInput, ChronicleReadExecutor, ChronicleAppendExecutor } from "./chronicle.js";
 export type { GenerateImageInput, GenerateImageResult, GeneratedImageResultItem, GenerateImageExecutor } from "./image.js";
 export type { OracleInput, OracleExecutor } from "./oracle.js";
 export type { VisitWebpageImageResult, VisitWebpageResult, WebSearchExecutor, VisitWebpageExecutor } from "./web.js";
 
 export {
-  createChronicleAppendTool,
-  createChronicleReadTool,
   createGenerateImageTool,
   createMakePlanTool,
   createOracleTool,
@@ -77,8 +65,6 @@ const BASELINE_TOOL_FACTORIES: ReadonlyArray<ExecutorBackedToolFactory> = [
   createVisitWebpageTool,
   (executors, options) => createGenerateImageTool(executors, toConfiguredString(options.toolsConfig?.imageGen?.model)),
   createOracleTool,
-  createChronicleReadTool,
-  createChronicleAppendTool,
 ];
 
 export function createDefaultToolExecutors(
@@ -90,14 +76,12 @@ export function createDefaultToolExecutors(
     visitWebpage: createDefaultVisitWebpageExecutor(options),
     generateImage: createDefaultGenerateImageExecutor(options),
     oracle: createDefaultOracleExecutor(options, oracleInvocation),
-    chronicleRead: createDefaultChronicleReadExecutor(options),
-    chronicleAppend: createDefaultChronicleAppendExecutor(options),
   };
 }
 
 /**
  * Baseline tool set for command-path parity.
- * Grouped by tool domains (web, sandbox, artifacts, images, oracle, chronicle).
+ * Grouped by tool domains (web, sandbox, artifacts, images, oracle).
  *
  * Gondolin read/write/edit/bash tools are always included, backed by a per-arc micro-VM.
  */
@@ -119,6 +103,7 @@ export function createBaselineAgentTools(options: BaselineToolOptions): ToolSet 
     arc: options.arc,
     config: gondolinConfig,
     toolsConfig: options.toolsConfig,
+    chronicleStore: options.chronicleStore,
     logger: options.logger,
   });
 

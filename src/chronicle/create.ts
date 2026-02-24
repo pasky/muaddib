@@ -3,7 +3,6 @@ import { join } from "node:path";
 import type { RuntimeLogWriter } from "../app/logging.js";
 import type { ChatHistoryStore } from "../history/chat-history-store.js";
 import type { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
-import { resolveMuaddibPath } from "../config/paths.js";
 import { ChronicleStore } from "./chronicle-store.js";
 import { ChronicleLifecycleTs, type ChronicleLifecycleConfig } from "./lifecycle.js";
 import { AutoChroniclerTs, type AutoChronicler } from "../rooms/autochronicler.js";
@@ -18,7 +17,6 @@ interface CreateChronicleOptions {
   model: string;
   arcModels?: Record<string, string>;
   paragraphsPerChapter?: number;
-  databasePath?: string;
   muaddibHome: string;
   history: ChatHistoryStore;
   modelAdapter: PiAiModelAdapter;
@@ -28,15 +26,12 @@ interface CreateChronicleOptions {
 export async function createChronicleSubsystem(
   options: CreateChronicleOptions,
 ): Promise<ChronicleSubsystem> {
-  const chronicleDbPath = resolveMuaddibPath(
-    options.databasePath,
-    join(options.muaddibHome, "chronicle.db"),
-  );
+  const chroniclePath = join(options.muaddibHome, "chronicle");
 
   const log = options.logger.getLogger("muaddib.chronicle");
-  log.info("Initializing chronicle storage", `path=${chronicleDbPath}`);
+  log.info("Initializing chronicle storage", `path=${chroniclePath}`);
 
-  const chronicleStore = new ChronicleStore(chronicleDbPath);
+  const chronicleStore = new ChronicleStore(chroniclePath);
   await chronicleStore.initialize();
 
   const lifecycleConfig: ChronicleLifecycleConfig = {

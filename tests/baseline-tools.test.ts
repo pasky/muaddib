@@ -3,8 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PiAiModelAdapter } from "../src/models/pi-ai-model-adapter.js";
 import {
   createBaselineAgentTools,
-  createChronicleAppendTool,
-  createChronicleReadTool,
   createGenerateImageTool,
   createOracleTool,
   ORACLE_EXCLUDED_TOOLS,
@@ -40,8 +38,6 @@ describe("baseline agent tools", () => {
         visitWebpage: async () => "",
         generateImage: async () => ({ summaryText: "", images: [] }),
         oracle: async () => "",
-        chronicleRead: async () => "",
-        chronicleAppend: async () => "",
       },
     });
 
@@ -51,8 +47,6 @@ describe("baseline agent tools", () => {
       "visit_webpage",
       "generate_image",
       "oracle",
-      "chronicle_read",
-      "chronicle_append",
       "read",
       "write",
       "edit",
@@ -70,8 +64,6 @@ describe("baseline agent tools", () => {
         visitWebpage: async () => "",
         generateImage: async () => ({ summaryText: "", images: [] }),
         oracle: async () => "",
-        chronicleRead: async () => "",
-        chronicleAppend: async () => "",
       },
     });
 
@@ -238,32 +230,6 @@ describe("baseline agent tools", () => {
     expect(ORACLE_EXCLUDED_TOOLS).not.toContain("web_search");
   });
 
-  it("chronicle tools delegate to configured executors", async () => {
-    const chronicleRead = vi.fn(async () => "# Arc: test");
-    const chronicleAppend = vi.fn(async () => "OK");
-
-    const readTool = createChronicleReadTool({ chronicleRead });
-    const appendTool = createChronicleAppendTool({ chronicleAppend });
-
-    const readResult = await readTool.execute(
-      "call-9",
-      { relative_chapter_id: -1 },
-      undefined,
-      undefined,
-    );
-    const appendResult = await appendTool.execute(
-      "call-10",
-      { text: "Remember this." },
-      undefined,
-      undefined,
-    );
-
-    expect(chronicleRead).toHaveBeenCalledWith({ relative_chapter_id: -1 });
-    expect(chronicleAppend).toHaveBeenCalledWith({ text: "Remember this." });
-    expect(readResult.content[0]).toEqual({ type: "text", text: "# Arc: test" });
-    expect(appendResult.content[0]).toEqual({ type: "text", text: "OK" });
-  });
-
 });
 
 // ── Gondolin tool set ──────────────────────────────────────────────────────
@@ -293,8 +259,6 @@ describe("baseline tools with Gondolin", () => {
     expect(names).toContain("visit_webpage");
     expect(names).toContain("generate_image");
     expect(names).toContain("oracle");
-    expect(names).toContain("chronicle_read");
-    expect(names).toContain("chronicle_append");
     expect(names).toContain("progress_report");
     expect(names).toContain("make_plan");
   });

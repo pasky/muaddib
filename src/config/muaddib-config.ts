@@ -91,7 +91,6 @@ export interface AgentConfig {
 
 interface ChroniclerConfig {
   model?: string;
-  database?: { path?: string };
   paragraphsPerChapter?: number;
   arcModels?: Record<string, string>;
 }

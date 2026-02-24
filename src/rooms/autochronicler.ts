@@ -177,7 +177,7 @@ export class AutoChroniclerTs implements AutoChronicler {
     await this.options.lifecycle.appendParagraph(arc, text);
 
     const currentChapter = await this.options.chronicleStore.getOrOpenCurrentChapter(arc);
-    return currentChapter.id;
+    return currentChapter.number;
   }
 
   private resolveChroniclerModel(arc: string): string {
