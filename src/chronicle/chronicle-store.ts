@@ -193,7 +193,7 @@ export class ChronicleStore {
 
     for (let i = 0; i < paragraphs.length; i++) {
       const p = paragraphs[i];
-      const tsPrefix = p.ts.slice(0, 16).replace("T", "T"); // YYYY-MM-DDTHH:MM
+      const tsPrefix = p.ts.slice(0, 16).replace("T", " "); // YYYY-MM-DD HH:MM
       lines.push(`[${tsPrefix}] ${p.content}`);
       if (i < paragraphs.length - 1) {
         lines.push("");
@@ -251,7 +251,7 @@ function parseChapterMarkdown(raw: string): ParsedChapter {
   // Parse paragraphs from body
   const paragraphBlocks = body.split(/\n\n+/).filter((block) => block.trim());
   for (const block of paragraphBlocks) {
-    const match = block.trim().match(/^\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})\]\s+([\s\S]+)$/);
+    const match = block.trim().match(/^\[(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2})\]\s+([\s\S]+)$/);
     if (match) {
       paragraphs.push({
         ts: match[1] + ":00.000Z",

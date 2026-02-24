@@ -1,6 +1,6 @@
 
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -247,6 +247,33 @@ describe("ChronicleStore", () => {
     expect(currentParagraphs.some((p) => p.includes("Second operational note."))).toBe(true);
 
     await chronicleStore.close();
+  });
+
+  it("parses chapter files with space-separated timestamps (migrated data)", async () => {
+    const dir = makeTempDir();
+    const store = new ChronicleStore(dir);
+    await store.initialize();
+
+    // Write a file matching migration script format (space between date and time)
+    const arcDir = join(dir, "libera##test");
+    mkdirSync(arcDir, { recursive: true });
+    writeFileSync(join(arcDir, "000001.md"), [
+      "---",
+      'openedAt: "2026-02-23 23:55:46Z"',
+      "---",
+      "",
+      "[2026-02-23 23:55] Previous chapter recap: some summary",
+      "",
+      "[2026-02-24 00:46] Second paragraph content",
+      "",
+    ].join("\n"));
+
+    const contextMessages = await store.getChapterContextMessages("libera##test");
+    expect(contextMessages).toHaveLength(2);
+    expect(contextMessages[0].content).toContain("Previous chapter recap: some summary");
+    expect(contextMessages[1].content).toContain("Second paragraph content");
+
+    await store.close();
   });
 
   it("readAllChapterFiles returns all chapter files for gondolin mounting", async () => {
