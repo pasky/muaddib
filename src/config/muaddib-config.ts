@@ -58,12 +58,6 @@ export interface GondolinConfig {
    * Default: 8.
    */
   maxConcurrentVms?: number;
-  /**
-   * Timeout in seconds for non-bash VM operations (read, write, edit, access
-   * checks).  Also used as the timeout for the post-resume health check.
-   * Default: 60.
-   */
-  vmOpTimeoutSeconds?: number;
 }
 
 /**

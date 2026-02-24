@@ -495,7 +495,6 @@ function shQuote(value: string): string {
  */
 const VM_BASH_OUTPUT_CAP_BYTES = 48 * 1024; // 48 KB — below upstream's 50 KB threshold
 
-const DEFAULT_VM_OP_TIMEOUT_SECONDS = 60;
 const VM_HEALTH_CHECK_TIMEOUT_MS = 20_000;
 
 // ── Bundled skills (loaded once, installed into every VM) ──────────────────
@@ -694,7 +693,8 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
   const chronicleFiles = options.chronicleStore?.readAllChapterFiles(arc) ?? [];
   const artifactHostname = resolveArtifactHostname(toolsConfig?.artifacts?.url, logger);
 
-  const vmOpTimeoutMs = (config.vmOpTimeoutSeconds ?? DEFAULT_VM_OP_TIMEOUT_SECONDS) * 1000;
+  const bashTimeoutSeconds = config.bashTimeoutSeconds ?? 270;
+  const vmOpTimeoutMs = bashTimeoutSeconds * 1000;
 
   let vmReady: Promise<VM> | null = null;
 
@@ -708,8 +708,6 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
     }
     return vmReady;
   }
-
-  const bashTimeoutSeconds = config.bashTimeoutSeconds ?? 270;
 
   const piReadTool = createReadTool(sessionDir, { operations: createVmReadOps(getVm, vmOpTimeoutMs, logger) });
   const piWriteTool = createWriteTool(sessionDir, { operations: createVmWriteOps(getVm, vmOpTimeoutMs) });
