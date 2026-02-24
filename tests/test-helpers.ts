@@ -1,7 +1,25 @@
-import { vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, vi } from "vitest";
 
-import type { ChatHistoryStore } from "../src/history/chat-history-store.js";
+import { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import type { RoomMessage } from "../src/rooms/message.js";
+
+const tempDirs: string[] = [];
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0, tempDirs.length)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/** Create a ChatHistoryStore backed by a fresh temp directory. */
+export function createTempHistoryStore(inferenceLimit = 20): ChatHistoryStore {
+  const dir = mkdtempSync(join(tmpdir(), "muaddib-test-history-"));
+  tempDirs.push(dir);
+  return new ChatHistoryStore(dir, inferenceLimit);
+}
 
 export interface Deferred<T> {
   promise: Promise<T>;

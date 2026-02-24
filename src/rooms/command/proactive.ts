@@ -223,7 +223,7 @@ export class ProactiveRunner {
 
         // Any new messages since we started waiting?
         const newMessages = await this.runtime.history.countMessagesSince(
-          message.serverTag, message.channelName, pollStart,
+          roomArc(message), pollStart,
         );
 
         if (newMessages === 0) {

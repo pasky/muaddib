@@ -59,8 +59,7 @@ export class AutoChroniclerTs implements AutoChronicler {
 
     return await this.withArcLock(arc, async () => {
       const unchronicledCount = await this.options.history.countRecentUnchronicled(
-        server,
-        channel,
+        arc,
         AutoChroniclerTs.MAX_LOOKBACK_DAYS,
       );
 
@@ -97,36 +96,36 @@ export class AutoChroniclerTs implements AutoChronicler {
 
   private async autoChronicle(
     mynick: string,
-    server: string,
-    channel: string,
+    _server: string,
+    _channel: string,
     arc: string,
     nMessages: number,
   ): Promise<void> {
-    const messages = await this.options.history.getFullHistory(server, channel, nMessages);
+    const messages = await this.options.history.getFullHistory(arc, nMessages);
     if (messages.length === 0) {
       this.logger.warn(`No unchronicled messages found for ${arc}.`);
       return;
     }
 
-    const messageIds = messages.map((message) => message.id);
-    const chapterId = await this.runChronicler(mynick, arc, messages);
+    const lastTs = messages[messages.length - 1].timestamp;
+    const chronicled = await this.runChronicler(mynick, arc, messages);
 
-    if (!chapterId) {
-      this.logger.warn(`Auto-chronicler produced no chapter id for ${arc}.`);
+    if (!chronicled) {
+      this.logger.warn(`Auto-chronicler produced no result for ${arc}.`);
       return;
     }
 
-    await this.options.history.markChronicled(messageIds, chapterId);
+    await this.options.history.markChronicled(arc, lastTs);
     this.logger.debug(
-      `Marked ${messageIds.length} messages as chronicled for ${arc} in chapter ${chapterId}.`,
+      `Marked messages up to ${lastTs} as chronicled for ${arc}.`,
     );
   }
 
   private async runChronicler(
     mynick: string,
     arc: string,
-    messages: Array<{ id: number; message: string; timestamp: string }>,
-  ): Promise<number | null> {
+    messages: Array<{ message: string; timestamp: string }>,
+  ): Promise<boolean> {
     const messageLines = messages.map((message) => {
       return `[${message.timestamp.slice(0, 16)}] ${message.message}`;
     });
@@ -171,13 +170,11 @@ export class AutoChroniclerTs implements AutoChronicler {
       this.logger.warn(
         `Chronicler model ${this.resolveChroniclerModel(arc)} returned no response for ${arc}.`,
       );
-      return null;
+      return false;
     }
 
     await this.options.lifecycle.appendParagraph(arc, text);
-
-    const currentChapter = await this.options.chronicleStore.getOrOpenCurrentChapter(arc);
-    return currentChapter.number;
+    return true;
   }
 
   private resolveChroniclerModel(arc: string): string {

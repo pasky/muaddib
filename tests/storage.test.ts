@@ -1,5 +1,6 @@
 
 
+
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,8 +10,9 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import { CONSOLE_LOGGER } from "../src/app/logging.js";
 import { ChronicleStore } from "../src/chronicle/chronicle-store.js";
 import { ChronicleLifecycleTs } from "../src/chronicle/lifecycle.js";
-import { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { AutoChroniclerTs } from "../src/rooms/autochronicler.js";
+import { fsSafeArc } from "../src/rooms/message.js";
+import { createTempHistoryStore } from "./test-helpers.js";
 
 function makeAssistantText(text: string) {
   return {
@@ -46,9 +48,11 @@ afterEach(() => {
   }
 });
 
+const ARC = fsSafeArc("libera##test");
+
 describe("ChatHistoryStore", () => {
   it("stores messages and returns chronological context with assistant mode prefix", async () => {
-    const store = new ChatHistoryStore(":memory:", 10);
+    const store = createTempHistoryStore(10);
     await store.initialize();
 
     await store.addMessage({
@@ -70,7 +74,7 @@ describe("ChatHistoryStore", () => {
       { mode: "!s" },
     );
 
-    const context = await store.getContext("libera", "#test", 10);
+    const context = await store.getContext(ARC, 10);
 
     expect(context).toHaveLength(2);
     expect(context[0].role).toBe("user");
@@ -82,7 +86,7 @@ describe("ChatHistoryStore", () => {
   });
 
   it("updates messages by platform id", async () => {
-    const store = new ChatHistoryStore(":memory:", 10);
+    const store = createTempHistoryStore(10);
     await store.initialize();
 
     await store.addMessage({
@@ -94,25 +98,33 @@ describe("ChatHistoryStore", () => {
       platformId: "1700000000.1111",
     });
 
-    await store.updateMessageByPlatformId(
-      "libera",
-      "#test",
+    await store.appendEdit(
+      ARC,
       "1700000000.1111",
       "edited",
       "alice",
     );
 
-    const rows = await store.getFullHistory("libera", "#test", 10);
-    expect(rows[0].message).toBe("<alice> edited");
+    // getFullHistory returns raw rows (original + edit)
+    const rows = await store.getFullHistory(ARC, 10);
+    expect(rows).toHaveLength(2);
+    expect(rows[0].message).toBe("<alice> archive me");
+    expect(rows[1].message).toBe("<alice> edited");
+
+    // getContext deduplicates by platformId, keeping the edit
+    const context = await store.getContext(ARC, 10);
+    expect(context).toHaveLength(1);
+    const text = (context[0] as any).content;
+    expect(text).toContain("edited");
 
     await store.close();
   });
 
   it("counts and marks chronicled messages", async () => {
-    const store = new ChatHistoryStore(":memory:", 10);
+    const store = createTempHistoryStore(10);
     await store.initialize();
 
-    const messageId = await store.addMessage({
+    const ts = await store.addMessage({
       serverTag: "libera",
       channelName: "#test",
       nick: "alice",
@@ -120,11 +132,11 @@ describe("ChatHistoryStore", () => {
       content: "archive me",
     });
 
-    expect(await store.countRecentUnchronicled("libera", "#test", 7)).toBe(1);
+    expect(await store.countRecentUnchronicled(ARC, 7)).toBe(1);
 
-    await store.markChronicled([messageId], 123);
+    await store.markChronicled(ARC, ts);
 
-    expect(await store.countRecentUnchronicled("libera", "#test", 7)).toBe(0);
+    expect(await store.countRecentUnchronicled(ARC, 7)).toBe(0);
 
     await store.close();
   });
@@ -190,7 +202,7 @@ describe("ChronicleStore", () => {
     await store.initialize();
 
     // Write a file matching migration script format (space between date and time)
-    const arcDir = join(dir, "libera##test");
+    const arcDir = join(dir, "libera##test", "chronicle");
     mkdirSync(arcDir, { recursive: true });
     writeFileSync(join(arcDir, "000001.md"), [
       "---",
@@ -228,7 +240,7 @@ describe("ChronicleStore", () => {
 
 describe("AutoChroniclerTs", () => {
   it("returns false without chronicling when unchronicled message count is below threshold", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
+    const history = createTempHistoryStore(20);
     await history.initialize();
 
     await history.addMessage({
@@ -280,7 +292,7 @@ describe("AutoChroniclerTs", () => {
   }, 10000);
 
   it("triggers chronicling at threshold, appends chronicle paragraph, and marks messages chronicled", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
+    const history = createTempHistoryStore(20);
     await history.initialize();
 
     await history.addMessage({
@@ -336,7 +348,7 @@ describe("AutoChroniclerTs", () => {
 
     expect(triggered).toBe(true);
     expect(modelAdapter.completeSimple).toHaveBeenCalledTimes(1);
-    expect(await history.countRecentUnchronicled("libera", "#test", 7)).toBe(0);
+    expect(await history.countRecentUnchronicled(ARC, 7)).toBe(0);
 
     const currentChapter = await chronicleStore.getOrOpenCurrentChapter("libera##test");
     const paragraphs = await chronicleStore.readChapter(currentChapter.number, "libera##test");

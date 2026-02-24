@@ -54,12 +54,12 @@ import {
 // roomArc / fsSafeArc).  No further normalisation needed here.
 
 export function getArcWorkspacePath(arc: string): string {
-  return join(getMuaddibHome(), "workspaces", arc);
+  return join(getMuaddibHome(), "arcs", arc, "workspace");
 }
 
 /** Checkpoint file lives *outside* the VFS-mounted workspace so the VM cannot tamper with it. */
 export function getArcCheckpointPath(arc: string): string {
-  return join(getMuaddibHome(), "checkpoints", arc + ".qcow2");
+  return join(getMuaddibHome(), "arcs", arc, "checkpoint.qcow2");
 }
 
 // ── VM cache: one VM per arc ───────────────────────────────────────────────
@@ -231,7 +231,6 @@ async function ensureVm(
 
       const workspacePath = getArcWorkspacePath(arc);
       mkdirSync(workspacePath, { recursive: true });
-      mkdirSync(join(getMuaddibHome(), "checkpoints"), { recursive: true });
 
       const blockedCidrs = config.blockedCidrs ?? [];
 

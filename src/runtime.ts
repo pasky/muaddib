@@ -2,7 +2,7 @@ import { join } from "node:path";
 
 import { AuthStorage } from "@mariozechner/pi-coding-agent";
 
-import { getMuaddibHome, resolveMuaddibPath } from "./config/paths.js";
+import { getMuaddibHome } from "./config/paths.js";
 import { RuntimeLogWriter } from "./app/logging.js";
 import { createChronicleSubsystem, type ChronicleSubsystem } from "./chronicle/create.js";
 import { ChatHistoryStore } from "./history/chat-history-store.js";
@@ -21,7 +21,7 @@ export interface MuaddibRuntime {
 interface CreateMuaddibRuntimeOptions {
   configPath: string;
   muaddibHome?: string;
-  dbPath?: string;
+  arcsPath?: string;
   /** Override logger (for tests). */
   logger?: RuntimeLogWriter;
 }
@@ -38,17 +38,13 @@ export async function createMuaddibRuntime(
   const authStorage = AuthStorage.create(join(muaddibHome, "auth.json"));
   const modelAdapter = new PiAiModelAdapter({ authStorage });
 
-  const historyConfig = config.getHistoryConfig();
-  const historyDbPath = options.dbPath ?? resolveMuaddibPath(
-    historyConfig.database?.path,
-    join(muaddibHome, "chat_history.db"),
-  );
+  const arcsPath = options.arcsPath ?? join(muaddibHome, "arcs");
 
   const defaultHistorySize = 40;
 
-  log.info("Initializing history storage", `path=${historyDbPath}`, `history_size=${defaultHistorySize}`);
+  log.info("Initializing history storage", `path=${arcsPath}`, `history_size=${defaultHistorySize}`);
 
-  const history = new ChatHistoryStore(historyDbPath, defaultHistorySize);
+  const history = new ChatHistoryStore(arcsPath, defaultHistorySize);
   await history.initialize();
 
   // Chronicle subsystem
@@ -60,7 +56,7 @@ export async function createMuaddibRuntime(
       model: chroniclerConfig.model,
       arcModels: chroniclerConfig.arcModels,
       paragraphsPerChapter: chroniclerConfig.paragraphsPerChapter,
-      muaddibHome,
+      arcsPath,
       history,
       modelAdapter,
       logger: runtimeLogger,

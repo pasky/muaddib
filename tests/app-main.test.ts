@@ -45,13 +45,8 @@ async function createConfigDir(config: Record<string, unknown>): Promise<{ dir: 
   const dir = await mkdtemp(join(tmpdir(), "muaddib-app-main-"));
   tempDirs.push(dir);
 
-  const mutableConfig = config as any;
-  mutableConfig.history ??= {};
-  mutableConfig.history.database ??= {};
-  mutableConfig.history.database.path ??= join(dir, "chat_history.db");
-
   const configPath = join(dir, "config.json");
-  await writeFile(configPath, JSON.stringify(mutableConfig), "utf-8");
+  await writeFile(configPath, JSON.stringify(config), "utf-8");
 
   process.env.MUADDIB_HOME = dir;
 
@@ -160,11 +155,6 @@ describe("createSendRetryEventLogger", () => {
 describe("runMuaddibMain", () => {
   it("writes startup and failure logs to $MUADDIB_HOME/logs/YYYY-MM-DD/system.log", async () => {
     const { dir, configPath } = await createConfigDir({
-      history: {
-        database: {
-          path: ":memory:",
-        },
-      },
       rooms: {
         common: {
           command: baseCommandConfig(),
@@ -204,11 +194,6 @@ describe("runMuaddibMain", () => {
   it("throws when Discord is enabled without token", async () => {
     await expect(
       runWithConfig({
-        history: {
-          database: {
-            path: ":memory:",
-          },
-        },
         rooms: {
           common: {
             command: baseCommandConfig(),
@@ -230,11 +215,6 @@ describe("runMuaddibMain", () => {
   it("throws when Slack is enabled without app token", async () => {
     await expect(
       runWithConfig({
-        history: {
-          database: {
-            path: ":memory:",
-          },
-        },
         rooms: {
           common: {
             command: baseCommandConfig(),
@@ -259,11 +239,6 @@ describe("runMuaddibMain", () => {
   it("throws when IRC is enabled without varlink socket path", async () => {
     await expect(
       runWithConfig({
-        history: {
-          database: {
-            path: ":memory:",
-          },
-        },
         rooms: {
           common: {
             command: baseCommandConfig(),
@@ -285,11 +260,6 @@ describe("runMuaddibMain", () => {
   it("fails fast when command.responseMaxBytes is invalid", async () => {
     await expect(
       runWithConfig({
-        history: {
-          database: {
-            path: ":memory:",
-          },
-        },
         rooms: {
           common: {
             command: {
@@ -316,11 +286,6 @@ describe("runMuaddibMain", () => {
   it("throws when no monitors are enabled", async () => {
     await expect(
       runWithConfig({
-        history: {
-          database: {
-            path: ":memory:",
-          },
-        },
         rooms: {
           common: {
             command: baseCommandConfig(),

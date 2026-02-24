@@ -1,9 +1,17 @@
-import { open, type Database } from "sqlite";
-import sqlite3 from "sqlite3";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
+import { join } from "node:path";
 import type { AssistantMessage, Message, UserMessage } from "@mariozechner/pi-ai";
 
-import { requireLastID, migrateAddColumn } from "../utils/index.js";
 import type { RoomMessage } from "../rooms/message.js";
+import { fsSafeArc } from "../rooms/message.js";
 
 export type ChatRole = "user" | "assistant";
 
@@ -34,514 +42,393 @@ export function createStubAssistantFields(): Pick<AssistantMessage, "api" | "pro
   };
 }
 
-export interface LlmCallInput {
-  provider: string;
-  model: string;
-  inputTokens: number | null;
-  outputTokens: number | null;
-  cost: number | null;
-  callType?: string | null;
-  arcName?: string | null;
-  triggerMessageId?: number | null;
+/** A single JSONL line — bag of optional fields, no type discriminator. */
+export interface JsonlLine {
+  ts: string;
+  n?: string;
+  r?: ChatRole;
+  m?: string;
+  run?: string;
+  call?: string;
+  model?: string;
+  inTok?: number;
+  outTok?: number;
+  cost?: number;
+  mode?: string;
+  pid?: string;
+  tid?: string;
+  edit?: boolean;
 }
 
 export interface HistoryMessageRow {
-  id: number;
   nick: string;
   message: string;
   role: ChatRole;
   timestamp: string;
-}
-
-export interface LlmCallRow {
-  id: number;
-  provider: string;
-  model: string;
-  inputTokens: number | null;
-  outputTokens: number | null;
-  cost: number | null;
-  callType: string | null;
-  arcName: string | null;
-  triggerMessageId: number | null;
-  responseMessageId: number | null;
-}
-
-interface ContextRow {
-  message: string;
-  role: ChatRole;
-  time_only: string;
-  timestamp: string;
-  mode: string | null;
-}
-
-interface FullHistoryRow {
-  id: number;
-  nick: string;
-  message: string;
-  role: ChatRole;
-  timestamp: string;
-}
-
-interface LlmCallDbRow {
-  id: number;
-  provider: string;
-  model: string;
-  input_tokens: number | null;
-  output_tokens: number | null;
-  cost: number | null;
-  call_type: string | null;
-  arc_name: string | null;
-  trigger_message_id: number | null;
-  response_message_id: number | null;
 }
 
 export class ChatHistoryStore {
-  private readonly dbPath: string;
+  private readonly arcsBasePath: string;
   private readonly inferenceLimit: number;
-  private db: Database | null = null;
 
-  constructor(dbPath: string, inferenceLimit = 5) {
-    this.dbPath = dbPath;
+  constructor(arcsBasePath: string, inferenceLimit = 5) {
+    this.arcsBasePath = arcsBasePath;
     this.inferenceLimit = inferenceLimit;
   }
 
   async initialize(): Promise<void> {
-    if (!this.db) {
-      this.db = await open({
-        filename: this.dbPath,
-        driver: sqlite3.Database,
-      });
-    }
-
-    const db = this.requireDb();
-
-    await db.exec(`
-      CREATE TABLE IF NOT EXISTS chat_messages (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          server_tag TEXT NOT NULL,
-          channel_name TEXT NOT NULL,
-          nick TEXT NOT NULL,
-          message TEXT NOT NULL,
-          role TEXT NOT NULL,
-          timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-          chapter_id INTEGER NULL,
-          mode TEXT NULL,
-          llm_call_id INTEGER NULL,
-          platform_id TEXT NULL,
-          thread_id TEXT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS llm_calls (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-          provider TEXT NOT NULL,
-          model TEXT NOT NULL,
-          input_tokens INTEGER,
-          output_tokens INTEGER,
-          cost REAL,
-          call_type TEXT,
-          arc_name TEXT,
-          trigger_message_id INTEGER NULL,
-          response_message_id INTEGER NULL
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_server_channel
-      ON chat_messages (server_tag, channel_name, timestamp);
-
-      CREATE INDEX IF NOT EXISTS idx_chapter_id
-      ON chat_messages (chapter_id);
-
-      CREATE INDEX IF NOT EXISTS idx_llm_calls_arc
-      ON llm_calls (arc_name, timestamp);
-
-      CREATE INDEX IF NOT EXISTS idx_platform_id
-      ON chat_messages (server_tag, channel_name, platform_id);
-    `);
-
-    await this.migrateChatMessagesTable();
-    await this.migrateLlmCallsTable();
+    mkdirSync(this.arcsBasePath, { recursive: true });
   }
 
   async close(): Promise<void> {
-    if (!this.db) {
-      return;
-    }
-
-    await this.db.close();
-    this.db = null;
+    // no-op — no DB handle
   }
 
-  async logLlmCall(input: LlmCallInput): Promise<number> {
-    const db = this.requireDb();
-
-    const result = await db.run(
-      `
-      INSERT INTO llm_calls
-      (provider, model, input_tokens, output_tokens, cost, call_type, arc_name, trigger_message_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      input.provider,
-      input.model,
-      input.inputTokens,
-      input.outputTokens,
-      input.cost,
-      input.callType ?? null,
-      input.arcName ?? null,
-      input.triggerMessageId ?? null,
-    );
-
-    return requireLastID(result);
-  }
-
-  async updateLlmCallResponse(callId: number, responseMessageId: number): Promise<void> {
-    const db = this.requireDb();
-    await db.run(
-      "UPDATE llm_calls SET response_message_id = ? WHERE id = ?",
-      responseMessageId,
-      callId,
-    );
-  }
-
+  /**
+   * Store a chat message. Returns the ISO timestamp used as the line's ts.
+   */
   async addMessage(
     message: RoomMessage,
     options: {
       mode?: string | null;
-      llmCallId?: number | null;
       contentTemplate?: string;
       role?: ChatRole;
+      run?: string;
+      call?: string;
+      model?: string;
+      inTok?: number;
+      outTok?: number;
+      cost?: number;
     } = {},
-  ): Promise<number> {
-    const db = this.requireDb();
-
+  ): Promise<string> {
+    const arc = fsSafeArc(`${message.serverTag}#${message.channelName}`);
     const role = options.role ?? this.defaultRoleForMessage(message);
-    const contentTemplate = options.contentTemplate ?? "<{nick}> {message}";
-    // Use originalContent for inbound user messages (preserves e.g. "MuaddibLLM: ...").
-    // Bot-authored messages always use content directly.
+    // Store raw message text — formatting happens on read.
     const isBotMessage = message.nick.toLowerCase() === message.mynick.toLowerCase();
-    const messageBody = isBotMessage ? message.content : (message.originalContent ?? message.content);
-    const content = contentTemplate
-      .replace("{nick}", message.nick)
-      .replace("{message}", messageBody);
+    let rawText = isBotMessage ? message.content : (message.originalContent ?? message.content);
+    if (options.contentTemplate) {
+      rawText = options.contentTemplate.replace("{message}", rawText);
+    }
 
-    const result = await db.run(
-      `
-      INSERT INTO chat_messages
-      (server_tag, channel_name, nick, message, role, mode, llm_call_id, platform_id, thread_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      message.serverTag,
-      message.channelName,
-      message.nick,
-      content,
-      role,
-      options.mode ?? null,
-      options.llmCallId ?? null,
-      message.platformId ?? null,
-      message.responseThreadId ?? message.threadId ?? null,
-    );
+    const ts = new Date().toISOString();
+    const line: JsonlLine = {
+      ts,
+      n: message.nick,
+      r: role,
+      m: rawText,
+    };
 
-    return requireLastID(result);
+    if (options.mode) line.mode = options.mode;
+    if (options.run) line.run = options.run;
+    if (options.call) line.call = options.call;
+    if (options.model) line.model = options.model;
+    if (options.inTok !== undefined) line.inTok = options.inTok;
+    if (options.outTok !== undefined) line.outTok = options.outTok;
+    if (options.cost !== undefined) line.cost = options.cost;
+    if (message.platformId) line.pid = message.platformId;
+    if (message.responseThreadId ?? message.threadId) {
+      line.tid = message.responseThreadId ?? message.threadId;
+    }
+
+    this.appendLine(arc, line);
+    return ts;
+  }
+
+  /**
+   * Log a non-chat LLM cost (chronicler, oracle, classifier, etc.).
+   */
+  async logLlmCost(
+    arc: string,
+    opts: {
+      run?: string;
+      call: string;
+      model: string;
+      inTok?: number;
+      outTok?: number;
+      cost?: number;
+    },
+  ): Promise<void> {
+    const line: JsonlLine = {
+      ts: new Date().toISOString(),
+    };
+    if (opts.run) line.run = opts.run;
+    line.call = opts.call;
+    line.model = opts.model;
+    if (opts.inTok !== undefined) line.inTok = opts.inTok;
+    if (opts.outTok !== undefined) line.outTok = opts.outTok;
+    if (opts.cost !== undefined) line.cost = opts.cost;
+
+    this.appendLine(arc, line);
   }
 
   async getContextForMessage(
     message: RoomMessage,
     limit?: number,
   ): Promise<Message[]> {
-    return this.getContext(
-      message.serverTag,
-      message.channelName,
-      limit,
-      message.threadId,
-    );
+    const arc = fsSafeArc(`${message.serverTag}#${message.channelName}`);
+    return this.getContext(arc, limit, message.threadId);
   }
 
   async getContext(
-    serverTag: string,
-    channelName: string,
+    arc: string,
     limit?: number,
     threadId?: string,
   ): Promise<Message[]> {
-    const db = this.requireDb();
     const inferenceLimit = limit ?? this.inferenceLimit;
+    const lines = this.readRecentLines(arc);
 
-    let rows: ContextRow[];
+    // Filter: only lines with m (messages, not bare cost lines)
+    const messageLines = lines.filter((l) => l.m !== undefined);
 
+    let selected: JsonlLine[];
     if (threadId) {
-      // Find the thread starter by platform_id, then include main-channel
-      // messages up to (and including) that starter plus all thread messages.
-      rows = await db.all<ContextRow[]>(
-        `
-        SELECT message, role, strftime('%H:%M', timestamp) as time_only, timestamp, mode
-        FROM chat_messages
-        WHERE server_tag = ? AND channel_name = ?
-        AND (
-          thread_id = ?
-          OR (thread_id IS NULL AND id <= COALESCE(
-            (SELECT id FROM chat_messages
-             WHERE server_tag = ? AND channel_name = ? AND platform_id = ?
-             LIMIT 1),
-            (SELECT MAX(id) FROM chat_messages WHERE server_tag = ? AND channel_name = ?)
-          ))
-        )
-        ORDER BY id DESC
-        LIMIT ?
-        `,
-        serverTag,
-        channelName,
-        threadId,
-        serverTag,
-        channelName,
-        threadId,
-        serverTag,
-        channelName,
-        inferenceLimit,
-      );
+      selected = this.selectThreadContext(messageLines, threadId, inferenceLimit);
     } else {
-      rows = await db.all<ContextRow[]>(
-        `
-        SELECT message, role, strftime('%H:%M', timestamp) as time_only, timestamp, mode
-        FROM chat_messages
-        WHERE server_tag = ? AND channel_name = ? AND thread_id IS NULL
-        ORDER BY timestamp DESC
-        LIMIT ?
-        `,
-        serverTag,
-        channelName,
-        inferenceLimit,
-      );
+      // Main channel: lines without tid
+      const mainLines = messageLines.filter((l) => !l.tid);
+      selected = this.dedupeEdits(mainLines).slice(-inferenceLimit);
     }
 
-    return rows
-      .slice()
-      .reverse()
-      .map((row): Message => {
-        const modePrefix = row.role === "assistant" && row.mode ? this.modeToPrefix(row.mode) : "";
-        const text = `${modePrefix}[${row.time_only}] ${row.message}`;
-        const timestamp = new Date(row.timestamp + "Z").getTime() || 0;
-        if (row.role === "assistant") {
-          return {
-            role: "assistant",
-            content: [{ type: "text", text }],
-            ...createStubAssistantFields(),
-            timestamp,
-          } satisfies AssistantMessage;
-        }
+    return selected.map((line): Message => {
+      const timeOnly = line.ts.slice(11, 16); // HH:MM
+      const nick = line.n ?? "?";
+      const content = line.m ?? "";
+      const formatted = `<${nick}> ${content}`;
+      const modePrefix = line.r === "assistant" && line.mode ? this.modeToPrefix(line.mode) : "";
+      const text = `${modePrefix}[${timeOnly}] ${formatted}`;
+      const timestamp = new Date(line.ts).getTime() || 0;
+
+      if (line.r === "assistant") {
         return {
-          role: "user",
-          content: text,
+          role: "assistant",
+          content: [{ type: "text", text }],
+          ...createStubAssistantFields(),
           timestamp,
-        } satisfies UserMessage;
-      });
+        } satisfies AssistantMessage;
+      }
+      return {
+        role: "user",
+        content: text,
+        timestamp,
+      } satisfies UserMessage;
+    });
   }
 
   async getFullHistory(
-    serverTag: string,
-    channelName: string,
+    arc: string,
     limit?: number,
   ): Promise<HistoryMessageRow[]> {
-    const db = this.requireDb();
+    const lines = this.readRecentLines(arc);
+    const messageLines = lines.filter((l) => l.m !== undefined);
+    const selected = limit !== undefined ? messageLines.slice(-limit) : messageLines;
 
-    const rows =
-      limit !== undefined
-        ? await db.all<FullHistoryRow[]>(
-            `
-            SELECT id, nick, message, role, timestamp FROM chat_messages
-            WHERE server_tag = ? AND channel_name = ?
-            ORDER BY timestamp DESC
-            LIMIT ?
-            `,
-            serverTag,
-            channelName,
-            limit,
-          )
-        : await db.all<FullHistoryRow[]>(
-            `
-            SELECT id, nick, message, role, timestamp FROM chat_messages
-            WHERE server_tag = ? AND channel_name = ?
-            ORDER BY timestamp DESC
-            `,
-            serverTag,
-            channelName,
-          );
-
-    return rows.slice().reverse().map((row) => ({
-      id: Number(row.id),
-      nick: String(row.nick),
-      message: String(row.message),
-      role: String(row.role) as ChatRole,
-      timestamp: String(row.timestamp),
+    return selected.map((line) => ({
+      nick: line.n ?? "?",
+      message: `<${line.n ?? "?"}> ${line.m ?? ""}`,
+      role: (line.r ?? "user") as ChatRole,
+      timestamp: line.ts,
     }));
   }
 
   /**
-   * Count messages in a channel since the given epoch timestamp (ms).
-   * Used by proactive debounce to detect silence.
+   * Count messages in an arc since the given epoch timestamp (ms).
    */
-  async countMessagesSince(serverTag: string, channelName: string, sinceEpochMs: number): Promise<number> {
-    const db = this.requireDb();
-    const isoTimestamp = new Date(sinceEpochMs).toISOString();
+  async countMessagesSince(arc: string, sinceEpochMs: number): Promise<number> {
+    const sinceTs = new Date(sinceEpochMs).toISOString();
+    const todayFile = this.jsonlPath(arc, this.todayDate());
+    if (!existsSync(todayFile)) return 0;
 
-    const row = await db.get<{ count: number }>(
-      `
-      SELECT COUNT(*) as count FROM chat_messages
-      WHERE server_tag = ? AND channel_name = ?
-      AND timestamp >= ?
-      `,
-      serverTag,
-      channelName,
-      isoTimestamp,
-    );
-
-    return Number(row?.count ?? 0);
+    const lines = this.readJsonlFile(todayFile);
+    return lines.filter((l) => l.m !== undefined && l.ts >= sinceTs).length;
   }
 
-  async countRecentUnchronicled(serverTag: string, channelName: string, days = 7): Promise<number> {
-    const db = this.requireDb();
+  async countRecentUnchronicled(arc: string, days = 7): Promise<number> {
+    const cursor = this.readCursorTs(arc);
+    const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+    const effectiveCutoff = cursor && cursor > cutoff ? cursor : cutoff;
 
-    const row = await db.get<{ count: number }>(
-      `
-      SELECT COUNT(*) as count FROM chat_messages
-      WHERE server_tag = ? AND channel_name = ?
-      AND chapter_id IS NULL
-      AND timestamp >= datetime('now', '-' || ? || ' days')
-      `,
-      serverTag,
-      channelName,
-      days,
-    );
-
-    return Number(row?.count ?? 0);
+    const lines = this.readRecentLines(arc, days);
+    return lines.filter(
+      (l) => l.m !== undefined && l.ts > effectiveCutoff,
+    ).length;
   }
 
-  async markChronicled(messageIds: number[], chapterId: number): Promise<void> {
-    if (messageIds.length === 0) {
-      return;
-    }
-
-    const db = this.requireDb();
-    const placeholders = messageIds.map(() => "?").join(",");
-    await db.run(
-      `UPDATE chat_messages SET chapter_id = ? WHERE id IN (${placeholders})`,
-      chapterId,
-      ...messageIds,
-    );
+  async markChronicled(arc: string, cursorTs: string): Promise<void> {
+    this.writeCursorTs(arc, cursorTs);
   }
 
   async getArcCostToday(arcName: string): Promise<number> {
-    const db = this.requireDb();
-    const row = await db.get<{ total: number }>(
-      `
-      SELECT COALESCE(SUM(cost), 0) as total FROM llm_calls
-      WHERE arc_name = ?
-      AND timestamp >= date('now')
-      `,
-      arcName,
-    );
-    return Number(row?.total ?? 0);
+    const todayFile = this.jsonlPath(arcName, this.todayDate());
+    if (!existsSync(todayFile)) return 0;
+
+    const lines = this.readJsonlFile(todayFile);
+    let total = 0;
+    for (const line of lines) {
+      if (line.cost !== undefined) {
+        total += line.cost;
+      }
+    }
+    return total;
   }
 
-  async getLlmCalls(limit?: number): Promise<LlmCallRow[]> {
-    const db = this.requireDb();
-    const rows =
-      limit !== undefined
-        ? await db.all<LlmCallDbRow[]>(
-            `
-            SELECT id, provider, model, input_tokens, output_tokens, cost, call_type,
-                   arc_name, trigger_message_id, response_message_id
-            FROM llm_calls
-            ORDER BY id ASC
-            LIMIT ?
-            `,
-            limit,
-          )
-        : await db.all<LlmCallDbRow[]>(
-            `
-            SELECT id, provider, model, input_tokens, output_tokens, cost, call_type,
-                   arc_name, trigger_message_id, response_message_id
-            FROM llm_calls
-            ORDER BY id ASC
-            `,
-          );
-
-    return rows.map((row) => ({
-      id: Number(row.id),
-      provider: row.provider,
-      model: row.model,
-      inputTokens: row.input_tokens,
-      outputTokens: row.output_tokens,
-      cost: row.cost,
-      callType: row.call_type,
-      arcName: row.arc_name,
-      triggerMessageId: row.trigger_message_id,
-      responseMessageId: row.response_message_id,
-    }));
+  /**
+   * Append an edit line. On context read, the latest line per pid wins.
+   */
+  async appendEdit(arc: string, pid: string, content: string, nick: string): Promise<void> {
+    const line: JsonlLine = {
+      ts: new Date().toISOString(),
+      n: nick,
+      r: "user",
+      m: content,
+      pid,
+      edit: true,
+    };
+    this.appendLine(arc, line);
   }
 
-  async updateMessageByPlatformId(
-    serverTag: string,
-    channelName: string,
-    platformId: string,
-    newContent: string,
-    nick: string,
-    contentTemplate = "<{nick}> {message}",
-  ): Promise<boolean> {
-    const db = this.requireDb();
-    const formatted = contentTemplate.replace("{nick}", nick).replace("{message}", newContent);
+  // ── Internal I/O ──
 
-    const result = await db.run(
-      `
-      UPDATE chat_messages
-      SET message = ?
-      WHERE server_tag = ? AND channel_name = ? AND platform_id = ?
-      `,
-      formatted,
-      serverTag,
-      channelName,
-      platformId,
-    );
-
-    return Number(result.changes ?? 0) > 0;
+  private appendLine(arc: string, line: JsonlLine): void {
+    const date = line.ts.slice(0, 10);
+    const filePath = this.jsonlPath(arc, date);
+    mkdirSync(join(this.arcsBasePath, arc, "chat_history"), { recursive: true });
+    appendFileSync(filePath, JSON.stringify(line) + "\n", "utf-8");
   }
+
+  private readJsonlFile(path: string): JsonlLine[] {
+    if (!existsSync(path)) return [];
+    const raw = readFileSync(path, "utf-8");
+    const lines: JsonlLine[] = [];
+    for (const line of raw.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      try {
+        lines.push(JSON.parse(trimmed));
+      } catch {
+        // skip malformed lines
+      }
+    }
+    return lines;
+  }
+
+  /** Read lines from today backwards, concatenated in chronological order. */
+  private readRecentLines(arc: string, maxDays = 30): JsonlLine[] {
+    const dir = join(this.arcsBasePath, arc, "chat_history");
+    if (!existsSync(dir)) return [];
+
+    const files = readdirSync(dir)
+      .filter((f) => f.endsWith(".jsonl"))
+      .sort();
+
+    // Only read last maxDays files
+    const recent = files.slice(-maxDays);
+    const allLines: JsonlLine[] = [];
+    for (const file of recent) {
+      allLines.push(...this.readJsonlFile(join(dir, file)));
+    }
+    return allLines;
+  }
+
+  private jsonlPath(arc: string, date: string): string {
+    return join(this.arcsBasePath, arc, "chat_history", `${date}.jsonl`);
+  }
+
+  private todayDate(): string {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  // ── Chronicle cursor ──
+
+  private cursorPath(arc: string): string {
+    return join(this.arcsBasePath, arc, "chronicle", "cursor.json");
+  }
+
+  private readCursorTs(arc: string): string | null {
+    const path = this.cursorPath(arc);
+    if (!existsSync(path)) return null;
+    try {
+      const data = JSON.parse(readFileSync(path, "utf-8"));
+      return data.ts ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  private writeCursorTs(arc: string, ts: string): void {
+    const path = this.cursorPath(arc);
+    mkdirSync(join(this.arcsBasePath, arc, "chronicle"), { recursive: true });
+    const tmpPath = path + ".tmp";
+    writeFileSync(tmpPath, JSON.stringify({ ts }) + "\n", "utf-8");
+    renameSync(tmpPath, path);
+  }
+
+  // ── Thread context algorithm ──
+
+  private selectThreadContext(
+    lines: JsonlLine[],
+    threadId: string,
+    limit: number,
+  ): JsonlLine[] {
+    const result: JsonlLine[] = [];
+    let foundStarter = false;
+    let starterTs: string | null = null;
+
+    // Scan backwards
+    for (let i = lines.length - 1; i >= 0 && result.length < limit; i--) {
+      const line = lines[i];
+
+      if (!foundStarter) {
+        // Collect thread messages
+        if (line.tid === threadId) {
+          result.push(line);
+          continue;
+        }
+        // Check if this is the thread starter (pid matches threadId, not a thread message itself)
+        if (line.pid === threadId && !line.tid) {
+          result.push(line);
+          foundStarter = true;
+          starterTs = line.ts;
+          continue;
+        }
+        // Skip unrelated main-channel messages until we find starter
+        continue;
+      }
+
+      // In main-channel mode: collect non-threaded messages before the starter
+      if (!line.tid && line.ts <= starterTs!) {
+        result.push(line);
+      }
+    }
+
+    return this.dedupeEdits(result.reverse());
+  }
+
+  /** When multiple lines share the same pid, keep the latest (edit dedup). */
+  private dedupeEdits(lines: JsonlLine[]): JsonlLine[] {
+    // Build a map of pid -> latest line index
+    const pidLatest = new Map<string, number>();
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const pid = lines[i].pid;
+      if (pid && !pidLatest.has(pid)) {
+        pidLatest.set(pid, i);
+      }
+    }
+
+    return lines.filter((line, i) => {
+      if (!line.pid) return true;
+      return pidLatest.get(line.pid) === i;
+    });
+  }
+
+  // ── Helpers ──
 
   private defaultRoleForMessage(message: RoomMessage): ChatRole {
     return message.nick.toLowerCase() === message.mynick.toLowerCase() ? "assistant" : "user";
   }
 
   private modeToPrefix(mode: string): string {
-    if (!mode) {
-      return "";
-    }
-    if (mode.startsWith("!")) {
-      return `${mode} `;
-    }
+    if (!mode) return "";
+    if (mode.startsWith("!")) return `${mode} `;
     return "";
-  }
-
-  private requireDb(): Database {
-    if (!this.db) {
-      throw new Error("ChatHistoryStore not initialized. Call initialize() first.");
-    }
-    return this.db;
-  }
-
-  private async migrateChatMessagesTable(): Promise<void> {
-    const db = this.requireDb();
-    await migrateAddColumn(db, "chat_messages", "mode", "TEXT NULL");
-    await migrateAddColumn(db, "chat_messages", "llm_call_id", "INTEGER NULL");
-    await migrateAddColumn(db, "chat_messages", "platform_id", "TEXT NULL");
-    await migrateAddColumn(db, "chat_messages", "thread_id", "TEXT NULL");
-  }
-
-  private async migrateLlmCallsTable(): Promise<void> {
-    const db = this.requireDb();
-    await migrateAddColumn(db, "llm_calls", "trigger_message_id", "INTEGER NULL");
-    const added = await migrateAddColumn(db, "llm_calls", "response_message_id", "INTEGER NULL");
-    if (added) {
-      await db.exec(`
-        UPDATE llm_calls SET response_message_id = (
-          SELECT id FROM chat_messages WHERE llm_call_id = llm_calls.id LIMIT 1
-        ) WHERE response_message_id IS NULL
-      `);
-    }
   }
 }

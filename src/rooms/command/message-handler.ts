@@ -112,7 +112,7 @@ export class RoomMessageHandler {
       }
     }
 
-    const triggerMessageId = await this.history.addMessage(message);
+    const triggerTs = await this.history.addMessage(message);
 
     if (!options.isDirect) {
       this.logger.debug(
@@ -133,10 +133,10 @@ export class RoomMessageHandler {
     // Messages that bypass steering (help, parse errors, no-context, non-steering modes)
     try {
       if (this.resolver.shouldBypassSteering(message)) {
-        return await this.executor.execute(message, triggerMessageId, options.sendResponse);
+        return await this.executor.execute(message, triggerTs, options.sendResponse);
       }
 
-      return await this.handleCommandMessage(message, triggerMessageId, options.sendResponse);
+      return await this.handleCommandMessage(message, triggerTs, options.sendResponse);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       this.logger.error("Agent execution failed", `nick=${message.nick}`, `error=${errorMsg}`);
@@ -151,14 +151,14 @@ export class RoomMessageHandler {
 
   /** Direct execution without steering (for CLI / tests). */
   async execute(message: RoomMessage): Promise<CommandExecutionResult> {
-    return this.executor.execute(message, 0, undefined);
+    return this.executor.execute(message, "", undefined);
   }
 
   // ── Session lifecycle: commands ──
 
   private async handleCommandMessage(
     message: RoomMessage,
-    triggerMessageId: number,
+    triggerTs: string,
     sendResponse: ((text: string) => Promise<void>) | undefined,
   ): Promise<CommandExecutionResult | null> {
     const key = sessionKey(message);
@@ -176,7 +176,7 @@ export class RoomMessageHandler {
 
     try {
       return await this.executor.execute(
-        message, triggerMessageId, sendResponse,
+        message, triggerTs, sendResponse,
         (agent) => {
           // Flush buffered messages, then swap to direct steering.
           for (const buffered of pending) {

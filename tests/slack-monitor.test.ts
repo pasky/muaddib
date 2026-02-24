@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { AuthStorage } from "@mariozechner/pi-coding-agent";
-import { ChatHistoryStore } from "../src/history/chat-history-store.js";
+import type { ChatHistoryStore } from "../src/history/chat-history-store.js";
+import { fsSafeArc } from "../src/rooms/message.js";
 import { SlackRoomMonitor } from "../src/rooms/slack/monitor.js";
+import { createTempHistoryStore } from "./test-helpers.js";
 import { createTestRuntime } from "./test-runtime.js";
 
 function baseCommandConfig() {
@@ -34,8 +36,7 @@ function buildRuntime(configData: Record<string, unknown>, history: ChatHistoryS
 
 describe("SlackRoomMonitor", () => {
   it("fromRuntime returns [] when Slack is disabled", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     const monitors = await SlackRoomMonitor.fromRuntime(buildRuntime({
       rooms: {
@@ -53,8 +54,7 @@ describe("SlackRoomMonitor", () => {
   });
 
   it("fromRuntime validates app token/workspaces when Slack is enabled", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     await expect(SlackRoomMonitor.fromRuntime(buildRuntime({
       rooms: {
@@ -96,8 +96,7 @@ describe("SlackRoomMonitor", () => {
   });
 
   it("fromRuntime builds one Slack monitor per workspace when enabled", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     const monitors = await SlackRoomMonitor.fromRuntime(buildRuntime({
       rooms: {
@@ -123,8 +122,7 @@ describe("SlackRoomMonitor", () => {
   });
 
   it("maps direct mention event to shared command handler with cleaned text", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let seenText = "";
     let isDirect = false;
@@ -160,8 +158,7 @@ describe("SlackRoomMonitor", () => {
   });
 
   it("includes Slack attachment context and propagates secrets", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let seenText = "";
     let seenSecrets: Record<string, unknown> | undefined;
@@ -218,8 +215,7 @@ describe("SlackRoomMonitor", () => {
   });
 
   it("normalizes repeated leading mention prefixes using Slack bot id + bot nick", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let seenText = "";
 
@@ -250,8 +246,7 @@ describe("SlackRoomMonitor", () => {
   });
 
   it("strips @botname prefix from direct messages", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let seenText = "";
 
@@ -281,8 +276,7 @@ describe("SlackRoomMonitor", () => {
   });
 
   it("decodes HTML entities in Slack message text", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let seenText = "";
 
@@ -316,8 +310,7 @@ describe("SlackRoomMonitor", () => {
   });
 
   it("maps workspace/message identity fields with Python parity semantics", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let mappedServerTag = "";
     let mappedPlatformId = "";
@@ -359,8 +352,7 @@ describe("SlackRoomMonitor", () => {
   });
 
   it("starts reply thread in channels by default and aligns RoomMessage thread context", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let seenThreadId: string | undefined;
     let seenResponseThreadId: string | undefined;
@@ -405,8 +397,7 @@ describe("SlackRoomMonitor", () => {
   });
 
   it("keeps DM replies non-threaded by default", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let seenResponseThreadId: string | undefined;
     let sentThreadTs: string | undefined;
@@ -446,8 +437,7 @@ describe("SlackRoomMonitor", () => {
   });
 
   it("maps threaded incoming events and passes thread id", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let seenThreadId: string | undefined;
     let sentThreadTs: string | undefined;
@@ -490,8 +480,7 @@ describe("SlackRoomMonitor", () => {
   });
 
   it("debounces rapid Slack replies by updating the previous bot message", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     const sendCalls: Array<{ text: string; threadTs?: string }> = [];
     const updateCalls: Array<{ messageTs: string; text: string }> = [];
@@ -551,8 +540,7 @@ describe("SlackRoomMonitor", () => {
   });
 
   it("formats outgoing Slack mentions before sending replies", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     const sent: string[] = [];
 
@@ -594,8 +582,7 @@ describe("SlackRoomMonitor", () => {
   });
 
   it("manages Slack typing indicator lifecycle for direct messages", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     const typingSetCalls: Array<{ channelId: string; threadTs: string }> = [];
     const typingClearCalls: Array<{ channelId: string; threadTs: string }> = [];
@@ -643,8 +630,7 @@ describe("SlackRoomMonitor", () => {
   });
 
   it("updates edited messages by platform id with history parity", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     await history.addMessage({
       serverTag: "slack:Rossum",
@@ -676,15 +662,17 @@ describe("SlackRoomMonitor", () => {
       newText: "edited message",
     });
 
-    const rows = await history.getFullHistory("slack:Rossum", "#general");
-    expect(rows[0].message).toBe("<Alice> edited message");
+    const arc = fsSafeArc("slack:Rossum##general");
+    const rows = await history.getFullHistory(arc);
+    // Original message at [0], appended edit line at [1]
+    expect(rows).toHaveLength(2);
+    expect(rows[1].message).toBe("<Alice> edited message");
 
     await history.close();
   });
 
   it("ignores users from ignore list through shared command handler", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let called = false;
 
@@ -714,8 +702,7 @@ describe("SlackRoomMonitor", () => {
   });
 
   it("retries Slack send once when sender returns a rate-limit error", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let sendAttempts = 0;
     const retryEvents: Array<{ type: string; retryable: boolean }> = [];
@@ -766,8 +753,7 @@ describe("SlackRoomMonitor", () => {
   });
 
   it("fails fast on non-rate-limit Slack send errors", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let sendAttempts = 0;
     const retryEvents: Array<{ type: string; retryable: boolean }> = [];
@@ -810,8 +796,7 @@ describe("SlackRoomMonitor", () => {
   });
 
   it("disconnects event source when sender connect fails after startup connect", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let eventSourceConnectCalls = 0;
     let eventSourceDisconnectCalls = 0;
@@ -852,8 +837,7 @@ describe("SlackRoomMonitor", () => {
   });
 
   it("reconnects receive loop when event source errors and reconnect policy is enabled", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let connectCalls = 0;
     let disconnectCalls = 0;
@@ -914,8 +898,7 @@ describe("SlackRoomMonitor", () => {
   });
 
   it("stops gracefully on null Slack events even when reconnect is enabled", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let connectCalls = 0;
     let disconnectCalls = 0;
@@ -952,8 +935,7 @@ describe("SlackRoomMonitor", () => {
   });
 
   it("fails after Slack reconnect max_attempts is exhausted", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let connectCalls = 0;
     let disconnectCalls = 0;
@@ -992,8 +974,7 @@ describe("SlackRoomMonitor", () => {
   });
 
   it("does not reconnect Slack monitor when reconnect policy is disabled", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let connectCalls = 0;
     let disconnectCalls = 0;
@@ -1032,8 +1013,7 @@ describe("SlackRoomMonitor", () => {
   });
 
   it("keeps event loop alive after a single handler failure", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     const processed: string[] = [];
     let offset = 0;

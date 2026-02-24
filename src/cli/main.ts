@@ -9,7 +9,7 @@ interface ParsedArgs {
   message: string;
   configPath: string;
   roomName?: string;
-  dbPath?: string;
+  arcsPath?: string;
   help: boolean;
 }
 
@@ -17,7 +17,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let message = "";
   let configPath = "./config.json";
   let roomName: string | undefined;
-  let dbPath: string | undefined;
+  let arcsPath: string | undefined;
   let help = false;
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -45,14 +45,14 @@ function parseArgs(argv: string[]): ParsedArgs {
       continue;
     }
 
-    if (arg === "--db-path" && argv[i + 1]) {
-      dbPath = argv[i + 1];
+    if (arg === "--arcs-path" && argv[i + 1]) {
+      arcsPath = argv[i + 1];
       i += 1;
       continue;
     }
   }
 
-  return { message, configPath, roomName, dbPath, help };
+  return { message, configPath, roomName, arcsPath, help };
 }
 
 async function main(): Promise<void> {
@@ -61,7 +61,7 @@ async function main(): Promise<void> {
   if (args.help || !args.message) {
     // eslint-disable-next-line no-console
     console.log(
-      "Usage: node dist/cli/main.js --message \"...\" [--config /path/to/config.json] [--room irc|discord|slack] [--db-path /path/to/chat_history.db]",
+      "Usage: node dist/cli/main.js --message \"...\" [--config /path/to/config.json] [--room irc|discord|slack] [--arcs-path /path/to/arcs]",
     );
     if (!args.help && !args.message) {
       process.exitCode = 2;
@@ -73,7 +73,7 @@ async function main(): Promise<void> {
     message: args.message,
     configPath: args.configPath,
     roomName: args.roomName,
-    dbPath: args.dbPath,
+    arcsPath: args.arcsPath,
   });
 
   if (result.response) {

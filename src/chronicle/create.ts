@@ -1,5 +1,3 @@
-import { join } from "node:path";
-
 import type { RuntimeLogWriter } from "../app/logging.js";
 import type { ChatHistoryStore } from "../history/chat-history-store.js";
 import type { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
@@ -17,7 +15,7 @@ interface CreateChronicleOptions {
   model: string;
   arcModels?: Record<string, string>;
   paragraphsPerChapter?: number;
-  muaddibHome: string;
+  arcsPath: string;
   history: ChatHistoryStore;
   modelAdapter: PiAiModelAdapter;
   logger: RuntimeLogWriter;
@@ -26,7 +24,7 @@ interface CreateChronicleOptions {
 export async function createChronicleSubsystem(
   options: CreateChronicleOptions,
 ): Promise<ChronicleSubsystem> {
-  const chroniclePath = join(options.muaddibHome, "chronicle");
+  const chroniclePath = options.arcsPath;
 
   const log = options.logger.getLogger("muaddib.chronicle");
   log.info("Initializing chronicle storage", `path=${chroniclePath}`);

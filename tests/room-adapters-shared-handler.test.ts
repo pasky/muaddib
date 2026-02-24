@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { AuthStorage } from "@mariozechner/pi-coding-agent";
-import { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { RoomMessageHandler } from "../src/rooms/command/message-handler.js";
+import { fsSafeArc } from "../src/rooms/message.js";
 import { DiscordRoomMonitor } from "../src/rooms/discord/monitor.js";
 import { SlackRoomMonitor } from "../src/rooms/slack/monitor.js";
+import { createTempHistoryStore } from "./test-helpers.js";
 import { createTestRuntime } from "./test-runtime.js";
 
 function buildRoomConfig() {
@@ -34,7 +35,7 @@ function buildRoomConfig() {
 
 describe("room adapters share RoomMessageHandler behavior", () => {
   it("Discord adapter persists user+assistant via shared handler", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
+    const history = createTempHistoryStore(20);
     await history.initialize();
 
     const handler = new RoomMessageHandler(
@@ -104,12 +105,13 @@ describe("room adapters share RoomMessageHandler behavior", () => {
 
     expect(sent).toEqual(["discord-shared"]);
 
-    const historyRows = await history.getFullHistory("discord:guild-1", "chan-1");
+    const discordArc = fsSafeArc("discord:guild-1#chan-1");
+    const historyRows = await history.getFullHistory(discordArc);
     expect(historyRows).toHaveLength(2);
     expect(historyRows[0].role).toBe("user");
     expect(historyRows[1].role).toBe("assistant");
 
-    const context = await history.getContext("discord:guild-1", "chan-1", 10);
+    const context = await history.getContext(discordArc, 10);
     const assistantContent = (context[1] as any).content[0].text;
     expect(assistantContent).toContain("!s");
 
@@ -117,7 +119,7 @@ describe("room adapters share RoomMessageHandler behavior", () => {
   });
 
   it("Slack adapter persists user+assistant via shared handler", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
+    const history = createTempHistoryStore(20);
     await history.initialize();
 
     const handler = new RoomMessageHandler(
@@ -188,10 +190,11 @@ describe("room adapters share RoomMessageHandler behavior", () => {
 
     expect(sent).toEqual(["slack-shared"]);
 
-    const historyRows = await history.getFullHistory("slack:T123", "C123");
+    const slackArc = fsSafeArc("slack:T123#C123");
+    const historyRows = await history.getFullHistory(slackArc);
     expect(historyRows).toHaveLength(2);
 
-    const context = await history.getContext("slack:T123", "C123", 10);
+    const context = await history.getContext(slackArc, 10);
     const slackAssistantContent = (context[1] as any).content[0].text;
     expect(slackAssistantContent).toContain("!s");
 

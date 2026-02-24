@@ -95,10 +95,6 @@ interface ChroniclerConfig {
   arcModels?: Record<string, string>;
 }
 
-interface HistoryConfig {
-  database?: { path?: string };
-}
-
 // ── Mode / Command config ──────────────────────────────────────────────
 
 export interface ModeConfig {
@@ -186,7 +182,6 @@ export interface RoomConfig {
 interface MuaddibSettings {
   agent?: AgentConfig;
   chronicler?: ChroniclerConfig;
-  history?: HistoryConfig;
   rooms?: Record<string, RoomConfig>;
 }
 
@@ -317,10 +312,6 @@ export class MuaddibConfig {
 
   getChroniclerConfig(): ChroniclerConfig {
     return this.data.chronicler ?? {};
-  }
-
-  getHistoryConfig(): HistoryConfig {
-    return this.data.history ?? {};
   }
 
   getRoomConfig(roomName: string): RoomConfig {

@@ -6,11 +6,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { RuntimeLogWriter } from "../src/app/logging.js";
-import { ChatHistoryStore } from "../src/history/chat-history-store.js";
+import type { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { IrcRoomMonitor } from "../src/rooms/irc/monitor.js";
+import { fsSafeArc } from "../src/rooms/message.js";
 import type { MuaddibRuntime } from "../src/runtime.js";
-import { createTestRuntime } from "./test-runtime.js";
 import { FakeEventsClient, FakeSender, baseCommandConfig } from "./e2e/helpers.js";
+import { createTempHistoryStore } from "./test-helpers.js";
+import { createTestRuntime } from "./test-runtime.js";
 
 function createDeferred<T = void>() {
   let resolve: ((value: T | PromiseLike<T>) => void) | undefined;
@@ -33,7 +35,7 @@ function buildRuntime(configData: Record<string, unknown>, history: ChatHistoryS
 
 describe("IrcRoomMonitor", () => {
   it("fromRuntime returns [] when IRC is disabled", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
+    const history = createTempHistoryStore(20);
     await history.initialize();
 
     const monitors = IrcRoomMonitor.fromRuntime(buildRuntime({
@@ -52,7 +54,7 @@ describe("IrcRoomMonitor", () => {
   });
 
   it("fromRuntime validates varlink.socketPath when IRC is enabled", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
+    const history = createTempHistoryStore(20);
     await history.initialize();
 
     expect(() => IrcRoomMonitor.fromRuntime(buildRuntime({
@@ -70,7 +72,7 @@ describe("IrcRoomMonitor", () => {
   });
 
   it("fromRuntime enables IRC by default and builds monitor", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
+    const history = createTempHistoryStore(20);
     await history.initialize();
 
     const monitors = IrcRoomMonitor.fromRuntime(buildRuntime({
@@ -91,7 +93,7 @@ describe("IrcRoomMonitor", () => {
   });
 
   it("routes direct message events into command handler and sender", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
+    const history = createTempHistoryStore(20);
     await history.initialize();
 
     const sender = new FakeSender();
@@ -144,7 +146,7 @@ describe("IrcRoomMonitor", () => {
       server: "libera",
     });
 
-    const historyRows = await history.getFullHistory("libera", "#test");
+    const historyRows = await history.getFullHistory(fsSafeArc("libera##test"));
     expect(historyRows).toHaveLength(2);
     // Inbound user message stored with full original content (bot-nick preserved)
     expect(historyRows[0].message).toBe("<alice> muaddib: hello there");
@@ -155,7 +157,7 @@ describe("IrcRoomMonitor", () => {
   });
 
   it("ignores passive public messages when not addressed directly", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
+    const history = createTempHistoryStore(20);
     await history.initialize();
 
     const sender = new FakeSender();
@@ -191,14 +193,14 @@ describe("IrcRoomMonitor", () => {
     expect(directFlag).toBe(false);
     expect(sender.sent).toHaveLength(0);
 
-    const historyRows = await history.getFullHistory("libera", "#test");
+    const historyRows = await history.getFullHistory(fsSafeArc("libera##test"));
     expect(historyRows).toHaveLength(1);
 
     await history.close();
   });
 
   it("refreshes cached mynick after varlink reconnect so direct detection stays correct", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
+    const history = createTempHistoryStore(20);
     await history.initialize();
 
     const responses: Array<Record<string, unknown> | null> = [
@@ -298,7 +300,7 @@ describe("IrcRoomMonitor", () => {
   });
 
   it("cleans up partially-connected varlink clients before retrying startup connect", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
+    const history = createTempHistoryStore(20);
     await history.initialize();
 
     let eventsDisconnectCalls = 0;
@@ -351,7 +353,7 @@ describe("IrcRoomMonitor", () => {
   });
 
   it("cleans up both varlink clients when waitForEvents fails on final startup attempt", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
+    const history = createTempHistoryStore(20);
     await history.initialize();
 
     let eventsDisconnectCalls = 0;
@@ -396,7 +398,7 @@ describe("IrcRoomMonitor", () => {
   });
 
   it("logs failed startup connection attempts before retrying", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
+    const history = createTempHistoryStore(20);
     await history.initialize();
 
     const logsHome = await mkdtemp(join(tmpdir(), "muaddib-irc-logs-"));
@@ -453,7 +455,7 @@ describe("IrcRoomMonitor", () => {
   });
 
   it("writes direct-message logs to arc-sharded files and keeps non-message logs in system.log", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
+    const history = createTempHistoryStore(20);
     await history.initialize();
 
     const logsHome = await mkdtemp(join(tmpdir(), "muaddib-irc-message-logs-"));
@@ -519,7 +521,7 @@ describe("IrcRoomMonitor", () => {
   });
 
   it("keeps event loop alive after a single handler failure", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
+    const history = createTempHistoryStore(20);
     await history.initialize();
 
     const responses: Array<Record<string, unknown>> = [
@@ -592,7 +594,7 @@ describe("IrcRoomMonitor", () => {
   });
 
   it("processes IRC events concurrently without waiting for previous handler completion", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
+    const history = createTempHistoryStore(20);
     await history.initialize();
 
     const responses: Array<Record<string, unknown>> = [

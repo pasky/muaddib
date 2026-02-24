@@ -308,9 +308,9 @@ describe("fsSafeArc", () => {
 // ── Gondolin checkpoint path ───────────────────────────────────────────────
 
 describe("getArcCheckpointPath", () => {
-  it("checkpoint path is under checkpoints/ not workspaces/", () => {
+  it("checkpoint path is under arcs/<arc>/ not workspaces/", () => {
     const checkpointPath = getArcCheckpointPath("test-arc");
-    expect(checkpointPath).toContain("/checkpoints/");
+    expect(checkpointPath).toContain("/arcs/test-arc/checkpoint.qcow2");
     expect(checkpointPath).not.toContain("/workspaces/");
   });
 

@@ -208,7 +208,7 @@ export class CommandExecutor {
    */
   async execute(
     message: RoomMessage,
-    triggerMessageId: number,
+    triggerTs: string,
     sendResponse: ((text: string) => Promise<void>) | undefined,
     onAgentCreated?: (agent: Agent) => void,
   ): Promise<CommandExecutionResult> {
@@ -223,7 +223,7 @@ export class CommandExecutor {
 
     if (!this.rateLimiter.checkLimit()) {
       logger.warn("Rate limit triggered", `arc=${roomArc(message)}`, `nick=${message.nick}`);
-      return await this.deliverResult(message, triggerMessageId, sendResponse, {
+      return await this.deliverResult(message, triggerTs, sendResponse, {
         response: `${message.nick}: Slow down a little, will you? (rate limiting)`,
         resolved: EMPTY_RESOLVED,
       });
@@ -254,20 +254,20 @@ export class CommandExecutor {
         `error=${resolved.error}`,
         `content=${message.content}`,
       );
-      return await this.deliverResult(message, triggerMessageId, sendResponse, {
+      return await this.deliverResult(message, triggerTs, sendResponse, {
         response: `${message.nick}: ${resolved.error}`, resolved,
       });
     }
 
     if (resolved.helpRequested) {
       logger.debug("Sending help message", `nick=${message.nick}`);
-      return await this.deliverResult(message, triggerMessageId, sendResponse, {
+      return await this.deliverResult(message, triggerTs, sendResponse, {
         response: this.resolver.buildHelpMessage(message.serverTag, message.channelName), resolved,
       });
     }
 
     if (!resolved.modeKey || !resolved.runtime || !resolved.selectedTrigger) {
-      return await this.deliverResult(message, triggerMessageId, sendResponse, {
+      return await this.deliverResult(message, triggerTs, sendResponse, {
         response: `${message.nick}: Internal command resolution error.`, resolved,
       });
     }
@@ -280,7 +280,7 @@ export class CommandExecutor {
       null;
 
     if (!modelSpec) {
-      return await this.deliverResult(message, triggerMessageId, sendResponse, {
+      return await this.deliverResult(message, triggerTs, sendResponse, {
         response: `${message.nick}: No model configured for mode '${resolved.modeKey}'.`, resolved,
       });
     }
@@ -401,7 +401,7 @@ export class CommandExecutor {
 
     // ── Deliver & persist ──
 
-    const result = await this.deliverResult(message, triggerMessageId, sendResponse, {
+    const result = await this.deliverResult(message, triggerTs, sendResponse, {
       response: responseText || null, resolved, model: modelSpec, usage, toolCallsCount,
     });
     await this.triggerAutoChronicler(message, this.commandConfig.historySize);
@@ -548,7 +548,7 @@ export class CommandExecutor {
    */
   private async deliverResult(
     message: RoomMessage,
-    triggerMessageId: number,
+    triggerTs: string,
     sendResponse: ((text: string) => Promise<void>) | undefined,
     partial: {
       response: string | null;
@@ -572,27 +572,11 @@ export class CommandExecutor {
     const { history, logger } = this;
     const arcName = roomArc(message);
 
-    let llmCallId: number | null = null;
-    if (result.model && result.usage) {
-      const spec = parseModelSpec(result.model);
-      llmCallId = await history.logLlmCall({
-        provider: spec.provider,
-        model: spec.modelId,
-        inputTokens: result.usage.input,
-        outputTokens: result.usage.output,
-        cost: result.usage.cost.total,
-        callType: "agent_run",
-        arcName,
-        triggerMessageId,
-      });
-    }
-
     logger.debug(
       "Persisting direct command response",
       `arc=${arcName}`,
       `model=${result.model ?? "n/a"}`,
       `tool_calls=${result.toolCallsCount}`,
-      `llm_call_id=${llmCallId ?? "n/a"}`,
     );
 
     const costStr = result.usage ? `$${result.usage.cost.total.toFixed(4)}` : "?";
@@ -609,7 +593,7 @@ export class CommandExecutor {
       await sendResponse(result.response);
     }
 
-    const responseMessageId = await history.addMessage(
+    await history.addMessage(
       {
         ...message,
         nick: message.mynick,
@@ -617,18 +601,18 @@ export class CommandExecutor {
       },
       {
         mode: result.resolved.selectedTrigger ?? undefined,
-        llmCallId: llmCallId ?? undefined,
+        run: triggerTs || undefined,
+        call: result.model ? "agent_run" : undefined,
+        model: result.model ?? undefined,
+        inTok: result.usage?.input,
+        outTok: result.usage?.output,
+        cost: result.usage?.cost.total,
       },
     );
-
-    if (llmCallId) {
-      await history.updateLlmCallResponse(llmCallId, responseMessageId);
-    }
 
     logger.debug(
       "Direct command response stored",
       `arc=${arcName}`,
-      `response_message_id=${responseMessageId}`,
     );
 
     await this.emitCostFollowups(message, result, arcName, sendResponse);

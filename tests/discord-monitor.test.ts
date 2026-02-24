@@ -8,6 +8,8 @@ import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { RuntimeLogWriter } from "../src/app/logging.js";
 import { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { DiscordRoomMonitor } from "../src/rooms/discord/monitor.js";
+import { fsSafeArc } from "../src/rooms/message.js";
+import { createTempHistoryStore } from "./test-helpers.js";
 import { createTestRuntime } from "./test-runtime.js";
 
 function baseCommandConfig() {
@@ -39,8 +41,7 @@ function buildRuntime(configData: Record<string, unknown>, history: ChatHistoryS
 
 describe("DiscordRoomMonitor", () => {
   it("fromRuntime returns [] when Discord is disabled", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     const monitors = await DiscordRoomMonitor.fromRuntime(buildRuntime({
       rooms: {
@@ -58,8 +59,7 @@ describe("DiscordRoomMonitor", () => {
   });
 
   it("fromRuntime validates token when Discord is enabled", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     await expect(DiscordRoomMonitor.fromRuntime(buildRuntime({
       rooms: {
@@ -76,8 +76,7 @@ describe("DiscordRoomMonitor", () => {
   });
 
   it("fromRuntime builds Discord monitor when enabled", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     const monitors = await DiscordRoomMonitor.fromRuntime(buildRuntime({
       rooms: {
@@ -96,8 +95,7 @@ describe("DiscordRoomMonitor", () => {
   });
 
   it("maps direct mention event to shared command handler with cleaned content", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let seenMessage = "";
     let isDirect = false;
@@ -139,8 +137,7 @@ describe("DiscordRoomMonitor", () => {
   });
 
   it("sets and clears Discord typing indicator around direct command handling", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     const typingSetCalls: string[] = [];
     const typingClearCalls: string[] = [];
@@ -181,8 +178,7 @@ describe("DiscordRoomMonitor", () => {
   });
 
   it("includes attachment metadata block in command content", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let seenContent = "";
 
@@ -223,8 +219,7 @@ describe("DiscordRoomMonitor", () => {
   });
 
   it("writes direct-message logs to Discord arc-sharded files", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     const logsHome = await mkdtemp(join(tmpdir(), "muaddib-discord-message-logs-"));
     const fixedNow = new Date(2026, 1, 12, 14, 15, 16, 321);
@@ -276,8 +271,7 @@ describe("DiscordRoomMonitor", () => {
   });
 
   it("normalizes Discord mention prefixes with bot id and preserves cleaned payload", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let seenMessage = "";
 
@@ -308,8 +302,7 @@ describe("DiscordRoomMonitor", () => {
   });
 
   it("maps serverTag/platformId using Python parity semantics", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let mappedServerTag = "";
     let mappedPlatformId = "";
@@ -344,8 +337,7 @@ describe("DiscordRoomMonitor", () => {
   });
 
   it("maps thread fields for context lookup and reply semantics", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let seenThreadId: string | undefined;
     const sendOptions: Array<{ replyToMessageId?: string; mentionAuthor?: boolean }> = [];
@@ -392,8 +384,7 @@ describe("DiscordRoomMonitor", () => {
   });
 
   it("debounces rapid Discord replies by editing the previous bot message", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     const sendCalls: Array<{ text: string; options?: { replyToMessageId?: string; mentionAuthor?: boolean } }> = [];
     const editCalls: Array<{ messageId: string; text: string }> = [];
@@ -454,8 +445,7 @@ describe("DiscordRoomMonitor", () => {
   });
 
   it("sends a new Discord followup when reply edit debounce is disabled", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     const sendCalls: Array<{ text: string; options?: { replyToMessageId?: string; mentionAuthor?: boolean } }> = [];
 
@@ -513,8 +503,7 @@ describe("DiscordRoomMonitor", () => {
   });
 
   it("updates edited Discord message content by platform id", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     await history.addMessage({
       serverTag: "discord:Rossum",
@@ -544,15 +533,18 @@ describe("DiscordRoomMonitor", () => {
       content: "edited message",
     });
 
-    const rows = await history.getFullHistory("discord:Rossum", "general");
-    expect(rows[0].message).toBe("<alice> edited message");
+    const arc = fsSafeArc("discord:Rossum#general");
+    const rows = await history.getFullHistory(arc);
+    // JSONL store keeps both original and edit line; the edit is appended last
+    expect(rows).toHaveLength(2);
+    expect(rows[0].message).toBe("<alice> hello");
+    expect(rows[1].message).toBe("<alice> edited message");
 
     await history.close();
   });
 
   it("passes passive messages with isDirect=false", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let isDirect = true;
 
@@ -580,8 +572,7 @@ describe("DiscordRoomMonitor", () => {
   });
 
   it("retries Discord send once when sender returns a rate-limit error", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let sendAttempts = 0;
     const retryEvents: Array<{ type: string; retryable: boolean }> = [];
@@ -631,8 +622,7 @@ describe("DiscordRoomMonitor", () => {
   });
 
   it("fails fast on non-rate-limit Discord send errors", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let sendAttempts = 0;
     const retryEvents: Array<{ type: string; retryable: boolean }> = [];
@@ -674,8 +664,7 @@ describe("DiscordRoomMonitor", () => {
   });
 
   it("disconnects event source when sender connect fails after startup connect", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let eventSourceConnectCalls = 0;
     let eventSourceDisconnectCalls = 0;
@@ -716,8 +705,7 @@ describe("DiscordRoomMonitor", () => {
   });
 
   it("reconnects receive loop when event source errors and reconnect policy is enabled", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let connectCalls = 0;
     let disconnectCalls = 0;
@@ -777,8 +765,7 @@ describe("DiscordRoomMonitor", () => {
   });
 
   it("stops gracefully on null Discord events even when reconnect is enabled", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let connectCalls = 0;
     let disconnectCalls = 0;
@@ -815,8 +802,7 @@ describe("DiscordRoomMonitor", () => {
   });
 
   it("fails after Discord reconnect max_attempts is exhausted", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let connectCalls = 0;
     let disconnectCalls = 0;
@@ -855,8 +841,7 @@ describe("DiscordRoomMonitor", () => {
   });
 
   it("does not reconnect Discord monitor when reconnect policy is disabled", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let connectCalls = 0;
     let disconnectCalls = 0;
@@ -895,8 +880,7 @@ describe("DiscordRoomMonitor", () => {
   });
 
   it("keeps event loop alive after a single handler failure", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     const processed: string[] = [];
     let offset = 0;
@@ -954,8 +938,7 @@ describe("DiscordRoomMonitor", () => {
   });
 
   it("preserves other users' resolved mentions in direct content", async () => {
-    const history = new ChatHistoryStore(":memory:", 20);
-    await history.initialize();
+    const history = createTempHistoryStore(20);
 
     let seenMessage = "";
 

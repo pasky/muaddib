@@ -23,6 +23,7 @@ import { AuthStorage, type ApiKeyCredential } from "@mariozechner/pi-coding-agen
 import { RuntimeLogWriter } from "../../src/app/logging.js";
 import { MuaddibConfig } from "../../src/config/muaddib-config.js";
 import { ChatHistoryStore } from "../../src/history/chat-history-store.js";
+import { createTempHistoryStore } from "../test-helpers.js";
 import { PiAiModelAdapter } from "../../src/models/pi-ai-model-adapter.js";
 import { IrcRoomMonitor } from "../../src/rooms/irc/monitor.js";
 import type { MuaddibRuntime } from "../../src/runtime.js";
@@ -240,7 +241,7 @@ export interface E2EContext {
 
 export async function createE2EContext(): Promise<E2EContext> {
   const tmpHome = await mkdtemp(join(tmpdir(), "muaddib-e2e-"));
-  const history = new ChatHistoryStore(":memory:", 20);
+  const history = createTempHistoryStore(20);
   await history.initialize();
   return { tmpHome, history, sender: new FakeSender() };
 }

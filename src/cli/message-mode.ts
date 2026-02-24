@@ -15,7 +15,7 @@ export interface CliMessageModeOptions {
   channelName?: string;
   nick?: string;
   mynick?: string;
-  dbPath?: string;
+  arcsPath?: string;
   runnerFactory?: CommandRunnerFactory;
 }
 
@@ -39,7 +39,7 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
   const runtime = await createMuaddibRuntime({
     configPath: options.configPath,
     muaddibHome,
-    dbPath: options.dbPath ?? ":memory:",
+    arcsPath: options.arcsPath,
     logger: runtimeLogger,
   });
 

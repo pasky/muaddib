@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { RuntimeLogWriter } from "../src/app/logging.js";
-import { ChatHistoryStore } from "../src/history/chat-history-store.js";
+import type { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import {
   RoomMessageHandler,
   type CommandRateLimiter,
@@ -14,7 +14,7 @@ import {
 } from "../src/rooms/command/message-handler.js";
 import type { ContextReducer } from "../src/rooms/command/context-reducer.js";
 import type { RoomMessage } from "../src/rooms/message.js";
-import { createDeferred, waitForPersistedMessage } from "./test-helpers.js";
+import { createDeferred, createTempHistoryStore, waitForPersistedMessage } from "./test-helpers.js";
 import { createTestRuntime } from "./test-runtime.js";
 
 const roomConfig = {
@@ -167,7 +167,7 @@ function makeRunnerResult(
 
 describe("RoomMessageHandler", () => {
   it("routes command to runner without duplicating trigger message and propagates reasoning level", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     await history.addMessage({
@@ -243,7 +243,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("strips echoed IRC context prefixes from generated response text", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const incoming = makeMessage("!s ping");
@@ -266,7 +266,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("strips IRC echo prefixes including angle-bracketed nicks", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const incoming = makeMessage("!s some update");
@@ -289,7 +289,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("logs direct command lifecycle to injected logger", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const incoming = makeMessage("!s ping");
@@ -330,19 +330,17 @@ describe("RoomMessageHandler", () => {
       "arc=libera##test",
       "model=openai:gpt-4o-mini",
       "tool_calls=0",
-      "llm_call_id=1",
     );
     expect(logger.debug).toHaveBeenCalledWith(
       "Direct command response stored",
       "arc=libera##test",
-      "response_message_id=2",
     );
 
     await history.close();
   });
 
   it("logs parse/help/rate-limit events with Python-matching severities", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const logger = {
@@ -404,17 +402,15 @@ describe("RoomMessageHandler", () => {
   });
 
   it("logs fallback + cost milestone lifecycle with info severity", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
-    await history.logLlmCall({
-      provider: "openai",
+    await history.logLlmCost("libera##test", {
+      call: "agent_run",
       model: "gpt-4o-mini",
-      inputTokens: 10,
-      outputTokens: 10,
+      inTok: 10,
+      outTok: 10,
       cost: 0.9,
-      callType: "agent_run",
-      arcName: "libera##test",
     });
 
     const logger = {
@@ -457,7 +453,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("logs agent execution failures at error severity", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const logger = {
@@ -491,7 +487,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("writes command lifecycle logs into message-context files", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const logsHome = await mkdtemp(join(tmpdir(), "muaddib-command-logs-"));
@@ -542,7 +538,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("applies context reducer when mode enables auto_reduce_context", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     await history.addMessage({
@@ -605,7 +601,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("prepends chapter context by default and skips it when include_chapter_summary is disabled", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     await history.addMessage({
@@ -677,7 +673,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("filters baseline tools via allowed_tools", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const incoming = makeMessage("!s scoped tools");
@@ -716,7 +712,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("passes oracle tool with invocation context containing conversation history", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     // Add prior conversation context
@@ -759,7 +755,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("second command in same thread steers into active session and returns null", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const incoming: RoomMessage = {
@@ -822,7 +818,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("returns help text for !h", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const incoming = makeMessage("!h");
@@ -846,7 +842,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("returns rate-limit warning and skips runner when limiter denies request", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const incoming = makeMessage("!s should be rate limited");
@@ -876,20 +872,17 @@ describe("RoomMessageHandler", () => {
     expect(result?.usage).toBeNull();
     expect(sent).toEqual(["alice: Slow down a little, will you? (rate limiting)"]);
 
-    const rows = await history.getFullHistory("libera", "#test");
+    const rows = await history.getFullHistory("libera##test");
     expect(rows).toHaveLength(2);
     expect(rows[0].role).toBe("user");
     expect(rows[1].role).toBe("assistant");
     expect(rows[1].message).toContain("rate limiting");
 
-    const llmCalls = await history.getLlmCalls();
-    expect(llmCalls).toHaveLength(0);
-
     await history.close();
   });
 
   it("triggers auto-chronicler for direct + passive paths and skips it when rate-limited", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const autoChronicler = {
@@ -952,7 +945,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("handleIncomingMessage persists user + assistant with selected trigger mode", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const incoming = makeMessage("!s persistence check");
@@ -996,37 +989,28 @@ describe("RoomMessageHandler", () => {
 
     await handler.handleIncomingMessage(incoming, { isDirect: true });
 
-    const rows = await history.getFullHistory("libera", "#test");
+    const rows = await history.getFullHistory("libera##test");
     expect(rows).toHaveLength(2);
     expect(rows[0].role).toBe("user");
     expect(rows[1].role).toBe("assistant");
 
-    const context = await history.getContext("libera", "#test", 10);
+    const context = await history.getContext("libera##test", 10);
     const assistantContent = (context[1] as any).content[0].text;
     expect(assistantContent).toContain("!s");
-
-    const llmCalls = await history.getLlmCalls();
-    expect(llmCalls).toHaveLength(1);
-    expect(llmCalls[0].provider).toBe("openai");
-    expect(llmCalls[0].model).toBe("gpt-4o-mini");
-    expect(llmCalls[0].triggerMessageId).toBeGreaterThan(0);
-    expect(llmCalls[0].responseMessageId).toBeGreaterThan(0);
 
     await history.close();
   });
 
   it("emits cost followup + daily milestone messages when command usage crosses thresholds", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
-    await history.logLlmCall({
-      provider: "openai",
+    await history.logLlmCost("libera##test", {
+      call: "agent_run",
       model: "gpt-4o-mini",
-      inputTokens: 10,
-      outputTokens: 10,
+      inTok: 10,
+      outTok: 10,
       cost: 0.9,
-      callType: "agent_run",
-      arcName: "libera##test",
     });
 
     const incoming = makeMessage("!s expensive response");
@@ -1062,7 +1046,7 @@ describe("RoomMessageHandler", () => {
       "(fun fact: my messages in this channel have already cost $1.2500 today)",
     ]);
 
-    const rows = await history.getFullHistory("libera", "#test");
+    const rows = await history.getFullHistory("libera##test");
     expect(rows).toHaveLength(4);
     expect(rows[2].message).toContain("this message used 2 tool calls");
     expect(rows[3].message).toContain("already cost $1.2500 today");
@@ -1071,7 +1055,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("converts oversized command responses into artifact links and keeps llm linkage", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const incoming = makeMessage("!s make it long");
@@ -1114,19 +1098,15 @@ describe("RoomMessageHandler", () => {
     expect(result?.response).toContain("... full response: https://example.com/artifacts/?");
     expect(sent).toEqual([result?.response ?? ""]);
 
-    const rows = await history.getFullHistory("libera", "#test");
+    const rows = await history.getFullHistory("libera##test");
     expect(rows).toHaveLength(2);
     expect(rows[1].message).toContain("full response: https://example.com/artifacts/?");
-
-    const llmCalls = await history.getLlmCalls();
-    expect(llmCalls).toHaveLength(1);
-    expect(llmCalls[0].responseMessageId).toBe(rows[1].id);
 
     await history.close();
   });
 
   it("does not convert response into artifact when responseMaxBytes is not exceeded", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const incoming = makeMessage("!s short response");
@@ -1154,7 +1134,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("keeps fallback-model llm logging/linkage when oversized response is converted to artifact", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const incoming = makeMessage("!s refusal + long fallback");
@@ -1184,21 +1164,15 @@ describe("RoomMessageHandler", () => {
     expect(result?.model).toBe("openai:gpt-4o-mini");
     expect(result?.response).toContain("The AI refused to respond to this request");
 
-    const rows = await history.getFullHistory("libera", "#test");
+    const rows = await history.getFullHistory("libera##test");
     expect(rows).toHaveLength(2);
     expect(rows[1].message).toContain("The AI refused to respond to this request");
-
-    const llmCalls = await history.getLlmCalls();
-    expect(llmCalls).toHaveLength(1);
-    expect(llmCalls[0].provider).toBe("openai");
-    expect(llmCalls[0].model).toBe("gpt-4o-mini");
-    expect(llmCalls[0].responseMessageId).toBe(rows[1].id);
 
     await history.close();
   });
 
   it("fails fast when command.responseMaxBytes is invalid", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     expect(
@@ -1220,7 +1194,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("retries on explicit refusal text with agent.refusalFallbackModel and persists fallback model usage", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const incoming = makeMessage("!s refusal fallback");
@@ -1249,19 +1223,14 @@ describe("RoomMessageHandler", () => {
     expect(result?.model).toBe("openai:gpt-4o-mini");
     expect(runnerModels).toEqual(["openai:gpt-4o-mini"]);
 
-    const llmCalls = await history.getLlmCalls();
-    expect(llmCalls).toHaveLength(1);
-    expect(llmCalls[0].provider).toBe("openai");
-    expect(llmCalls[0].model).toBe("gpt-4o-mini");
-
-    const rows = await history.getFullHistory("libera", "#test");
+    const rows = await history.getFullHistory("libera##test");
     expect(rows[1]?.message).toContain("[refusal fallback to claude-3-5-haiku]");
 
     await history.close();
   });
 
   it("propagates explicit safety-refusal errors from runner", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const incoming = makeMessage("!s safety fallback");
@@ -1286,7 +1255,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("does not trigger fallback when response lacks explicit refusal/error markers", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const incoming = makeMessage("!s no fallback");
@@ -1311,16 +1280,11 @@ describe("RoomMessageHandler", () => {
     expect(result?.model).toBe("openai:gpt-4o-mini");
     expect(runnerModels).toEqual(["openai:gpt-4o-mini"]);
 
-    const llmCalls = await history.getLlmCalls();
-    expect(llmCalls).toHaveLength(1);
-    expect(llmCalls[0].provider).toBe("openai");
-    expect(llmCalls[0].model).toBe("gpt-4o-mini");
-
     await history.close();
   });
 
   it("concurrent commands from same user steer into active session", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const firstStarted = createDeferred<void>();
@@ -1380,7 +1344,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("messages arriving before agent creation are buffered and steered on flush", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const resolveStarted = createDeferred<void>();
@@ -1441,7 +1405,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("shares session across users in the same thread via steering", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const firstStarted = createDeferred<void>();
@@ -1499,7 +1463,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("passives and commands arriving during active session all steer into the agent", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const firstStarted = createDeferred<void>();
@@ -1561,7 +1525,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("passes onAgentCreated callback to runner factory for steering registration", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     let capturedCallback: ((agent: any) => void) | undefined;
@@ -1586,7 +1550,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("passive messages during active session steer into the running agent", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const firstStarted = createDeferred<void>();
@@ -1641,7 +1605,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("starts proactive session on passive message in proactive-enabled channel", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const proactiveRoomConfig = {
@@ -1696,7 +1660,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("drops proactive NULL sentinel responses instead of sending them", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const proactiveRoomConfig = {
@@ -1753,14 +1717,14 @@ describe("RoomMessageHandler", () => {
     await new Promise((r) => setImmediate(r));
 
     expect(sent).toEqual([]);
-    const rows = await history.getFullHistory("libera", "#test");
+    const rows = await history.getFullHistory("libera##test");
     expect(rows.filter((row) => row.role === "assistant")).toHaveLength(0);
 
     await history.close();
   });
 
   it("does not start proactive session on passive message in non-proactive channel", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     // No proactive config at all
@@ -1782,7 +1746,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("command preempts proactive debounce session", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const proactiveRoomConfig = {
@@ -1848,7 +1812,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("command from different nick preempts proactive debounce session", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const proactiveRoomConfig = {
@@ -1917,7 +1881,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("passive messages steer into running proactive agent session", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const proactiveRoomConfig = {
@@ -2019,7 +1983,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("commands are not blocked by running proactive session", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const proactiveRoomConfig = {
@@ -2094,7 +2058,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("isolates sessions by nick when there is no thread", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const aliceStarted = createDeferred<void>();
@@ -2152,7 +2116,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("isolates sessions for the same nick across different channels", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const firstStarted = createDeferred<void>();
@@ -2203,7 +2167,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("commands arriving after session starts are steered — only one runner invocation", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     const firstStarted = createDeferred<void>();
@@ -2261,7 +2225,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("runner error cleans up session so next command starts fresh", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     let runCount = 0;
@@ -2304,7 +2268,7 @@ describe("RoomMessageHandler", () => {
   });
 
   it("passive messages with no active session and no proactive are no-ops", async () => {
-    const history = new ChatHistoryStore(":memory:", 40);
+    const history = createTempHistoryStore(40);
     await history.initialize();
 
     let runCount = 0;

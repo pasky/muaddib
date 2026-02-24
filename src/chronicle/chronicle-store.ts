@@ -153,7 +153,7 @@ export class ChronicleStore {
   // ── Internal helpers ──
 
   private arcDir(arc: string): string {
-    return join(this.basePath, arc);
+    return join(this.basePath, arc, "chronicle");
   }
 
   private chapterFilename(number: number): string {
