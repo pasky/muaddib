@@ -76,16 +76,7 @@ export class AutoChroniclerTs implements AutoChronicler {
       );
 
       try {
-        await this.autoChronicle(
-          mynick,
-          server,
-          channel,
-          arc,
-          Math.min(
-            AutoChroniclerTs.MAX_CHRONICLE_BATCH,
-            unchronicledCount + AutoChroniclerTs.MESSAGE_OVERLAP,
-          ),
-        );
+        await this.autoChronicle(mynick, server, channel, arc);
       } catch (error) {
         this.logger.error(`Auto-chronicling failed for ${arc}:`, error);
       }
@@ -99,9 +90,8 @@ export class AutoChroniclerTs implements AutoChronicler {
     _server: string,
     _channel: string,
     arc: string,
-    nMessages: number,
   ): Promise<void> {
-    const messages = await this.options.history.getFullHistory(arc, nMessages);
+    const messages = await this.options.history.readChroniclerContext(arc, AutoChroniclerTs.MAX_CHRONICLE_BATCH, AutoChroniclerTs.MESSAGE_OVERLAP);
     if (messages.length === 0) {
       this.logger.warn(`No unchronicled messages found for ${arc}.`);
       return;

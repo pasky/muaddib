@@ -175,65 +175,25 @@ export class ChatHistoryStore {
     threadId?: string,
   ): Promise<Message[]> {
     const inferenceLimit = limit ?? this.inferenceLimit;
-
-    // Read newest-first and stop early once we have enough lines.
-    // Thread context reads files until the thread starter is found (plus
-    // one extra file for pre-starter context).  Non-thread context uses a
-    // simple line-count cap.
     const lines = threadId
-      ? await this.readRecentLines(arc, {
-          until: (chunk) =>
-            chunk.some((l) => l.pid === threadId && (!l.tid || l.tid === l.pid)),
-        })
-      : await this.readRecentLines(arc, { maxLines: inferenceLimit * 4 });
-
-    // Filter: only lines with m (messages, not bare cost lines)
-    const messageLines = lines.filter((l) => l.m !== undefined);
-
-    let selected: JsonlLine[];
-    if (threadId) {
-      selected = this.selectThreadContext(messageLines, threadId, inferenceLimit);
-    } else {
-      // Main channel: lines without tid
-      const mainLines = messageLines.filter((l) => !l.tid);
-      selected = this.dedupeEdits(mainLines).slice(-inferenceLimit);
-    }
-
-    return selected.map((line): Message => {
-      const timeOnly = line.ts.slice(11, 16); // HH:MM
-      const nick = line.n ?? "?";
-      const content = line.m ?? "";
-      const formatted = `<${nick}> ${content}`;
-      const modePrefix = line.r === "assistant" && line.mode ? this.modeToPrefix(line.mode) : "";
-      const text = `${modePrefix}[${timeOnly}] ${formatted}`;
-      const timestamp = new Date(line.ts).getTime() || 0;
-
-      if (line.r === "assistant") {
-        return {
-          role: "assistant",
-          content: [{ type: "text", text }],
-          ...createStubAssistantFields(),
-          timestamp,
-        } satisfies AssistantMessage;
-      }
-      return {
-        role: "user",
-        content: text,
-        timestamp,
-      } satisfies UserMessage;
-    });
+      ? await this.readThreadContext(arc, threadId, inferenceLimit)
+      : await this.readMainContext(arc, inferenceLimit);
+    return this.formatContextLines(lines);
   }
 
   async getFullHistory(
     arc: string,
     limit?: number,
   ): Promise<HistoryMessageRow[]> {
-    // Read newest-first, stop once we have enough raw lines to yield `limit`
-    // message lines after filtering. A 2× multiplier absorbs cost-only lines.
-    const maxLines = limit !== undefined ? limit * 2 : undefined;
-    const lines = await this.readRecentLines(arc, { maxLines });
-    const messageLines = lines.filter((l) => l.m !== undefined);
-    const selected = limit !== undefined ? messageLines.slice(-limit) : messageLines;
+    const allLines: JsonlLine[] = [];
+    for await (const line of this.streamNewestFirst(arc)) {
+      if (line.m !== undefined) {
+        allLines.push(line);
+      }
+    }
+    // allLines is newest-first; reverse to get chronological order
+    allLines.reverse();
+    const selected = limit !== undefined ? allLines.slice(-limit) : allLines;
 
     return selected.map((line) => ({
       nick: line.n ?? "?",
@@ -244,28 +204,66 @@ export class ChatHistoryStore {
   }
 
   /**
+   * Replaces getFullHistory for the chronicler — anchors by cursor timestamp.
+   * Returns up to maxBatch unchronicled messages after the cursor, plus up to
+   * overlap already-chronicled messages before it (for conversational context),
+   * all in chronological order.
+   */
+  async readChroniclerContext(arc: string, maxBatch: number, overlap = 0): Promise<Array<{ message: string; timestamp: string }>> {
+    const cursor = await this.readCursorTs(arc);
+
+    const unchronicled: JsonlLine[] = [];
+    const pre: JsonlLine[] = [];
+    let pastCursor = false;
+    for await (const line of this.streamNewestFirst(arc)) {
+      if (line.m === undefined) continue;
+      if (!pastCursor && cursor && line.ts <= cursor) {
+        pastCursor = true;
+      }
+      if (!pastCursor) {
+        // Unchronicled: after cursor
+        unchronicled.push(line);
+        if (unchronicled.length >= maxBatch) break;
+      } else {
+        // Already chronicled: collect overlap context before cursor
+        pre.push(line);
+        if (pre.length >= overlap) break;
+      }
+    }
+
+    // Both arrays are newest-first; reverse each, then pre-cursor context comes first.
+    pre.reverse();
+    unchronicled.reverse();
+    return [...pre, ...unchronicled].map((line) => ({
+      message: `<${line.n ?? "?"}> ${line.m ?? ""}`,
+      timestamp: line.ts,
+    }));
+  }
+
+  /**
    * Count messages in an arc since the given epoch timestamp (ms).
-   * Uses sinceTs as a file-date filter so it only reads files that could
-   * contain relevant lines — correctly handles midnight boundaries.
    */
   async countMessagesSince(arc: string, sinceEpochMs: number): Promise<number> {
     const sinceTs = new Date(sinceEpochMs).toISOString();
-    const lines = await this.readRecentLines(arc, { sinceTs });
-    return lines.filter((l) => l.m !== undefined && l.ts >= sinceTs).length;
+    let count = 0;
+    for await (const line of this.streamNewestFirst(arc)) {
+      if (line.ts < sinceTs) break;
+      if (line.m !== undefined) count++;
+    }
+    return count;
   }
 
   async countRecentUnchronicled(arc: string, days = 7): Promise<number> {
     const cursor = await this.readCursorTs(arc);
     const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
-    // effectiveCutoff is whichever is more recent: the chronicle cursor or the
-    // day-window floor. Using sinceTs as a file filter means we only open files
-    // that could possibly contain unchronicled messages.
     const effectiveCutoff = cursor && cursor > cutoff ? cursor : cutoff;
 
-    const lines = await this.readRecentLines(arc, { sinceTs: effectiveCutoff });
-    return lines.filter(
-      (l) => l.m !== undefined && l.ts > effectiveCutoff,
-    ).length;
+    let count = 0;
+    for await (const line of this.streamNewestFirst(arc)) {
+      if (line.ts <= effectiveCutoff) break;
+      if (line.m !== undefined) count++;
+    }
+    return count;
   }
 
   markChronicled(arc: string, cursorTs: string): void {
@@ -337,67 +335,144 @@ export class ChatHistoryStore {
   }
 
   /**
-   * Read JSONL lines in chronological order.
-   *
-   * opts.sinceTs  — only consider files whose date prefix >= sinceTs.slice(0,10).
-   *                 Avoids opening files that cannot contain relevant lines.
-   * opts.maxLines — read files newest-first and stop once this many lines have
-   *                 been accumulated. Avoids reading the full archive when callers
-   *                 only need a recent window.
-   * opts.until    — read files newest-first and stop once this predicate returns
-   *                 true for a newly-read chunk.  Reads one additional file after
-   *                 the predicate fires so that pre-match context is available.
-   *
-   * sinceTs filters the candidate file list up-front; maxLines and until both
-   * apply early-stopping within that filtered set. When both maxLines and until
-   * are given, reading stops when either condition is met first.
+   * Yields lines from newest to oldest across all JSONL files for an arc.
+   * No filtering or stopping logic — callers apply their own conditions.
    */
-  private async readRecentLines(
-    arc: string,
-    opts: { sinceTs?: string; maxLines?: number; until?: (chunk: JsonlLine[]) => boolean } = {},
-  ): Promise<JsonlLine[]> {
+  private async *streamNewestFirst(arc: string): AsyncGenerator<JsonlLine> {
     const dir = join(this.arcsBasePath, arc, "chat_history");
 
-    let allFiles: string[];
+    let files: string[];
     try {
-      allFiles = (await readdir(dir)).filter((f) => f.endsWith(".jsonl")).sort();
+      files = (await readdir(dir)).filter((f) => f.endsWith(".jsonl")).sort();
     } catch {
-      return [];
+      return;
     }
 
-    // sinceTs filter: drop files that predate the cutoff date entirely.
-    const files = opts.sinceTs
-      ? allFiles.filter((f) => f.replace(".jsonl", "") >= opts.sinceTs!.slice(0, 10))
-      : allFiles;
+    // Read files newest-first
+    for (let i = files.length - 1; i >= 0; i--) {
+      const fileLines = await this.readJsonlFile(join(dir, files[i]));
+      // Yield lines within each file newest-first (reverse order)
+      for (let j = fileLines.length - 1; j >= 0; j--) {
+        yield fileLines[j];
+      }
+    }
+  }
 
-    if (opts.maxLines !== undefined || opts.until) {
-      // Read newest files first; stop based on maxLines / until.
-      const chunks: JsonlLine[][] = [];
-      let total = 0;
-      let satisfied = false;
-      for (let i = files.length - 1; i >= 0; i--) {
-        if (opts.maxLines && total >= opts.maxLines) break;
-        const fileLines = await this.readJsonlFile(join(dir, files[i]));
-        chunks.push(fileLines);
-        total += fileLines.length;
-        if (opts.until && !satisfied && opts.until(fileLines)) {
-          // Predicate matched — read one more file for pre-match context,
-          // then break.
-          satisfied = true;
-        } else if (satisfied) {
-          break;
+  /**
+   * Read main-channel context lines (oldest-first), deduped by (pid, role).
+   * Skips lines with tid (thread lines) and non-message lines.
+   */
+  private async readMainContext(arc: string, limit: number): Promise<JsonlLine[]> {
+    const seen = new Set<string>();
+    const collected: JsonlLine[] = [];
+
+    for await (const line of this.streamNewestFirst(arc)) {
+      // Only message lines, not threaded
+      if (line.m === undefined || line.tid) continue;
+
+      // Dedup by (pid, role): first occurrence newest-first = latest version
+      if (line.pid) {
+        const key = `${line.pid}\0${line.r ?? "user"}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+      }
+
+      collected.push(line);
+      if (collected.length >= limit) break;
+    }
+
+    return collected.reverse();
+  }
+
+  /**
+   * Read thread context lines (oldest-first), deduped by (pid, role).
+   *
+   * Phase 1 (before starter found): collect thread replies (tid === threadId)
+   *   and watch for the starter: line.pid === threadId && (!line.tid || line.tid === line.pid)
+   * Phase 2 (after starter found): collect pre-starter main-channel lines (!tid, m only)
+   *   until total collected >= limit.
+   *
+   * The starter line itself is counted in the total.
+   */
+  private async readThreadContext(arc: string, threadId: string, limit: number): Promise<JsonlLine[]> {
+    const seen = new Set<string>();
+    const collected: JsonlLine[] = [];
+    let foundStarter = false;
+
+    const deduped = (line: JsonlLine): boolean => {
+      if (!line.pid) return false; // no dedup needed
+      const key = `${line.pid}\0${line.r ?? "user"}`;
+      if (seen.has(key)) return true; // duplicate
+      seen.add(key);
+      return false;
+    };
+
+    for await (const line of this.streamNewestFirst(arc)) {
+      if (collected.length >= limit) break;
+
+      if (!foundStarter) {
+        // Phase 1: looking for starter and collecting thread replies
+
+        // Check for starter FIRST (Slack auto-thread: tid===pid===threadId)
+        if (line.pid === threadId && (!line.tid || line.tid === line.pid)) {
+          if (!deduped(line)) {
+            collected.push(line);
+          }
+          foundStarter = true;
+          continue;
+        }
+
+        // Collect thread replies (tid === threadId), skip everything else
+        if (line.tid === threadId) {
+          if (!deduped(line)) {
+            collected.push(line);
+          }
+        }
+      } else {
+        // Phase 2: collect pre-starter context lines
+        if (line.m !== undefined) {
+          if (line.tid === threadId) {
+            // Older thread member below the starter (e.g. root user message in Slack auto-thread
+            // where both user root and bot root share pid===tid===threadId).
+            if (!deduped(line)) collected.push(line);
+          } else if (!line.tid) {
+            // Pre-starter main-channel message
+            if (!deduped(line)) collected.push(line);
+          }
         }
       }
-      const result = chunks.reverse().flat();
-      return opts.maxLines ? result.slice(-opts.maxLines) : result;
     }
 
-    // No maxLines / until: read all matching files in chronological order.
-    const allLines: JsonlLine[] = [];
-    for (const file of files) {
-      allLines.push(...(await this.readJsonlFile(join(dir, file))));
-    }
-    return allLines;
+    return collected.reverse();
+  }
+
+  /**
+   * Format collected JsonlLine[] into Message[] for inference.
+   */
+  private formatContextLines(lines: JsonlLine[]): Message[] {
+    return lines.map((line): Message => {
+      const timeOnly = line.ts.slice(11, 16); // HH:MM
+      const nick = line.n ?? "?";
+      const content = line.m ?? "";
+      const formatted = `<${nick}> ${content}`;
+      const modePrefix = line.r === "assistant" && line.mode ? this.modeToPrefix(line.mode) : "";
+      const text = `${modePrefix}[${timeOnly}] ${formatted}`;
+      const timestamp = new Date(line.ts).getTime() || 0;
+
+      if (line.r === "assistant") {
+        return {
+          role: "assistant",
+          content: [{ type: "text", text }],
+          ...createStubAssistantFields(),
+          timestamp,
+        } satisfies AssistantMessage;
+      }
+      return {
+        role: "user",
+        content: text,
+        timestamp,
+      } satisfies UserMessage;
+    });
   }
 
   private jsonlPath(arc: string, date: string): string {
@@ -422,92 +497,6 @@ export class ChatHistoryStore {
     } catch {
       return null;
     }
-  }
-
-
-  // ── Thread context algorithm ──
-
-  /**
-   * selectThreadContext scans backwards through `lines` to collect:
-   * 1. The thread starter (pid === threadId, no foreign tid)
-   * 2. All thread replies (tid === threadId)
-   * 3. Pre-starter main-channel messages (for context up to inferenceLimit)
-   *
-   * The caller uses readRecentLines with an `until` predicate that stops
-   * reading files once the thread starter is found (plus one extra file
-   * for pre-starter context).
-   * The backward scan is O(n) and stops once limit results are collected.
-   */
-  private selectThreadContext(
-    lines: JsonlLine[],
-    threadId: string,
-    limit: number,
-  ): JsonlLine[] {
-    const result: JsonlLine[] = [];
-    let foundStarter = false;
-    let starterTs: string | null = null;
-
-    // Scan backwards
-    for (let i = lines.length - 1; i >= 0 && result.length < limit; i--) {
-      const line = lines[i];
-
-      // Check starter BEFORE thread membership — when tid===pid===threadId
-      // (Slack auto-thread), the line must be recognized as the starter,
-      // not consumed as an ordinary thread reply.
-      if (
-        !foundStarter &&
-        line.pid === threadId &&
-        (!line.tid || line.tid === line.pid)
-      ) {
-        result.push(line);
-        foundStarter = true;
-        starterTs = line.ts;
-        continue;
-      }
-
-      // Collect thread messages (tid matches) — both before and after finding starter.
-      if (line.tid === threadId) {
-        result.push(line);
-        continue;
-      }
-
-      if (!foundStarter) {
-        // Skip unrelated main-channel messages until we find starter
-        continue;
-      }
-
-      // In main-channel mode: collect non-threaded messages before the starter
-      if (!line.tid && line.ts <= starterTs!) {
-        result.push(line);
-      }
-    }
-
-    return this.dedupeEdits(result.reverse());
-  }
-
-  /**
-   * When multiple lines share the same pid AND role, keep the latest (edit dedup).
-   * Different roles with the same pid are independent — a user message and an
-   * assistant response may legitimately share a platformId (e.g. deliverResult
-   * cloning the triggering message).
-   */
-  private dedupeEdits(lines: JsonlLine[]): JsonlLine[] {
-    // Build a map of (pid, role) -> latest line index
-    const keyLatest = new Map<string, number>();
-    for (let i = lines.length - 1; i >= 0; i--) {
-      const pid = lines[i].pid;
-      if (!pid) continue;
-      const key = `${pid}\0${lines[i].r ?? "user"}`;
-      if (!keyLatest.has(key)) {
-        keyLatest.set(key, i);
-      }
-    }
-
-    return lines.filter((line, i) => {
-      if (!line.pid) return true;
-      const key = `${line.pid}\0${line.r ?? "user"}`;
-      return keyLatest.get(key) === i;
-    });
   }
 
   // ── Helpers ──
