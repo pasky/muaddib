@@ -2298,4 +2298,80 @@ describe("RoomMessageHandler", () => {
 
     await history.close();
   });
+
+  it("does not persist user platformId on bot response (Fix A: PID collision)", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const incoming: RoomMessage = {
+      ...makeMessage("!s hello"),
+      platformId: "user-msg-1234",
+    };
+
+    const persistedMessages: RoomMessage[] = [];
+    const origAddMessage = history.addMessage.bind(history);
+    vi.spyOn(history, "addMessage").mockImplementation(async (...args) => {
+      const [msg] = args;
+      persistedMessages.push(msg as RoomMessage);
+      return origAddMessage(...(args as Parameters<typeof history.addMessage>));
+    });
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: () => ({
+        prompt: async () => makeRunnerResult("bot reply"),
+      }),
+    });
+
+    await handler.handleIncomingMessage(incoming, {
+      isDirect: true,
+      sendResponse: async () => {},
+    });
+
+    // Find the bot response among persisted messages
+    const botMessages = persistedMessages.filter((m) => m.nick === "muaddib" && m.content === "bot reply");
+    expect(botMessages).toHaveLength(1);
+    // Bot response must NOT inherit the user's platformId
+    expect(botMessages[0].platformId).not.toBe("user-msg-1234");
+  });
+
+  it("persists outbound platformId from sendResponse on bot response (Fix C)", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const incoming: RoomMessage = {
+      ...makeMessage("!s hello"),
+      platformId: "user-msg-1234",
+    };
+
+    const persistedMessages: RoomMessage[] = [];
+    const origAddMessage = history.addMessage.bind(history);
+    vi.spyOn(history, "addMessage").mockImplementation(async (...args) => {
+      const [msg] = args;
+      persistedMessages.push(msg as RoomMessage);
+      return origAddMessage(...(args as Parameters<typeof history.addMessage>));
+    });
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: () => ({
+        prompt: async () => makeRunnerResult("bot reply"),
+      }),
+    });
+
+    await handler.handleIncomingMessage(incoming, {
+      isDirect: true,
+      sendResponse: async () => ({ platformId: "outbound-5555" }),
+    });
+
+    // Find the bot response among persisted messages
+    const botMessages = persistedMessages.filter((m) => m.nick === "muaddib" && m.content === "bot reply");
+    expect(botMessages).toHaveLength(1);
+    // Bot response must use the outbound platformId from the send result
+    expect(botMessages[0].platformId).toBe("outbound-5555");
+  });
 });

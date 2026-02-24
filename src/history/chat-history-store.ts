@@ -374,19 +374,27 @@ export class ChatHistoryStore {
     for (let i = lines.length - 1; i >= 0 && result.length < limit; i--) {
       const line = lines[i];
 
+      // Check starter BEFORE thread membership — when tid===pid===threadId
+      // (Slack auto-thread), the line must be recognized as the starter,
+      // not consumed as an ordinary thread reply.
+      if (
+        !foundStarter &&
+        line.pid === threadId &&
+        (!line.tid || line.tid === line.pid)
+      ) {
+        result.push(line);
+        foundStarter = true;
+        starterTs = line.ts;
+        continue;
+      }
+
+      // Collect thread messages (tid matches) — both before and after finding starter.
+      if (line.tid === threadId) {
+        result.push(line);
+        continue;
+      }
+
       if (!foundStarter) {
-        // Collect thread messages
-        if (line.tid === threadId) {
-          result.push(line);
-          continue;
-        }
-        // Check if this is the thread starter (pid matches threadId, not a thread message itself)
-        if (line.pid === threadId && !line.tid) {
-          result.push(line);
-          foundStarter = true;
-          starterTs = line.ts;
-          continue;
-        }
         // Skip unrelated main-channel messages until we find starter
         continue;
       }
@@ -400,20 +408,28 @@ export class ChatHistoryStore {
     return this.dedupeEdits(result.reverse());
   }
 
-  /** When multiple lines share the same pid, keep the latest (edit dedup). */
+  /**
+   * When multiple lines share the same pid AND role, keep the latest (edit dedup).
+   * Different roles with the same pid are independent — a user message and an
+   * assistant response may legitimately share a platformId (e.g. deliverResult
+   * cloning the triggering message).
+   */
   private dedupeEdits(lines: JsonlLine[]): JsonlLine[] {
-    // Build a map of pid -> latest line index
-    const pidLatest = new Map<string, number>();
+    // Build a map of (pid, role) -> latest line index
+    const keyLatest = new Map<string, number>();
     for (let i = lines.length - 1; i >= 0; i--) {
       const pid = lines[i].pid;
-      if (pid && !pidLatest.has(pid)) {
-        pidLatest.set(pid, i);
+      if (!pid) continue;
+      const key = `${pid}\0${lines[i].r ?? "user"}`;
+      if (!keyLatest.has(key)) {
+        keyLatest.set(key, i);
       }
     }
 
     return lines.filter((line, i) => {
       if (!line.pid) return true;
-      return pidLatest.get(line.pid) === i;
+      const key = `${line.pid}\0${line.r ?? "user"}`;
+      return keyLatest.get(key) === i;
     });
   }
 

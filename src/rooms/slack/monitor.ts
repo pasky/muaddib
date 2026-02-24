@@ -15,7 +15,7 @@ import { SlackSocketTransport } from "./transport.js";
 interface CommandLike {
   handleIncomingMessage(
     message: RoomMessage,
-    options: { isDirect: boolean; sendResponse?: (text: string) => Promise<void> },
+    options: { isDirect: boolean; sendResponse?: (text: string) => Promise<{ platformId?: string } | void> },
   ): Promise<{ response: string | null } | null>;
   cancelProactive?(): void;
 }
@@ -364,6 +364,8 @@ export class SlackRoomMonitor {
               if (typingIndicatorThreadTs && sender.setTypingIndicator) {
                 await sender.setTypingIndicator(event.channelId, typingIndicatorThreadTs);
               }
+
+              return { platformId: lastReplyTs };
             }
           : undefined,
       });

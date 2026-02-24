@@ -48,6 +48,13 @@ import type { AgentConfig } from "../../config/muaddib-config.js";
 
 export type CommandExecutorLogger = Logger;
 
+export interface SendResult {
+  platformId?: string;
+}
+
+/** Callback for sending a message to the room. May return the outbound platform ID. */
+export type SendResponse = (text: string) => Promise<SendResult | void>;
+
 export interface CommandExecutionResult {
   response: string | null;
   resolved: ResolvedCommand;
@@ -209,7 +216,7 @@ export class CommandExecutor {
   async execute(
     message: RoomMessage,
     triggerTs: string,
-    sendResponse: ((text: string) => Promise<void>) | undefined,
+    sendResponse: SendResponse | undefined,
     onAgentCreated?: (agent: Agent) => void,
   ): Promise<CommandExecutionResult> {
     const { commandConfig, logger } = this;
@@ -376,7 +383,7 @@ export class CommandExecutor {
       metaReminder: modeConfig.promptReminder,
       progressThresholdSeconds: progressConfig?.thresholdSeconds,
       progressMinIntervalSeconds: progressConfig?.minIntervalSeconds,
-      onStatusMessage: sendResponse,
+      onStatusMessage: sendResponse ? (text: string) => { sendResponse(text); } : undefined,
       logger,
       onAgentCreated,
     });
@@ -415,7 +422,7 @@ export class CommandExecutor {
    */
   async executeProactive(
     message: RoomMessage,
-    sendResponse: ((text: string) => Promise<void>) | undefined,
+    sendResponse: SendResponse | undefined,
     proactiveConfig: ProactiveConfig,
     classifiedTrigger: string,
     classifiedRuntime: { reasoningEffort: string; allowedTools: string[] | null },
@@ -446,7 +453,7 @@ export class CommandExecutor {
       metaReminder: this.commandConfig.modes.serious?.promptReminder,
       progressThresholdSeconds: proactiveProgressConfig?.thresholdSeconds,
       progressMinIntervalSeconds: proactiveProgressConfig?.minIntervalSeconds,
-      onStatusMessage: sendResponse,
+      onStatusMessage: sendResponse ? (text: string) => { sendResponse(text); } : undefined,
       logger,
       onAgentCreated,
     });
@@ -483,8 +490,10 @@ export class CommandExecutor {
       `response=${responseText}`,
     );
 
+    let outboundPlatformId: string | undefined;
     if (sendResponse) {
-      await sendResponse(responseText);
+      const sendResult = await sendResponse(responseText);
+      outboundPlatformId = sendResult?.platformId;
     }
 
     await this.history.addMessage(
@@ -492,6 +501,7 @@ export class CommandExecutor {
         ...message,
         nick: message.mynick,
         content: responseText,
+        platformId: outboundPlatformId,
       },
       { mode: classifiedTrigger },
     );
@@ -549,7 +559,7 @@ export class CommandExecutor {
   private async deliverResult(
     message: RoomMessage,
     triggerTs: string,
-    sendResponse: ((text: string) => Promise<void>) | undefined,
+    sendResponse: SendResponse | undefined,
     partial: {
       response: string | null;
       resolved: ResolvedCommand;
@@ -589,8 +599,10 @@ export class CommandExecutor {
       `response=${result.response}`,
     );
 
+    let outboundPlatformId: string | undefined;
     if (sendResponse) {
-      await sendResponse(result.response);
+      const sendResult = await sendResponse(result.response);
+      outboundPlatformId = sendResult?.platformId;
     }
 
     await history.addMessage(
@@ -598,6 +610,7 @@ export class CommandExecutor {
         ...message,
         nick: message.mynick,
         content: result.response,
+        platformId: outboundPlatformId,
       },
       {
         mode: result.resolved.selectedTrigger ?? undefined,
@@ -624,7 +637,7 @@ export class CommandExecutor {
     message: RoomMessage,
     result: CommandExecutionResult,
     arcName: string,
-    sendResponse: ((text: string) => Promise<void>) | undefined,
+    sendResponse: SendResponse | undefined,
   ): Promise<void> {
     if (!sendResponse || !result.usage) {
       return;
@@ -644,11 +657,12 @@ export class CommandExecutor {
       ].join(", ")})`;
 
       logger.info("Sending cost followup", `arc=${arcName}`, `cost=${totalCost.toFixed(4)}`);
-      await sendResponse(costMessage);
+      const costSendResult = await sendResponse(costMessage);
       await history.addMessage({
         ...message,
         nick: message.mynick,
         content: costMessage,
+        platformId: costSendResult?.platformId,
       });
     }
 
@@ -663,11 +677,12 @@ export class CommandExecutor {
     const milestoneMessage =
       `(fun fact: my messages in this channel have already cost $${totalToday.toFixed(4)} today)`;
     logger.info("Sending daily cost milestone", `arc=${arcName}`, `total_today=${totalToday.toFixed(4)}`);
-    await sendResponse(milestoneMessage);
+    const milestoneSendResult = await sendResponse(milestoneMessage);
     await history.addMessage({
       ...message,
       nick: message.mynick,
       content: milestoneMessage,
+      platformId: milestoneSendResult?.platformId,
     });
   }
 
@@ -791,6 +806,7 @@ export class CommandExecutor {
         ...message,
         nick: message.mynick,
         content: summaryText,
+        platformId: undefined,
       },
       {
         contentTemplate: "[internal monologue] {message}",
@@ -802,7 +818,7 @@ export class CommandExecutor {
     message: RoomMessage,
     allowedTools: string[] | null,
     conversationContext?: Message[],
-    sendResponse?: (text: string) => Promise<void>,
+    sendResponse?: SendResponse,
   ): ToolSet {
     const invocationToolOptions: BaselineToolOptions = {
       ...this.buildToolOptions(),
@@ -814,11 +830,12 @@ export class CommandExecutor {
     const onProgressReport: ((text: string) => void | Promise<void>) | undefined =
       sendResponse
         ? async (text: string) => {
-            await sendResponse(text);
+            const sendResult = await sendResponse(text);
             await this.history.addMessage({
               ...message,
               nick: message.mynick,
               content: text,
+              platformId: sendResult?.platformId,
             });
           }
         : undefined;

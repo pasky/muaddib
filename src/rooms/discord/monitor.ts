@@ -15,7 +15,7 @@ import { DiscordGatewayTransport } from "./transport.js";
 interface CommandLike {
   handleIncomingMessage(
     message: RoomMessage,
-    options: { isDirect: boolean; sendResponse?: (text: string) => Promise<void> },
+    options: { isDirect: boolean; sendResponse?: (text: string) => Promise<{ platformId?: string } | void> },
   ): Promise<{ response: string | null } | null>;
   cancelProactive?(): void;
 }
@@ -313,7 +313,7 @@ export class DiscordRoomMonitor {
                 }
                 lastReplyText = combined;
                 lastReplyAtSeconds = nowSeconds;
-                return;
+                return { platformId: lastReplyMessageId };
               }
 
               const replyToMessageId = lastReplyMessageId ?? event.messageId;
@@ -334,6 +334,7 @@ export class DiscordRoomMonitor {
               }
               lastReplyText = text;
               lastReplyAtSeconds = nowSeconds;
+              return { platformId: lastReplyMessageId };
             }
           : undefined,
       });

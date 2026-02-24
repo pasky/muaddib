@@ -16,6 +16,7 @@ import {
   type CommandExecutionResult,
   type CommandExecutorOverrides,
   type CommandExecutorLogger,
+  type SendResponse,
 } from "./command-executor.js";
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { type RoomMessage, roomArc, STEER_PREFIX } from "../message.js";
@@ -29,6 +30,8 @@ export type {
   CommandRunnerFactoryInput,
   CommandRateLimiter,
   CommandExecutorOverrides,
+  SendResponse,
+  SendResult,
 } from "./command-executor.js";
 
 /** Key for session isolation: arc + nick (or arc + thread for threaded messages). */
@@ -91,7 +94,7 @@ export class RoomMessageHandler {
 
   async handleIncomingMessage(
     message: RoomMessage,
-    options: { isDirect: boolean; sendResponse?: (text: string) => Promise<void> },
+    options: { isDirect: boolean; sendResponse?: SendResponse },
   ): Promise<CommandExecutionResult | null> {
     // ── Synchronous steer fast-path ──
     // Check for an active session BEFORE the async addMessage call.  Without
@@ -159,7 +162,7 @@ export class RoomMessageHandler {
   private async handleCommandMessage(
     message: RoomMessage,
     triggerTs: string,
-    sendResponse: ((text: string) => Promise<void>) | undefined,
+    sendResponse: SendResponse | undefined,
   ): Promise<CommandExecutionResult | null> {
     const key = sessionKey(message);
     const existing = this.activeSteers.get(key);
@@ -220,7 +223,7 @@ export class RoomMessageHandler {
 
   private async handlePassiveMessage(
     message: RoomMessage,
-    sendResponse: ((text: string) => Promise<void>) | undefined,
+    sendResponse: SendResponse | undefined,
   ): Promise<void> {
     const key = sessionKey(message);
 

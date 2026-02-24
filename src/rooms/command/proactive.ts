@@ -20,6 +20,7 @@ import type {
   CommandExecutor,
   CommandRateLimiter,
   CommandExecutorLogger,
+  SendResponse,
 } from "./command-executor.js";
 import { pickModeModel } from "./command-executor.js";
 import { type RoomMessage, roomArc, STEER_PREFIX } from "../message.js";
@@ -153,7 +154,7 @@ export class ProactiveRunner {
    */
   steerOrStart(
     message: RoomMessage,
-    sendResponse: ((text: string) => Promise<void>) | undefined,
+    sendResponse: SendResponse | undefined,
     hasActiveCommandSession: () => boolean,
   ): boolean {
     const channelKey = CommandResolver.channelKey(message.serverTag, message.channelName);
@@ -197,7 +198,7 @@ export class ProactiveRunner {
    */
   private async runSession(
     message: RoomMessage,
-    sendResponse: ((text: string) => Promise<void>) | undefined,
+    sendResponse: SendResponse | undefined,
     hasActiveCommandSession: () => boolean,
   ): Promise<void> {
     const debounceMs = this.config.debounceSeconds * 1000;
@@ -241,7 +242,7 @@ export class ProactiveRunner {
 
   private async evaluateAndMaybeInterject(
     message: RoomMessage,
-    sendResponse: ((text: string) => Promise<void>) | undefined,
+    sendResponse: SendResponse | undefined,
     channelKey: string,
   ): Promise<void> {
     if (!this.rateLimiter.checkLimit()) {

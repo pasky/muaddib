@@ -120,6 +120,200 @@ describe("ChatHistoryStore", () => {
     await store.close();
   });
 
+  // ── Issue #1: PID dedupe collision ──
+
+  it("does not dedupe user and assistant messages that share the same platformId", async () => {
+    const store = createTempHistoryStore(10);
+    await store.initialize();
+
+    // Simulate: user sends message, then deliverResult clones it for assistant
+    // Both end up with the same platformId — assistant must NOT shadow user.
+    await store.addMessage({
+      serverTag: "slack:test",
+      channelName: "general",
+      nick: "alice",
+      mynick: "muaddib",
+      content: "what is the spice?",
+      platformId: "1234.5678",
+    });
+
+    await store.addMessage({
+      serverTag: "slack:test",
+      channelName: "general",
+      nick: "muaddib",
+      mynick: "muaddib",
+      content: "the spice is life",
+      platformId: "1234.5678",
+    });
+
+    const arc = fsSafeArc("slack:test#general");
+    const context = await store.getContext(arc, 10);
+
+    expect(context).toHaveLength(2);
+    expect(context[0].role).toBe("user");
+    expect(context[1].role).toBe("assistant");
+  });
+
+  it("preserves all messages in a thread when user+assistant share platformId", async () => {
+    const store = createTempHistoryStore(10);
+    await store.initialize();
+
+    const arc = fsSafeArc("slack:test#general");
+
+    // Root mention (Slack: pid === tid for root)
+    await store.addMessage({
+      serverTag: "slack:test",
+      channelName: "general",
+      nick: "alice",
+      mynick: "muaddib",
+      content: "hello",
+      platformId: "1000.0000",
+      threadId: "1000.0000",
+      responseThreadId: "1000.0000",
+    });
+    await store.addMessage({
+      serverTag: "slack:test",
+      channelName: "general",
+      nick: "muaddib",
+      mynick: "muaddib",
+      content: "hi there",
+      platformId: "1000.0000",
+      threadId: "1000.0000",
+      responseThreadId: "1000.0000",
+    });
+
+    // Thread reply
+    await store.addMessage({
+      serverTag: "slack:test",
+      channelName: "general",
+      nick: "alice",
+      mynick: "muaddib",
+      content: "follow up",
+      platformId: "2000.0000",
+      threadId: "1000.0000",
+      responseThreadId: "1000.0000",
+    });
+    await store.addMessage({
+      serverTag: "slack:test",
+      channelName: "general",
+      nick: "muaddib",
+      mynick: "muaddib",
+      content: "follow up answer",
+      platformId: "2000.0000",
+      threadId: "1000.0000",
+      responseThreadId: "1000.0000",
+    });
+
+    const context = await store.getContext(arc, 10, "1000.0000");
+
+    // All four messages must be present
+    expect(context).toHaveLength(4);
+    expect(context[0].role).toBe("user");
+    expect(context[1].role).toBe("assistant");
+    expect(context[2].role).toBe("user");
+    expect(context[3].role).toBe("assistant");
+  });
+
+  // ── Issue #2: Thread starter detection ──
+
+  it("finds Slack thread starter when tid === pid (B2 relaxed condition)", async () => {
+    const store = createTempHistoryStore(10);
+    await store.initialize();
+
+    const arc = fsSafeArc("slack:test#general");
+
+    // Pre-thread main channel context
+    await store.addMessage({
+      serverTag: "slack:test",
+      channelName: "general",
+      nick: "bob",
+      mynick: "muaddib",
+      content: "earlier channel message",
+    });
+
+    // Slack root mention: pid === tid (auto-thread)
+    await store.addMessage({
+      serverTag: "slack:test",
+      channelName: "general",
+      nick: "alice",
+      mynick: "muaddib",
+      content: "question in channel",
+      platformId: "1000.0000",
+      threadId: "1000.0000",
+      responseThreadId: "1000.0000",
+    });
+
+    // Thread reply
+    await store.addMessage({
+      serverTag: "slack:test",
+      channelName: "general",
+      nick: "alice",
+      mynick: "muaddib",
+      content: "thread followup",
+      platformId: "2000.0000",
+      threadId: "1000.0000",
+      responseThreadId: "1000.0000",
+    });
+
+    const context = await store.getContext(arc, 10, "1000.0000");
+
+    // Should include: pre-thread msg, starter, thread reply = 3
+    expect(context).toHaveLength(3);
+    expect(context[0].role).toBe("user");
+    expect((context[0] as any).content).toContain("earlier channel message");
+    expect((context[1] as any).content).toContain("question in channel");
+    expect((context[2] as any).content).toContain("thread followup");
+  });
+
+  it("finds bot-rooted thread starter via persisted outbound platformId", async () => {
+    const store = createTempHistoryStore(10);
+    await store.initialize();
+
+    const arc = fsSafeArc("slack:test#general");
+
+    // Pre-thread context
+    await store.addMessage({
+      serverTag: "slack:test",
+      channelName: "general",
+      nick: "alice",
+      mynick: "muaddib",
+      content: "earlier context",
+    });
+
+    // Bot sends a message to channel (replyStartThread=false),
+    // its outbound platformId "5555.0000" is persisted after send.
+    await store.addMessage({
+      serverTag: "slack:test",
+      channelName: "general",
+      nick: "muaddib",
+      mynick: "muaddib",
+      content: "bot channel message",
+      platformId: "5555.0000",
+    });
+
+    // User replies in thread on bot's message
+    await store.addMessage({
+      serverTag: "slack:test",
+      channelName: "general",
+      nick: "alice",
+      mynick: "muaddib",
+      content: "replying to bot",
+      platformId: "7777.0000",
+      threadId: "5555.0000",
+      responseThreadId: "5555.0000",
+    });
+
+    const context = await store.getContext(arc, 10, "5555.0000");
+
+    // Should include: pre-thread msg, bot starter, thread reply = 3
+    expect(context).toHaveLength(3);
+    expect((context[0] as any).content).toContain("earlier context");
+    // Bot starter is an assistant message — content is [{type:"text", text:"..."}]
+    expect(context[1].role).toBe("assistant");
+    expect((context[1] as any).content[0].text).toContain("bot channel message");
+    expect((context[2] as any).content).toContain("replying to bot");
+  });
+
   it("counts and marks chronicled messages", async () => {
     const store = createTempHistoryStore(10);
     await store.initialize();
