@@ -282,11 +282,7 @@ async function ensureVm(
       // the logger so stuck boots are diagnosable.  The "qemu" debug component
       // requires the "protocol" debug flag.
       const debugLog: import("@earendil-works/gondolin").DebugLogFn = (component, message) => {
-        if (component === "qemu" || component === "error") {
-          logger?.info(`Gondolin VM [${arc}] ${component}: ${message}`);
-        } else {
-          logger?.debug(`Gondolin VM [${arc}] ${component}: ${message}`);
-        }
+        logger?.debug(`Gondolin VM [${arc}] ${component}: ${message}`);
       };
 
       const vmOptions: import("@earendil-works/gondolin").VMOptions = {
