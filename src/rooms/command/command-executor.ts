@@ -50,6 +50,10 @@ export type CommandExecutorLogger = Logger;
 
 export interface SendResult {
   platformId?: string;
+  /** When true, the message was coalesced into an existing platform message via edit. */
+  isEdit?: boolean;
+  /** The full coalesced content after edit (set when isEdit is true). */
+  combinedContent?: string;
 }
 
 /** Callback for sending a message to the room. May return the outbound platform ID. */
@@ -490,21 +494,25 @@ export class CommandExecutor {
       `response=${responseText}`,
     );
 
-    let outboundPlatformId: string | undefined;
+    let proactiveSendResult: SendResult | undefined;
     if (sendResponse) {
-      const sendResult = await sendResponse(responseText);
-      outboundPlatformId = sendResult?.platformId;
+      const sr = await sendResponse(responseText);
+      if (sr) proactiveSendResult = sr;
     }
 
-    await this.history.addMessage(
-      {
-        ...message,
-        nick: message.mynick,
-        content: responseText,
-        platformId: outboundPlatformId,
-      },
-      { mode: classifiedTrigger },
-    );
+    if (proactiveSendResult?.isEdit && proactiveSendResult.platformId && proactiveSendResult.combinedContent) {
+      await this.history.appendEdit(roomArc(message), proactiveSendResult.platformId, proactiveSendResult.combinedContent, message.mynick, "assistant");
+    } else {
+      await this.history.addMessage(
+        {
+          ...message,
+          nick: message.mynick,
+          content: responseText,
+          platformId: proactiveSendResult?.platformId,
+        },
+        { mode: classifiedTrigger },
+      );
+    }
 
     await this.triggerAutoChronicler(message, this.commandConfig.historySize);
     return true;
@@ -599,29 +607,35 @@ export class CommandExecutor {
       `response=${result.response}`,
     );
 
-    let outboundPlatformId: string | undefined;
+    let sendResult: SendResult | undefined;
     if (sendResponse) {
-      const sendResult = await sendResponse(result.response);
-      outboundPlatformId = sendResult?.platformId;
+      const sr = await sendResponse(result.response);
+      if (sr) sendResult = sr;
     }
 
-    await history.addMessage(
-      {
-        ...message,
-        nick: message.mynick,
-        content: result.response,
-        platformId: outboundPlatformId,
-      },
-      {
-        mode: result.resolved.selectedTrigger ?? undefined,
-        run: triggerTs || undefined,
-        call: result.model ? "agent_run" : undefined,
-        model: result.model ?? undefined,
-        inTok: result.usage?.input,
-        outTok: result.usage?.output,
-        cost: result.usage?.cost.total,
-      },
-    );
+    if (sendResult?.isEdit && sendResult.platformId && sendResult.combinedContent) {
+      // Message was coalesced into an existing platform message via edit —
+      // update the existing history line to match the combined platform content.
+      await history.appendEdit(arcName, sendResult.platformId, sendResult.combinedContent, message.mynick, "assistant");
+    } else {
+      await history.addMessage(
+        {
+          ...message,
+          nick: message.mynick,
+          content: result.response,
+          platformId: sendResult?.platformId,
+        },
+        {
+          mode: result.resolved.selectedTrigger ?? undefined,
+          run: triggerTs || undefined,
+          call: result.model ? "agent_run" : undefined,
+          model: result.model ?? undefined,
+          inTok: result.usage?.input,
+          outTok: result.usage?.output,
+          cost: result.usage?.cost.total,
+        },
+      );
+    }
 
     logger.debug(
       "Direct command response stored",
@@ -658,12 +672,16 @@ export class CommandExecutor {
 
       logger.info("Sending cost followup", `arc=${arcName}`, `cost=${totalCost.toFixed(4)}`);
       const costSendResult = await sendResponse(costMessage);
-      await history.addMessage({
-        ...message,
-        nick: message.mynick,
-        content: costMessage,
-        platformId: costSendResult?.platformId,
-      });
+      if (costSendResult?.isEdit && costSendResult.platformId && costSendResult.combinedContent) {
+        await history.appendEdit(arcName, costSendResult.platformId, costSendResult.combinedContent, message.mynick, "assistant");
+      } else {
+        await history.addMessage({
+          ...message,
+          nick: message.mynick,
+          content: costMessage,
+          platformId: costSendResult?.platformId,
+        });
+      }
     }
 
     const totalToday = await history.getArcCostToday(arcName);
@@ -678,12 +696,16 @@ export class CommandExecutor {
       `(fun fact: my messages in this channel have already cost $${totalToday.toFixed(4)} today)`;
     logger.info("Sending daily cost milestone", `arc=${arcName}`, `total_today=${totalToday.toFixed(4)}`);
     const milestoneSendResult = await sendResponse(milestoneMessage);
-    await history.addMessage({
-      ...message,
-      nick: message.mynick,
-      content: milestoneMessage,
-      platformId: milestoneSendResult?.platformId,
-    });
+    if (milestoneSendResult?.isEdit && milestoneSendResult.platformId && milestoneSendResult.combinedContent) {
+      await history.appendEdit(arcName, milestoneSendResult.platformId, milestoneSendResult.combinedContent, message.mynick, "assistant");
+    } else {
+      await history.addMessage({
+        ...message,
+        nick: message.mynick,
+        content: milestoneMessage,
+        platformId: milestoneSendResult?.platformId,
+      });
+    }
   }
 
   // ── Helpers ──
@@ -831,12 +853,16 @@ export class CommandExecutor {
       sendResponse
         ? async (text: string) => {
             const sendResult = await sendResponse(text);
-            await this.history.addMessage({
-              ...message,
-              nick: message.mynick,
-              content: text,
-              platformId: sendResult?.platformId,
-            });
+            if (sendResult?.isEdit && sendResult.platformId && sendResult.combinedContent) {
+              await this.history.appendEdit(roomArc(message), sendResult.platformId, sendResult.combinedContent, message.mynick, "assistant");
+            } else {
+              await this.history.addMessage({
+                ...message,
+                nick: message.mynick,
+                content: text,
+                platformId: sendResult?.platformId,
+              });
+            }
           }
         : undefined;
 

@@ -313,7 +313,7 @@ export class DiscordRoomMonitor {
                 }
                 lastReplyText = combined;
                 lastReplyAtSeconds = nowSeconds;
-                return { platformId: lastReplyMessageId };
+                return { platformId: lastReplyMessageId, isEdit: true, combinedContent: combined };
               }
 
               const replyToMessageId = lastReplyMessageId ?? event.messageId;

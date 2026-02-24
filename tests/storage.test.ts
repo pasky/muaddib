@@ -120,6 +120,36 @@ describe("ChatHistoryStore", () => {
     await store.close();
   });
 
+  it("appendEdit supports assistant role for bot message coalescing", async () => {
+    const store = createTempHistoryStore(10);
+    await store.initialize();
+
+    const arc = fsSafeArc("slack:test#general");
+
+    // Bot sends initial response
+    await store.addMessage({
+      serverTag: "slack:test",
+      channelName: "general",
+      nick: "muaddib",
+      mynick: "muaddib",
+      content: "bot reply",
+      platformId: "5555.0000",
+    });
+
+    // Cost followup coalesced via edit — combined content replaces original
+    await store.appendEdit(arc, "5555.0000", "bot reply\n(cost $0.50)", "muaddib", "assistant");
+
+    const context = await store.getContext(arc, 10);
+
+    // Dedup keeps the edit — one message with combined content
+    expect(context).toHaveLength(1);
+    expect(context[0].role).toBe("assistant");
+    expect((context[0] as any).content[0].text).toContain("bot reply");
+    expect((context[0] as any).content[0].text).toContain("cost $0.50");
+
+    await store.close();
+  });
+
   // ── Issue #1: PID dedupe collision ──
 
   it("does not dedupe user and assistant messages that share the same platformId", async () => {

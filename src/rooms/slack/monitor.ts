@@ -343,6 +343,12 @@ export class SlackRoomMonitor {
                 }
                 lastReplyText = combined;
                 lastReplyAtSeconds = nowSeconds;
+
+                if (typingIndicatorThreadTs && sender.setTypingIndicator) {
+                  await sender.setTypingIndicator(event.channelId, typingIndicatorThreadTs);
+                }
+
+                return { platformId: lastReplyTs, isEdit: true, combinedContent: combined };
               } else {
                 const sendResult = await sendWithRetryResult<SlackSendResult>(
                   event.channelId,

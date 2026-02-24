@@ -2374,4 +2374,64 @@ describe("RoomMessageHandler", () => {
     // Bot response must use the outbound platformId from the send result
     expect(botMessages[0].platformId).toBe("outbound-5555");
   });
+
+  it("coalesces bot message via appendEdit when sendResponse returns isEdit (edit debounce)", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const incoming: RoomMessage = {
+      ...makeMessage("!s hello"),
+      platformId: "user-msg-1234",
+    };
+
+    let callCount = 0;
+    const handler = createHandler({
+      roomConfig: {
+        ...roomConfig,
+        command: {
+          ...roomConfig.command,
+          modes: {
+            ...roomConfig.command.modes,
+            serious: {
+              ...roomConfig.command.modes.serious,
+              model: "openai:gpt-4o-mini",
+            },
+          },
+        },
+      } as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: () => ({
+        prompt: async () => makeRunnerResult("expensive answer", { totalCost: 0.5, toolCallsCount: 3 }),
+      }),
+    });
+
+    await handler.handleIncomingMessage(incoming, {
+      isDirect: true,
+      sendResponse: async (text) => {
+        callCount++;
+        if (callCount === 1) {
+          // First call: new send
+          return { platformId: "bot-5555" };
+        }
+        // Subsequent calls: edit debounce — return combined content
+        return {
+          platformId: "bot-5555",
+          isEdit: true,
+          combinedContent: `expensive answer\n${text}`,
+        };
+      },
+    });
+
+    // Check that context reflects the coalesced message
+    const arc = (await import("../src/rooms/message.js")).fsSafeArc("libera##test");
+    const context = await history.getContext(arc, 10);
+
+    // Should have user + one coalesced assistant message (not two separate ones)
+    const assistantMsgs = context.filter((m) => m.role === "assistant");
+    // The coalesced message should contain both the answer and cost info
+    const lastAssistant = assistantMsgs[assistantMsgs.length - 1];
+    expect((lastAssistant as any).content[0].text).toContain("expensive answer");
+    expect((lastAssistant as any).content[0].text).toContain("cost");
+  });
 });

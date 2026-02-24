@@ -278,11 +278,11 @@ export class ChatHistoryStore {
   /**
    * Append an edit line. On context read, the latest line per pid wins.
    */
-  async appendEdit(arc: string, pid: string, content: string, nick: string): Promise<void> {
+  async appendEdit(arc: string, pid: string, content: string, nick: string, role?: ChatRole): Promise<void> {
     const line: JsonlLine = {
       ts: new Date().toISOString(),
       n: nick,
-      r: "user",
+      r: role ?? "user",
       m: content,
       pid,
       edit: true,
