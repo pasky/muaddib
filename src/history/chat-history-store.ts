@@ -177,11 +177,15 @@ export class ChatHistoryStore {
     const inferenceLimit = limit ?? this.inferenceLimit;
 
     // Read newest-first and stop early once we have enough lines.
-    // Thread context uses a larger multiplier: we need to scan back past
-    // all thread replies to find the starter, plus collect pre-starter
-    // main-channel context — so we need a bigger look-back window.
-    const maxLines = threadId ? inferenceLimit * 10 : inferenceLimit * 4;
-    const lines = await this.readRecentLines(arc, { maxLines });
+    // Thread context reads files until the thread starter is found (plus
+    // one extra file for pre-starter context).  Non-thread context uses a
+    // simple line-count cap.
+    const lines = threadId
+      ? await this.readRecentLines(arc, {
+          until: (chunk) =>
+            chunk.some((l) => l.pid === threadId && (!l.tid || l.tid === l.pid)),
+        })
+      : await this.readRecentLines(arc, { maxLines: inferenceLimit * 4 });
 
     // Filter: only lines with m (messages, not bare cost lines)
     const messageLines = lines.filter((l) => l.m !== undefined);
@@ -340,13 +344,17 @@ export class ChatHistoryStore {
    * opts.maxLines — read files newest-first and stop once this many lines have
    *                 been accumulated. Avoids reading the full archive when callers
    *                 only need a recent window.
+   * opts.until    — read files newest-first and stop once this predicate returns
+   *                 true for a newly-read chunk.  Reads one additional file after
+   *                 the predicate fires so that pre-match context is available.
    *
-   * Both options can be combined: sinceTs filters the candidate file list up-front,
-   * then maxLines applies early-stopping within that filtered set.
+   * sinceTs filters the candidate file list up-front; maxLines and until both
+   * apply early-stopping within that filtered set. When both maxLines and until
+   * are given, reading stops when either condition is met first.
    */
   private async readRecentLines(
     arc: string,
-    opts: { sinceTs?: string; maxLines?: number } = {},
+    opts: { sinceTs?: string; maxLines?: number; until?: (chunk: JsonlLine[]) => boolean } = {},
   ): Promise<JsonlLine[]> {
     const dir = join(this.arcsBasePath, arc, "chat_history");
 
@@ -362,20 +370,29 @@ export class ChatHistoryStore {
       ? allFiles.filter((f) => f.replace(".jsonl", "") >= opts.sinceTs!.slice(0, 10))
       : allFiles;
 
-    if (opts.maxLines !== undefined) {
-      // Read newest files first; stop once we've collected enough lines.
+    if (opts.maxLines !== undefined || opts.until) {
+      // Read newest files first; stop based on maxLines / until.
       const chunks: JsonlLine[][] = [];
       let total = 0;
-      for (let i = files.length - 1; i >= 0 && total < opts.maxLines; i--) {
+      let satisfied = false;
+      for (let i = files.length - 1; i >= 0; i--) {
+        if (opts.maxLines && total >= opts.maxLines) break;
         const fileLines = await this.readJsonlFile(join(dir, files[i]));
         chunks.push(fileLines);
         total += fileLines.length;
+        if (opts.until && !satisfied && opts.until(fileLines)) {
+          // Predicate matched — read one more file for pre-match context,
+          // then break.
+          satisfied = true;
+        } else if (satisfied) {
+          break;
+        }
       }
-      // Reverse chunks back to chronological order, trim to maxLines.
-      return chunks.reverse().flat().slice(-opts.maxLines);
+      const result = chunks.reverse().flat();
+      return opts.maxLines ? result.slice(-opts.maxLines) : result;
     }
 
-    // No maxLines: read all matching files in chronological order.
+    // No maxLines / until: read all matching files in chronological order.
     const allLines: JsonlLine[] = [];
     for (const file of files) {
       allLines.push(...(await this.readJsonlFile(join(dir, file))));
@@ -416,8 +433,9 @@ export class ChatHistoryStore {
    * 2. All thread replies (tid === threadId)
    * 3. Pre-starter main-channel messages (for context up to inferenceLimit)
    *
-   * The caller passes maxLines = inferenceLimit * 10 to readRecentLines so that
-   * recent thread history is available without reading the entire archive.
+   * The caller uses readRecentLines with an `until` predicate that stops
+   * reading files once the thread starter is found (plus one extra file
+   * for pre-starter context).
    * The backward scan is O(n) and stops once limit results are collected.
    */
   private selectThreadContext(

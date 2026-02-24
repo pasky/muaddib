@@ -344,6 +344,58 @@ describe("ChatHistoryStore", () => {
     expect((context[2] as any).content).toContain("replying to bot");
   });
 
+  it("finds thread starter beyond a naive line-count window", async () => {
+    // With inferenceLimit=3, a naive maxLines=30 would miss the starter.
+    // The until-predicate approach reads files until the starter is found.
+    const store = createTempHistoryStore(3);
+    await store.initialize();
+
+    const arc = fsSafeArc("slack:test#general");
+
+    // Thread starter
+    await store.addMessage({
+      serverTag: "slack:test",
+      channelName: "general",
+      nick: "alice",
+      mynick: "muaddib",
+      content: "thread root",
+      platformId: "1000.0000",
+      threadId: "1000.0000",
+      responseThreadId: "1000.0000",
+    });
+
+    // 35 unrelated main-channel messages to push the starter far back
+    for (let i = 0; i < 35; i++) {
+      await store.addMessage({
+        serverTag: "slack:test",
+        channelName: "general",
+        nick: "bob",
+        mynick: "muaddib",
+        content: `filler ${i}`,
+      });
+    }
+
+    // Thread reply (recent)
+    await store.addMessage({
+      serverTag: "slack:test",
+      channelName: "general",
+      nick: "alice",
+      mynick: "muaddib",
+      content: "thread reply",
+      platformId: "9000.0000",
+      threadId: "1000.0000",
+      responseThreadId: "1000.0000",
+    });
+
+    const context = await store.getContext(arc, 3, "1000.0000");
+
+    const texts = context.map((m) =>
+      typeof m.content === "string" ? m.content : (m.content as any)[0]?.text ?? "",
+    );
+    expect(texts.some((t) => t.includes("thread root"))).toBe(true);
+    expect(texts.some((t) => t.includes("thread reply"))).toBe(true);
+  });
+
   it("countMessagesSince counts messages from yesterday when crossing midnight", async () => {
     const store = createTempHistoryStore(10);
     await store.initialize();
