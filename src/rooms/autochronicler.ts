@@ -76,7 +76,7 @@ export class AutoChroniclerTs implements AutoChronicler {
       );
 
       try {
-        await this.autoChronicle(mynick, server, channel, arc);
+        await this.autoChronicle(mynick, arc);
       } catch (error) {
         this.logger.error(`Auto-chronicling failed for ${arc}:`, error);
       }
@@ -87,8 +87,6 @@ export class AutoChroniclerTs implements AutoChronicler {
 
   private async autoChronicle(
     mynick: string,
-    _server: string,
-    _channel: string,
     arc: string,
   ): Promise<void> {
     const messages = await this.options.history.readChroniclerContext(arc, AutoChroniclerTs.MAX_CHRONICLE_BATCH, AutoChroniclerTs.MESSAGE_OVERLAP);
@@ -105,7 +103,7 @@ export class AutoChroniclerTs implements AutoChronicler {
       return;
     }
 
-    await this.options.history.markChronicled(arc, lastTs);
+    this.options.history.markChronicled(arc, lastTs);
     this.logger.debug(
       `Marked messages up to ${lastTs} as chronicled for ${arc}.`,
     );

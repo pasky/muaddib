@@ -436,7 +436,7 @@ describe("ChatHistoryStore", () => {
 
     expect(await store.countRecentUnchronicled(ARC, 7)).toBe(1);
 
-    await store.markChronicled(ARC, ts);
+    store.markChronicled(ARC, ts);
 
     expect(await store.countRecentUnchronicled(ARC, 7)).toBe(0);
 
