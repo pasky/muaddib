@@ -82,11 +82,6 @@ interface FullHistoryRow {
   timestamp: string;
 }
 
-interface RecentMessageDbRow {
-  message: string;
-  timestamp: string;
-}
-
 interface LlmCallDbRow {
   id: number;
   provider: string;
@@ -257,7 +252,6 @@ export class ChatHistoryStore {
       message.channelName,
       limit,
       message.threadId,
-      message.threadStarterId,
     );
   }
 
@@ -266,7 +260,6 @@ export class ChatHistoryStore {
     channelName: string,
     limit?: number,
     threadId?: string,
-    threadStarterId?: number,
   ): Promise<Message[]> {
     const db = this.requireDb();
     const inferenceLimit = limit ?? this.inferenceLimit;
@@ -274,38 +267,35 @@ export class ChatHistoryStore {
     let rows: ContextRow[];
 
     if (threadId) {
-      if (threadStarterId !== undefined) {
-        rows = await db.all<ContextRow[]>(
-          `
-          SELECT message, role, strftime('%H:%M', timestamp) as time_only, timestamp, mode
-          FROM chat_messages
-          WHERE server_tag = ? AND channel_name = ?
-          AND ((thread_id IS NULL AND id <= ?) OR thread_id = ?)
-          ORDER BY id DESC
-          LIMIT ?
-          `,
-          serverTag,
-          channelName,
-          threadStarterId,
-          threadId,
-          inferenceLimit,
-        );
-      } else {
-        rows = await db.all<ContextRow[]>(
-          `
-          SELECT message, role, strftime('%H:%M', timestamp) as time_only, timestamp, mode
-          FROM chat_messages
-          WHERE server_tag = ? AND channel_name = ?
-          AND (thread_id IS NULL OR thread_id = ?)
-          ORDER BY id DESC
-          LIMIT ?
-          `,
-          serverTag,
-          channelName,
-          threadId,
-          inferenceLimit,
-        );
-      }
+      // Find the thread starter by platform_id, then include main-channel
+      // messages up to (and including) that starter plus all thread messages.
+      rows = await db.all<ContextRow[]>(
+        `
+        SELECT message, role, strftime('%H:%M', timestamp) as time_only, timestamp, mode
+        FROM chat_messages
+        WHERE server_tag = ? AND channel_name = ?
+        AND (
+          thread_id = ?
+          OR (thread_id IS NULL AND id <= COALESCE(
+            (SELECT id FROM chat_messages
+             WHERE server_tag = ? AND channel_name = ? AND platform_id = ?
+             LIMIT 1),
+            (SELECT MAX(id) FROM chat_messages WHERE server_tag = ? AND channel_name = ?)
+          ))
+        )
+        ORDER BY id DESC
+        LIMIT ?
+        `,
+        serverTag,
+        channelName,
+        threadId,
+        serverTag,
+        channelName,
+        threadId,
+        serverTag,
+        channelName,
+        inferenceLimit,
+      );
     } else {
       rows = await db.all<ContextRow[]>(
         `
@@ -381,59 +371,6 @@ export class ChatHistoryStore {
       role: String(row.role) as ChatRole,
       timestamp: String(row.timestamp),
     }));
-  }
-
-  async getRecentMessagesSince(
-    serverTag: string,
-    channelName: string,
-    nick: string,
-    timestamp: number,
-    threadId?: string,
-  ): Promise<Array<{ message: string; timestamp: string }>> {
-    const db = this.requireDb();
-    const sinceEpochSeconds = String(Math.trunc(timestamp));
-
-    const rows = threadId
-      ? await db.all<RecentMessageDbRow[]>(
-          `
-          SELECT message, timestamp FROM chat_messages
-          WHERE server_tag = ? AND channel_name = ? AND nick = ?
-          AND strftime('%s', timestamp) > ? AND thread_id = ?
-          ORDER BY timestamp ASC
-          `,
-          serverTag,
-          channelName,
-          nick,
-          sinceEpochSeconds,
-          threadId,
-        )
-      : await db.all<RecentMessageDbRow[]>(
-          `
-          SELECT message, timestamp FROM chat_messages
-          WHERE server_tag = ? AND channel_name = ? AND nick = ?
-          AND strftime('%s', timestamp) > ? AND thread_id IS NULL
-          ORDER BY timestamp ASC
-          `,
-          serverTag,
-          channelName,
-          nick,
-          sinceEpochSeconds,
-        );
-
-    return rows.flatMap((row) => {
-      const content = String(row.message);
-      const splitIndex = content.indexOf("> ");
-      if (splitIndex < 0) {
-        return [];
-      }
-
-      return [
-        {
-          message: content.slice(splitIndex + 2),
-          timestamp: String(row.timestamp),
-        },
-      ];
-    });
   }
 
   /**
@@ -538,27 +475,6 @@ export class ChatHistoryStore {
       triggerMessageId: row.trigger_message_id,
       responseMessageId: row.response_message_id,
     }));
-  }
-
-  async getMessageIdByPlatformId(
-    serverTag: string,
-    channelName: string,
-    platformId: string,
-  ): Promise<number | null> {
-    const db = this.requireDb();
-
-    const row = await db.get<{ id: number }>(
-      `
-      SELECT id FROM chat_messages
-      WHERE server_tag = ? AND channel_name = ? AND platform_id = ?
-      LIMIT 1
-      `,
-      serverTag,
-      channelName,
-      platformId,
-    );
-
-    return row ? Number(row.id) : null;
   }
 
   async updateMessageByPlatformId(

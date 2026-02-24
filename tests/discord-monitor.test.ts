@@ -347,17 +347,7 @@ describe("DiscordRoomMonitor", () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();
 
-    await history.addMessage({
-      serverTag: "discord:Rossum",
-      channelName: "general",
-      nick: "alice",
-      mynick: "muaddib",
-      content: "thread-start",
-      platformId: "thread-1",
-    });
-
     let seenThreadId: string | undefined;
-    let seenThreadStarterId: number | undefined;
     const sendOptions: Array<{ replyToMessageId?: string; mentionAuthor?: boolean }> = [];
 
     const monitor = new DiscordRoomMonitor({
@@ -371,7 +361,6 @@ describe("DiscordRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async (message, options) => {
           seenThreadId = message.threadId;
-          seenThreadStarterId = message.threadStarterId;
           await options.sendResponse?.("ok");
           return { response: "ok" };
         },
@@ -392,7 +381,6 @@ describe("DiscordRoomMonitor", () => {
     });
 
     expect(seenThreadId).toBe("thread-1");
-    expect(seenThreadStarterId).toBeGreaterThan(0);
     expect(sendOptions).toEqual([
       {
         replyToMessageId: "msg-42",

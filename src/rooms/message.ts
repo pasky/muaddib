@@ -8,7 +8,6 @@ export interface RoomMessage {
   originalContent?: string;
   platformId?: string;
   threadId?: string;
-  threadStarterId?: number;
   responseThreadId?: string;
   secrets?: Record<string, unknown>;
 }

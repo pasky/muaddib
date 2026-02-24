@@ -264,18 +264,6 @@ export class DiscordRoomMonitor {
         ? `discord:${event.guildId}`
         : "discord:_DM";
 
-    let threadStarterId: number | undefined;
-    if (event.threadId) {
-      const starterId = await this.options.history.getMessageIdByPlatformId(
-        serverTag,
-        event.channelName ?? event.channelId,
-        event.threadId,
-      );
-      if (starterId !== null) {
-        threadStarterId = starterId;
-      }
-    }
-
     const message: RoomMessage = {
       serverTag,
       channelName: event.channelName ?? event.channelId,
@@ -289,7 +277,6 @@ export class DiscordRoomMonitor {
         : undefined,
       platformId: event.messageId,
       threadId: event.threadId,
-      threadStarterId,
     };
 
     const sender = this.options.sender;

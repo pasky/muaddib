@@ -445,21 +445,11 @@ describe("SlackRoomMonitor", () => {
     await history.close();
   });
 
-  it("maps threaded incoming events and resolves thread starter history id", async () => {
+  it("maps threaded incoming events and passes thread id", async () => {
     const history = new ChatHistoryStore(":memory:", 20);
     await history.initialize();
 
-    await history.addMessage({
-      serverTag: "slack:Rossum",
-      channelName: "#general",
-      nick: "alice",
-      mynick: "muaddib",
-      content: "thread starter",
-      platformId: "1700000000.1111",
-    });
-
     let seenThreadId: string | undefined;
-    let seenThreadStarterId: number | undefined;
     let sentThreadTs: string | undefined;
 
     const monitor = new SlackRoomMonitor({
@@ -473,7 +463,6 @@ describe("SlackRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async (message, options) => {
           seenThreadId = message.threadId;
-          seenThreadStarterId = message.threadStarterId;
           await options.sendResponse?.("ok");
           return { response: "ok" };
         },
@@ -495,7 +484,6 @@ describe("SlackRoomMonitor", () => {
     });
 
     expect(seenThreadId).toBe("1700000000.1111");
-    expect(seenThreadStarterId).toBeGreaterThan(0);
     expect(sentThreadTs).toBe("1700000000.1111");
 
     await history.close();

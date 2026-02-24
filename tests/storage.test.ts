@@ -81,11 +81,11 @@ describe("ChatHistoryStore", () => {
     await store.close();
   });
 
-  it("updates and resolves messages by platform id", async () => {
+  it("updates messages by platform id", async () => {
     const store = new ChatHistoryStore(":memory:", 10);
     await store.initialize();
 
-    const messageId = await store.addMessage({
+    await store.addMessage({
       serverTag: "libera",
       channelName: "#test",
       nick: "alice",
@@ -93,10 +93,6 @@ describe("ChatHistoryStore", () => {
       content: "archive me",
       platformId: "1700000000.1111",
     });
-
-    expect(await store.getMessageIdByPlatformId("libera", "#test", "1700000000.1111")).toBe(
-      messageId,
-    );
 
     await store.updateMessageByPlatformId(
       "libera",
@@ -108,67 +104,6 @@ describe("ChatHistoryStore", () => {
 
     const rows = await store.getFullHistory("libera", "#test", 10);
     expect(rows[0].message).toBe("<alice> edited");
-
-    await store.close();
-  });
-
-  it("returns recent followup messages since timestamp with thread-aware filtering", async () => {
-    const store = new ChatHistoryStore(":memory:", 10);
-    await store.initialize();
-
-    await store.addMessage({
-      serverTag: "libera",
-      channelName: "#test",
-      nick: "alice",
-      mynick: "muaddib",
-      content: "main followup",
-    });
-    await store.addMessage({
-      serverTag: "libera",
-      channelName: "#test",
-      nick: "alice",
-      mynick: "muaddib",
-      content: "thread followup",
-      threadId: "thread-1",
-    });
-    await store.addMessage({
-      serverTag: "libera",
-      channelName: "#test",
-      nick: "alice",
-      mynick: "muaddib",
-      content: "other thread followup",
-      threadId: "thread-2",
-    });
-    await store.addMessage({
-      serverTag: "libera",
-      channelName: "#test",
-      nick: "bob",
-      mynick: "muaddib",
-      content: "bob followup",
-      threadId: "thread-1",
-    });
-
-    const mainFollowups = await store.getRecentMessagesSince("libera", "#test", "alice", 0);
-    expect(mainFollowups).toEqual([
-      {
-        message: "main followup",
-        timestamp: expect.any(String),
-      },
-    ]);
-
-    const threadFollowups = await store.getRecentMessagesSince(
-      "libera",
-      "#test",
-      "alice",
-      0,
-      "thread-1",
-    );
-    expect(threadFollowups).toEqual([
-      {
-        message: "thread followup",
-        timestamp: expect.any(String),
-      },
-    ]);
 
     await store.close();
   });

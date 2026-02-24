@@ -288,14 +288,6 @@ export class SlackRoomMonitor {
     const responseThreadId = resolveReplyThreadTs(this.options.roomConfig, event);
     const threadId = event.threadTs ?? responseThreadId;
 
-    let threadStarterId: number | undefined;
-    if (threadId) {
-      const starterId = await this.options.history.getMessageIdByPlatformId(serverTag, channelName, threadId);
-      if (starterId !== null) {
-        threadStarterId = starterId;
-      }
-    }
-
     const message: RoomMessage = {
       serverTag,
       channelName,
@@ -309,7 +301,6 @@ export class SlackRoomMonitor {
         : undefined,
       platformId: event.messageTs,
       threadId,
-      threadStarterId,
       responseThreadId,
       secrets: event.secrets,
     };
