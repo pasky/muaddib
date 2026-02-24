@@ -15,7 +15,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, posix } from "node:path";
 
 import {
@@ -278,10 +278,23 @@ async function ensureVm(
         mounts["/chronicle"] = chronicleFs;
       }
 
+      // Forward QEMU serial console output (guest kernel + init messages) to
+      // the logger so stuck boots are diagnosable.  The "qemu" debug component
+      // requires the "protocol" debug flag.
+      const debugLog: import("@earendil-works/gondolin").DebugLogFn = (component, message) => {
+        if (component === "qemu" || component === "error") {
+          logger?.info(`Gondolin VM [${arc}] ${component}: ${message}`);
+        } else {
+          logger?.debug(`Gondolin VM [${arc}] ${component}: ${message}`);
+        }
+      };
+
       const vmOptions: import("@earendil-works/gondolin").VMOptions = {
         vfs: { mounts },
         httpHooks,
         dns: { mode: dnsMode },
+        sandbox: { debug: ["protocol"] },
+        debugLog,
       };
 
       const checkpointPath = getArcCheckpointPath(arc);
@@ -291,9 +304,18 @@ async function ensureVm(
           const checkpoint = VmCheckpoint.load(checkpointPath);
           vm = await checkpoint.resume(vmOptions);
           logger?.info(`Gondolin VM resumed from checkpoint for arc ${arc}: ${checkpointPath}`);
+          // Health check: verify the guest is actually responsive after resume.
+          // QEMU can boot from a dirty checkpoint and spin at 100% CPU without
+          // ever starting sandboxd, leaving all subsequent operations stuck.
+          await vm.exec(["/bin/true"], { signal: AbortSignal.timeout(VM_HEALTH_CHECK_TIMEOUT_MS) });
+          logger?.info(`Gondolin VM health check passed for arc ${arc}`);
         } catch (err) {
-          logger?.warn(`Gondolin checkpoint restore failed, starting fresh VM for arc ${arc}`, String(err));
+          logger?.warn(`Gondolin checkpoint resume/health-check failed for arc ${arc}, deleting checkpoint and starting fresh VM`, String(err));
+          // Clean up the broken VM if it was created.
+          try { vm!.close().catch(() => {}); } catch { /* ignore */ }
+          try { unlinkSync(checkpointPath); } catch { /* ignore */ }
           vm = await VMClass.create(vmOptions);
+          logger?.info(`Gondolin VM started fresh (after checkpoint failure) for arc ${arc}, workspace: ${workspacePath}`);
         }
       } else {
         vm = await VMClass.create(vmOptions);
@@ -473,6 +495,9 @@ function shQuote(value: string): string {
  */
 const VM_BASH_OUTPUT_CAP_BYTES = 48 * 1024; // 48 KB — below upstream's 50 KB threshold
 
+const DEFAULT_VM_OP_TIMEOUT_SECONDS = 60;
+const VM_HEALTH_CHECK_TIMEOUT_MS = 20_000;
+
 // ── Bundled skills (loaded once, installed into every VM) ──────────────────
 
 let cachedSkills: LoadedSkill[] | undefined;
@@ -486,15 +511,17 @@ function getBundledSkills(): LoadedSkill[] {
 
 // ── VM operations factories ────────────────────────────────────────────────
 
-function createVmReadOps(getVm: () => Promise<VM>, logger?: Logger): ReadOperations {
+function createVmReadOps(getVm: () => Promise<VM>, opTimeoutMs: number, logger?: Logger): ReadOperations {
   return {
     readFile: async (absolutePath) => {
       const vm = await getVm();
-      return vm.readFile(absolutePath);
+      return vm.readFile(absolutePath, { signal: AbortSignal.timeout(opTimeoutMs) });
     },
     access: async (absolutePath) => {
       const vm = await getVm();
-      const r = await vm.exec(["/bin/sh", "-lc", `test -r ${shQuote(absolutePath)}`]);
+      const r = await vm.exec(["/bin/sh", "-lc", `test -r ${shQuote(absolutePath)}`], {
+        signal: AbortSignal.timeout(opTimeoutMs),
+      });
       if (!r.ok) {
         throw new Error(`not readable: ${absolutePath}`);
       }
@@ -506,7 +533,7 @@ function createVmReadOps(getVm: () => Promise<VM>, logger?: Logger): ReadOperati
           "/bin/sh",
           "-lc",
           `file --mime-type -b ${shQuote(absolutePath)}`,
-        ]);
+        ], { signal: AbortSignal.timeout(opTimeoutMs) });
         if (!r.ok) {
           logger?.warn(`Gondolin detectImageMimeType: 'file' failed for ${absolutePath} (exit ${r.exitCode}): ${r.stderr}`);
           return null;
@@ -525,17 +552,17 @@ function createVmReadOps(getVm: () => Promise<VM>, logger?: Logger): ReadOperati
   };
 }
 
-function createVmWriteOps(getVm: () => Promise<VM>): WriteOperations {
+function createVmWriteOps(getVm: () => Promise<VM>, opTimeoutMs: number): WriteOperations {
   return {
     writeFile: async (absolutePath, content) => {
       const vm = await getVm();
       const dir = posix.dirname(absolutePath);
-      await vm.exec(["/bin/mkdir", "-p", dir]);
-      await vm.writeFile(absolutePath, content, { encoding: "utf8" });
+      await vm.exec(["/bin/mkdir", "-p", dir], { signal: AbortSignal.timeout(opTimeoutMs) });
+      await vm.writeFile(absolutePath, content, { encoding: "utf8", signal: AbortSignal.timeout(opTimeoutMs) });
     },
     mkdir: async (dir) => {
       const vm = await getVm();
-      const r = await vm.exec(["/bin/mkdir", "-p", dir]);
+      const r = await vm.exec(["/bin/mkdir", "-p", dir], { signal: AbortSignal.timeout(opTimeoutMs) });
       if (!r.ok) {
         throw new Error(`mkdir failed (${r.exitCode}): ${r.stderr}`);
       }
@@ -543,9 +570,9 @@ function createVmWriteOps(getVm: () => Promise<VM>): WriteOperations {
   };
 }
 
-function createVmEditOps(getVm: () => Promise<VM>, logger?: Logger): EditOperations {
-  const readOps = createVmReadOps(getVm, logger);
-  const writeOps = createVmWriteOps(getVm);
+function createVmEditOps(getVm: () => Promise<VM>, opTimeoutMs: number, logger?: Logger): EditOperations {
+  const readOps = createVmReadOps(getVm, opTimeoutMs, logger);
+  const writeOps = createVmWriteOps(getVm, opTimeoutMs);
   return {
     readFile: readOps.readFile,
     access: readOps.access,
@@ -667,12 +694,14 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
   const chronicleFiles = options.chronicleStore?.readAllChapterFiles(arc) ?? [];
   const artifactHostname = resolveArtifactHostname(toolsConfig?.artifacts?.url, logger);
 
+  const vmOpTimeoutMs = (config.vmOpTimeoutSeconds ?? DEFAULT_VM_OP_TIMEOUT_SECONDS) * 1000;
+
   let vmReady: Promise<VM> | null = null;
 
   function getVm(): Promise<VM> {
     if (!vmReady) {
       vmReady = ensureVm(arc, config, dnsMode, skills, chronicleFiles, artifactHostname, logger).then(async (vm) => {
-        await vm.exec(["/bin/mkdir", "-p", sessionDir]);
+        await vm.exec(["/bin/mkdir", "-p", sessionDir], { signal: AbortSignal.timeout(vmOpTimeoutMs) });
         logger?.info(`Gondolin session dir: ${sessionDir} (arc: ${arc})`);
         return vm;
       });
@@ -682,15 +711,15 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
 
   const bashTimeoutSeconds = config.bashTimeoutSeconds ?? 270;
 
-  const piReadTool = createReadTool(sessionDir, { operations: createVmReadOps(getVm, logger) });
-  const piWriteTool = createWriteTool(sessionDir, { operations: createVmWriteOps(getVm) });
-  const piEditTool = createEditTool(sessionDir, { operations: createVmEditOps(getVm, logger) });
+  const piReadTool = createReadTool(sessionDir, { operations: createVmReadOps(getVm, vmOpTimeoutMs, logger) });
+  const piWriteTool = createWriteTool(sessionDir, { operations: createVmWriteOps(getVm, vmOpTimeoutMs) });
+  const piEditTool = createEditTool(sessionDir, { operations: createVmEditOps(getVm, vmOpTimeoutMs, logger) });
   const piBashTool = createBashTool(sessionDir, { operations: createVmBashOps(getVm, bashTimeoutSeconds) });
 
   // share_artifact reads files from the VM and publishes them to the artifact store.
   const sandboxReadFile: SandboxReadFile = async (absolutePath: string): Promise<Buffer> => {
     const vm = await getVm();
-    const content = await vm.readFile(absolutePath);
+    const content = await vm.readFile(absolutePath, { signal: AbortSignal.timeout(vmOpTimeoutMs) });
     return Buffer.isBuffer(content) ? content : Buffer.from(content);
   };
   const artifactContext: ArtifactContext = { toolsConfig, logger };

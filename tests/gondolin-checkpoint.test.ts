@@ -914,3 +914,100 @@ describe("formatSkillsForVmPrompt", () => {
     expect(prompt).toBe("");
   });
 });
+
+// ── Health check after checkpoint resume ────────────────────────────────────
+
+describe("gondolin — post-resume health check", () => {
+  it("falls back to fresh VM when health check fails after checkpoint resume", async () => {
+    // Fake VM that will be returned from checkpoint.resume() — health check will fail
+    const sickVm = makeFakeVm();
+    sickVm.exec.mockImplementationOnce(() => {
+      // First exec call is the health check (/bin/true) — make it reject
+      throw new Error("VM unresponsive");
+    });
+
+    // Healthy VM that will be returned from VM.create fallback
+    const healthyVm = makeFakeVm();
+
+    const gondolin = await import("@earendil-works/gondolin");
+
+    // Set up VmCheckpoint.load to return a checkpoint that resumes to sickVm
+    // @ts-expect-error test-only
+    gondolin.VmCheckpoint.load.mockReturnValueOnce({
+      resume: vi.fn(async () => sickVm),
+    });
+
+    // Register the healthy VM as the fallback for VM.create
+    await registerFakeVm(healthyVm);
+
+    // Create a fake checkpoint file so existsSync returns true
+    const { getArcCheckpointPath } = await import("../src/agent/tools/gondolin-tools.js");
+    const checkpointPath = getArcCheckpointPath("health-check-arc");
+    const { mkdirSync, writeFileSync, existsSync } = await import("node:fs");
+    const { dirname } = await import("node:path");
+    mkdirSync(dirname(checkpointPath), { recursive: true });
+    writeFileSync(checkpointPath, "fake-checkpoint-data");
+
+    const logger = makeLogger();
+    const { tools } = createGondolinTools({
+      arc: "health-check-arc",
+      config: gondolinConfig,
+      logger,
+    });
+
+    // Force VM creation by invoking bash
+    const bashTool = tools.find((t) => t.name === "bash")!;
+    await bashTool.execute("id", { command: "echo hi" }, new AbortController().signal, () => {});
+
+    // Should have logged the health check failure
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("health-check failed"),
+      expect.any(String),
+    );
+    // Should have logged fresh VM start
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.stringContaining("started fresh"),
+    );
+    // The checkpoint file should have been deleted
+    expect(existsSync(checkpointPath)).toBe(false);
+    // sickVm.close should have been called to clean up
+    expect(sickVm.close).toHaveBeenCalled();
+    // VM.create should have been called as fallback
+    expect(gondolin.VM.create).toHaveBeenCalled();
+  });
+
+  it("uses resumed VM when health check passes", async () => {
+    const healthyVm = makeFakeVm();
+
+    const gondolin = await import("@earendil-works/gondolin");
+    // @ts-expect-error test-only
+    gondolin.VmCheckpoint.load.mockReturnValueOnce({
+      resume: vi.fn(async () => healthyVm),
+    });
+
+    const { getArcCheckpointPath } = await import("../src/agent/tools/gondolin-tools.js");
+    const checkpointPath = getArcCheckpointPath("healthy-resume-arc");
+    const { mkdirSync, writeFileSync, existsSync } = await import("node:fs");
+    const { dirname } = await import("node:path");
+    mkdirSync(dirname(checkpointPath), { recursive: true });
+    writeFileSync(checkpointPath, "fake-checkpoint-data");
+
+    const logger = makeLogger();
+    const { tools } = createGondolinTools({
+      arc: "healthy-resume-arc",
+      config: gondolinConfig,
+      logger,
+    });
+
+    const bashTool = tools.find((t) => t.name === "bash")!;
+    await bashTool.execute("id", { command: "echo hi" }, new AbortController().signal, () => {});
+
+    // Should have logged successful resume and health check
+    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining("resumed from checkpoint"));
+    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining("health check passed"));
+    // Should NOT have fallen back to VM.create
+    expect(gondolin.VM.create).not.toHaveBeenCalled();
+    // Checkpoint file should still exist
+    expect(existsSync(checkpointPath)).toBe(true);
+  });
+});
