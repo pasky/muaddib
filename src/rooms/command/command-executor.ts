@@ -500,19 +500,9 @@ export class CommandExecutor {
       if (sr) proactiveSendResult = sr;
     }
 
-    if (proactiveSendResult?.isEdit && proactiveSendResult.platformId && proactiveSendResult.combinedContent) {
-      await this.history.appendEdit(roomArc(message), proactiveSendResult.platformId, proactiveSendResult.combinedContent, message.mynick, "assistant");
-    } else {
-      await this.history.addMessage(
-        {
-          ...message,
-          nick: message.mynick,
-          content: responseText,
-          platformId: proactiveSendResult?.platformId,
-        },
-        { mode: classifiedTrigger },
-      );
-    }
+    await this.persistBotResponse(roomArc(message), message, responseText, proactiveSendResult, {
+      mode: classifiedTrigger,
+    });
 
     await this.triggerAutoChronicler(message, this.commandConfig.historySize);
     return true;
@@ -587,7 +577,7 @@ export class CommandExecutor {
       return result;
     }
 
-    const { history, logger } = this;
+    const { logger } = this;
     const arcName = roomArc(message);
 
     logger.debug(
@@ -613,29 +603,15 @@ export class CommandExecutor {
       if (sr) sendResult = sr;
     }
 
-    if (sendResult?.isEdit && sendResult.platformId && sendResult.combinedContent) {
-      // Message was coalesced into an existing platform message via edit —
-      // update the existing history line to match the combined platform content.
-      await history.appendEdit(arcName, sendResult.platformId, sendResult.combinedContent, message.mynick, "assistant");
-    } else {
-      await history.addMessage(
-        {
-          ...message,
-          nick: message.mynick,
-          content: result.response,
-          platformId: sendResult?.platformId,
-        },
-        {
-          mode: result.resolved.selectedTrigger ?? undefined,
-          run: triggerTs || undefined,
-          call: result.model ? "agent_run" : undefined,
-          model: result.model ?? undefined,
-          inTok: result.usage?.input,
-          outTok: result.usage?.output,
-          cost: result.usage?.cost.total,
-        },
-      );
-    }
+    await this.persistBotResponse(arcName, message, result.response, sendResult, {
+      mode: result.resolved.selectedTrigger ?? undefined,
+      run: triggerTs || undefined,
+      call: result.model ? "agent_run" : undefined,
+      model: result.model ?? undefined,
+      inTok: result.usage?.input,
+      outTok: result.usage?.output,
+      cost: result.usage?.cost.total,
+    });
 
     logger.debug(
       "Direct command response stored",
@@ -672,16 +648,8 @@ export class CommandExecutor {
 
       logger.info("Sending cost followup", `arc=${arcName}`, `cost=${totalCost.toFixed(4)}`);
       const costSendResult = await sendResponse(costMessage);
-      if (costSendResult?.isEdit && costSendResult.platformId && costSendResult.combinedContent) {
-        await history.appendEdit(arcName, costSendResult.platformId, costSendResult.combinedContent, message.mynick, "assistant");
-      } else {
-        await history.addMessage({
-          ...message,
-          nick: message.mynick,
-          content: costMessage,
-          platformId: costSendResult?.platformId,
-        });
-      }
+      const costSR = costSendResult ? costSendResult : undefined;
+      await this.persistBotResponse(arcName, message, costMessage, costSR);
     }
 
     const totalToday = await history.getArcCostToday(arcName);
@@ -696,15 +664,53 @@ export class CommandExecutor {
       `(fun fact: my messages in this channel have already cost $${totalToday.toFixed(4)} today)`;
     logger.info("Sending daily cost milestone", `arc=${arcName}`, `total_today=${totalToday.toFixed(4)}`);
     const milestoneSendResult = await sendResponse(milestoneMessage);
-    if (milestoneSendResult?.isEdit && milestoneSendResult.platformId && milestoneSendResult.combinedContent) {
-      await history.appendEdit(arcName, milestoneSendResult.platformId, milestoneSendResult.combinedContent, message.mynick, "assistant");
+    const milestoneSR = milestoneSendResult ? milestoneSendResult : undefined;
+    await this.persistBotResponse(arcName, message, milestoneMessage, milestoneSR);
+  }
+
+  // ── Bot message persistence ──
+
+  /**
+   * Persist a bot response to history, handling edit-coalesce vs new-message branching.
+   * Constructs the bot RoomMessage explicitly — only the fields that belong on a bot message
+   * are carried from the triggering user message (no `originalContent`, `secrets`, etc.).
+   */
+  private async persistBotResponse(
+    arcName: string,
+    message: RoomMessage,
+    content: string,
+    sendResult: SendResult | undefined,
+    options?: {
+      mode?: string;
+      run?: string;
+      call?: string;
+      model?: string;
+      inTok?: number;
+      outTok?: number;
+      cost?: number;
+      contentTemplate?: string;
+    },
+  ): Promise<void> {
+    if (sendResult?.isEdit && sendResult.platformId && sendResult.combinedContent) {
+      await this.history.appendEdit(
+        arcName,
+        sendResult.platformId,
+        sendResult.combinedContent,
+        message.mynick,
+        "assistant",
+      );
     } else {
-      await history.addMessage({
-        ...message,
+      const botMessage: RoomMessage = {
+        serverTag: message.serverTag,
+        channelName: message.channelName,
         nick: message.mynick,
-        content: milestoneMessage,
-        platformId: milestoneSendResult?.platformId,
-      });
+        mynick: message.mynick,
+        content,
+        platformId: sendResult?.platformId,
+        threadId: message.threadId,
+        responseThreadId: message.responseThreadId,
+      };
+      await this.history.addMessage(botMessage, options);
     }
   }
 
@@ -823,17 +829,9 @@ export class CommandExecutor {
       return;
     }
 
-    await this.history.addMessage(
-      {
-        ...message,
-        nick: message.mynick,
-        content: summaryText,
-        platformId: undefined,
-      },
-      {
-        contentTemplate: "[internal monologue] {message}",
-      },
-    );
+    await this.persistBotResponse(roomArc(message), message, summaryText, undefined, {
+      contentTemplate: "[internal monologue] {message}",
+    });
   }
 
   selectTools(
@@ -852,17 +850,9 @@ export class CommandExecutor {
     const onProgressReport: ((text: string) => void | Promise<void>) | undefined =
       sendResponse
         ? async (text: string) => {
-            const sendResult = await sendResponse(text);
-            if (sendResult?.isEdit && sendResult.platformId && sendResult.combinedContent) {
-              await this.history.appendEdit(roomArc(message), sendResult.platformId, sendResult.combinedContent, message.mynick, "assistant");
-            } else {
-              await this.history.addMessage({
-                ...message,
-                nick: message.mynick,
-                content: text,
-                platformId: sendResult?.platformId,
-              });
-            }
+            const sr = await sendResponse(text);
+            const sendResult = sr ? sr : undefined;
+            await this.persistBotResponse(roomArc(message), message, text, sendResult);
           }
         : undefined;
 

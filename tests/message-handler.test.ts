@@ -2434,4 +2434,62 @@ describe("RoomMessageHandler", () => {
     expect((lastAssistant as any).content[0].text).toContain("expensive answer");
     expect((lastAssistant as any).content[0].text).toContain("cost");
   });
+
+  it("bot response messages do not carry originalContent or secrets from the triggering user message", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const incoming: RoomMessage = {
+      ...makeMessage("!s hello"),
+      originalContent: "muaddib: !s hello",
+      secrets: { apiKey: "super-secret-123" },
+      platformId: "user-msg-9999",
+      threadId: "thread-42",
+      responseThreadId: "resp-thread-42",
+    };
+
+    const persistedMessages: RoomMessage[] = [];
+    const origAddMessage = history.addMessage.bind(history);
+    vi.spyOn(history, "addMessage").mockImplementation(async (...args) => {
+      const [msg] = args;
+      persistedMessages.push(msg as RoomMessage);
+      return origAddMessage(...(args as Parameters<typeof history.addMessage>));
+    });
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: () => ({
+        prompt: async () => makeRunnerResult("bot reply"),
+      }),
+    });
+
+    await handler.handleIncomingMessage(incoming, {
+      isDirect: true,
+      sendResponse: async () => ({ platformId: "outbound-7777" }),
+    });
+
+    // Find all bot messages (response + possibly tool summary)
+    const botMessages = persistedMessages.filter((m) => m.nick === "muaddib");
+    expect(botMessages.length).toBeGreaterThanOrEqual(1);
+
+    for (const botMsg of botMessages) {
+      // Must NOT carry user's originalContent or secrets
+      expect(botMsg.originalContent).toBeUndefined();
+      expect(botMsg.secrets).toBeUndefined();
+      // Must carry threading fields from user message
+      expect(botMsg.threadId).toBe("thread-42");
+      expect(botMsg.responseThreadId).toBe("resp-thread-42");
+      // Must carry correct structural fields
+      expect(botMsg.serverTag).toBe("libera");
+      expect(botMsg.channelName).toBe("#test");
+      expect(botMsg.mynick).toBe("muaddib");
+    }
+
+    // The main bot response specifically
+    const mainBot = botMessages.find((m) => m.content === "bot reply");
+    expect(mainBot).toBeDefined();
+    expect(mainBot!.platformId).toBe("outbound-7777");
+  });
 });
