@@ -7,7 +7,7 @@ import type { Logger } from "../../app/logging.js";
 import { truncateForDebug } from "../../agent/debug-utils.js";
 
 const PERSISTENCE_SUMMARY_SYSTEM_PROMPT =
-  "As an AI agent, you need to remember in the future what tools you used when generating a response, and what the tools told you. Summarize all tool uses in a single concise paragraph. If artifact links are included, include every artifact link and tie each link to the corresponding tool call; OTOH /tmp/session* paths are ephemeral and not worth saving.";
+  "As an AI agent, you need to remember in the future what tools you used when generating a response, and what the tools told you. Summarize all tool uses in a single concise paragraph. If artifact links are included, include every artifact link and tie each link to the corresponding tool call. Include /tmp/session-* working directory paths so you can return to previous work.";
 
 interface PersistentToolCall {
   toolName: string;

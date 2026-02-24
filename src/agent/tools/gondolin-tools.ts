@@ -665,8 +665,9 @@ export interface GondolinToolsOptions {
  * session ends — whether it succeeds or fails.
  *
  * One VM is created (and cached) per arc.  Each call to this function creates
- * a fresh ephemeral session directory at /tmp/session-{uuid}/ which becomes the
- * default working directory for bash and the base for relative path resolution.
+ * a fresh session directory at /tmp/session-{uuid}/ which becomes the default
+ * working directory for bash and the base for relative path resolution.
+ * The last 8 session dirs are kept across checkpoints so the agent can revisit them.
  */
 export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
   const { arc, config, toolsConfig, logger } = options;
@@ -737,7 +738,7 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
     ? " Chronicle: your memory chapters are at /chronicle/ (read-only)."
     : "";
   const systemPromptSuffix =
-    `Filesystem: /workspace persists across sessions; ${sessionDir} is your ephemeral working directory.` +
+    `Filesystem: /workspace persists across sessions; ${sessionDir} is your session working directory (last 8 session dirs in /tmp/session-* are kept).` +
     chronicleSuffix +
     artifactsSuffix +
     skillsSection;
@@ -770,8 +771,8 @@ export function resetGondolinVmCache(): void {
 /**
  * Checkpoint the Gondolin VM for an arc after a session ends.
  *
- * Cleans up ephemeral session directories inside /tmp, then stops the VM and
- * persists its disk state to `$MUADDIB_HOME/workspaces/<arcId>/vm-checkpoint.qcow2`.
+ * Prunes old session directories inside /tmp (keeping the 8 most recent), then
+ * stops the VM and persists its disk state to `$MUADDIB_HOME/workspaces/<arcId>/vm-checkpoint.qcow2`.
  * The VM is removed from the cache so the next invocation resumes from the checkpoint.
  *
  * This is a no-op if no VM is running for the arc.
@@ -818,8 +819,9 @@ export async function checkpointGondolinArc(
 
   const checkpointPromise = (async () => {
     try {
-      // Clean ephemeral session dirs from VM /tmp before checkpointing
-      await vm.exec(["/bin/sh", "-c", "rm -rf /tmp/session-*"]);
+      // Prune old session dirs from VM /tmp, keeping the 8 most recent.
+      await vm.exec(["/bin/sh", "-c",
+        "ls -1dt /tmp/session-* 2>/dev/null | tail -n +9 | xargs rm -rf"]);
       // Stop the VM and materialize the disk overlay as a checkpoint
       await vm.checkpoint(checkpointPath);
       logger?.info(`Gondolin VM checkpointed for arc ${arc}: ${checkpointPath}`);
