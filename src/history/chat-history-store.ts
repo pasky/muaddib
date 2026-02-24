@@ -253,8 +253,12 @@ export class ChatHistoryStore {
     ).length;
   }
 
-  async markChronicled(arc: string, cursorTs: string): Promise<void> {
-    this.writeCursorTs(arc, cursorTs);
+  markChronicled(arc: string, cursorTs: string): void {
+    const path = this.cursorPath(arc);
+    mkdirSync(join(this.arcsBasePath, arc, "chronicle"), { recursive: true });
+    const tmpPath = path + ".tmp";
+    writeFileSync(tmpPath, JSON.stringify({ ts: cursorTs }) + "\n", "utf-8");
+    renameSync(tmpPath, path);
   }
 
   async getArcCostToday(arcName: string): Promise<number> {
@@ -354,13 +358,6 @@ export class ChatHistoryStore {
     }
   }
 
-  private writeCursorTs(arc: string, ts: string): void {
-    const path = this.cursorPath(arc);
-    mkdirSync(join(this.arcsBasePath, arc, "chronicle"), { recursive: true });
-    const tmpPath = path + ".tmp";
-    writeFileSync(tmpPath, JSON.stringify({ ts }) + "\n", "utf-8");
-    renameSync(tmpPath, path);
-  }
 
   // ── Thread context algorithm ──
 
