@@ -173,7 +173,7 @@
       ".js": "javascript", ".mjs": "javascript", ".cjs": "javascript",
       ".ts": "typescript", ".tsx": "typescript", ".jsx": "javascript",
       ".json": "json", ".jsonc": "json",
-      ".html": "xml", ".htm": "xml", ".xml": "xml", ".xsl": "xml", ".svg": "xml",
+      ".xml": "xml", ".xsl": "xml",
       ".css": "css", ".scss": "scss", ".less": "less",
       ".sh": "bash", ".bash": "bash", ".zsh": "bash", ".fish": "bash",
       ".yml": "yaml", ".yaml": "yaml",
@@ -297,6 +297,22 @@
 
         if (isImage) {
           content.innerHTML = '<img src="' + rawHref + '" alt="' + escapeHtml(filename) + '" />';
+          return;
+        }
+
+        const htmlExts = [".html", ".htm"];
+        const isHtml = contentType.includes("text/html") || htmlExts.some(function (ext) { return lower.endsWith(ext); });
+
+        if (isHtml) {
+          // Render HTML in a near-fullpage sandboxed iframe
+          document.querySelector(".wrap").style.cssText = "max-width:none;margin:0;padding:0;position:fixed;inset:0;top:2.5rem;";
+          var iframe = document.createElement("iframe");
+          iframe.src = rawHref;
+          iframe.sandbox = "allow-scripts allow-same-origin";
+          iframe.style.cssText = "width:100%;height:100%;border:none;";
+          content.style.cssText = "margin:0;height:100%;";
+          content.innerHTML = "";
+          content.appendChild(iframe);
           return;
         }
 
