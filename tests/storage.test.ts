@@ -1,7 +1,7 @@
 
 
 
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -342,6 +342,32 @@ describe("ChatHistoryStore", () => {
     expect(context[1].role).toBe("assistant");
     expect((context[1] as any).content[0].text).toContain("bot channel message");
     expect((context[2] as any).content).toContain("replying to bot");
+  });
+
+  it("countMessagesSince counts messages from yesterday when crossing midnight", async () => {
+    const store = createTempHistoryStore(10);
+    await store.initialize();
+
+    // Directly write a JSONL file dated yesterday to simulate messages
+    // written before midnight (the proactive debounce use case).
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+    const arc = ARC;
+    const histDir = join((store as any).arcsBasePath, arc, "chat_history");
+    mkdirSync(histDir, { recursive: true });
+    const yesterdayTs = `${yesterday}T23:59:00.000Z`;
+    appendFileSync(
+      join(histDir, `${yesterday}.jsonl`),
+      JSON.stringify({ ts: yesterdayTs, n: "alice", r: "user", m: "late night msg" }) + "\n",
+      "utf-8",
+    );
+
+    // sinceEpochMs is 5 minutes before the message — crosses into yesterday
+    const sinceMs = new Date(yesterdayTs).getTime() - 5 * 60 * 1000;
+    const count = await store.countMessagesSince(arc, sinceMs);
+
+    expect(count).toBe(1);
+
+    await store.close();
   });
 
   it("counts and marks chronicled messages", async () => {

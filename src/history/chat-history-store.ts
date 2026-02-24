@@ -1,12 +1,10 @@
 import {
   appendFileSync,
-  existsSync,
   mkdirSync,
-  readFileSync,
   renameSync,
-  readdirSync,
   writeFileSync,
 } from "node:fs";
+import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { AssistantMessage, Message, UserMessage } from "@mariozechner/pi-ai";
 
@@ -70,6 +68,8 @@ export interface HistoryMessageRow {
 export class ChatHistoryStore {
   private readonly arcsBasePath: string;
   private readonly inferenceLimit: number;
+  /** Tracks chat_history dirs already confirmed to exist — avoids mkdirSync per message. */
+  private readonly createdHistoryDirs = new Set<string>();
 
   constructor(arcsBasePath: string, inferenceLimit = 5) {
     this.arcsBasePath = arcsBasePath;
@@ -175,7 +175,18 @@ export class ChatHistoryStore {
     threadId?: string,
   ): Promise<Message[]> {
     const inferenceLimit = limit ?? this.inferenceLimit;
-    const lines = this.readRecentLines(arc);
+
+    let lines: JsonlLine[];
+    if (threadId) {
+      // Thread context: need to scan back to find thread starter + main channel
+      // context before it. Read all recent lines (no early-stop).
+      lines = await this.readRecentLines(arc);
+    } else {
+      // Non-thread: read in reverse and stop early once we have enough lines.
+      // Use a multiplier to absorb thread messages, cost lines, and edits that
+      // will be filtered out before the final slice(-inferenceLimit).
+      lines = await this.readRecentLines(arc, 30, inferenceLimit * 4);
+    }
 
     // Filter: only lines with m (messages, not bare cost lines)
     const messageLines = lines.filter((l) => l.m !== undefined);
@@ -218,7 +229,7 @@ export class ChatHistoryStore {
     arc: string,
     limit?: number,
   ): Promise<HistoryMessageRow[]> {
-    const lines = this.readRecentLines(arc);
+    const lines = await this.readRecentLines(arc, 30, limit !== undefined ? limit * 2 : undefined);
     const messageLines = lines.filter((l) => l.m !== undefined);
     const selected = limit !== undefined ? messageLines.slice(-limit) : messageLines;
 
@@ -232,22 +243,38 @@ export class ChatHistoryStore {
 
   /**
    * Count messages in an arc since the given epoch timestamp (ms).
+   * Reads all files from the date of sinceEpochMs onwards, so it correctly
+   * handles midnight boundaries (e.g. proactive debounce starting at 23:59).
    */
   async countMessagesSince(arc: string, sinceEpochMs: number): Promise<number> {
     const sinceTs = new Date(sinceEpochMs).toISOString();
-    const todayFile = this.jsonlPath(arc, this.todayDate());
-    if (!existsSync(todayFile)) return 0;
+    const sinceDate = sinceTs.slice(0, 10);
+    const dir = join(this.arcsBasePath, arc, "chat_history");
 
-    const lines = this.readJsonlFile(todayFile);
-    return lines.filter((l) => l.m !== undefined && l.ts >= sinceTs).length;
+    let files: string[];
+    try {
+      files = (await readdir(dir)).filter((f) => f.endsWith(".jsonl")).sort();
+    } catch {
+      return 0;
+    }
+
+    // Only read files at or after sinceDate
+    const relevantFiles = files.filter((f) => f.replace(".jsonl", "") >= sinceDate);
+
+    let count = 0;
+    for (const file of relevantFiles) {
+      const lines = await this.readJsonlFile(join(dir, file));
+      count += lines.filter((l) => l.m !== undefined && l.ts >= sinceTs).length;
+    }
+    return count;
   }
 
   async countRecentUnchronicled(arc: string, days = 7): Promise<number> {
-    const cursor = this.readCursorTs(arc);
+    const cursor = await this.readCursorTs(arc);
     const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
     const effectiveCutoff = cursor && cursor > cutoff ? cursor : cutoff;
 
-    const lines = this.readRecentLines(arc, days);
+    const lines = await this.readRecentLines(arc, days);
     return lines.filter(
       (l) => l.m !== undefined && l.ts > effectiveCutoff,
     ).length;
@@ -263,9 +290,7 @@ export class ChatHistoryStore {
 
   async getArcCostToday(arcName: string): Promise<number> {
     const todayFile = this.jsonlPath(arcName, this.todayDate());
-    if (!existsSync(todayFile)) return 0;
-
-    const lines = this.readJsonlFile(todayFile);
+    const lines = await this.readJsonlFile(todayFile);
     let total = 0;
     for (const line of lines) {
       if (line.cost !== undefined) {
@@ -295,13 +320,21 @@ export class ChatHistoryStore {
   private appendLine(arc: string, line: JsonlLine): void {
     const date = line.ts.slice(0, 10);
     const filePath = this.jsonlPath(arc, date);
-    mkdirSync(join(this.arcsBasePath, arc, "chat_history"), { recursive: true });
+    const dirKey = join(this.arcsBasePath, arc, "chat_history");
+    if (!this.createdHistoryDirs.has(dirKey)) {
+      mkdirSync(dirKey, { recursive: true });
+      this.createdHistoryDirs.add(dirKey);
+    }
     appendFileSync(filePath, JSON.stringify(line) + "\n", "utf-8");
   }
 
-  private readJsonlFile(path: string): JsonlLine[] {
-    if (!existsSync(path)) return [];
-    const raw = readFileSync(path, "utf-8");
+  private async readJsonlFile(path: string): Promise<JsonlLine[]> {
+    let raw: string;
+    try {
+      raw = await readFile(path, "utf-8");
+    } catch {
+      return [];
+    }
     const lines: JsonlLine[] = [];
     for (const line of raw.split("\n")) {
       const trimmed = line.trim();
@@ -315,20 +348,43 @@ export class ChatHistoryStore {
     return lines;
   }
 
-  /** Read lines from today backwards, concatenated in chronological order. */
-  private readRecentLines(arc: string, maxDays = 30): JsonlLine[] {
+  /**
+   * Read JSONL lines in chronological order.
+   *
+   * When `maxLines` is given, files are read newest-first and we stop once
+   * `maxLines` have been accumulated — avoiding a full scan of 30 days of
+   * files for callers that only need a small window of recent context.
+   */
+  private async readRecentLines(arc: string, maxDays = 30, maxLines?: number): Promise<JsonlLine[]> {
     const dir = join(this.arcsBasePath, arc, "chat_history");
-    if (!existsSync(dir)) return [];
 
-    const files = readdirSync(dir)
-      .filter((f) => f.endsWith(".jsonl"))
-      .sort();
+    let files: string[];
+    try {
+      files = (await readdir(dir)).filter((f) => f.endsWith(".jsonl")).sort();
+    } catch {
+      return [];
+    }
 
-    // Only read last maxDays files
+    // Limit to maxDays most-recent files
     const recent = files.slice(-maxDays);
+
+    if (maxLines !== undefined) {
+      // Read newest files first; collect chunks until we have enough lines.
+      const chunks: JsonlLine[][] = [];
+      let total = 0;
+      for (let i = recent.length - 1; i >= 0 && total < maxLines; i--) {
+        const fileLines = await this.readJsonlFile(join(dir, recent[i]));
+        chunks.push(fileLines);
+        total += fileLines.length;
+      }
+      // Reverse so result is chronological, then trim to maxLines
+      return chunks.reverse().flat().slice(-maxLines);
+    }
+
+    // No limit: read all files in chronological order
     const allLines: JsonlLine[] = [];
     for (const file of recent) {
-      allLines.push(...this.readJsonlFile(join(dir, file)));
+      allLines.push(...(await this.readJsonlFile(join(dir, file))));
     }
     return allLines;
   }
@@ -347,11 +403,10 @@ export class ChatHistoryStore {
     return join(this.arcsBasePath, arc, "chronicle", "cursor.json");
   }
 
-  private readCursorTs(arc: string): string | null {
+  private async readCursorTs(arc: string): Promise<string | null> {
     const path = this.cursorPath(arc);
-    if (!existsSync(path)) return null;
     try {
-      const data = JSON.parse(readFileSync(path, "utf-8"));
+      const data = JSON.parse(await readFile(path, "utf-8"));
       return data.ts ?? null;
     } catch {
       return null;
@@ -361,6 +416,16 @@ export class ChatHistoryStore {
 
   // ── Thread context algorithm ──
 
+  /**
+   * selectThreadContext scans backwards through `lines` to collect:
+   * 1. The thread starter (pid === threadId, no foreign tid)
+   * 2. All thread replies (tid === threadId)
+   * 3. Pre-starter main-channel messages (for context up to inferenceLimit)
+   *
+   * It naturally benefits from `readRecentLines` being called without a
+   * maxLines cap (full history), since the thread starter may be arbitrarily
+   * far back. The backward scan is already O(n) and stops once limit is met.
+   */
   private selectThreadContext(
     lines: JsonlLine[],
     threadId: string,
