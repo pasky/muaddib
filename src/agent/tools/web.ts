@@ -4,7 +4,7 @@ import { resolve, relative, extname } from "node:path";
 import { Type } from "@sinclair/typebox";
 
 import type { ToolContext, MuaddibTool } from "./types.js";
-import { extractLocalArtifactPath, looksLikeImageUrl } from "./url-utils.js";
+import { extractLocalArtifactPath } from "./url-utils.js";
 
 export interface VisitWebpageImageResult {
   kind: "image";
@@ -187,7 +187,7 @@ export function createDefaultVisitWebpageExecutor(
       // Recovery strategy: some sites disallow HEAD; continue with reader fallback.
     }
 
-    if (contentType.startsWith("image/") || looksLikeImageUrl(url)) {
+    if (contentType.startsWith("image/")) {
       const imageResponse = await fetch(url, {
         headers: requestHeaders,
       });
@@ -197,15 +197,6 @@ export function createDefaultVisitWebpageExecutor(
 
       const imageMimeType =
         (imageResponse.headers.get("content-type") ?? "image/png").split(";")[0].trim();
-
-      // The URL may look like an image (.jpg etc.) but actually serve HTML
-      // (e.g. Wikimedia Commons file pages). Fall through to text handling.
-      if (!imageMimeType.startsWith("image/")) {
-        const body = (await imageResponse.text()).trim();
-        if (!body) return `## Content from ${url}\n\n(Empty response)`;
-        return formatTextContent(url, body, maxWebContentLength);
-      }
-
       const imageBytes = Buffer.from(await imageResponse.arrayBuffer());
       if (imageBytes.length > maxImageBytes) {
         throw new Error(

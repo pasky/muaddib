@@ -75,10 +75,3 @@ export function extractLocalArtifactPath(url: string, artifactsUrl: string | und
   if (!remainder) return undefined;
   return decodeURIComponent(remainder);
 }
-
-/**
- * Check if a URL looks like an image based on file extension.
- */
-export function looksLikeImageUrl(url: string): boolean {
-  return /\.(?:png|jpe?g|gif|webp)(?:$|[?#])/i.test(url);
-}

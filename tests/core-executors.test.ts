@@ -475,23 +475,24 @@ describe("core tool executors visit_webpage support", () => {
     expect(result as string).not.toContain("kind");
   });
 
-  it("visit_webpage falls through to text when image-like URL serves HTML and HEAD fails", async () => {
-    const htmlContent = "<html><body>Image page content</body></html>";
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+  it("visit_webpage uses Jina text path for image-like URL when HEAD fails", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "HEAD") {
-        // HEAD fails — contentType stays empty, looksLikeImageUrl triggers image branch.
         throw new Error("HEAD not allowed");
       }
-      return new Response(htmlContent, {
-        status: 200,
-        headers: { "content-type": "text/html" },
-      });
+      // With HEAD failing, contentType is empty so no image branch.
+      // The URL has no auth headers, so it falls through to Jina reader.
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.startsWith("https://r.jina.ai/")) {
+        return new Response("Jina rendered text for photo page", { status: 200 });
+      }
+      return new Response("", { status: 404 });
     });
 
     const executors = createDefaultToolExecutors({});
     const result = await executors.visitWebpage("https://example.com/photo.jpg");
     expect(typeof result).toBe("string");
-    expect(result as string).toContain("Image page content");
+    expect(result as string).toContain("Jina rendered text for photo page");
   });
 
   it("visit_webpage rejects non-http URLs", async () => {
