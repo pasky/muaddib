@@ -4,7 +4,8 @@ set -euo pipefail
 # Build a custom Gondolin guest image for Muaddib.
 #
 # The image includes Python 3 (pip, numpy, matplotlib), Node.js, npm, uv,
-# and a 1 GB rootfs so the agent has room to install additional packages at runtime.
+# Chromium, poppler-utils, jq, git, imagemagick, a pre-activated uv venv,
+# and a 4 GB rootfs so the agent has room to install additional packages at runtime.
 #
 # Alpine 3.23 ships Node.js 24 in its main repo, so no version manager is needed.
 #
@@ -148,12 +149,28 @@ cat > "$BUILD_CONFIG" << EOF
       "nodejs",
       "npm",
       "uv",
-      "openssh"
+      "openssh",
+      "poppler-utils",
+      "chromium",
+      "font-noto",
+      "jq",
+      "git",
+      "imagemagick"
     ]
   },
   "rootfs": {
     "label": "gondolin-root",
-    "sizeMb": 1024
+    "sizeMb": 4096
+  },
+  "postBuild": {
+    "commands": [
+      "uv venv --system-site-packages /opt/venv"
+    ]
+  },
+  "env": {
+    "VIRTUAL_ENV": "/opt/venv",
+    "PATH": "/opt/venv/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "CHROME_BIN": "/usr/bin/chromium-browser"
   }
 }
 EOF
@@ -168,7 +185,7 @@ export PATH="$BIN_TMPDIR:/usr/sbin:/sbin:$PATH"
 echo ""
 echo "Building Gondolin guest image (arch: $ARCH)"
 echo "Output: $OUTPUT_DIR"
-echo "Downloads Alpine 3.23 packages and creates a 1 GB ext4 image — takes a few minutes."
+echo "Downloads Alpine 3.23 packages and creates a 4 GB ext4 image — takes a few minutes."
 echo ""
 
 "$GONDOLIN" build --config "$BUILD_CONFIG" --output "$OUTPUT_DIR"

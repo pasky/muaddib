@@ -747,6 +747,7 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
     : "";
   const systemPromptSuffix =
     `Filesystem: /workspace persists across sessions; ${sessionDir} is your session working directory (last 8 session dirs in /tmp/session-* are kept).` +
+    " Environment: Alpine Linux, uv venv is active." +
     chronicleSuffix +
     chatHistorySuffix +
     artifactsSuffix +
