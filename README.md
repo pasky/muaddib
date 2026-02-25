@@ -15,7 +15,7 @@ What does it take to talk to many strangers?
 2. It has been optimized for high cost and token efficiency (using a variety of context engineering etc. techniques).
 3. It operates in "lurk" mode by default (rather than replying to everything, Muaddib replies when highlighted, but can also interject proactively when it seems useful).
 
-Other work-in-progress features are also going to be tailored to this scenario (e.g. per-user token usage tracking and limiting / billing, per-channel code secrets and persistent workspaces, ...).
+Other work-in-progress features are also going to be tailored to this scenario (e.g. per-user token usage tracking and limiting / billing, per-channel code secrets, ...).
 
 Of course, this means a tradeoff. Muaddib is not designed to sift through your email and manage your personal calendar!
 It is tailored for **public and team environments, where it's useful to have an AI agent as a "virtual teammate"** - both as an AI colleague in chat for public many-to-many collaboration, and allowing personal or per-channel contexts.
@@ -49,8 +49,8 @@ So is Slack - including threads:
 
 ## Features
 
-- **AI Integrations**: Anthropic Claude (Opus 4.5 recommended), OpenAI, DeepSeek, any OpenRouter model (including Gemini models)
-- **Agentic Capability**: Ability to visit websites, view images, perform deep research, fully sandboxed and isolated code execution and long-term state maintenance, publish artifacts
+- **AI Integrations**: Anthropic Claude (Opus 4.6 recommended), OpenAI, DeepSeek, any OpenRouter model (including Gemini models)
+- **Agentic Capability**: Ability to visit websites, view images, perform deep research, fully sandboxed and isolated code execution and long-term state maintenance, publish artifacts; each channel/DM gets a persistent sandboxed workspace with long-term state (code, data, installed packages)
 - **Restartable and Persistent Memory**: All state is persisted; AI agent maintains a continuous chronicle of events and experiences to refer to
 - **Command System**: Automatic model routing (to balance cost, speed and intelligence) plus extensible command-based interaction with prefixes for various modes
 - **Proactive Interjecting**: Channel-based whitelist system for automatic participation in relevant conversations
@@ -67,11 +67,13 @@ All muaddib data lives in `$MUADDIB_HOME` (defaults to `~/.muaddib/`):
 ~/.muaddib/
 ├── config.json         # Configuration (no secrets)
 ├── auth.json           # API keys and secrets
-├── chat_history.db     # Chat history database
-├── chronicle.db        # Chronicle database
+├── arcs/               # Per-arc data (one subdir per channel/DM)
+│   └── <arc>/
+│       ├── chat_history/   # JSONL chat logs (one file per day)
+│       ├── chronicle/      # Markdown chronicle entries
+│       ├── workspace/      # Gondolin VM persistent workspace (mounted at /workspace)
+│       └── checkpoint.qcow2  # Gondolin VM disk checkpoint
 ├── artifacts/          # Published artifacts
-├── workspaces/         # Gondolin VM persistent workspaces (one subdir per arc)
-├── checkpoints/        # Gondolin VM disk checkpoints (.qcow2, one per arc)
 └── logs/               # Per-message log files
 ```
 

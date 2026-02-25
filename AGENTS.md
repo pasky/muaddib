@@ -25,7 +25,7 @@
 - **Persistence**:
   - Chat history: `src/history/chat-history-store.ts`
   - Chronicle: `src/chronicle/*`
-- **Config & Data**: all runtime state lives under `$MUADDIB_HOME` (defaults to `~/.muaddib/`), including `config.json`, `chat_history.db`, `chronicle.db`, `artifacts/`, `logs/`. `config.json.example` documents every supported config field with comments — **keep it in sync when adding new config keys**.
+- **Config & Data**: all runtime state lives under `$MUADDIB_HOME` (defaults to `~/.muaddib/`), including `config.json`, `arcs/` (per-arc JSONL chat history, markdown chronicle, Gondolin workspace and checkpoint), `artifacts/`, `logs/`. `config.json.example` documents every supported config field with comments — **keep it in sync when adding new config keys**.
 - Models MUST be fully-qualified as `provider:model` (e.g. `anthropic:claude-sonnet-4`). No defaults.
 - No backwards compatibility shims for legacy config keys.
 

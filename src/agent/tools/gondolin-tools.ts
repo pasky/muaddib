@@ -4,8 +4,8 @@
  * Provides read/write/edit/bash tools backed by a Gondolin micro-VM instead of
  * the host filesystem.  One VM per arc (persistent, reused across invocations).
  * Each invocation gets an ephemeral working directory at /tmp/session-{uuid}/.
- * Persistent workspace is mounted from $MUADDIB_HOME/workspaces/<arcId>/ at /workspace.
- * VM disk checkpoint stored at $MUADDIB_HOME/checkpoints/<arcId>.qcow2 (outside the VFS mount).
+ * Persistent workspace is mounted from $MUADDIB_HOME/arcs/<arcId>/workspace/ at /workspace.
+ * VM disk checkpoint stored at $MUADDIB_HOME/arcs/<arcId>/checkpoint.qcow2.
  *
  * Network policy:
  *   - Internal RFC-1918 and loopback ranges are blocked by default.
@@ -785,7 +785,7 @@ export function resetGondolinVmCache(): void {
  * Checkpoint the Gondolin VM for an arc after a session ends.
  *
  * Prunes old session directories inside /tmp (keeping the 8 most recent), then
- * stops the VM and persists its disk state to `$MUADDIB_HOME/workspaces/<arcId>/vm-checkpoint.qcow2`.
+ * stops the VM and persists its disk state to `$MUADDIB_HOME/arcs/<arcId>/checkpoint.qcow2`.
  * The VM is removed from the cache so the next invocation resumes from the checkpoint.
  *
  * This is a no-op if no VM is running for the arc.
