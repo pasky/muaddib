@@ -27,9 +27,9 @@ FROM_DATE=$(date -d "-${DAYS} days" +%Y-%m-%d)
 echo "=== Cost Report: last $DAYS days ($FROM_DATE → $TODAY) ==="
 echo
 
-# Collect all JSONL lines with cost data into a single stream, tagged with arc name.
-# We inject the arc name as a field so downstream jq can group by it.
-collect_cost_lines() {
+# Collect JSONL lines tagged with arc name.
+# Emits cost records (cost != null) and user trigger records (r == "u" with run set).
+collect_lines() {
   for arc_dir in "$ARCS_DIR"/*/chat_history; do
     [[ -d "$arc_dir" ]] || continue
     arc=$(basename "$(dirname "$arc_dir")")
@@ -39,17 +39,21 @@ collect_cost_lines() {
       fname=$(basename "$f" .jsonl)
       [[ "$fname" > "$FROM_DATE" || "$fname" == "$FROM_DATE" ]] || continue
       jq -c --arg arc "$arc" \
-        'select(.cost != null and .ts != null) | . + {arc: $arc}' \
+        'select((.cost != null and .ts != null) or (.r == "u" and .run != null)) | . + {arc: $arc}' \
         "$f" 2>/dev/null || true
     done
   done
 }
 
-# Materialize once into a temp file
+# Materialize once into temp files: all records, cost records, and trigger lookup
+ALLFILE=$(mktemp)
 TMPFILE=$(mktemp)
-trap 'rm -f "$TMPFILE"' EXIT
+TRIGFILE=$(mktemp)
+trap 'rm -f "$ALLFILE" "$TMPFILE" "$TRIGFILE"' EXIT
 
-collect_cost_lines | jq -c --arg cutoff "$CUTOFF" 'select(.ts >= $cutoff)' > "$TMPFILE"
+collect_lines | jq -c --arg cutoff "$CUTOFF" 'select(.ts >= $cutoff)' > "$ALLFILE"
+jq -c 'select(.cost != null)' "$ALLFILE" > "$TMPFILE"
+jq -c 'select(.r == "u" and .run != null)' "$ALLFILE" > "$TRIGFILE"
 
 if [[ ! -s "$TMPFILE" ]]; then
   echo "(no cost data found for the last $DAYS days)"
@@ -95,9 +99,17 @@ echo "--- Per User (total across channels) ---"
 echo
 printf "%-18s  %10s  %6s  %12s  %12s  %s\n" "user" "cost" "calls" "input_tok" "output_tok" "channels"
 printf "%-18s  %10s  %6s  %12s  %12s  %s\n" "----" "----" "-----" "---------" "----------" "--------"
-jq -s '
-  group_by(.n // "(unknown)") | map({
-    nick: (.[0].n // "(unknown)"),
+jq -s --slurpfile triggers "$TRIGFILE" '
+  # Build lookup: (arc, run) -> triggering nick
+  ($triggers | map({key: "\(.arc)|\(.run)", value: .n}) |
+    from_entries) as $trig_lookup |
+  # Resolve each cost record to the triggering user
+  [.[] | . + {resolved_nick:
+    (if .run then ($trig_lookup["\(.arc)|\(.run)"] // .n // "(unknown)")
+     else (.n // "(unknown)") end)
+  }] |
+  group_by(.resolved_nick) | map({
+    nick: .[0].resolved_nick,
     cost: (map(.cost // 0) | add),
     calls: length,
     inTok: (map(.inTok // 0) | add),
@@ -132,12 +144,19 @@ echo
 
 LOGS_DIR="$MUADDIB_HOME/logs"
 
-jq -s --argjson threshold "$COST_THRESHOLD" '
-  [.[] | select(.cost > $threshold)] | sort_by(-.cost)[] |
-  [.ts[:10],
-   (.ts[11:19] | gsub(":"; "-")),
+jq -s --argjson threshold "$COST_THRESHOLD" --slurpfile triggers "$TRIGFILE" '
+  # Build lookup: (arc, run) -> triggering nick
+  ($triggers | map({key: "\(.arc)|\(.run)", value: .n}) |
+    from_entries) as $trig_lookup |
+  [.[] | select(.cost > $threshold)] |
+  [.[] | . + {
+    trig_nick: (if .run then ($trig_lookup["\(.arc)|\(.run)"] // .n // "?") else (.n // "?") end),
+    trig_ts: (.run // .ts)
+  }] | sort_by(-.cost)[] |
+  [.trig_ts[:10],
+   (.trig_ts[11:19] | gsub(":"; "-")),
    .arc,
-   (.n // "?"),
+   .trig_nick,
    .cost,
    (.inTok // 0),
    (.outTok // 0)] | @tsv
