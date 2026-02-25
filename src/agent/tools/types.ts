@@ -2,6 +2,7 @@ import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { AuthStorage } from "@mariozechner/pi-coding-agent";
 import type { ChronicleStore } from "../../chronicle/chronicle-store.js";
 import type { ToolsConfig } from "../../config/muaddib-config.js";
+import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import type { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import type { Logger } from "../../app/logging.js";
 
@@ -56,6 +57,8 @@ export interface ToolContext extends ArtifactContext {
   modelAdapter: PiAiModelAdapter;
   /** Chronicle store — used for gondolin VM mounting and context prepending. */
   chronicleStore?: ChronicleStore;
+  /** Chat history store — mounted read-only at /chat_history in gondolin VMs. */
+  chatHistoryStore?: ChatHistoryStore;
 
   // ── Per-invocation context ──
   /** Arc identifier (e.g. "libera##test"), used for Gondolin VM isolation and chronicle scoping. */

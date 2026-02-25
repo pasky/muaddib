@@ -1,6 +1,9 @@
 import {
   appendFileSync,
+  existsSync,
   mkdirSync,
+  readFileSync,
+  readdirSync,
   renameSync,
   writeFileSync,
 } from "node:fs";
@@ -299,6 +302,25 @@ export class ChatHistoryStore {
       edit: true,
     };
     this.appendLine(arc, line);
+  }
+
+  // ── Gondolin VM mounting ──
+
+  /**
+   * Read all chat history JSONL files for an arc (synchronous).
+   * Returns `{ filename, content }[]` suitable for mounting as an in-memory
+   * read-only VFS inside a Gondolin VM — mirrors ChronicleStore.readAllChapterFiles().
+   */
+  readAllHistoryFiles(arc: string): Array<{ filename: string; content: string }> {
+    const dir = join(this.arcsBasePath, arc, "chat_history");
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir)
+      .filter((f) => f.endsWith(".jsonl"))
+      .sort()
+      .map((filename) => ({
+        filename,
+        content: readFileSync(join(dir, filename), "utf-8"),
+      }));
   }
 
   // ── Internal I/O ──

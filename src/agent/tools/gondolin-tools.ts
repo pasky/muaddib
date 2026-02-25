@@ -36,6 +36,7 @@ import type { GondolinConfig } from "../../config/muaddib-config.js";
 import type { ToolsConfig } from "../../config/muaddib-config.js";
 import type { Logger } from "../../app/logging.js";
 import type { ChronicleStore } from "../../chronicle/chronicle-store.js";
+import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import type { ArtifactContext, MuaddibTool, ToolSet } from "./types.js";
 import {
   createShareArtifactTool,
@@ -189,6 +190,7 @@ async function ensureVm(
   dnsMode: SupportedDnsMode,
   skills: LoadedSkill[],
   chronicleFiles: Array<{ filename: string; content: string }>,
+  chatHistoryFiles: Array<{ filename: string; content: string }>,
   artifactHostname: string | undefined,
   logger?: Logger,
 ): Promise<VM> {
@@ -275,6 +277,15 @@ async function ensureVm(
         }
         chronicleFs.setReadOnly();
         mounts["/chronicle"] = chronicleFs;
+      }
+
+      if (chatHistoryFiles.length > 0) {
+        const historyFs = new MemProviderClass();
+        for (const file of chatHistoryFiles) {
+          historyFs.writeFileSync!(file.filename, file.content, { encoding: "utf8" });
+        }
+        historyFs.setReadOnly();
+        mounts["/chat_history"] = historyFs;
       }
 
       // Forward QEMU serial console output (guest kernel + init messages) to
@@ -655,6 +666,7 @@ export interface GondolinToolsOptions {
   config: GondolinConfig;
   toolsConfig?: ToolsConfig;
   chronicleStore?: ChronicleStore;
+  chatHistoryStore?: ChatHistoryStore;
   logger?: Logger;
 }
 
@@ -687,6 +699,7 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
 
   const skills = getBundledSkills();
   const chronicleFiles = options.chronicleStore?.readAllChapterFiles(arc) ?? [];
+  const chatHistoryFiles = options.chatHistoryStore?.readAllHistoryFiles(arc) ?? [];
   const artifactHostname = resolveArtifactHostname(toolsConfig?.artifacts?.url, logger);
 
   const bashTimeoutSeconds = config.bashTimeoutSeconds ?? 270;
@@ -696,7 +709,7 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
 
   function getVm(): Promise<VM> {
     if (!vmReady) {
-      vmReady = ensureVm(arc, config, dnsMode, skills, chronicleFiles, artifactHostname, logger).then(async (vm) => {
+      vmReady = ensureVm(arc, config, dnsMode, skills, chronicleFiles, chatHistoryFiles, artifactHostname, logger).then(async (vm) => {
         await vm.exec(["/bin/mkdir", "-p", sessionDir], { signal: AbortSignal.timeout(vmOpTimeoutMs) });
         logger?.info(`Gondolin session dir: ${sessionDir} (arc: ${arc})`);
         return vm;
@@ -734,11 +747,15 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
     ? ` Artifacts: your previously produced output attachments - any URLs that start with ${artifactsUrl}, read with download_artifact skill.`
     : "";
   const chronicleSuffix = chronicleFiles.length > 0
-    ? " Chronicle: your memory chapters are at /chronicle/ (read-only)."
+    ? " Chronicle: you chapters and paragraphs chronicling your experiences, plans, thoughts and observations,.forming the backbone of your consciousness, are at /chronicle/ (read-only)."
+    : "";
+  const chatHistorySuffix = chatHistoryFiles.length > 0
+    ? " Chat history: raw JSONL logs at /chat_history/ (read-only)."
     : "";
   const systemPromptSuffix =
     `Filesystem: /workspace persists across sessions; ${sessionDir} is your session working directory (last 8 session dirs in /tmp/session-* are kept).` +
     chronicleSuffix +
+    chatHistorySuffix +
     artifactsSuffix +
     skillsSection;
 

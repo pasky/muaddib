@@ -104,6 +104,7 @@ export function createBaselineAgentTools(options: BaselineToolOptions): ToolSet 
     config: gondolinConfig,
     toolsConfig: options.toolsConfig,
     chronicleStore: options.chronicleStore,
+    chatHistoryStore: options.chatHistoryStore,
     logger: options.logger,
   });
 

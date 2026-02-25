@@ -887,6 +887,34 @@ describe("gondolin — artifact URL in systemPromptSuffix", () => {
   });
 });
 
+describe("gondolin — chat history in systemPromptSuffix", () => {
+  it("includes chat_history hint when chatHistoryStore has files", () => {
+    const { systemPromptSuffix } = createGondolinTools({
+      arc: "history-arc",
+      config: gondolinConfig,
+      chatHistoryStore: { readAllHistoryFiles: () => [{ filename: "2025-01-01.jsonl", content: "{}" }] } as any,
+    });
+    expect(systemPromptSuffix).toContain("/chat_history/");
+  });
+
+  it("omits chat_history hint when chatHistoryStore returns no files", () => {
+    const { systemPromptSuffix } = createGondolinTools({
+      arc: "no-history-arc",
+      config: gondolinConfig,
+      chatHistoryStore: { readAllHistoryFiles: () => [] } as any,
+    });
+    expect(systemPromptSuffix).not.toContain("/chat_history/");
+  });
+
+  it("omits chat_history hint when chatHistoryStore is absent", () => {
+    const { systemPromptSuffix } = createGondolinTools({
+      arc: "absent-history-arc",
+      config: gondolinConfig,
+    });
+    expect(systemPromptSuffix).not.toContain("/chat_history/");
+  });
+});
+
 // ── Skill loader unit tests ────────────────────────────────────────────────
 
 describe("loadBundledSkills", () => {

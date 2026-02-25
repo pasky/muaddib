@@ -442,6 +442,35 @@ describe("ChatHistoryStore", () => {
 
     await store.close();
   });
+
+  it("readAllHistoryFiles returns all JSONL files for gondolin mounting", async () => {
+    const store = createTempHistoryStore(10);
+    await store.initialize();
+
+    await store.addMessage({
+      serverTag: "libera",
+      channelName: "#test",
+      nick: "alice",
+      mynick: "muaddib",
+      content: "hello",
+    });
+
+    const files = store.readAllHistoryFiles(ARC);
+    expect(files.length).toBe(1);
+    expect(files[0].filename).toMatch(/^\d{4}-\d{2}-\d{2}\.jsonl$/);
+    expect(files[0].content).toContain("hello");
+
+    await store.close();
+  });
+
+  it("readAllHistoryFiles returns empty array for unknown arc", async () => {
+    const store = createTempHistoryStore(10);
+    await store.initialize();
+
+    expect(store.readAllHistoryFiles("nonexistent-arc")).toEqual([]);
+
+    await store.close();
+  });
 });
 
 describe("ChronicleStore", () => {

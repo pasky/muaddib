@@ -3,7 +3,7 @@ name: chronicle-read
 description: Read chronicle memory chapters from /chronicle/ in the sandbox.
 ---
 
-Chronicle files at `/chronicle/` are numbered markdown files (`000001.md`, `000002.md`, etc.) with YAML frontmatter (`openedAt`, `closedAt`, `summary`) and timestamped paragraphs:
+Chronicle files at `/chronicle/` are numbered markdown chapter files (`000001.md`, `000002.md`, etc.) with YAML frontmatter (`openedAt`, `closedAt`, `summary`) and timestamped paragraphs:
 
 ```markdown
 ---
@@ -18,5 +18,6 @@ summary: "Brief summary of the chapter."
 ```
 
 - `closedAt` absent = current (open) chapter
-- Current chapter paragraphs are auto-prepended to context as `<context_summary>` messages
+- Previous chapter summary and current chapter paragraphs were auto-prepended to your context as `<context_summary>` messages
+- The chronicle is continuously written by your scaffold automatically, based on `/chat_history` chatter
 - Use `read` tool on `/chronicle/NNNNNN.md` for older chapters
