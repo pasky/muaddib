@@ -11,6 +11,6 @@ repos:
     hooks:
       - id: ts-check
         name: TypeScript lint + typecheck + tests + build (parallel)
-        entry: bash -c 'npm run lint & pid_lint=$!; npm run typecheck & pid_tc=$!; timeout 30 npm test & pid_test=$!; npm run build & pid_build=$!; wait $pid_lint && wait $pid_tc && wait $pid_test && wait $pid_build'
+        entry: bash scripts/pre-commit-check.sh
         language: system
         pass_filenames: false
