@@ -537,6 +537,10 @@ export class CommandExecutor {
       const fallbackSpec = parseModelSpec(agentResult.refusalFallbackModel);
       responseText = `${responseText} [refusal fallback to ${fallbackSpec.modelId}]`.trim();
     }
+    if (agentResult.visionFallbackActivated && agentResult.visionFallbackModel) {
+      const fallbackSpec = parseModelSpec(agentResult.visionFallbackModel);
+      responseText = `${responseText} [vision fallback to ${fallbackSpec.modelId}]`.trim();
+    }
 
     responseText = await this.applyResponseLengthPolicy(responseText, message.arc);
     responseText = this.cleanResponseText(responseText, message.nick);

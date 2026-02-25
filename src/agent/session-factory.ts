@@ -174,7 +174,13 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
 
   const modelRegistry = new ModelRegistry(input.authStorage);
   const llmDebugMaxChars = Math.max(500, Math.floor(input.llmDebugMaxChars ?? 120_000));
-  const streamFn = createTracingStreamFn(logger, llmDebugMaxChars);
+
+  // Mutable vision-fallback state: when activated, the streamFn will override
+  // the model parameter to use the vision-capable model. This bypasses the
+  // stale `config.model` that pi-agent-core's _runLoop captures by value at
+  // loop start, avoiding a wasted turn + 5s delay on non-vision models.
+  const visionState = { activated: false, model: null as ResolvedPiAiModel["model"] | null };
+  const streamFn = createTracingStreamFn(logger, llmDebugMaxChars, visionState);
 
   // Compute maxIterations, session start, and nudge state before Agent construction
   // so they can be captured in the transformContext closure.
@@ -237,7 +243,6 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
   );
 
   let turnCount = 0;
-  let visionFallbackActivated = false;
   const unsubscribe = session.subscribe((event) => {
     if (event.type === "turn_end") {
       turnCount += 1;
@@ -284,9 +289,13 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
     }
 
     if (event.type === "tool_execution_end" && !event.isError) {
-      if (!visionFallbackActivated && visionFallbackModel && hasImageToolOutput(event.result)) {
+      if (!visionState.activated && visionFallbackModel && hasImageToolOutput(event.result)) {
+        visionState.activated = true;
+        visionState.model = visionFallbackModel.model;
+        // setModel ensures correctness for subsequent session.prompt() calls
+        // (e.g. empty-completion retry), but won't help the current loop
+        // iteration — the streamFn override handles that.
         agent.setModel(visionFallbackModel.model);
-        visionFallbackActivated = true;
       }
     }
   });
@@ -300,7 +309,7 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
         throw new Error(`No API key configured for provider '${provider}'. Add it to auth.json.`);
       }
     },
-    getVisionFallbackActivated: () => visionFallbackActivated,
+    getVisionFallbackActivated: () => visionState.activated,
     dispose: () => {
       unsubscribe();
       session.dispose();
@@ -330,9 +339,14 @@ function convertContextToAgentMessages(
   });
 }
 
-function createTracingStreamFn(logger: Logger, maxChars: number): StreamFn {
+function createTracingStreamFn(
+  logger: Logger,
+  maxChars: number,
+  visionState: { activated: boolean; model: ResolvedPiAiModel["model"] | null },
+): StreamFn {
   return (model, context, options) => {
-    return streamSimple(model, context, {
+    const effectiveModel = (visionState.activated && visionState.model) ? visionState.model : model;
+    return streamSimple(effectiveModel, context, {
       ...options,
       onPayload: (payload: unknown) => {
         logger.debug("llm_io payload agent_stream", safeJson(payload, maxChars));

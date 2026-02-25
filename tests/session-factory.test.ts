@@ -179,6 +179,11 @@ describe("createAgentSessionForInvocation", () => {
 
   it("activates vision fallback model on image tool output and enforces max-iteration abort", () => {
     const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const visionModel = {
+      provider: "anthropic",
+      id: "claude-sonnet-4",
+      api: "anthropic-messages",
+    };
     const resolve = vi.fn((spec: string) => {
       if (spec === "openai:gpt-4o-mini") {
         return {
@@ -188,7 +193,7 @@ describe("createAgentSessionForInvocation", () => {
       }
       return {
         spec: { provider: "anthropic", modelId: "claude-sonnet-4" },
-        model: { provider: "anthropic", id: "claude-sonnet-4", api: "anthropic-messages" },
+        model: visionModel,
       };
     });
 
@@ -207,12 +212,18 @@ describe("createAgentSessionForInvocation", () => {
     const agent = ctx.agent as any;
 
     session.emit({ type: "tool_execution_end", isError: false, result: { nested: [{ kind: "image" }] } });
-    expect(agent.setModel).toHaveBeenCalledWith({
-      provider: "anthropic",
-      id: "claude-sonnet-4",
-      api: "anthropic-messages",
-    });
+    expect(agent.setModel).toHaveBeenCalledWith(visionModel);
     expect(ctx.getVisionFallbackActivated()).toBe(true);
+
+    // After vision fallback activates, the streamFn should use the vision model
+    // instead of the passed-in model parameter (fixing the race condition where
+    // pi-agent-core's _runLoop captures config.model by value at loop start).
+    mockState.streamSimpleMock.mockClear();
+    const streamFn = agent.config.streamFn;
+    const originalModel = { provider: "openai", id: "gpt-4o-mini", api: "responses" };
+    streamFn(originalModel, { messages: [] }, {});
+    expect(mockState.streamSimpleMock).toHaveBeenCalledTimes(1);
+    expect(mockState.streamSimpleMock.mock.calls[0][0]).toBe(visionModel);
 
     session.emit({
       type: "turn_end",
@@ -254,6 +265,30 @@ describe("createAgentSessionForInvocation", () => {
     expect(agent.steer).toHaveBeenCalled();
     expect(session.abort).toHaveBeenCalledTimes(1);
     expect(logger.warn).toHaveBeenCalledWith("Exceeding max iterations, aborting session prompt loop.");
+  });
+
+  it("streamFn uses original model when vision fallback is not activated", () => {
+    const resolve = vi.fn(() => ({
+      spec: { provider: "openai", modelId: "gpt-4o-mini" },
+      model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
+    }));
+
+    const ctx = createAgentSessionForInvocation({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "system",
+      tools: [],
+      authStorage: AuthStorage.inMemory(),
+      modelAdapter: { resolve } as any,
+    });
+
+    const agent = ctx.agent as any;
+    mockState.streamSimpleMock.mockClear();
+
+    const originalModel = { provider: "openai", id: "gpt-4o-mini", api: "responses" };
+    agent.config.streamFn(originalModel, { messages: [] }, {});
+    expect(mockState.streamSimpleMock).toHaveBeenCalledTimes(1);
+    expect(mockState.streamSimpleMock.mock.calls[0][0]).toBe(originalModel);
+    expect(ctx.getVisionFallbackActivated()).toBe(false);
   });
 
   it("transformContext injects metaReminder on first turn, after toolUse, but not after stop or at iteration limit", async () => {
