@@ -520,7 +520,7 @@ function createVmReadOps(getVm: () => Promise<VM>, opTimeoutMs: number, logger?:
   return {
     readFile: async (absolutePath) => {
       const vm = await getVm();
-      return vm.readFile(absolutePath, { signal: AbortSignal.timeout(opTimeoutMs) });
+      return vm.fs.readFile(absolutePath, { signal: AbortSignal.timeout(opTimeoutMs) });
     },
     access: async (absolutePath) => {
       const vm = await getVm();
@@ -563,7 +563,7 @@ function createVmWriteOps(getVm: () => Promise<VM>, opTimeoutMs: number): WriteO
       const vm = await getVm();
       const dir = posix.dirname(absolutePath);
       await vm.exec(["/bin/mkdir", "-p", dir], { signal: AbortSignal.timeout(opTimeoutMs) });
-      await vm.writeFile(absolutePath, content, { encoding: "utf8", signal: AbortSignal.timeout(opTimeoutMs) });
+      await vm.fs.writeFile(absolutePath, content, { encoding: "utf8", signal: AbortSignal.timeout(opTimeoutMs) });
     },
     mkdir: async (dir) => {
       const vm = await getVm();
@@ -726,7 +726,7 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
   // share_artifact reads files from the VM and publishes them to the artifact store.
   const sandboxReadFile: SandboxReadFile = async (absolutePath: string): Promise<Buffer> => {
     const vm = await getVm();
-    const content = await vm.readFile(absolutePath, { signal: AbortSignal.timeout(vmOpTimeoutMs) });
+    const content = await vm.fs.readFile(absolutePath, { signal: AbortSignal.timeout(vmOpTimeoutMs) });
     return Buffer.isBuffer(content) ? content : Buffer.from(content);
   };
   const artifactContext: ArtifactContext = { toolsConfig, logger };
