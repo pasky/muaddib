@@ -115,7 +115,7 @@ export class RoomMessageHandler {
       }
     }
 
-    const triggerTs = await this.history.addMessage(message);
+    const triggerTs = await this.history.addMessage(message, { selfRun: true });
 
     if (!options.isDirect) {
       this.logger.debug(

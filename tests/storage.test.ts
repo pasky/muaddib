@@ -1,7 +1,7 @@
 
 
 
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, appendFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -11,6 +11,7 @@ import { CONSOLE_LOGGER } from "../src/app/logging.js";
 import { ChronicleStore } from "../src/chronicle/chronicle-store.js";
 import { ChronicleLifecycleTs } from "../src/chronicle/lifecycle.js";
 import { AutoChroniclerTs } from "../src/rooms/autochronicler.js";
+import { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { fsSafeArc } from "../src/rooms/message.js";
 import { createTempHistoryStore } from "./test-helpers.js";
 
@@ -418,6 +419,26 @@ describe("ChatHistoryStore", () => {
     const count = await store.countMessagesSince(arc, sinceMs);
 
     expect(count).toBe(1);
+
+    await store.close();
+  });
+
+  it("selfRun sets run field to the line's own timestamp", async () => {
+    const dir = makeTempDir();
+    const store = new ChatHistoryStore(dir);
+    await store.initialize();
+
+    const ts = await store.addMessage(
+      { serverTag: "libera", channelName: "#test", nick: "alice", mynick: "muaddib", content: "trigger" },
+      { selfRun: true },
+    );
+
+    // Read raw JSONL to verify the run field
+    const jsonlPath = join(dir, ARC, "chat_history", `${ts.slice(0, 10)}.jsonl`);
+    const lines = readFileSync(jsonlPath, "utf-8").trim().split("\n").map((l) => JSON.parse(l));
+    expect(lines).toHaveLength(1);
+    expect(lines[0].run).toBe(ts);
+    expect(lines[0].ts).toBe(ts);
 
     await store.close();
   });

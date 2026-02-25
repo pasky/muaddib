@@ -993,6 +993,14 @@ describe("RoomMessageHandler", () => {
     expect(rows[0].role).toBe("user");
     expect(rows[1].role).toBe("assistant");
 
+    // Verify run field on raw JSONL: trigger message has run == ts, assistant has run == trigger ts
+    const arcsBase = (history as any).arcsBasePath;
+    const today = new Date().toISOString().slice(0, 10);
+    const jsonlRaw = await readFile(join(arcsBase, "libera##test", "chat_history", `${today}.jsonl`), "utf-8");
+    const jsonlLines = jsonlRaw.trim().split("\n").map((l: string) => JSON.parse(l));
+    expect(jsonlLines[0].run).toBe(jsonlLines[0].ts); // trigger message: run == self ts
+    expect(jsonlLines[1].run).toBe(jsonlLines[0].ts); // assistant: run == trigger ts
+
     const context = await history.getContext("libera##test", 10);
     const assistantContent = (context[1] as any).content[0].text;
     expect(assistantContent).toContain("!s");
@@ -1049,6 +1057,18 @@ describe("RoomMessageHandler", () => {
     expect(rows).toHaveLength(4);
     expect(rows[2].message).toContain("this message used 2 tool calls");
     expect(rows[3].message).toContain("already cost $1.2500 today");
+
+    // Verify run field on all JSONL lines: trigger, response, and cost followups share the same run ID
+    // Line 0 is the logLlmCost entry (no nick/role), lines 1-4 are the actual message flow.
+    const arcsBase = (history as any).arcsBasePath;
+    const today = new Date().toISOString().slice(0, 10);
+    const jsonlRaw = await readFile(join(arcsBase, "libera##test", "chat_history", `${today}.jsonl`), "utf-8");
+    const jsonlLines = jsonlRaw.trim().split("\n").map((l: string) => JSON.parse(l));
+    const triggerTs = jsonlLines[1].ts;
+    expect(jsonlLines[1].run).toBe(triggerTs); // trigger: self-referencing run
+    expect(jsonlLines[2].run).toBe(triggerTs); // primary response
+    expect(jsonlLines[3].run).toBe(triggerTs); // cost followup
+    expect(jsonlLines[4].run).toBe(triggerTs); // daily milestone
 
     await history.close();
   });

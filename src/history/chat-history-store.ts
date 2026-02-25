@@ -93,6 +93,8 @@ export class ChatHistoryStore {
       mode?: string | null;
       contentTemplate?: string;
       role?: ChatRole;
+      /** When true, set `run` to the line's own `ts` (for trigger messages). */
+      selfRun?: boolean;
       run?: string;
       call?: string;
       model?: string;
@@ -119,6 +121,7 @@ export class ChatHistoryStore {
     };
 
     if (options.mode) line.mode = options.mode;
+    if (options.selfRun) line.run = ts;
     if (options.run) line.run = options.run;
     if (options.call) line.call = options.call;
     if (options.model) line.model = options.model;

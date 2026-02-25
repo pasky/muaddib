@@ -376,7 +376,7 @@ export class CommandExecutor {
       ...selectedContext.slice(0, -1),
     ];
 
-    const toolSet = this.selectTools(message, resolved.runtime.allowedTools, runnerContext, sendResponse);
+    const toolSet = this.selectTools(message, resolved.runtime.allowedTools, runnerContext, sendResponse, triggerTs);
 
     const progressConfig = this.agentConfig.progress;
     const runner = this.runnerFactory({
@@ -397,7 +397,7 @@ export class CommandExecutor {
       runner, message, `[${queryTimestamp}] <${message.nick}> ${queryContent}`, runnerContext, toolSet.tools, {
         reasoningEffort: resolved.runtime.reasoningEffort,
         visionModel: resolved.runtime.visionModel ?? undefined,
-      },
+      }, triggerTs,
     );
 
     if (!responseText) {
@@ -520,6 +520,7 @@ export class CommandExecutor {
     contextMessages: Message[],
     tools: MuaddibTool[],
     opts: { reasoningEffort: string; visionModel?: string },
+    triggerTs?: string,
   ): Promise<PromptRunResult> {
     const agentResult = await runner.prompt(queryText, {
       contextMessages,
@@ -528,7 +529,7 @@ export class CommandExecutor {
       refusalFallbackModel: this.refusalFallbackModel ?? undefined,
     });
 
-    await this.persistGeneratedToolSummary(message, agentResult, tools);
+    await this.persistGeneratedToolSummary(message, agentResult, tools, triggerTs);
     agentResult.session?.dispose();
 
     let responseText = agentResult.text;
@@ -617,7 +618,7 @@ export class CommandExecutor {
       `arc=${arcName}`,
     );
 
-    await this.emitCostFollowups(message, result, arcName, sendResponse);
+    await this.emitCostFollowups(message, result, arcName, sendResponse, triggerTs);
 
     return result;
   }
@@ -627,6 +628,7 @@ export class CommandExecutor {
     result: CommandExecutionResult,
     arcName: string,
     sendResponse: SendResponse | undefined,
+    triggerTs?: string,
   ): Promise<void> {
     if (!sendResponse || !result.usage) {
       return;
@@ -648,7 +650,7 @@ export class CommandExecutor {
       logger.info("Sending cost followup", `arc=${arcName}`, `cost=${totalCost.toFixed(4)}`);
       const costSendResult = await sendResponse(costMessage);
       const costSR = costSendResult ? costSendResult : undefined;
-      await this.persistBotResponse(arcName, message, costMessage, costSR);
+      await this.persistBotResponse(arcName, message, costMessage, costSR, { run: triggerTs });
     }
 
     const totalToday = await history.getArcCostToday(arcName);
@@ -664,7 +666,7 @@ export class CommandExecutor {
     logger.info("Sending daily cost milestone", `arc=${arcName}`, `total_today=${totalToday.toFixed(4)}`);
     const milestoneSendResult = await sendResponse(milestoneMessage);
     const milestoneSR = milestoneSendResult ? milestoneSendResult : undefined;
-    await this.persistBotResponse(arcName, message, milestoneMessage, milestoneSR);
+    await this.persistBotResponse(arcName, message, milestoneMessage, milestoneSR, { run: triggerTs });
   }
 
   // ── Bot message persistence ──
@@ -814,6 +816,7 @@ export class CommandExecutor {
     message: RoomMessage,
     result: PromptResult,
     tools: MuaddibTool[],
+    triggerTs?: string,
   ): Promise<void> {
     const summaryText = await generateToolSummaryFromSession({
       result,
@@ -830,6 +833,7 @@ export class CommandExecutor {
 
     await this.persistBotResponse(roomArc(message), message, summaryText, undefined, {
       contentTemplate: "[internal monologue] {message}",
+      run: triggerTs,
     });
   }
 
@@ -838,6 +842,7 @@ export class CommandExecutor {
     allowedTools: string[] | null,
     conversationContext?: Message[],
     sendResponse?: SendResponse,
+    triggerTs?: string,
   ): ToolSet {
     const invocationToolOptions: BaselineToolOptions = {
       ...this.buildToolOptions(),
@@ -851,7 +856,9 @@ export class CommandExecutor {
         ? async (text: string) => {
             const sr = await sendResponse(text);
             const sendResult = sr ? sr : undefined;
-            await this.persistBotResponse(roomArc(message), message, text, sendResult);
+            await this.persistBotResponse(roomArc(message), message, text, sendResult, {
+              run: triggerTs,
+            });
           }
         : undefined;
 
