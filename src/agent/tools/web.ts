@@ -23,6 +23,26 @@ const DEFAULT_IMAGE_LIMIT = 3_500_000;
 /** Jina reader retry config. Mutable for test override. */
 export const jinaRetryConfig = { delaysMs: [0, 30_000, 90_000] };
 
+/**
+ * Wrap a fetch call to surface the `.cause` from Node's opaque "fetch failed" TypeError.
+ * Node 18+ fetch throws `TypeError("fetch failed")` for network-level errors
+ * (DNS, connection refused, TLS, etc.) with the real reason buried in `.cause`.
+ */
+async function diagnosticFetch(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch (err: unknown) {
+    const cause = (err as { cause?: unknown }).cause;
+    const causeMsg = cause instanceof Error ? cause.message : cause ? String(cause) : "";
+    const baseMsg = err instanceof Error ? err.message : String(err);
+    const detail = causeMsg && !baseMsg.includes(causeMsg) ? `${baseMsg}: ${causeMsg}` : baseMsg;
+    throw new Error(`${init?.method ?? "GET"} ${String(input)} failed: ${detail}`, { cause: err });
+  }
+}
+
 const IMAGE_EXTENSIONS: Record<string, string> = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
@@ -126,7 +146,7 @@ export function createDefaultWebSearchExecutor(
     await searchRateLimiter.waitIfNeeded();
 
     const url = `https://s.jina.ai/?q=${encodeURIComponent(trimmedQuery)}`;
-    const response = await fetch(url, {
+    const response = await diagnosticFetch(url, {
       headers: buildJinaHeaders(await options.authStorage.getApiKey("jina"), {
         "X-Respond-With": "no-content",
       }),
@@ -176,7 +196,7 @@ export function createDefaultVisitWebpageExecutor(
 
     let contentType = "";
     try {
-      const headResponse = await fetch(url, {
+      const headResponse = await diagnosticFetch(url, {
         method: "HEAD",
         headers: requestHeaders,
       });
@@ -188,7 +208,7 @@ export function createDefaultVisitWebpageExecutor(
     }
 
     if (contentType.startsWith("image/")) {
-      const imageResponse = await fetch(url, {
+      const imageResponse = await diagnosticFetch(url, {
         headers: requestHeaders,
       });
       if (!imageResponse.ok) {
@@ -216,7 +236,7 @@ export function createDefaultVisitWebpageExecutor(
     );
 
     if (hasAuthHeaders) {
-      const response = await fetch(url, {
+      const response = await diagnosticFetch(url, {
         headers: requestHeaders,
       });
 
@@ -322,7 +342,7 @@ async function fetchJinaWithRetry(
       await new Promise((r) => setTimeout(r, delay));
     }
 
-    const response = await fetch(readerUrl, {
+    const response = await diagnosticFetch(readerUrl, {
       headers: buildJinaHeaders(jinaApiKey),
     });
 

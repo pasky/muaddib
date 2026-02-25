@@ -585,6 +585,31 @@ describe("core tool executors visit_webpage Jina retry support", () => {
   });
 });
 
+describe("core tool executors visit_webpage network error diagnostics", () => {
+  it("visit_webpage surfaces cause from Node fetch TypeError", async () => {
+    const fetchError = new TypeError("fetch failed");
+    (fetchError as any).cause = new Error("getaddrinfo ENOTFOUND brmlab.cz");
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(fetchError);
+
+    const executors = createDefaultToolExecutors({});
+    // HEAD fails silently (caught), then Jina GET also fails — diagnosticFetch surfaces the cause.
+    await expect(executors.visitWebpage("https://brmlab.cz/test.png")).rejects.toThrow(
+      /getaddrinfo ENOTFOUND/,
+    );
+  });
+
+  it("visit_webpage surfaces connection refused errors", async () => {
+    const fetchError = new TypeError("fetch failed");
+    (fetchError as any).cause = new Error("connect ECONNREFUSED 127.0.0.1:443");
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(fetchError);
+
+    const executors = createDefaultToolExecutors({});
+    await expect(executors.visitWebpage("https://localhost/page")).rejects.toThrow(
+      /ECONNREFUSED/,
+    );
+  });
+});
+
 describe("core tool executors visit_webpage newline cleanup", () => {
   it("visit_webpage collapses excessive newlines in Jina content", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
