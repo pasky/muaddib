@@ -269,7 +269,9 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
             .filter((b): b is { type: string; text?: string } => b.type === "text")
             .map((b) => b.text ?? "")
             .join(" | ");
-          logger.warn(`Turn ${turnCount}: assistant produced text output alongside tool_use: ${textSnippet}`);
+          if (textSnippet.trim()) {
+            logger.warn(`Turn ${turnCount}: assistant produced text output alongside tool_use: ${textSnippet}`);
+          }
         }
       }
 

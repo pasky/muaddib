@@ -588,6 +588,22 @@ describe("createAgentSessionForInvocation", () => {
     expect(logger.warn).toHaveBeenCalledWith(
       "Turn 1: assistant produced text output alongside tool_use: Let me search for that.",
     );
+
+    // Whitespace-only text alongside tool_use should NOT trigger the warning
+    (logger.warn as ReturnType<typeof vi.fn>).mockClear();
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "text", text: "  \n " },
+          { type: "toolCall", id: "t2", name: "web_search", arguments: {} },
+        ],
+        stopReason: "toolUse",
+      },
+      toolResults: [{ role: "toolResult" }],
+    });
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 
   it("does not inject metaReminder when not configured", () => {
