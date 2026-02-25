@@ -197,6 +197,15 @@ export function createDefaultVisitWebpageExecutor(
 
       const imageMimeType =
         (imageResponse.headers.get("content-type") ?? "image/png").split(";")[0].trim();
+
+      // The URL may look like an image (.jpg etc.) but actually serve HTML
+      // (e.g. Wikimedia Commons file pages). Fall through to text handling.
+      if (!imageMimeType.startsWith("image/")) {
+        const body = (await imageResponse.text()).trim();
+        if (!body) return `## Content from ${url}\n\n(Empty response)`;
+        return formatTextContent(url, body, maxWebContentLength);
+      }
+
       const imageBytes = Buffer.from(await imageResponse.arrayBuffer());
       if (imageBytes.length > maxImageBytes) {
         throw new Error(

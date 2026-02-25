@@ -455,6 +455,45 @@ describe("core tool executors visit_webpage support", () => {
     expect((result as any).mimeType).toBe("image/png");
   });
 
+  it("visit_webpage falls through to text when image-like URL serves HTML", async () => {
+    const htmlContent = "<html><body>File:Filip-Turek.jpg - Wikimedia Commons</body></html>";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "HEAD") {
+        // HEAD may not reveal the true type (or may fail).
+        return new Response("", { status: 200, headers: { "content-type": "text/html" } });
+      }
+      return new Response(htmlContent, {
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
+    });
+
+    const executors = createDefaultToolExecutors({});
+    const result = await executors.visitWebpage("https://commons.wikimedia.org/wiki/File:Filip-Turek.jpg");
+    expect(typeof result).toBe("string");
+    expect(result as string).toContain("Wikimedia Commons");
+    expect(result as string).not.toContain("kind");
+  });
+
+  it("visit_webpage falls through to text when image-like URL serves HTML and HEAD fails", async () => {
+    const htmlContent = "<html><body>Image page content</body></html>";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "HEAD") {
+        // HEAD fails — contentType stays empty, looksLikeImageUrl triggers image branch.
+        throw new Error("HEAD not allowed");
+      }
+      return new Response(htmlContent, {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      });
+    });
+
+    const executors = createDefaultToolExecutors({});
+    const result = await executors.visitWebpage("https://example.com/photo.jpg");
+    expect(typeof result).toBe("string");
+    expect(result as string).toContain("Image page content");
+  });
+
   it("visit_webpage rejects non-http URLs", async () => {
     const executors = createDefaultToolExecutors({});
     await expect(executors.visitWebpage("ftp://example.com/file")).rejects.toThrow("Invalid URL");
