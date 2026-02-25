@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { RoomMessageHandler } from "../src/rooms/command/message-handler.js";
-import { fsSafeArc } from "../src/rooms/message.js";
+import { buildArc } from "../src/rooms/message.js";
 import { DiscordRoomMonitor } from "../src/rooms/discord/monitor.js";
 import { SlackRoomMonitor } from "../src/rooms/slack/monitor.js";
 import { createTempHistoryStore } from "./test-helpers.js";
@@ -105,7 +105,7 @@ describe("room adapters share RoomMessageHandler behavior", () => {
 
     expect(sent).toEqual(["discord-shared"]);
 
-    const discordArc = fsSafeArc("discord:guild-1#chan-1");
+    const discordArc = buildArc("discord:guild-1", "chan-1");
     const historyRows = await history.getFullHistory(discordArc);
     expect(historyRows).toHaveLength(2);
     expect(historyRows[0].role).toBe("user");
@@ -190,7 +190,7 @@ describe("room adapters share RoomMessageHandler behavior", () => {
 
     expect(sent).toEqual(["slack-shared"]);
 
-    const slackArc = fsSafeArc("slack:T123#C123");
+    const slackArc = buildArc("slack:T123", "C123");
     const historyRows = await history.getFullHistory(slackArc);
     expect(historyRows).toHaveLength(2);
 

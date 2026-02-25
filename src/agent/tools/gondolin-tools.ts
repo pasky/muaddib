@@ -50,7 +50,7 @@ import {
 
 // ── Arc ID / workspace path / checkpoint path ──────────────────────────────
 // Arc IDs are already filesystem-safe (percent-encoded at construction in
-// roomArc / fsSafeArc).  No further normalisation needed here.
+// buildArc).  No further normalisation needed here.
 
 export function getArcWorkspacePath(arc: string): string {
   return join(getMuaddibHome(), "arcs", arc, "workspace");

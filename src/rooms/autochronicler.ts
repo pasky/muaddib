@@ -3,7 +3,7 @@ import type { ChronicleStore } from "../chronicle/chronicle-store.js";
 import type { ChronicleLifecycle } from "../chronicle/lifecycle.js";
 import type { ChatHistoryStore } from "../history/chat-history-store.js";
 import { CONSOLE_LOGGER, type Logger } from "../app/logging.js";
-import { fsSafeArc } from "./message.js";
+import { buildArc } from "./message.js";
 import { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
 
 export interface AutoChronicler {
@@ -55,7 +55,7 @@ export class AutoChroniclerTs implements AutoChronicler {
     channel: string,
     maxSize: number,
   ): Promise<boolean> {
-    const arc = fsSafeArc(`${server}#${channel}`);
+    const arc = buildArc(server, channel);
 
     return await this.withArcLock(arc, async () => {
       const unchronicledCount = await this.options.history.countRecentUnchronicled(

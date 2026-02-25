@@ -110,6 +110,7 @@ function makeMessage(content: string): RoomMessage {
   return {
     serverTag: "libera",
     channelName: "#test",
+    arc: "libera##test",
     nick: "alice",
     mynick: "muaddib",
     content,
@@ -2164,14 +2165,14 @@ describe("RoomMessageHandler", () => {
     });
 
     const t1 = handler.handleIncomingMessage(
-      { ...makeMessage("!s first"), channelName: "#foo" },
+      { ...makeMessage("!s first"), channelName: "#foo", arc: "libera##foo" },
       { isDirect: true, sendResponse: async () => {} },
     );
 
     await firstStarted.promise;
 
     const t2 = handler.handleIncomingMessage(
-      { ...makeMessage("!s second"), channelName: "#bar" },
+      { ...makeMessage("!s second"), channelName: "#bar", arc: "libera##bar" },
       { isDirect: true, sendResponse: async () => {} },
     );
 
@@ -2443,7 +2444,7 @@ describe("RoomMessageHandler", () => {
     });
 
     // Check that context reflects the coalesced message
-    const arc = (await import("../src/rooms/message.js")).fsSafeArc("libera##test");
+    const arc = (await import("../src/rooms/message.js")).buildArc("libera", "#test");
     const context = await history.getContext(arc, 10);
 
     // Should have user + one coalesced assistant message (not two separate ones)

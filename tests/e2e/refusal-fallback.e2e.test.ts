@@ -17,7 +17,7 @@ import { rm } from "node:fs/promises";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fsSafeArc } from "../../src/rooms/message.js";
+import { buildArc } from "../../src/rooms/message.js";
 import {
   type E2EContext,
   type StreamMockState,
@@ -96,7 +96,7 @@ describe("E2E: Refusal → fallback → annotated response", () => {
     expect(mainResponse.message).toContain("claude-3-5-sonnet-20241022");
 
     // Verify history has the persisted messages
-    const historyRows = await ctx.history.getFullHistory(fsSafeArc("libera##test"));
+    const historyRows = await ctx.history.getFullHistory(buildArc("libera", "#test"));
     expect(historyRows.length).toBeGreaterThanOrEqual(2); // user message + bot response
     const botMessage = historyRows.find((row) => row.nick === "muaddib");
     expect(botMessage).toBeDefined();

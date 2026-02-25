@@ -12,7 +12,7 @@ import { ChronicleStore } from "../src/chronicle/chronicle-store.js";
 import { ChronicleLifecycleTs } from "../src/chronicle/lifecycle.js";
 import { AutoChroniclerTs } from "../src/rooms/autochronicler.js";
 import { ChatHistoryStore } from "../src/history/chat-history-store.js";
-import { fsSafeArc } from "../src/rooms/message.js";
+import { buildArc } from "../src/rooms/message.js";
 import { createTempHistoryStore } from "./test-helpers.js";
 
 function makeAssistantText(text: string) {
@@ -49,7 +49,7 @@ afterEach(() => {
   }
 });
 
-const ARC = fsSafeArc("libera##test");
+const ARC = buildArc("libera", "#test");
 
 describe("ChatHistoryStore", () => {
   it("stores messages and returns chronological context with assistant mode prefix", async () => {
@@ -59,6 +59,7 @@ describe("ChatHistoryStore", () => {
     await store.addMessage({
       serverTag: "libera",
       channelName: "#test",
+      arc: "libera##test",
       nick: "alice",
       mynick: "muaddib",
       content: "hello",
@@ -68,6 +69,7 @@ describe("ChatHistoryStore", () => {
       {
         serverTag: "libera",
         channelName: "#test",
+      arc: "libera##test",
         nick: "muaddib",
         mynick: "muaddib",
         content: "hi there",
@@ -93,6 +95,7 @@ describe("ChatHistoryStore", () => {
     await store.addMessage({
       serverTag: "libera",
       channelName: "#test",
+      arc: "libera##test",
       nick: "alice",
       mynick: "muaddib",
       content: "archive me",
@@ -125,12 +128,13 @@ describe("ChatHistoryStore", () => {
     const store = createTempHistoryStore(10);
     await store.initialize();
 
-    const arc = fsSafeArc("slack:test#general");
+    const arc = buildArc("slack:test", "general");
 
     // Bot sends initial response
     await store.addMessage({
       serverTag: "slack:test",
       channelName: "general",
+      arc: "slack:test#general",
       nick: "muaddib",
       mynick: "muaddib",
       content: "bot reply",
@@ -162,6 +166,7 @@ describe("ChatHistoryStore", () => {
     await store.addMessage({
       serverTag: "slack:test",
       channelName: "general",
+      arc: "slack:test#general",
       nick: "alice",
       mynick: "muaddib",
       content: "what is the spice?",
@@ -171,13 +176,14 @@ describe("ChatHistoryStore", () => {
     await store.addMessage({
       serverTag: "slack:test",
       channelName: "general",
+      arc: "slack:test#general",
       nick: "muaddib",
       mynick: "muaddib",
       content: "the spice is life",
       platformId: "1234.5678",
     });
 
-    const arc = fsSafeArc("slack:test#general");
+    const arc = buildArc("slack:test", "general");
     const context = await store.getContext(arc, 10);
 
     expect(context).toHaveLength(2);
@@ -189,12 +195,13 @@ describe("ChatHistoryStore", () => {
     const store = createTempHistoryStore(10);
     await store.initialize();
 
-    const arc = fsSafeArc("slack:test#general");
+    const arc = buildArc("slack:test", "general");
 
     // Root mention (Slack: pid === tid for root)
     await store.addMessage({
       serverTag: "slack:test",
       channelName: "general",
+      arc: "slack:test#general",
       nick: "alice",
       mynick: "muaddib",
       content: "hello",
@@ -205,6 +212,7 @@ describe("ChatHistoryStore", () => {
     await store.addMessage({
       serverTag: "slack:test",
       channelName: "general",
+      arc: "slack:test#general",
       nick: "muaddib",
       mynick: "muaddib",
       content: "hi there",
@@ -217,6 +225,7 @@ describe("ChatHistoryStore", () => {
     await store.addMessage({
       serverTag: "slack:test",
       channelName: "general",
+      arc: "slack:test#general",
       nick: "alice",
       mynick: "muaddib",
       content: "follow up",
@@ -227,6 +236,7 @@ describe("ChatHistoryStore", () => {
     await store.addMessage({
       serverTag: "slack:test",
       channelName: "general",
+      arc: "slack:test#general",
       nick: "muaddib",
       mynick: "muaddib",
       content: "follow up answer",
@@ -251,12 +261,13 @@ describe("ChatHistoryStore", () => {
     const store = createTempHistoryStore(10);
     await store.initialize();
 
-    const arc = fsSafeArc("slack:test#general");
+    const arc = buildArc("slack:test", "general");
 
     // Pre-thread main channel context
     await store.addMessage({
       serverTag: "slack:test",
       channelName: "general",
+      arc: "slack:test#general",
       nick: "bob",
       mynick: "muaddib",
       content: "earlier channel message",
@@ -266,6 +277,7 @@ describe("ChatHistoryStore", () => {
     await store.addMessage({
       serverTag: "slack:test",
       channelName: "general",
+      arc: "slack:test#general",
       nick: "alice",
       mynick: "muaddib",
       content: "question in channel",
@@ -278,6 +290,7 @@ describe("ChatHistoryStore", () => {
     await store.addMessage({
       serverTag: "slack:test",
       channelName: "general",
+      arc: "slack:test#general",
       nick: "alice",
       mynick: "muaddib",
       content: "thread followup",
@@ -300,12 +313,13 @@ describe("ChatHistoryStore", () => {
     const store = createTempHistoryStore(10);
     await store.initialize();
 
-    const arc = fsSafeArc("slack:test#general");
+    const arc = buildArc("slack:test", "general");
 
     // Pre-thread context
     await store.addMessage({
       serverTag: "slack:test",
       channelName: "general",
+      arc: "slack:test#general",
       nick: "alice",
       mynick: "muaddib",
       content: "earlier context",
@@ -316,6 +330,7 @@ describe("ChatHistoryStore", () => {
     await store.addMessage({
       serverTag: "slack:test",
       channelName: "general",
+      arc: "slack:test#general",
       nick: "muaddib",
       mynick: "muaddib",
       content: "bot channel message",
@@ -326,6 +341,7 @@ describe("ChatHistoryStore", () => {
     await store.addMessage({
       serverTag: "slack:test",
       channelName: "general",
+      arc: "slack:test#general",
       nick: "alice",
       mynick: "muaddib",
       content: "replying to bot",
@@ -351,12 +367,13 @@ describe("ChatHistoryStore", () => {
     const store = createTempHistoryStore(3);
     await store.initialize();
 
-    const arc = fsSafeArc("slack:test#general");
+    const arc = buildArc("slack:test", "general");
 
     // Thread starter
     await store.addMessage({
       serverTag: "slack:test",
       channelName: "general",
+      arc: "slack:test#general",
       nick: "alice",
       mynick: "muaddib",
       content: "thread root",
@@ -370,6 +387,7 @@ describe("ChatHistoryStore", () => {
       await store.addMessage({
         serverTag: "slack:test",
         channelName: "general",
+      arc: "slack:test#general",
         nick: "bob",
         mynick: "muaddib",
         content: `filler ${i}`,
@@ -380,6 +398,7 @@ describe("ChatHistoryStore", () => {
     await store.addMessage({
       serverTag: "slack:test",
       channelName: "general",
+      arc: "slack:test#general",
       nick: "alice",
       mynick: "muaddib",
       content: "thread reply",
@@ -429,7 +448,8 @@ describe("ChatHistoryStore", () => {
     await store.initialize();
 
     const ts = await store.addMessage(
-      { serverTag: "libera", channelName: "#test", nick: "alice", mynick: "muaddib", content: "trigger" },
+      { serverTag: "libera", channelName: "#test",
+      arc: "libera##test", nick: "alice", mynick: "muaddib", content: "trigger" },
       { selfRun: true },
     );
 
@@ -450,6 +470,7 @@ describe("ChatHistoryStore", () => {
     const ts = await store.addMessage({
       serverTag: "libera",
       channelName: "#test",
+      arc: "libera##test",
       nick: "alice",
       mynick: "muaddib",
       content: "archive me",
@@ -557,6 +578,7 @@ describe("AutoChroniclerTs", () => {
     await history.addMessage({
       serverTag: "libera",
       channelName: "#test",
+      arc: "libera##test",
       nick: "alice",
       mynick: "muaddib",
       content: "only one",
@@ -609,6 +631,7 @@ describe("AutoChroniclerTs", () => {
     await history.addMessage({
       serverTag: "libera",
       channelName: "#test",
+      arc: "libera##test",
       nick: "alice",
       mynick: "muaddib",
       content: "one",
@@ -616,6 +639,7 @@ describe("AutoChroniclerTs", () => {
     await history.addMessage({
       serverTag: "libera",
       channelName: "#test",
+      arc: "libera##test",
       nick: "bob",
       mynick: "muaddib",
       content: "two",

@@ -1,6 +1,6 @@
 import type { Message } from "@mariozechner/pi-ai";
 import type { CommandConfig, ModeConfig } from "../../config/muaddib-config.js";
-import { fsSafeArc, type RoomMessage } from "../message.js";
+import { buildArc, type RoomMessage } from "../message.js";
 
 export type { CommandConfig, ModeConfig };
 
@@ -200,7 +200,7 @@ export class CommandResolver {
   }
 
   static channelKey(serverTag: string, channelName: string): string {
-    return fsSafeArc(`${CommandResolver.normalizeServerTag(serverTag)}#${channelName}`);
+    return buildArc(CommandResolver.normalizeServerTag(serverTag), channelName);
   }
 
   getChannelMode(serverTag: string, channelName: string): string {

@@ -145,7 +145,7 @@ describe("E2E: Context reduction + multi-tool + progress + tool summary", () => 
 
   it("reduces context, runs web_search + progress_report, generates tool summary", async () => {
     // ── Seed 10 history messages ──
-    const arc = { serverTag: "libera", channelName: "#test", mynick: "muaddib" };
+    const arc = { serverTag: "libera", channelName: "#test", arc: "libera##test", mynick: "muaddib" };
     for (let i = 0; i < 10; i++) {
       const isUser = i % 2 === 0;
       await ctx.history.addMessage({

@@ -84,6 +84,7 @@ describe("CommandResolver", () => {
       message: {
         serverTag: "libera",
         channelName: "#test",
+        arc: "libera##test",
         nick: "user",
         mynick: "bot",
         content: "!a use deep reasoning",
@@ -111,6 +112,7 @@ describe("CommandResolver", () => {
       message: {
         serverTag: "libera",
         channelName: "#general",
+        arc: "libera##general",
         nick: "user",
         mynick: "bot",
         content: "tell me something",
@@ -184,6 +186,7 @@ describe("CommandResolver", () => {
     const bypass = resolver.shouldBypassSteering({
       serverTag: "libera",
       channelName: "#general",
+      arc: "libera##general",
       nick: "user",
       mynick: "bot",
       content: "!d be snarky",

@@ -4,7 +4,7 @@ import { CONSOLE_LOGGER, RuntimeLogWriter, type Logger } from "../../app/logging
 import { appendAttachmentBlock, normalizeName, nowMonotonicSeconds, requireNonEmptyString, sleep, stripLeadingMention } from "../../utils/index.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import { RoomMessageHandler } from "../command/message-handler.js";
-import { type RoomMessage, roomArc, fsSafeArc } from "../message.js";
+import { type RoomMessage, buildArc } from "../message.js";
 import {
   sendWithRetryResult,
   type SendRetryEvent,
@@ -291,6 +291,7 @@ export class SlackRoomMonitor {
     const message: RoomMessage = {
       serverTag,
       channelName,
+      arc: buildArc(serverTag, channelName),
       nick: event.username,
       mynick: event.mynick,
       content: cleanedContent,
@@ -382,7 +383,7 @@ export class SlackRoomMonitor {
       return;
     }
 
-    const arc = roomArc(message);
+    const arc = message.arc;
     const typingThreadTs = message.threadId ?? event.messageTs;
     let typingIndicatorSet = false;
 
@@ -428,7 +429,7 @@ export class SlackRoomMonitor {
     const serverTag = `slack:${event.workspaceName ?? event.workspaceId}`;
     const channelName = resolveSlackChannelName(event);
 
-    const arc = fsSafeArc(`${serverTag}#${channelName}`);
+    const arc = buildArc(serverTag, channelName);
     await this.options.history.appendEdit(arc, event.editedMessageTs, newText, event.username);
   }
 }

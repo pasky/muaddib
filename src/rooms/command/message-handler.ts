@@ -19,7 +19,7 @@ import {
   type SendResponse,
 } from "./command-executor.js";
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
-import { type RoomMessage, roomArc, STEER_PREFIX } from "../message.js";
+import { type RoomMessage, STEER_PREFIX } from "../message.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import { formatUtcTime } from "../../utils/index.js";
 
@@ -36,7 +36,7 @@ export type {
 
 /** Key for session isolation: arc + nick (or arc + thread for threaded messages). */
 function sessionKey(message: RoomMessage): string {
-  const arc = roomArc(message);
+  const arc = message.arc;
   if (message.threadId) {
     return `${arc}\0*\0${message.threadId}`;
   }
@@ -120,7 +120,7 @@ export class RoomMessageHandler {
     if (!options.isDirect) {
       this.logger.debug(
         "Handling passive message",
-        `arc=${roomArc(message)}`,
+        `arc=${message.arc}`,
         `nick=${message.nick}`,
       );
       await this.handlePassiveMessage(message, options.sendResponse);
@@ -129,7 +129,7 @@ export class RoomMessageHandler {
 
     this.logger.debug(
       "Handling direct command",
-      `arc=${roomArc(message)}`,
+      `arc=${message.arc}`,
       `nick=${message.nick}`,
     );
 
@@ -204,7 +204,7 @@ export class RoomMessageHandler {
     });
     this.logger.info(
       "Steered message into active session",
-      `arc=${roomArc(message)}`,
+      `arc=${message.arc}`,
       `nick=${message.nick}`,
       `content=${message.content}`,
     );
@@ -237,7 +237,7 @@ export class RoomMessageHandler {
     // Try proactive: steer into running proactive agent, or start new session.
     // Check ANY active command session in the same channel (not just same nick)
     // to avoid launching a proactive agent that duplicates an in-flight command.
-    const arc = roomArc(message);
+    const arc = message.arc;
     this.proactiveRunner?.steerOrStart(
       message,
       sendResponse,

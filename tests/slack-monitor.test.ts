@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import type { ChatHistoryStore } from "../src/history/chat-history-store.js";
-import { fsSafeArc } from "../src/rooms/message.js";
+import { buildArc } from "../src/rooms/message.js";
 import { SlackRoomMonitor } from "../src/rooms/slack/monitor.js";
 import { createTempHistoryStore } from "./test-helpers.js";
 import { createTestRuntime } from "./test-runtime.js";
@@ -635,6 +635,7 @@ describe("SlackRoomMonitor", () => {
     await history.addMessage({
       serverTag: "slack:Rossum",
       channelName: "#general",
+      arc: "slack:Rossum##general",
       nick: "Alice",
       mynick: "Muaddib",
       content: "hello",
@@ -662,7 +663,7 @@ describe("SlackRoomMonitor", () => {
       newText: "edited message",
     });
 
-    const arc = fsSafeArc("slack:Rossum##general");
+    const arc = buildArc("slack:Rossum", "#general");
     const rows = await history.getFullHistory(arc);
     // Original message at [0], appended edit line at [1]
     expect(rows).toHaveLength(2);

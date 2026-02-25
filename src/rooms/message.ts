@@ -1,6 +1,8 @@
 export interface RoomMessage {
   serverTag: string;
   channelName: string;
+  /** Filesystem-safe arc identifier, computed once at construction via `buildArc(serverTag, channelName)`. */
+  readonly arc: string;
   nick: string;
   mynick: string;
   content: string;
@@ -13,15 +15,12 @@ export interface RoomMessage {
 }
 
 /**
- * Percent-encode a string so it is safe as a filesystem path component.
- * Encodes '%' first (to avoid double-encoding), then '/'.
+ * Build a filesystem-safe arc identifier from a server tag and channel name.
+ * Joins as `"${serverTag}#${channelName}"` then percent-encodes '%' and '/'.
  */
-export function fsSafeArc(raw: string): string {
+export function buildArc(serverTag: string, channelName: string): string {
+  const raw = `${serverTag}#${channelName}`;
   return raw.replaceAll("%", "%25").replaceAll("/", "%2F");
-}
-
-export function roomArc(message: Pick<RoomMessage, "serverTag" | "channelName">): string {
-  return fsSafeArc(`${message.serverTag}#${message.channelName}`);
 }
 
 /** Prefix for steered passive messages so the agent doesn't derail from its current task. */

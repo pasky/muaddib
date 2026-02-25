@@ -20,7 +20,7 @@ import {
   isIpInCidr,
   resetGondolinVmCache,
 } from "../src/agent/tools/gondolin-tools.js";
-import { fsSafeArc } from "../src/rooms/message.js";
+import { buildArc } from "../src/rooms/message.js";
 
 function createTools(options: Record<string, unknown>) {
   return createBaselineAgentTools({
@@ -280,28 +280,28 @@ describe("baseline tools with Gondolin", () => {
   });
 });
 
-// ── fsSafeArc (percent-encoding) ───────────────────────────────────────────
+// ── buildArc (percent-encoding) ────────────────────────────────────────────
 
-describe("fsSafeArc", () => {
+describe("buildArc", () => {
   it("passes through simple arc names unchanged", () => {
-    expect(fsSafeArc("irc-libera#general")).toBe("irc-libera#general");
+    expect(buildArc("irc-libera", "general")).toBe("irc-libera#general");
   });
 
   it("encodes slashes as %2F", () => {
-    expect(fsSafeArc("irc-libera#foo/bar")).toBe("irc-libera#foo%2Fbar");
+    expect(buildArc("irc-libera", "foo/bar")).toBe("irc-libera#foo%2Fbar");
   });
 
   it("encodes percent signs as %25 before encoding slashes", () => {
-    expect(fsSafeArc("arc%2F")).toBe("arc%252F");
+    expect(buildArc("arc%2F", "x")).toBe("arc%252F#x");
   });
 
   it("handles multiple slashes and percents", () => {
-    expect(fsSafeArc("a/b%c/d")).toBe("a%2Fb%25c%2Fd");
+    expect(buildArc("a/b%c", "d")).toBe("a%2Fb%25c#d");
   });
 
   it("different arcs produce different ids (no collisions)", () => {
-    // "foo/bar" and "foo%2Fbar" must not collide
-    expect(fsSafeArc("foo/bar")).not.toBe(fsSafeArc("foo%2Fbar"));
+    // "foo/bar#x" and "foo%2Fbar#x" must not collide
+    expect(buildArc("foo/bar", "x")).not.toBe(buildArc("foo%2Fbar", "x"));
   });
 });
 

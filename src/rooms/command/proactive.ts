@@ -23,7 +23,7 @@ import type {
   SendResponse,
 } from "./command-executor.js";
 import { pickModeModel } from "./command-executor.js";
-import { type RoomMessage, roomArc, STEER_PREFIX } from "../message.js";
+import { type RoomMessage, STEER_PREFIX } from "../message.js";
 import { sleep } from "../../utils/index.js";
 
 // ── ProactiveConfig (resolved, all fields required) ──
@@ -174,7 +174,7 @@ export class ProactiveRunner {
       });
       this.logger.info(
         "Steered passive message into proactive session",
-        `arc=${roomArc(message)}`,
+        `arc=${message.arc}`,
         `nick=${message.nick}`,
         `content=${message.content}`,
       );
@@ -224,7 +224,7 @@ export class ProactiveRunner {
 
         // Any new messages since we started waiting?
         const newMessages = await this.runtime.history.countMessagesSince(
-          roomArc(message), pollStart,
+          message.arc, pollStart,
         );
 
         if (newMessages === 0) {
@@ -248,7 +248,7 @@ export class ProactiveRunner {
     if (!this.rateLimiter.checkLimit()) {
       this.logger.debug(
         "Proactive interjection rate limited",
-        `arc=${roomArc(message)}`,
+        `arc=${message.arc}`,
         `nick=${message.nick}`,
       );
       return;
@@ -271,7 +271,7 @@ export class ProactiveRunner {
     if (!evalResult.shouldInterject) {
       this.logger.debug(
         "Proactive interjection declined",
-        `arc=${roomArc(message)}`,
+        `arc=${message.arc}`,
         `reason=${evalResult.reason}`,
       );
       return;
@@ -299,7 +299,7 @@ export class ProactiveRunner {
       : "(empty)";
     this.logger.info(
       "Interjecting proactively",
-      `arc=${roomArc(message)}`,
+      `arc=${message.arc}`,
       `lastMessage=${lastContentStr.slice(0, 150)}`,
       `reason=${evalResult.reason}`,
     );

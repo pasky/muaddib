@@ -8,7 +8,7 @@ import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { RuntimeLogWriter } from "../src/app/logging.js";
 import type { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { IrcRoomMonitor } from "../src/rooms/irc/monitor.js";
-import { fsSafeArc } from "../src/rooms/message.js";
+import { buildArc } from "../src/rooms/message.js";
 import type { MuaddibRuntime } from "../src/runtime.js";
 import { FakeEventsClient, FakeSender, baseCommandConfig } from "./e2e/helpers.js";
 import { createTempHistoryStore } from "./test-helpers.js";
@@ -146,7 +146,7 @@ describe("IrcRoomMonitor", () => {
       server: "libera",
     });
 
-    const historyRows = await history.getFullHistory(fsSafeArc("libera##test"));
+    const historyRows = await history.getFullHistory(buildArc("libera", "#test"));
     expect(historyRows).toHaveLength(2);
     // Inbound user message stored with full original content (bot-nick preserved)
     expect(historyRows[0].message).toBe("<alice> muaddib: hello there");
@@ -193,7 +193,7 @@ describe("IrcRoomMonitor", () => {
     expect(directFlag).toBe(false);
     expect(sender.sent).toHaveLength(0);
 
-    const historyRows = await history.getFullHistory(fsSafeArc("libera##test"));
+    const historyRows = await history.getFullHistory(buildArc("libera", "#test"));
     expect(historyRows).toHaveLength(1);
 
     await history.close();

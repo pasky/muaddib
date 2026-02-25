@@ -9,7 +9,6 @@ import { join } from "node:path";
 import type { AssistantMessage, Message, UserMessage } from "@mariozechner/pi-ai";
 
 import type { RoomMessage } from "../rooms/message.js";
-import { fsSafeArc } from "../rooms/message.js";
 
 export type ChatRole = "user" | "assistant";
 
@@ -103,7 +102,7 @@ export class ChatHistoryStore {
       cost?: number;
     } = {},
   ): Promise<string> {
-    const arc = fsSafeArc(`${message.serverTag}#${message.channelName}`);
+    const arc = message.arc;
     const role = options.role ?? this.defaultRoleForMessage(message);
     // Store raw message text — formatting happens on read.
     const isBotMessage = message.nick.toLowerCase() === message.mynick.toLowerCase();
@@ -168,8 +167,7 @@ export class ChatHistoryStore {
     message: RoomMessage,
     limit?: number,
   ): Promise<Message[]> {
-    const arc = fsSafeArc(`${message.serverTag}#${message.channelName}`);
-    return this.getContext(arc, limit, message.threadId);
+    return this.getContext(message.arc, limit, message.threadId);
   }
 
   async getContext(

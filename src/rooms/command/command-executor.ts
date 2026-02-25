@@ -30,7 +30,7 @@ import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { parseModelSpec } from "../../models/model-spec.js";
 import { ContextReducerTs, type ContextReducer } from "./context-reducer.js";
-import { type RoomMessage, roomArc } from "../message.js";
+import type { RoomMessage } from "../message.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import { createModeClassifier } from "./classifier.js";
 import { RateLimiter } from "./rate-limiter.js";
@@ -232,7 +232,7 @@ export class CommandExecutor {
     // ── Rate limit ──
 
     if (!this.rateLimiter.checkLimit()) {
-      logger.warn("Rate limit triggered", `arc=${roomArc(message)}`, `nick=${message.nick}`);
+      logger.warn("Rate limit triggered", `arc=${message.arc}`, `nick=${message.nick}`);
       return await this.deliverResult(message, triggerTs, sendResponse, {
         response: `${message.nick}: Slow down a little, will you? (rate limiting)`,
         resolved: EMPTY_RESOLVED,
@@ -241,7 +241,7 @@ export class CommandExecutor {
 
     logger.info(
       "Received command",
-      `arc=${roomArc(message)}`,
+      `arc=${message.arc}`,
       `nick=${message.nick}`,
       `content=${message.content}`,
     );
@@ -259,7 +259,7 @@ export class CommandExecutor {
     if (resolved.error) {
       logger.warn(
         "Command parse error",
-        `arc=${roomArc(message)}`,
+        `arc=${message.arc}`,
         `nick=${message.nick}`,
         `error=${resolved.error}`,
         `content=${message.content}`,
@@ -325,7 +325,7 @@ export class CommandExecutor {
 
     logger.debug(
       "Resolved direct command",
-      `arc=${roomArc(message)}`,
+      `arc=${message.arc}`,
       `mode=${resolved.modeKey}`,
       `trigger=${resolved.selectedTrigger}`,
       `model=${modelSpec}`,
@@ -348,7 +348,7 @@ export class CommandExecutor {
       this.runtime.chronicle?.chronicleStore
     ) {
       prependedContext = await this.runtime.chronicle.chronicleStore.getChapterContextMessages(
-        roomArc(message),
+        message.arc,
       );
     }
 
@@ -403,7 +403,7 @@ export class CommandExecutor {
     if (!responseText) {
       logger.info(
         "Agent chose not to answer",
-        `arc=${roomArc(message)}`,
+        `arc=${message.arc}`,
         `mode=${resolved.selectedLabel}`,
         `trigger=${resolved.selectedTrigger}`,
       );
@@ -478,7 +478,7 @@ export class CommandExecutor {
     if (!proactiveText || proactiveText.startsWith("Error: ") || isNullSentinel(proactiveText)) {
       logger.info(
         "Agent decided not to interject proactively",
-        `arc=${roomArc(message)}`,
+        `arc=${message.arc}`,
       );
       return false;
     }
@@ -487,7 +487,7 @@ export class CommandExecutor {
 
     logger.info(
       "Sending proactive response",
-      `arc=${roomArc(message)}`,
+      `arc=${message.arc}`,
       `label=${classifiedTrigger}`,
       `trigger=${classifiedTrigger}`,
       `response=${responseText}`,
@@ -499,7 +499,7 @@ export class CommandExecutor {
       if (sr) proactiveSendResult = sr;
     }
 
-    await this.persistBotResponse(roomArc(message), message, responseText, proactiveSendResult, {
+    await this.persistBotResponse(message.arc, message, responseText, proactiveSendResult, {
       mode: classifiedTrigger,
     });
 
@@ -538,7 +538,7 @@ export class CommandExecutor {
       responseText = `${responseText} [refusal fallback to ${fallbackSpec.modelId}]`.trim();
     }
 
-    responseText = await this.applyResponseLengthPolicy(responseText, roomArc(message));
+    responseText = await this.applyResponseLengthPolicy(responseText, message.arc);
     responseText = this.cleanResponseText(responseText, message.nick);
 
     return {
@@ -578,7 +578,7 @@ export class CommandExecutor {
     }
 
     const { logger } = this;
-    const arcName = roomArc(message);
+    const arcName = message.arc;
 
     logger.debug(
       "Persisting direct command response",
@@ -704,6 +704,7 @@ export class CommandExecutor {
       const botMessage: RoomMessage = {
         serverTag: message.serverTag,
         channelName: message.channelName,
+        arc: message.arc,
         nick: message.mynick,
         mynick: message.mynick,
         content,
@@ -824,14 +825,14 @@ export class CommandExecutor {
       persistenceSummaryModel: this.persistenceSummaryModel,
       modelAdapter: this.modelAdapter,
       logger: this.logger,
-      arc: roomArc(message),
+      arc: message.arc,
     });
 
     if (!summaryText) {
       return;
     }
 
-    await this.persistBotResponse(roomArc(message), message, summaryText, undefined, {
+    await this.persistBotResponse(message.arc, message, summaryText, undefined, {
       contentTemplate: "[internal monologue] {message}",
       run: triggerTs,
     });
@@ -846,7 +847,7 @@ export class CommandExecutor {
   ): ToolSet {
     const invocationToolOptions: BaselineToolOptions = {
       ...this.buildToolOptions(),
-      arc: roomArc(message),
+      arc: message.arc,
       secrets: message.secrets,
     };
 
@@ -856,7 +857,7 @@ export class CommandExecutor {
         ? async (text: string) => {
             const sr = await sendResponse(text);
             const sendResult = sr ? sr : undefined;
-            await this.persistBotResponse(roomArc(message), message, text, sendResult, {
+            await this.persistBotResponse(message.arc, message, text, sendResult, {
               run: triggerTs,
             });
           }

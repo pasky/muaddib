@@ -8,7 +8,7 @@ import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { RuntimeLogWriter } from "../src/app/logging.js";
 import { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { DiscordRoomMonitor } from "../src/rooms/discord/monitor.js";
-import { fsSafeArc } from "../src/rooms/message.js";
+import { buildArc } from "../src/rooms/message.js";
 import { createTempHistoryStore } from "./test-helpers.js";
 import { createTestRuntime } from "./test-runtime.js";
 
@@ -508,6 +508,7 @@ describe("DiscordRoomMonitor", () => {
     await history.addMessage({
       serverTag: "discord:Rossum",
       channelName: "general",
+      arc: "discord:Rossum#general",
       nick: "alice",
       mynick: "muaddib",
       content: "hello",
@@ -533,7 +534,7 @@ describe("DiscordRoomMonitor", () => {
       content: "edited message",
     });
 
-    const arc = fsSafeArc("discord:Rossum#general");
+    const arc = buildArc("discord:Rossum", "general");
     const rows = await history.getFullHistory(arc);
     // JSONL store keeps both original and edit line; the edit is appended last
     expect(rows).toHaveLength(2);
