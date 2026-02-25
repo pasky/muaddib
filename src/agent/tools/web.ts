@@ -200,11 +200,13 @@ export function createDefaultVisitWebpageExecutor(
         method: "HEAD",
         headers: requestHeaders,
       });
+      options.logger?.debug(`HEAD ${url} → ${headResponse.status} content-type=${headResponse.headers.get("content-type") ?? "(none)"}`);
       if (headResponse.ok) {
         contentType = (headResponse.headers.get("content-type") ?? "").toLowerCase();
       }
-    } catch {
+    } catch (err) {
       // Recovery strategy: some sites disallow HEAD; continue with reader fallback.
+      options.logger?.debug(`HEAD ${url} failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     if (contentType.startsWith("image/")) {
