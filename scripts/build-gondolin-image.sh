@@ -117,8 +117,13 @@ fi
 
 ARCH=$(node -e "console.log(process.arch === 'arm64' ? 'aarch64' : 'x86_64')")
 
+INIT_EXTRA=$(mktemp /tmp/gondolin-init-extra-XXXXXX.sh)
+cat > "$INIT_EXTRA" << 'INITEOF'
+[ -d /opt/venv ] || uv venv --system-site-packages /opt/venv
+INITEOF
+
 BUILD_CONFIG=$(mktemp /tmp/gondolin-build-XXXXXX.json)
-trap 'rm -f "$BUILD_CONFIG"; rm -rf "$BIN_TMPDIR"' EXIT
+trap 'rm -f "$BUILD_CONFIG" "$INIT_EXTRA"; rm -rf "$BIN_TMPDIR"' EXIT
 
 # Use absolute paths for sandboxXxxPath so they resolve correctly regardless
 # of configDir. gondolin calls path.resolve(configDir, value), which returns
@@ -163,7 +168,7 @@ cat > "$BUILD_CONFIG" << EOF
     "sizeMb": 4096
   },
   "init": {
-    "rootfsInitExtra": "[ -d /opt/venv ] || uv venv --system-site-packages /opt/venv"
+    "rootfsInitExtra": "$INIT_EXTRA"
   },
   "env": {
     "VIRTUAL_ENV": "/opt/venv",
