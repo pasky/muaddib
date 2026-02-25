@@ -41,6 +41,7 @@ import {
   createDefaultShareArtifactExecutor,
   type SandboxReadFile,
 } from "./artifact.js";
+import { SizeLimitProvider } from "./size-limit-provider.js";
 import {
   loadBundledSkills,
   formatSkillsForVmPrompt,
@@ -260,8 +261,10 @@ async function ensureVm(
 
       // Serve bundled skills as a readonly in-memory mount so the agent can
       // read them via the sandbox read tool without any file-copy overhead.
+      const workspaceLimitBytes = (config.workspaceSizeMb ?? 4096) * 1024 * 1024;
       const mounts: Record<string, import("@earendil-works/gondolin").VirtualProvider> = {
-        "/workspace": new RealFSProvider(workspacePath),
+        "/workspace": new SizeLimitProvider(
+          new RealFSProvider(workspacePath), workspaceLimitBytes, workspacePath),
       };
       if (skills.length > 0) {
         const skillsFs = new MemProviderClass();

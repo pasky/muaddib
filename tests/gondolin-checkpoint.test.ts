@@ -107,11 +107,16 @@ const memoryProviderInstances: Array<{
   readOnly: boolean;
 }> = [];
 
-vi.mock("@earendil-works/gondolin", () => {
+vi.mock("@earendil-works/gondolin", async (importOriginal) => {
   // provide a fake gondolin module so ensureVm() can run without a real package
+  const actual = await importOriginal<typeof import("@earendil-works/gondolin")>();
   const fakeVms = new Map<string, FakeVm>();
 
   return {
+    // Re-export VFS utilities needed by SizeLimitProvider
+    VirtualProviderClass: actual.VirtualProviderClass,
+    ERRNO: actual.ERRNO,
+    isWriteFlag: actual.isWriteFlag,
     __fakeVms: fakeVms,
     /** Last VMOptions passed to VM.create — for mount assertions. */
     __lastVmOptions: { value: null as unknown },

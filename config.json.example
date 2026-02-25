@@ -28,7 +28,8 @@
         "dnsMode": "synthetic",
         "blockedCidrs": ["203.0.113.0/24", "2001:db8:1::/48"],
         "bashTimeoutSeconds": 270,
-        "maxConcurrentVms": 8
+        "maxConcurrentVms": 8,
+        "workspaceSizeMb": 4096
       }
     }
   },

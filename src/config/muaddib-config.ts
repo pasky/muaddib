@@ -58,6 +58,12 @@ export interface GondolinConfig {
    * Default: 8.
    */
   maxConcurrentVms?: number;
+  /**
+   * Maximum workspace size in MB.  When the cumulative size of files written
+   * to /workspace exceeds this limit, further writes fail with ENOSPC.
+   * Default: 4096 (4 GB).
+   */
+  workspaceSizeMb?: number;
 }
 
 /**
