@@ -134,22 +134,6 @@ export class ChronicleStore {
     }));
   }
 
-  /**
-   * Read all chapter files for an arc. Returns an array of { number, content }
-   * where content is the raw markdown string. Used for gondolin VM mounting.
-   */
-  readAllChapterFiles(arc: string): Array<{ filename: string; content: string }> {
-    const dir = this.arcDir(arc);
-    if (!existsSync(dir)) {
-      return [];
-    }
-    const files = this.listChapterFiles(arc);
-    return files.map((filename) => ({
-      filename,
-      content: readFileSync(join(dir, filename), "utf-8"),
-    }));
-  }
-
   // ── Internal helpers ──
 
   private arcDir(arc: string): string {

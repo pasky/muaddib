@@ -209,8 +209,6 @@ export class CommandExecutor {
       authStorage: this.runtime.authStorage,
       modelAdapter: this.modelAdapter,
       logger: this.logger,
-      chronicleStore: this.runtime.chronicle?.chronicleStore,
-      chatHistoryStore: this.runtime.history,
     };
   }
 

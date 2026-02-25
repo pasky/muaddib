@@ -621,7 +621,6 @@ describe("RoomMessageHandler", () => {
 
     const chronicleStore = {
       getChapterContextMessages: vi.fn(async () => chapterContext),
-      readAllChapterFiles: vi.fn(() => []),
     };
 
     const runnerContextWithSummary: string[][] = [];

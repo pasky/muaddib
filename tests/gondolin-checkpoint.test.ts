@@ -5,6 +5,7 @@
  * resetGondolinVmCache + a small backdoor exposed for testing.
  */
 
+import { mkdirSync } from "node:fs";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ── pull the internals we need ─────────────────────────────────────────────
@@ -15,6 +16,8 @@ import {
   resetGondolinVmCache,
   closeAllVms,
   getVmSlotState,
+  getArcChronicleDir,
+  getArcChatHistoryDir,
 } from "../src/agent/tools/gondolin-tools.js";
 
 import {
@@ -130,7 +133,12 @@ vi.mock("@earendil-works/gondolin", () => {
       }),
     },
     RealFSProvider: class {
-      constructor(_path: string) {}
+      rootPath: string;
+      constructor(path: string) { this.rootPath = path; }
+    },
+    ReadonlyProvider: class {
+      backend: unknown;
+      constructor(backend: unknown) { this.backend = backend; }
     },
     MemoryProvider: class {
       _files = new Map<string, string>();
@@ -887,28 +895,74 @@ describe("gondolin — artifact URL in systemPromptSuffix", () => {
   });
 });
 
+describe("gondolin — chronicle/chat_history ReadonlyProvider mounts", () => {
+  it("mounts chronicle and chat_history as ReadonlyProvider(RealFSProvider) when dirs exist", async () => {
+    const arc = "readonly-mount-arc";
+    mkdirSync(getArcChronicleDir(arc), { recursive: true });
+    mkdirSync(getArcChatHistoryDir(arc), { recursive: true });
+
+    const fakeVm = makeFakeVm();
+    await registerFakeVm(fakeVm);
+
+    const { tools } = createGondolinTools({ arc, config: gondolinConfig });
+
+    // Force VM creation by invoking bash
+    const bashTool = tools.find((t) => t.name === "bash")!;
+    await bashTool.execute("id", { command: "echo hi" }, new AbortController().signal, () => {});
+
+    const gondolin = await import("@earendil-works/gondolin");
+    // @ts-expect-error test-only
+    const opts = gondolin.__lastVmOptions.value as { vfs: { mounts: Record<string, any> } };
+
+    // /chronicle should be a ReadonlyProvider wrapping RealFSProvider
+    expect(opts.vfs.mounts).toHaveProperty("/chronicle");
+    const chronicleMount = opts.vfs.mounts["/chronicle"];
+    expect(chronicleMount.constructor.name).toBe("ReadonlyProvider");
+    expect(chronicleMount.backend.constructor.name).toBe("RealFSProvider");
+    expect(chronicleMount.backend.rootPath).toBe(getArcChronicleDir(arc));
+
+    // /chat_history should be a ReadonlyProvider wrapping RealFSProvider
+    expect(opts.vfs.mounts).toHaveProperty("/chat_history");
+    const historyMount = opts.vfs.mounts["/chat_history"];
+    expect(historyMount.constructor.name).toBe("ReadonlyProvider");
+    expect(historyMount.backend.constructor.name).toBe("RealFSProvider");
+    expect(historyMount.backend.rootPath).toBe(getArcChatHistoryDir(arc));
+
+    // Skills should still use MemoryProvider (only 1 MemoryProvider for skills)
+    expect(memoryProviderInstances.length).toBe(1);
+  });
+
+  it("does not mount /chronicle or /chat_history when dirs do not exist", async () => {
+    const fakeVm = makeFakeVm();
+    await registerFakeVm(fakeVm);
+
+    const { tools } = createGondolinTools({ arc: "no-dirs-arc", config: gondolinConfig });
+    const bashTool = tools.find((t) => t.name === "bash")!;
+    await bashTool.execute("id", { command: "echo hi" }, new AbortController().signal, () => {});
+
+    const gondolin = await import("@earendil-works/gondolin");
+    // @ts-expect-error test-only
+    const opts = gondolin.__lastVmOptions.value as { vfs: { mounts: Record<string, any> } };
+
+    expect(opts.vfs.mounts).not.toHaveProperty("/chronicle");
+    expect(opts.vfs.mounts).not.toHaveProperty("/chat_history");
+  });
+});
+
 describe("gondolin — chat history in systemPromptSuffix", () => {
-  it("includes chat_history hint when chatHistoryStore has files", () => {
+  it("includes chat_history hint when chat_history dir exists on host", () => {
+    mkdirSync(getArcChatHistoryDir("history-arc"), { recursive: true });
+
     const { systemPromptSuffix } = createGondolinTools({
       arc: "history-arc",
       config: gondolinConfig,
-      chatHistoryStore: { readAllHistoryFiles: () => [{ filename: "2025-01-01.jsonl", content: "{}" }] } as any,
     });
     expect(systemPromptSuffix).toContain("/chat_history/");
   });
 
-  it("omits chat_history hint when chatHistoryStore returns no files", () => {
+  it("omits chat_history hint when chat_history dir does not exist", () => {
     const { systemPromptSuffix } = createGondolinTools({
       arc: "no-history-arc",
-      config: gondolinConfig,
-      chatHistoryStore: { readAllHistoryFiles: () => [] } as any,
-    });
-    expect(systemPromptSuffix).not.toContain("/chat_history/");
-  });
-
-  it("omits chat_history hint when chatHistoryStore is absent", () => {
-    const { systemPromptSuffix } = createGondolinTools({
-      arc: "absent-history-arc",
       config: gondolinConfig,
     });
     expect(systemPromptSuffix).not.toContain("/chat_history/");
