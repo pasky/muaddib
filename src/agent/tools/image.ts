@@ -24,7 +24,7 @@ export type GenerateImageExecutor = (input: GenerateImageInput) => Promise<Gener
 import { writeArtifactBytes } from "./artifact-storage.js";
 
 const DEFAULT_IMAGE_LIMIT = 3_500_000;
-const DEFAULT_IMAGE_GEN_TIMEOUT_MS = 60_000;
+const DEFAULT_IMAGE_GEN_TIMEOUT_MS = 120_000;
 const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 const IMAGE_SUFFIX_BY_MIME_TYPE: Record<string, string> = {
   "image/png": ".png",
