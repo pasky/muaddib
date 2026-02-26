@@ -74,6 +74,10 @@ export interface MemoryConfig {
   charLimit?: number;
 }
 
+export interface SkillsConfig {
+  creationThreshold?: number;
+}
+
 export interface ToolsConfig {
   artifacts?: ArtifactsConfig;
   oracle?: OracleConfig;
@@ -81,6 +85,7 @@ export interface ToolsConfig {
   jina?: JinaConfig;
   gondolin?: GondolinConfig;
   memory?: MemoryConfig;
+  skills?: SkillsConfig;
 }
 
 /**

@@ -44,6 +44,7 @@ import {
 import { SizeLimitProvider } from "./size-limit-provider.js";
 import {
   loadBundledSkills,
+  loadWorkspaceSkills,
   formatSkillsForVmPrompt,
   VM_SKILLS_BASE,
   type LoadedSkill,
@@ -696,6 +697,8 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
   vmActiveSessions.set(arc, (vmActiveSessions.get(arc) ?? 0) + 1);
 
   const skills = getBundledSkills();
+  const workspaceSkills = loadWorkspaceSkills(workspacePath);
+  const allSkills = [...skills, ...workspaceSkills];
   const artifactHostname = resolveArtifactHostname(toolsConfig?.artifacts?.url, logger);
 
   const bashTimeoutSeconds = config.bashTimeoutSeconds ?? 270;
@@ -737,7 +740,7 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
     shareArtifactTool,
   ];
 
-  const skillsSection = formatSkillsForVmPrompt(skills);
+  const skillsSection = formatSkillsForVmPrompt(allSkills);
   const artifactsUrl = options.toolsConfig?.artifacts?.url;
   const artifactsSuffix = artifactsUrl
     ? ` Artifacts: your previously produced output attachments - any URLs that start with ${artifactsUrl}, read with download_artifact skill.`

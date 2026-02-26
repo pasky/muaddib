@@ -8,7 +8,7 @@
  * so the agent can read them via the sandbox read tool.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -64,6 +64,34 @@ export function loadBundledSkills(): LoadedSkill[] {
 
 /** VM-local base path where skills are installed. */
 export const VM_SKILLS_BASE = "/skills";
+
+/** VM-local base path where workspace skills live (inside the /workspace RealFS mount). */
+export const VM_WORKSPACE_SKILLS_BASE = "/workspace/skills";
+
+/**
+ * Load workspace skills from the arc's workspace directory.
+ *
+ * Each skill's `filePath` is rewritten to the VM-local path
+ * (`/workspace/skills/<name>/SKILL.md`) so `formatSkillsForPrompt` emits
+ * locations the agent can read inside the sandbox.
+ *
+ * Returns `[]` if the directory doesn't exist.
+ */
+export function loadWorkspaceSkills(workspacePath: string): LoadedSkill[] {
+  const dir = join(workspacePath, "skills");
+  if (!existsSync(dir)) return [];
+
+  try {
+    const { skills } = loadSkillsFromDir({ dir, source: "workspace" });
+    return skills.map((skill) => ({
+      ...skill,
+      content: readFileSync(skill.filePath, "utf-8"),
+      filePath: `${VM_WORKSPACE_SKILLS_BASE}/${skill.name}/SKILL.md`,
+    }));
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Format a skills listing for inclusion in the system prompt suffix.

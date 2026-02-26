@@ -42,10 +42,11 @@ import {
 import type { ProactiveConfig } from "./proactive.js";
 import { generateToolSummaryFromSession } from "./tool-summary.js";
 import type { Logger } from "../../app/logging.js";
-import type { AgentConfig, MemoryConfig } from "../../config/muaddib-config.js";
+import type { AgentConfig, MemoryConfig, SkillsConfig } from "../../config/muaddib-config.js";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { getArcWorkspacePath } from "../../agent/tools/gondolin-tools.js";
+import { loadWorkspaceSkills } from "../../agent/skills/load-skills.js";
 
 // ── Public types ──
 
@@ -562,8 +563,11 @@ export class CommandExecutor {
 
       if (opts.memoryUpdate !== false && agentResult.session) {
         try {
-          agentResult.bumpMaxIterations?.(3);
-          const memoryPrompt = buildMemoryUpdatePrompt(message.arc, this.agentConfig.tools?.memory);
+          agentResult.bumpMaxIterations?.(5);
+          const memoryPrompt = buildMemoryUpdatePrompt(message.arc, this.agentConfig.tools?.memory, {
+            toolCallsCount: agentResult.toolCallsCount ?? 0,
+            skillsConfig: this.agentConfig.tools?.skills,
+          });
           await agentResult.session.prompt(memoryPrompt);
         } catch (err) {
           this.logger.warn("Memory update failed", String(err));
@@ -1031,8 +1035,14 @@ function byteLengthUtf8(text: string): number {
 }
 
 const DEFAULT_MEMORY_CHAR_LIMIT = 2200;
+const DEFAULT_SKILL_CREATION_THRESHOLD = 4;
 
-export function buildMemoryUpdatePrompt(arc: string, memoryConfig?: MemoryConfig): string {
+export interface PostSessionOptions {
+  toolCallsCount?: number;
+  skillsConfig?: SkillsConfig;
+}
+
+export function buildMemoryUpdatePrompt(arc: string, memoryConfig?: MemoryConfig, options?: PostSessionOptions): string {
   const charLimit = memoryConfig?.charLimit ?? DEFAULT_MEMORY_CHAR_LIMIT;
   const workspacePath = getArcWorkspacePath(arc);
   const memoryPath = join(workspacePath, "MEMORY.md");
@@ -1053,7 +1063,23 @@ export function buildMemoryUpdatePrompt(arc: string, memoryConfig?: MemoryConfig
 
   const displayContent = content.trim() || "(empty - not yet created)";
 
-  return `<meta>Session complete. Here is your current /workspace/MEMORY.md (${chars}/${charLimit} chars${capacityWarning}):\n---\n${displayContent}\n---\nIf you learned something worth persisting for the long term (beyond the continuously moving chronicle: user preferences, big lessons, key decisions), update /workspace/MEMORY.md using the edit or write tool. Keep entries concise. If nothing worth saving, do nothing.</meta>`;
+  let prompt = `<meta>Session complete. Here is your current /workspace/MEMORY.md (${chars}/${charLimit} chars${capacityWarning}):\n---\n${displayContent}\n---\nIf you learned something worth persisting for the long term (beyond the continuously moving chronicle: user preferences, big lessons, key decisions), update /workspace/MEMORY.md using the edit or write tool. Keep entries concise. If nothing worth saving, do nothing.`;
+
+  // Skill creation section - appended when session was complex enough
+  const toolCallsCount = options?.toolCallsCount ?? 0;
+  const threshold = options?.skillsConfig?.creationThreshold ?? DEFAULT_SKILL_CREATION_THRESHOLD;
+
+  if (toolCallsCount >= threshold) {
+    const existingSkills = loadWorkspaceSkills(workspacePath);
+    const skillsList = existingSkills.length > 0
+      ? existingSkills.map((s) => `- ${s.name}: ${s.description}`).join("\n")
+      : "(none)";
+
+    prompt += `\n\nSkill creation: this session used ${toolCallsCount} tool calls. Consider saving a reusable skill at /workspace/skills/<name>/SKILL.md if:\n- The procedure was complex and hard to discover (required trial & error or user correction)\n- You recognize a pattern you've solved before or will likely need again\nExisting workspace skills:\n${skillsList}\nSee the manage-skills skill for format. If nothing worth capturing, do nothing.`;
+  }
+
+  prompt += "</meta>";
+  return prompt;
 }
 
 function trimToMaxBytes(text: string, maxBytes: number): string {

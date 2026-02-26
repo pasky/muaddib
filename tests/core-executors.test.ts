@@ -860,6 +860,44 @@ describe("core tool executors generate_image support", () => {
   });
 });
 
+// ── Workspace skills ──────────────────────────────────────────────────────
+
+import { loadWorkspaceSkills } from "../src/agent/skills/load-skills.js";
+
+describe("loadWorkspaceSkills", () => {
+  it("returns empty array when skills directory does not exist", () => {
+    const result = loadWorkspaceSkills("/nonexistent/workspace");
+    expect(result).toEqual([]);
+  });
+
+  it("loads valid workspace skills and rewrites filePath", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "muaddib-ws-skills-"));
+    tempDirs.push(dir);
+    const skillDir = join(dir, "skills", "my-skill");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(
+      join(skillDir, "SKILL.md"),
+      "---\nname: my-skill\ndescription: A test skill.\n---\nDo the thing.\n",
+    );
+
+    const skills = loadWorkspaceSkills(dir);
+    expect(skills).toHaveLength(1);
+    expect(skills[0].name).toBe("my-skill");
+    expect(skills[0].description).toBe("A test skill.");
+    expect(skills[0].filePath).toBe("/workspace/skills/my-skill/SKILL.md");
+    expect(skills[0].content).toContain("Do the thing.");
+  });
+
+  it("returns empty array when skills directory exists but is empty", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "muaddib-ws-skills-"));
+    tempDirs.push(dir);
+    mkdirSync(join(dir, "skills"), { recursive: true });
+
+    const skills = loadWorkspaceSkills(dir);
+    expect(skills).toEqual([]);
+  });
+});
+
 // ── Memory update prompt ──────────────────────────────────────────────────
 
 import { buildMemoryUpdatePrompt } from "../src/rooms/command/command-executor.js";
@@ -907,5 +945,54 @@ describe("buildMemoryUpdatePrompt", () => {
     const prompt = buildMemoryUpdatePrompt(arc, { charLimit: 600 });
     expect(prompt).toContain("500/600 chars");
     expect(prompt).toContain("consolidate"); // 500/600 > 80%
+  });
+
+  it("includes skill creation section when toolCallsCount >= threshold", () => {
+    const arc = "memory-skills-arc";
+    const workspacePath = getArcWorkspacePath(arc);
+    mkdirSync(workspacePath, { recursive: true });
+
+    const prompt = buildMemoryUpdatePrompt(arc, undefined, { toolCallsCount: 5 });
+    expect(prompt).toContain("Skill creation:");
+    expect(prompt).toContain("5 tool calls");
+    expect(prompt).toContain("(none)");
+    expect(prompt).toContain("manage-skills");
+  });
+
+  it("omits skill creation section when toolCallsCount < threshold", () => {
+    const arc = "memory-no-skills-arc";
+    const workspacePath = getArcWorkspacePath(arc);
+    mkdirSync(workspacePath, { recursive: true });
+
+    const prompt = buildMemoryUpdatePrompt(arc, undefined, { toolCallsCount: 2 });
+    expect(prompt).not.toContain("Skill creation:");
+  });
+
+  it("lists existing workspace skills in skill creation section", () => {
+    const arc = "memory-existing-skills-arc";
+    const workspacePath = getArcWorkspacePath(arc);
+    const skillDir = join(workspacePath, "skills", "deploy-app");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(
+      join(skillDir, "SKILL.md"),
+      "---\nname: deploy-app\ndescription: Deploy the application.\n---\nRun deploy script.\n",
+    );
+
+    const prompt = buildMemoryUpdatePrompt(arc, undefined, { toolCallsCount: 6 });
+    expect(prompt).toContain("- deploy-app: Deploy the application.");
+    expect(prompt).not.toContain("(none)");
+  });
+
+  it("respects custom creationThreshold from skillsConfig", () => {
+    const arc = "memory-custom-threshold-arc";
+    const workspacePath = getArcWorkspacePath(arc);
+    mkdirSync(workspacePath, { recursive: true });
+
+    // toolCallsCount=2 should trigger with threshold=2
+    const prompt = buildMemoryUpdatePrompt(arc, undefined, {
+      toolCallsCount: 2,
+      skillsConfig: { creationThreshold: 2 },
+    });
+    expect(prompt).toContain("Skill creation:");
   });
 });
