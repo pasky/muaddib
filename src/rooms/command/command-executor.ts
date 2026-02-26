@@ -95,6 +95,8 @@ interface PromptRunResult {
   responseText: string;
   usage: Usage | null;
   toolCallsCount: number;
+  /** Deferred work (tool summary, memory update, session dispose) that callers await after sending the response. */
+  backgroundWork?: Promise<void>;
 }
 
 export interface CommandExecutorOverrides {
@@ -396,7 +398,7 @@ export class CommandExecutor {
 
     const queryTimestamp = formatUtcTime().slice(-5); // HH:MM in UTC, matching history format
     const queryContent = message.originalContent ?? resolved.queryText;
-    const { responseText, usage, toolCallsCount } = await this.invokeAndPostProcess(
+    const { responseText, usage, toolCallsCount, backgroundWork } = await this.invokeAndPostProcess(
       runner, message, `[${queryTimestamp}] <${message.nick}> ${queryContent}`, runnerContext, toolSet.tools, {
         reasoningEffort: resolved.runtime.reasoningEffort,
         visionModel: resolved.runtime.visionModel ?? undefined,
@@ -418,6 +420,9 @@ export class CommandExecutor {
     const result = await this.deliverResult(message, triggerTs, sendResponse, {
       response: responseText || null, resolved, model: modelSpec, usage, toolCallsCount,
     });
+
+    // Tool summary, memory update, and session dispose run after the response is sent.
+    await backgroundWork;
     await this.triggerAutoChronicler(message, this.commandConfig.historySize);
 
     return result;
@@ -484,6 +489,7 @@ export class CommandExecutor {
         "Agent decided not to interject proactively",
         `arc=${message.arc}`,
       );
+      await result.backgroundWork;
       return false;
     }
 
@@ -507,6 +513,7 @@ export class CommandExecutor {
       mode: classifiedTrigger,
     });
 
+    await result.backgroundWork;
     await this.triggerAutoChronicler(message, this.commandConfig.historySize);
     return true;
   }
@@ -533,21 +540,8 @@ export class CommandExecutor {
       refusalFallbackModel: this.refusalFallbackModel ?? undefined,
     });
 
-    await this.persistGeneratedToolSummary(message, agentResult, tools, triggerTs);
-
-    // ── Memory update ──
-    if (opts.memoryUpdate !== false && agentResult.session) {
-      try {
-        agentResult.bumpMaxIterations?.(3);
-        const memoryPrompt = buildMemoryUpdatePrompt(message.arc, this.agentConfig.tools?.memory);
-        await agentResult.session.prompt(memoryPrompt);
-      } catch (err) {
-        this.logger.warn("Memory update failed", String(err));
-      }
-    }
-
-    agentResult.session?.dispose();
-
+    // Extract and post-process response text immediately — don't block on
+    // tool summary / memory update which are independent of the response.
     let responseText = agentResult.text;
     if (agentResult.refusalFallbackActivated && agentResult.refusalFallbackModel) {
       const fallbackSpec = parseModelSpec(agentResult.refusalFallbackModel);
@@ -561,10 +555,29 @@ export class CommandExecutor {
     responseText = await this.applyResponseLengthPolicy(responseText, message.arc);
     responseText = this.cleanResponseText(responseText, message.nick);
 
+    // Deferred: tool summary persistence, memory update, session dispose.
+    // Callers await this *after* sending the response so the user isn't blocked.
+    const backgroundWork = (async () => {
+      await this.persistGeneratedToolSummary(message, agentResult, tools, triggerTs);
+
+      if (opts.memoryUpdate !== false && agentResult.session) {
+        try {
+          agentResult.bumpMaxIterations?.(3);
+          const memoryPrompt = buildMemoryUpdatePrompt(message.arc, this.agentConfig.tools?.memory);
+          await agentResult.session.prompt(memoryPrompt);
+        } catch (err) {
+          this.logger.warn("Memory update failed", String(err));
+        }
+      }
+
+      agentResult.session?.dispose();
+    })();
+
     return {
       responseText,
       usage: agentResult.usage,
       toolCallsCount: agentResult.toolCallsCount ?? 0,
+      backgroundWork,
     };
   }
 
