@@ -194,4 +194,41 @@ describe("CommandResolver", () => {
 
     expect(bypass).toBe(true);
   });
+
+  it("resolves memoryUpdate from mode config (defaults true, respects false)", async () => {
+    const configWithMemory = {
+      ...commandConfig,
+      modes: {
+        ...commandConfig.modes,
+        sarcastic: {
+          ...commandConfig.modes.sarcastic,
+          memoryUpdate: false,
+        },
+      },
+    };
+
+    const resolver = new CommandResolver(
+      configWithMemory as any,
+      async () => "EASY_SERIOUS",
+      "!h",
+      new Set(["!c"]),
+      (model) => String(model),
+    );
+
+    // Serious mode defaults to true
+    const serious = await resolver.resolve({
+      message: { serverTag: "s", channelName: "#c", arc: "s##c", nick: "u", mynick: "b", content: "!s test" },
+      context: [],
+      defaultSize: 40,
+    });
+    expect(serious.runtime?.memoryUpdate).toBe(true);
+
+    // Sarcastic mode explicitly set to false
+    const sarcastic = await resolver.resolve({
+      message: { serverTag: "s", channelName: "#c", arc: "s##c", nick: "u", mynick: "b", content: "!d test" },
+      context: [],
+      defaultSize: 40,
+    });
+    expect(sarcastic.runtime?.memoryUpdate).toBe(false);
+  });
 });

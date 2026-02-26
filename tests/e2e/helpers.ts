@@ -218,6 +218,7 @@ export function baseCommandConfig() {
       serious: {
         model: "openai:gpt-4o-mini",
         prompt: "You are {mynick}.",
+        memoryUpdate: false,
         triggers: {
           "!s": {},
         },

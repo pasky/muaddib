@@ -23,6 +23,9 @@
 	"model": "openrouter:google/gemini-3.1-pro-preview",
         "prompt": "You are an oracle - a powerful reasoning entity consulted for complex analysis and creative work. Take your time to think deeply. Use available tools to gather additional inputs and validate your conclusions, however your purpose is not to be a versatile agent but a sage advisor. Leave any complex tool use to the agent that called you as a tool just now, focus on formulating deep and correct advice rather than doing things yourself."
       },
+      "memory": {
+        "charLimit": 2200
+      },
       "gondolin": {
         "_comment": "dnsMode supports 'synthetic' (default; gondolin intercepts DNS and returns synthetic IPs, forcing all HTTP/HTTPS through the MITM layer) and 'open' (real DNS). blockedCidrs applies to HTTP/HTTPS traffic via the MITM layer (IP-level check after DNS resolution; all non-HTTP traffic blocked a priori, RFC-1918/loopback are always blocked). RFC-1918/loopback are blocked by default, except the hostname from tools.artifacts.url so the sandbox can fetch shared artifacts hosted on private IPs. bashTimeoutSeconds caps individual bash command execution AND non-bash VM operations (read/write/edit/access) as a deadlock detector (default 270, just under Claude's 5-minute token-cache expiry). maxConcurrentVms limits how many arc QEMU processes may run simultaneously; new arc invocations block until a slot is free.",
         "dnsMode": "synthetic",
@@ -70,6 +73,7 @@
             "promptReminder": "REMEMBER: It's time to be extremely clever and bring out in FULL FORCE your sharp sarcasm and cynical, dry, rough sense of humor. Go be surprisingly witty.",
             "reasoningEffort": "minimal",
             "steering": false,
+            "memoryUpdate": false,
             "allowedTools": [],
             "triggers": {
               "!d": {},

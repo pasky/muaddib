@@ -70,12 +70,17 @@ export interface GondolinConfig {
  * Configuration for the agent's built-in tools (oracle, artifacts, image generation, etc.).
  * Lives under `agent.tools` in config.json.
  */
+export interface MemoryConfig {
+  charLimit?: number;
+}
+
 export interface ToolsConfig {
   artifacts?: ArtifactsConfig;
   oracle?: OracleConfig;
   imageGen?: ImageGenConfig;
   jina?: JinaConfig;
   gondolin?: GondolinConfig;
+  memory?: MemoryConfig;
 }
 
 /**
@@ -114,6 +119,7 @@ export interface ModeConfig {
   visionModel?: string;
   prompt?: string;
   promptReminder?: string;
+  memoryUpdate?: boolean;
   triggers: Record<string, Record<string, unknown>>;
 }
 

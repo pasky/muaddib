@@ -111,6 +111,9 @@ describe("SessionRunner", () => {
     expect(result.usage.totalTokens).toBe(15);
     expect(result.stopReason).toBe("stop");
     expect(ensureProviderKey).toHaveBeenCalledWith("openai");
+    // unsubscribe is deferred to session.dispose() on the success path
+    expect(unsubscribe).not.toHaveBeenCalled();
+    await result.session!.dispose();
     expect(unsubscribe).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
@@ -164,7 +167,7 @@ describe("SessionRunner", () => {
     expect(agent.setModel).toHaveBeenCalledWith({ provider: "anthropic", id: "claude-sonnet-4" });
   });
 
-  it("calls toolSet.dispose after successful prompt", async () => {
+  it("defers toolSet.dispose to session.dispose on success", async () => {
     const dispose = vi.fn(async () => {});
     const session = {
       messages: [
@@ -177,6 +180,7 @@ describe("SessionRunner", () => {
       ] as any[],
       subscribe: vi.fn(() => vi.fn()),
       prompt: vi.fn(async () => {}),
+      dispose: vi.fn(async () => {}),
     };
 
     mockCreateAgentSessionForInvocation.mockReturnValue({
@@ -195,11 +199,54 @@ describe("SessionRunner", () => {
       toolSet: { tools: [], dispose },
     });
 
-    await runner.prompt("hello");
+    const result = await runner.prompt("hello");
+    // toolSet.dispose is NOT called yet — deferred to session.dispose()
+    expect(dispose).not.toHaveBeenCalled();
+
+    // Calling session.dispose() triggers toolSet.dispose + original dispose
+    await result.session!.dispose();
     expect(dispose).toHaveBeenCalledTimes(1);
   });
 
-  it("calls toolSet.dispose even when prompt throws", async () => {
+  it("does not double-dispose toolSet when session.dispose is called", async () => {
+    const dispose = vi.fn(async () => {});
+    const session = {
+      messages: [
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "response" }],
+          usage: makeUsage(),
+          stopReason: "stop",
+        },
+      ] as any[],
+      subscribe: vi.fn(() => vi.fn()),
+      prompt: vi.fn(async () => {}),
+      dispose: vi.fn(async () => {}),
+    };
+
+    mockCreateAgentSessionForInvocation.mockReturnValue({
+      session,
+      agent: { setModel: vi.fn() },
+      ensureProviderKey: vi.fn(async () => {}),
+      getVisionFallbackActivated: () => false,
+    });
+
+    const runner = new SessionRunner({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "sys",
+      authStorage: AuthStorage.inMemory(),
+      logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      modelAdapter: { resolve: () => ({ spec: { provider: "openai", modelId: "gpt-4o-mini" }, model: {} }) } as any,
+      toolSet: { tools: [], dispose },
+    });
+
+    const result = await runner.prompt("hello");
+    await result.session!.dispose();
+    await result.session!.dispose(); // second call should be safe
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls toolSet.dispose in finally block when prompt throws", async () => {
     const dispose = vi.fn(async () => {});
     const session = {
       messages: [] as any[],
@@ -322,7 +369,8 @@ describe("SessionRunner", () => {
     expect(payload.content[1].thinking).toBe(longThinking);
     expect(payload.content[1].thinkingSignature).toBe("sig-thinking");
     expect(payload.content[2].thoughtSignature).toBe("sig-tool");
-    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    // unsubscribe is deferred to session.dispose() on the success path
+    expect(unsubscribe).not.toHaveBeenCalled();
   });
 
   function makeMinimalSession(text = "ok"): any {

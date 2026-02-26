@@ -5,7 +5,7 @@
  * resetGondolinVmCache + a small backdoor exposed for testing.
  */
 
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ── pull the internals we need ─────────────────────────────────────────────
@@ -18,6 +18,7 @@ import {
   getVmSlotState,
   getArcChronicleDir,
   getArcChatHistoryDir,
+  getArcWorkspacePath,
 } from "../src/agent/tools/gondolin-tools.js";
 
 import {
@@ -971,6 +972,45 @@ describe("gondolin — chat history in systemPromptSuffix", () => {
       config: gondolinConfig,
     });
     expect(systemPromptSuffix).not.toContain("/chat_history/");
+  });
+});
+
+describe("gondolin — MEMORY.md in systemPromptSuffix", () => {
+  it("includes <memory> tag when MEMORY.md exists in workspace", () => {
+    const arc = "memory-arc";
+    const workspacePath = getArcWorkspacePath(arc);
+    mkdirSync(workspacePath, { recursive: true });
+    writeFileSync(`${workspacePath}/MEMORY.md`, "User prefers dark mode.\nProject uses TypeScript.");
+
+    const { systemPromptSuffix } = createGondolinTools({
+      arc,
+      config: gondolinConfig,
+    });
+    expect(systemPromptSuffix).toContain('<memory file="/workspace/MEMORY.md">');
+    expect(systemPromptSuffix).toContain("User prefers dark mode.");
+    expect(systemPromptSuffix).toContain("Project uses TypeScript.");
+    expect(systemPromptSuffix).toContain("</memory>");
+  });
+
+  it("omits <memory> tag when MEMORY.md does not exist", () => {
+    const { systemPromptSuffix } = createGondolinTools({
+      arc: "no-memory-arc",
+      config: gondolinConfig,
+    });
+    expect(systemPromptSuffix).not.toContain("<memory");
+  });
+
+  it("omits <memory> tag when MEMORY.md is empty", () => {
+    const arc = "empty-memory-arc";
+    const workspacePath = getArcWorkspacePath(arc);
+    mkdirSync(workspacePath, { recursive: true });
+    writeFileSync(`${workspacePath}/MEMORY.md`, "   \n  ");
+
+    const { systemPromptSuffix } = createGondolinTools({
+      arc,
+      config: gondolinConfig,
+    });
+    expect(systemPromptSuffix).not.toContain("<memory");
   });
 });
 

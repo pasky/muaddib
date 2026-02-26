@@ -15,7 +15,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, posix } from "node:path";
 
 import {
@@ -748,13 +748,28 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
   const chatHistorySuffix = existsSync(getArcChatHistoryDir(arc))
     ? " Chat history: raw JSONL logs at /chat_history/ (read-only)."
     : "";
+  // Inject MEMORY.md if present in workspace
+  const memoryPath = join(workspacePath, "MEMORY.md");
+  let memorySuffix = "";
+  if (existsSync(memoryPath)) {
+    try {
+      const memoryContent = readFileSync(memoryPath, "utf8");
+      if (memoryContent.trim()) {
+        memorySuffix = `\n<memory file="/workspace/MEMORY.md">\n${memoryContent}\n</memory>`;
+      }
+    } catch {
+      // Ignore read errors — memory is best-effort
+    }
+  }
+
   const systemPromptSuffix =
     `Filesystem: /workspace persists across sessions; ${sessionDir} is your session working directory (last 8 session dirs in /tmp/session-* are kept).` +
     " Environment: Alpine Linux, uv venv is active." +
     chronicleSuffix +
     chatHistorySuffix +
     artifactsSuffix +
-    skillsSection;
+    skillsSection +
+    memorySuffix;
 
   const dispose = () => checkpointGondolinArc(arc, logger);
 

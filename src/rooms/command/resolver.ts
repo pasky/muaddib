@@ -32,6 +32,7 @@ export interface RuntimeSettings {
   steering: boolean;
   autoReduceContext: boolean;
   includeChapterSummary: boolean;
+  memoryUpdate: boolean;
   model: string | null;
   visionModel: string | null;
   historySize: number;
@@ -176,6 +177,10 @@ export class CommandResolver {
         includeChapterSummary:
           (overrides.includeChapterSummary as boolean | undefined) ??
           modeConfig.includeChapterSummary ??
+          true,
+        memoryUpdate:
+          (overrides.memoryUpdate as boolean | undefined) ??
+          modeConfig.memoryUpdate ??
           true,
         model: (overrides.model as string | undefined) ?? null,
         visionModel:

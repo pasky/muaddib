@@ -150,6 +150,28 @@ export class SessionRunner {
       }
     });
 
+    // Wrap session.dispose so it chains toolSet.dispose() (e.g. Gondolin checkpoint)
+    // before the original dispose.  This keeps the VM alive until the caller is done
+    // with the session (e.g. for a memory-update prompt after the main response).
+    const toolSet = this.options.toolSet;
+    const origDispose = typeof session.dispose === "function"
+      ? session.dispose.bind(session)
+      : undefined;
+    let toolSetDisposed = false;
+    let unsubscribed = false;
+    session.dispose = async () => {
+      if (!unsubscribed) {
+        unsubscribed = true;
+        unsubscribe();
+      }
+      if (!toolSetDisposed && toolSet?.dispose) {
+        toolSetDisposed = true;
+        await toolSet.dispose();
+      }
+      await origDispose?.();
+    };
+
+    let sessionReturned = false;
     try {
       const refusalFallbackActivated = await this.promptWithRefusalFallback(
         session,
@@ -180,6 +202,7 @@ export class SessionRunner {
       }
 
       const lastAssistant = findLastAssistantMessage(session.messages);
+      sessionReturned = true;
       return {
         text,
         stopReason: lastAssistant?.stopReason ?? "stop",
@@ -197,8 +220,17 @@ export class SessionRunner {
         session,
       };
     } finally {
-      unsubscribe();
-      await this.options.toolSet?.dispose?.();
+      // Error-path safety: if the session is never returned (exception before return),
+      // unsubscribe and ensure toolSet is still cleaned up.  On the success path,
+      // both are deferred — the caller triggers them via session.dispose().
+      if (!sessionReturned && !unsubscribed) {
+        unsubscribed = true;
+        unsubscribe();
+      }
+      if (!sessionReturned && !toolSetDisposed && toolSet?.dispose) {
+        toolSetDisposed = true;
+        await toolSet.dispose();
+      }
     }
   }
 
