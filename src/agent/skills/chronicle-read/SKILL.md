@@ -1,9 +1,9 @@
 ---
 name: chronicle-read
-description: Read chronicle memory chapters from /chronicle/ in the sandbox.
+description: Read chronicle memory chapters from /chronicle/
 ---
 
-Chronicle files at `/chronicle/` are numbered markdown chapter files (`000001.md`, `000002.md`, etc.) with YAML frontmatter (`openedAt`, `closedAt`, `summary`) and timestamped paragraphs:
+Chronicle files in the `/chronicle/` directory are numbered chapter files (`000001.md`, `000002.md`, etc.) with YAML frontmatter and timestamped paragraphs:
 
 ```markdown
 ---

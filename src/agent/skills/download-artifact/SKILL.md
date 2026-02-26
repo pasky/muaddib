@@ -1,6 +1,6 @@
 ---
 name: download-artifact
-description: Download a previously shared artifact into the sandbox by its viewer URL.
+description: Save a previously shared artifact URL to a file
 ---
 
 Artifact viewer URL `https://host/?filename` → raw file at `https://host/filename`.

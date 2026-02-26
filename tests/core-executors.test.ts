@@ -955,7 +955,6 @@ describe("buildMemoryUpdatePrompt", () => {
     const prompt = buildMemoryUpdatePrompt(arc, undefined, { toolCallsCount: 5 });
     expect(prompt).toContain("Skill creation:");
     expect(prompt).toContain("5 tool calls");
-    expect(prompt).toContain("(none)");
     expect(prompt).toContain("manage-skills");
   });
 
@@ -966,21 +965,6 @@ describe("buildMemoryUpdatePrompt", () => {
 
     const prompt = buildMemoryUpdatePrompt(arc, undefined, { toolCallsCount: 2 });
     expect(prompt).not.toContain("Skill creation:");
-  });
-
-  it("lists existing workspace skills in skill creation section", () => {
-    const arc = "memory-existing-skills-arc";
-    const workspacePath = getArcWorkspacePath(arc);
-    const skillDir = join(workspacePath, "skills", "deploy-app");
-    mkdirSync(skillDir, { recursive: true });
-    writeFileSync(
-      join(skillDir, "SKILL.md"),
-      "---\nname: deploy-app\ndescription: Deploy the application.\n---\nRun deploy script.\n",
-    );
-
-    const prompt = buildMemoryUpdatePrompt(arc, undefined, { toolCallsCount: 6 });
-    expect(prompt).toContain("- deploy-app: Deploy the application.");
-    expect(prompt).not.toContain("(none)");
   });
 
   it("respects custom creationThreshold from skillsConfig", () => {

@@ -46,7 +46,6 @@ import type { AgentConfig, MemoryConfig, SkillsConfig } from "../../config/muadd
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { getArcWorkspacePath } from "../../agent/tools/gondolin-tools.js";
-import { loadWorkspaceSkills } from "../../agent/skills/load-skills.js";
 
 // ── Public types ──
 
@@ -1070,12 +1069,7 @@ export function buildMemoryUpdatePrompt(arc: string, memoryConfig?: MemoryConfig
   const threshold = options?.skillsConfig?.creationThreshold ?? DEFAULT_SKILL_CREATION_THRESHOLD;
 
   if (toolCallsCount >= threshold) {
-    const existingSkills = loadWorkspaceSkills(workspacePath);
-    const skillsList = existingSkills.length > 0
-      ? existingSkills.map((s) => `- ${s.name}: ${s.description}`).join("\n")
-      : "(none)";
-
-    prompt += `\n\nSkill creation: this session used ${toolCallsCount} tool calls. Consider saving a reusable skill at /workspace/skills/<name>/SKILL.md if:\n- The procedure was complex and hard to discover (required trial & error or user correction)\n- You recognize a pattern you've solved before or will likely need again\nExisting workspace skills:\n${skillsList}\nSee the manage-skills skill for format. If nothing worth capturing, do nothing.`;
+    prompt += `\n\nSkill creation: this session used ${toolCallsCount} tool calls - was it tough? If you didn't follow an existing skill, consider saving a reusable skill using manage-skills. Skills allow you to continuously learn, but also carry a permanent token cost. So only if both:\n- The procedure was complex *and* hard to discover (required trial & error or user correction)\n- You could confirm this is a pattern you've encountered historically (grep history?) or are certain to need again\nIf it's not worth capturing, do nothing.`;
   }
 
   prompt += "</meta>";

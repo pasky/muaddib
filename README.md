@@ -51,9 +51,9 @@ So is Slack - including threads:
 
 - **AI Integrations**: Anthropic Claude (Opus 4.6 recommended), OpenAI, DeepSeek, any OpenRouter model (including Gemini models)
 - **Agentic Capability**: Ability to visit websites, view images, perform deep research, fully sandboxed and isolated code execution and long-term state maintenance, publish artifacts; each channel/DM gets a persistent sandboxed workspace with long-term state (code, data, installed packages)
-- **Restartable and Persistent Memory**: All state is persisted; AI agent maintains a continuous chronicle of events and experiences to refer to
-- **Command System**: Automatic model routing (to balance cost, speed and intelligence) plus extensible command-based interaction with prefixes for various modes
-- **Proactive Interjecting**: Channel-based whitelist system for automatic participation in relevant conversations
+- **Continuous Learning**: AI agent maintains short-term memory (smart context engineering), mid-term memory (a scratchpad), and long-term memory both episodic (a continuous chronicle of events and experiences) and procedural (automatically maintained skills)
+- **Command System**: Automatic model routing (to balance cost, speed and intelligence) plus multiple, extensible "command modes" based on specific prefixes
+- **Proactive Interjecting**: Lurk-by-default with a opt-in automatic participation in relevant conversations
 
 Muaddib has been **battle-tested since July 2025** in a (slightly) hostile IRC environment, lurking at a variety of [libera.chat](https://libera.chat/) channels.  However, bugs are possible (no warranty etc.) and LLM usage carries some inherent risks (e.g. a code execution sandbox with your API keys preloaded *plus* an access to the internet [*can* be fooled](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/) by a highly crafted malicious website that the agent visits to upload these API keys somewhere).
 
