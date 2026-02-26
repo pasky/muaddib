@@ -71,7 +71,7 @@ export class IrcRoomMonitor {
     );
 
     const commandHandler = new RoomMessageHandler(runtime, "irc", {
-      responseCleaner: (text) => text.replace(/\n/g, "; ").trim(),
+      responseCleaner: (text) => text.replace(/\n+/g, "; ").trim(),
     });
 
     return [
@@ -319,5 +319,5 @@ function normalizeSenderAndMessage(nick: string, message: string): [string, stri
 }
 
 function defaultResponseCleaner(text: string): string {
-  return text.replace(/\n/g, "; ").trim() || text;
+  return text.replace(/\n+/g, "; ").trim() || text;
 }

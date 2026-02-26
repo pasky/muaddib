@@ -112,7 +112,7 @@ describe("IrcRoomMonitor", () => {
           executeCalls.push(message.content);
           originalContentCalls.push(message.originalContent);
           if (options.isDirect && options.sendResponse) {
-            await options.sendResponse("line1\nline2");
+            await options.sendResponse("line1\n\nline2");
           }
           await history.addMessage(message);
           await history.addMessage({
