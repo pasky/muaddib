@@ -17,75 +17,57 @@ export function emptyUsage(): Usage {
   };
 }
 
-const LEAF_STRING_MAX = 2048;
+const BINARY_DATA_PREVIEW_LENGTH = 512;
 
-export interface JsonSerializationOptions {
-  preserveContentText?: boolean;
-  preserveContentThinking?: boolean;
-}
-
-function shouldPreserveLeafString(
-  parent: unknown,
-  key: string | number | undefined,
-  options: JsonSerializationOptions,
-): boolean {
-  if (!parent || typeof parent !== "object" || typeof key !== "string") {
-    return false;
-  }
-
-  const parentRecord = parent as Record<string, unknown>;
-  if (options.preserveContentText && key === "text" && parentRecord.type === "text") {
-    return true;
-  }
-
-  if (options.preserveContentThinking && key === "thinking" && parentRecord.type === "thinking") {
-    return true;
-  }
-
-  return false;
-}
-
-function truncateLeafStrings(
-  value: unknown,
-  options: JsonSerializationOptions,
-  parent?: unknown,
-  key?: string | number,
-): unknown {
-  if (typeof value === "string") {
-    if (shouldPreserveLeafString(parent, key, options) || value.length <= LEAF_STRING_MAX) {
-      return value;
-    }
-
-    const half = Math.floor((LEAF_STRING_MAX - 3) / 2);
-    return `${value.slice(0, half)}...${value.slice(-half)}`;
+/**
+ * Recursively replace inline binary blobs (e.g. base64 image data) with a
+ * short placeholder that includes a preview of the first bytes.
+ * Keeps the rest of the structure intact so debug logs remain informative.
+ */
+export function stripBinaryContent(value: unknown): unknown {
+  if (value === null || value === undefined || typeof value !== "object") {
+    return value;
   }
 
   if (Array.isArray(value)) {
-    return value.map((entry, index) => truncateLeafStrings(entry, options, value, index));
+    return value.map(stripBinaryContent);
   }
 
-  if (value !== null && typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const [childKey, childValue] of Object.entries(value)) {
-      out[childKey] = truncateLeafStrings(childValue, options, value, childKey);
-    }
-    return out;
+  const record = value as Record<string, unknown>;
+
+  // Content block with type "image" carrying base64 data
+  if (record.type === "image" && typeof record.data === "string") {
+    const data = record.data;
+    const mimeType = typeof record.mimeType === "string" ? record.mimeType : "unknown";
+    const preview = data.slice(0, BINARY_DATA_PREVIEW_LENGTH);
+    const suffix = data.length > BINARY_DATA_PREVIEW_LENGTH
+      ? `...[${data.length} chars total]`
+      : "";
+    return {
+      type: "image",
+      data: `[binary image data, ${mimeType}] ${preview}${suffix}`,
+      mimeType: record.mimeType,
+    };
   }
 
-  return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(record)) {
+    out[key] = stripBinaryContent(val);
+  }
+  return out;
 }
 
-export function safeJson(value: unknown, maxChars: number, options: JsonSerializationOptions = {}): string {
+export function safeJson(value: unknown, maxChars: number): string {
   try {
-    return truncateForDebug(JSON.stringify(truncateLeafStrings(value, options), null, 2), maxChars);
+    return truncateForDebug(JSON.stringify(stripBinaryContent(value), null, 2), maxChars);
   } catch {
     return "[unserializable payload]";
   }
 }
 
-export function compactJson(value: unknown, maxChars: number, options: JsonSerializationOptions = {}): string {
+export function compactJson(value: unknown, maxChars: number): string {
   try {
-    return truncateForDebug(JSON.stringify(truncateLeafStrings(value, options)), maxChars);
+    return truncateForDebug(JSON.stringify(stripBinaryContent(value)), maxChars);
   } catch {
     return "[unserializable payload]";
   }

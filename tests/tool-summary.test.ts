@@ -109,10 +109,12 @@ describe("generateToolSummaryFromSession", () => {
 
     const payload = modelAdapter.completeSimple.mock.calls[0][1];
     const userContent: string = payload.messages[0].content;
-    // The base64 blob must NOT appear in the prompt
+    // The full base64 blob must NOT appear in the prompt
     expect(userContent).not.toContain(fakeBase64);
-    // But we should still mention it was an image
+    // But we should still mention it was an image with a preview
     expect(userContent).toContain("[binary image data, image/jpeg]");
+    // First 512 chars of the base64 should appear as preview
+    expect(userContent).toContain(fakeBase64.slice(0, 512));
     expect(userContent).toContain("https://example.test/photo.jpg");
   });
 

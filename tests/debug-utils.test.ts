@@ -1,59 +1,82 @@
 import { describe, it, expect } from "vitest";
-import { compactJson, safeJson, truncateForDebug } from "../src/agent/debug-utils.js";
+import { compactJson, safeJson, stripBinaryContent, truncateForDebug } from "../src/agent/debug-utils.js";
 
 describe("debug-utils", () => {
-  describe("safeJson leaf string truncation", () => {
-    it("truncates leaf strings longer than 2048 chars with ellipsis in middle", () => {
+  describe("stripBinaryContent", () => {
+    it("replaces image data with placeholder and preview", () => {
+      const data = "iVBORw0KGgoAAAAN" + "A".repeat(2000);
+      const result = stripBinaryContent({
+        type: "image",
+        data,
+        mimeType: "image/png",
+      }) as Record<string, unknown>;
+
+      expect(result.type).toBe("image");
+      expect(result.mimeType).toBe("image/png");
+      const replaced = result.data as string;
+      expect(replaced).toContain("[binary image data, image/png]");
+      // Preview of first 512 chars
+      expect(replaced).toContain(data.slice(0, 512));
+      // Full data must not be present
+      expect(replaced).not.toBe(data);
+      expect(replaced.length).toBeLessThan(data.length);
+    });
+
+    it("leaves short image data with preview (no truncation marker)", () => {
+      const data = "abc123";
+      const result = stripBinaryContent({
+        type: "image",
+        data,
+        mimeType: "image/gif",
+      }) as Record<string, unknown>;
+
+      expect(result.data).toBe("[binary image data, image/gif] abc123");
+    });
+
+    it("recurses into nested objects and arrays", () => {
+      const data = "X".repeat(1000);
+      const input = {
+        content: [
+          { type: "text", text: "hello" },
+          { type: "image", data, mimeType: "image/jpeg" },
+        ],
+      };
+      const result = input.content[1].data;
+      const stripped = stripBinaryContent(input) as any;
+      expect(stripped.content[0]).toEqual({ type: "text", text: "hello" });
+      expect(stripped.content[1].data).not.toBe(result);
+      expect(stripped.content[1].data).toContain("[binary image data, image/jpeg]");
+    });
+
+    it("passes through primitives unchanged", () => {
+      expect(stripBinaryContent(null)).toBe(null);
+      expect(stripBinaryContent(undefined)).toBe(undefined);
+      expect(stripBinaryContent(42)).toBe(42);
+      expect(stripBinaryContent("hello")).toBe("hello");
+    });
+
+    it("does not affect non-image objects with data field", () => {
+      const obj = { type: "file", data: "some content" };
+      expect(stripBinaryContent(obj)).toEqual(obj);
+    });
+  });
+
+  describe("safeJson", () => {
+    it("strips binary content before serializing", () => {
+      const data = "B".repeat(2000);
+      const result = safeJson(
+        { content: [{ type: "image", data, mimeType: "image/png" }] },
+        100000,
+      );
+      expect(result).not.toContain("B".repeat(2000));
+      expect(result).toContain("[binary image data, image/png]");
+    });
+
+    it("preserves long text strings without leaf truncation", () => {
       const long = "x".repeat(3000);
-      const result = safeJson({ key: long }, 10000);
+      const result = safeJson({ key: long }, 100000);
       const parsed = JSON.parse(result) as { key: string };
-      expect(parsed.key.length).toBeLessThanOrEqual(2048);
-      expect(parsed.key).toContain("...");
-      expect(parsed.key.startsWith("x")).toBe(true);
-      expect(parsed.key.endsWith("x")).toBe(true);
-    });
-
-    it("leaves short strings intact", () => {
-      const result = safeJson({ key: "hello" }, 10000);
-      expect(JSON.parse(result)).toEqual({ key: "hello" });
-    });
-
-    it("truncates nested leaf strings", () => {
-      const long = "a".repeat(3000);
-      const result = safeJson({ nested: { val: long } }, 10000);
-      const parsed = JSON.parse(result) as { nested: { val: string } };
-      expect(parsed.nested.val.length).toBeLessThanOrEqual(2048);
-      expect(parsed.nested.val).toContain("...");
-    });
-
-    it("truncates strings in arrays", () => {
-      const long = "b".repeat(3000);
-      const result = safeJson([long], 10000);
-      const parsed = JSON.parse(result) as string[];
-      expect(parsed[0].length).toBeLessThanOrEqual(2048);
-      expect(parsed[0]).toContain("...");
-    });
-
-    it("can preserve content text strings", () => {
-      const long = "c".repeat(3000);
-      const result = safeJson(
-        { content: [{ type: "text", text: long }] },
-        10000,
-        { preserveContentText: true },
-      );
-      const parsed = JSON.parse(result) as { content: Array<{ type: string; text: string }> };
-      expect(parsed.content[0].text).toBe(long);
-    });
-
-    it("can preserve content thinking strings", () => {
-      const long = "d".repeat(3000);
-      const result = safeJson(
-        { content: [{ type: "thinking", thinking: long }] },
-        10000,
-        { preserveContentThinking: true },
-      );
-      const parsed = JSON.parse(result) as { content: Array<{ type: string; thinking: string }> };
-      expect(parsed.content[0].thinking).toBe(long);
+      expect(parsed.key).toBe(long);
     });
   });
 

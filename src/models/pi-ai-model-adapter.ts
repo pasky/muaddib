@@ -13,6 +13,7 @@ import {
 import type { AuthStorage } from "@mariozechner/pi-coding-agent";
 
 import type { Logger } from "../app/logging.js";
+import { stripBinaryContent } from "../agent/debug-utils.js";
 import { parseModelSpec, type ModelSpec } from "./model-spec.js";
 import {
   getOverriddenProviders,
@@ -127,7 +128,7 @@ export class PiAiModelAdapter {
 }
 
 function truncateJson(value: unknown, maxChars: number): string {
-  const json = JSON.stringify(value, null, 2) ?? "[unserializable]";
+  const json = JSON.stringify(stripBinaryContent(value), null, 2) ?? "[unserializable]";
   if (json.length <= maxChars) {
     return json;
   }

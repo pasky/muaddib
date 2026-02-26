@@ -4,7 +4,7 @@ import type { MuaddibTool, ToolPersistType } from "../../agent/tools/baseline-to
 import type { PromptResult } from "../../agent/session-runner.js";
 import type { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import type { Logger } from "../../app/logging.js";
-import { truncateForDebug } from "../../agent/debug-utils.js";
+import { stripBinaryContent, truncateForDebug } from "../../agent/debug-utils.js";
 
 const PERSISTENCE_SUMMARY_SYSTEM_PROMPT =
   "As an AI agent, you need to remember in the future what tools you used when generating a response, and what the tools told you. Summarize all tool uses in a single concise paragraph. If artifact links are included, include every artifact link and tie each link to the corresponding tool call. Include /tmp/session-* working directory paths so you can return to previous work.";
@@ -150,32 +150,6 @@ function buildPersistenceSummaryInput(persistentToolCalls: PersistentToolCall[])
 
   lines.push("\nPlease provide a concise summary of what was accomplished in these tool calls.");
   return lines.join("\n");
-}
-
-/** Replace inline image/binary base64 blobs with a short placeholder so they
- *  don't bloat the persistence-summary LLM prompt. */
-function stripBinaryContent(value: unknown): unknown {
-  if (value === null || value === undefined || typeof value !== "object") {
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    return value.map(stripBinaryContent);
-  }
-
-  const record = value as Record<string, unknown>;
-
-  // Content block with type "image" carrying base64 data
-  if (record.type === "image" && typeof record.data === "string") {
-    const mimeType = typeof record.mimeType === "string" ? record.mimeType : "unknown";
-    return { type: "image", data: `[binary image data, ${mimeType}]`, mimeType: record.mimeType };
-  }
-
-  const out: Record<string, unknown> = {};
-  for (const [key, val] of Object.entries(record)) {
-    out[key] = stripBinaryContent(val);
-  }
-  return out;
 }
 
 function extractArtifactUrls(result: unknown): string[] {

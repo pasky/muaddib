@@ -15,11 +15,6 @@ import type { ToolSet } from "./tools/types.js";
 const DEFAULT_EMPTY_COMPLETION_RETRY_PROMPT =
   "<meta>No valid text or tool use found in response. Please try again.</meta>";
 
-const MESSAGE_DEBUG_JSON_OPTIONS = {
-  preserveContentText: true,
-  preserveContentThinking: true,
-} as const;
-
 export interface SessionRunnerOptions {
   model: string;
   systemPrompt: string;
@@ -132,7 +127,7 @@ export class SessionRunner {
         if (message.role === "assistant") {
           this.logger.debug(
             "llm_io response agent_stream",
-            safeJson(renderMessageForDebug(event.message, this.llmDebugMaxChars), this.llmDebugMaxChars, MESSAGE_DEBUG_JSON_OPTIONS),
+            safeJson(renderMessageForDebug(event.message, this.llmDebugMaxChars), this.llmDebugMaxChars),
           );
         }
         return;
@@ -209,7 +204,7 @@ export class SessionRunner {
 
   private logLlmIo(stage: string, messages: readonly unknown[]): void {
     const rendered = messages.map((message) => renderMessageForDebug(message, this.llmDebugMaxChars));
-    this.logger.debug(`llm_io ${stage}`, safeJson(rendered, this.llmDebugMaxChars, MESSAGE_DEBUG_JSON_OPTIONS));
+    this.logger.debug(`llm_io ${stage}`, safeJson(rendered, this.llmDebugMaxChars));
   }
 
   /**
