@@ -1,4 +1,4 @@
-import { getModel, type Api, type KnownProvider, type Model } from "@mariozechner/pi-ai";
+import { getModel, type Api, type KnownProvider, type Model, type OpenAICompletionsCompat } from "@mariozechner/pi-ai";
 
 const DEEPSEEK_PROVIDER = "deepseek";
 const DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com/anthropic";
@@ -85,13 +85,14 @@ export function getOverriddenProviders(): string[] {
 export function resolveProviderOverrideModel(
   provider: string,
   modelId: string,
+  providerRouting?: string[],
 ): Model<Api> | undefined {
   if (provider === DEEPSEEK_PROVIDER) {
     return resolveDeepSeekModel(modelId);
   }
 
   if (provider === OPENROUTER_PROVIDER) {
-    return resolveOpenRouterModel(modelId);
+    return resolveOpenRouterModel(modelId, providerRouting);
   }
 
   return undefined;
@@ -127,13 +128,17 @@ function resolveDeepSeekModel(modelId: string): Model<Api> {
   };
 }
 
-function resolveOpenRouterModel(modelId: string): Model<Api> | undefined {
+function resolveOpenRouterModel(modelId: string, providerRouting?: string[]): Model<Api> | undefined {
+  const compat: OpenAICompletionsCompat | undefined = providerRouting?.length
+    ? { openRouterRouting: { only: providerRouting } }
+    : undefined;
+
   // Prefer the static registry entry if it exists.
   const known = getModel(OPENROUTER_PROVIDER as KnownProvider, modelId as never) as
     | Model<Api>
     | undefined;
   if (known) {
-    return known;
+    return compat ? { ...known, compat } : known;
   }
 
   // Use live OpenRouter model data if the background fetch has landed.
@@ -150,6 +155,7 @@ function resolveOpenRouterModel(modelId: string): Model<Api> | undefined {
       cost: cached.cost,
       contextWindow: cached.contextWindow,
       maxTokens: cached.maxTokens,
+      compat,
     };
   }
 
@@ -174,5 +180,6 @@ function resolveOpenRouterModel(modelId: string): Model<Api> | undefined {
     },
     contextWindow: 128_000,
     maxTokens: 8_192,
+    compat,
   };
 }

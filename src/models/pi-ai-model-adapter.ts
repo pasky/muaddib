@@ -79,6 +79,7 @@ export class PiAiModelAdapter {
     const providerOverrideModel = resolveProviderOverrideModel(
       spec.provider,
       spec.modelId,
+      spec.providerRouting,
     );
     if (providerOverrideModel) {
       return { spec, model: providerOverrideModel };

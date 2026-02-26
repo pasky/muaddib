@@ -31,4 +31,36 @@ describe("parseModelSpec", () => {
     expect(() => parseModelSpec("openai:")).toThrow(ModelSpecError);
     expect(() => parseModelSpec("openai:")).toThrow("empty model segment");
   });
+
+  it("parses provider routing from # suffix", () => {
+    const spec = parseModelSpec("openrouter:moonshotai/kimi-k2#baseten/fp4,moonshotai/int4");
+
+    expect(spec.provider).toBe("openrouter");
+    expect(spec.modelId).toBe("moonshotai/kimi-k2");
+    expect(spec.providerRouting).toEqual(["baseten/fp4", "moonshotai/int4"]);
+  });
+
+  it("parses single provider routing slug", () => {
+    const spec = parseModelSpec("openrouter:anthropic/claude-sonnet-4#anthropic");
+
+    expect(spec.modelId).toBe("anthropic/claude-sonnet-4");
+    expect(spec.providerRouting).toEqual(["anthropic"]);
+  });
+
+  it("ignores empty # suffix", () => {
+    const spec = parseModelSpec("openrouter:some/model#");
+
+    expect(spec.modelId).toBe("some/model");
+    expect(spec.providerRouting).toBeUndefined();
+  });
+
+  it("throws when model id before # is empty", () => {
+    expect(() => parseModelSpec("openrouter:#baseten")).toThrow("empty model segment");
+  });
+
+  it("sets no providerRouting when # is absent", () => {
+    const spec = parseModelSpec("openrouter:google/gemini-3-flash");
+
+    expect(spec.providerRouting).toBeUndefined();
+  });
 });

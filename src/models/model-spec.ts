@@ -2,6 +2,8 @@ export interface ModelSpec {
   provider: string;
   modelId: string;
   raw: string;
+  /** OpenRouter provider routing slugs (parsed from `#slug1,slug2` suffix). */
+  providerRouting?: string[];
 }
 
 export type ModelSpecErrorCode =
@@ -56,5 +58,26 @@ export function parseModelSpec(input: string): ModelSpec {
     );
   }
 
-  return { provider, modelId, raw };
+  // Parse optional #slug1,slug2 provider routing suffix.
+  const hashIndex = modelId.indexOf("#");
+  if (hashIndex < 0) {
+    return { provider, modelId, raw };
+  }
+
+  const routingSuffix = modelId.slice(hashIndex + 1).trim();
+  const baseModelId = modelId.slice(0, hashIndex).trim();
+
+  if (!baseModelId) {
+    throw new ModelSpecError(
+      "MODEL_SPEC_EMPTY_MODEL",
+      `Model '${raw}' has an empty model segment before '#'; expected ${MODEL_SPEC_EXAMPLE}.`,
+    );
+  }
+
+  if (!routingSuffix) {
+    return { provider, modelId: baseModelId, raw };
+  }
+
+  const providerRouting = routingSuffix.split(",").map((s) => s.trim()).filter(Boolean);
+  return { provider, modelId: baseModelId, raw, providerRouting: providerRouting.length ? providerRouting : undefined };
 }
