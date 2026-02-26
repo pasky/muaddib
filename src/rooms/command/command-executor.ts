@@ -77,8 +77,7 @@ export interface CommandRunnerFactoryInput {
   metaReminder?: string;
   progressThresholdSeconds?: number;
   progressMinIntervalSeconds?: number;
-  onStatusMessage?: (text: string) => void | Promise<void>;
-  onIntermediateResponse?: (text: string) => void | Promise<void>;
+  onResponse?: (text: string) => void | Promise<void>;
   logger?: Logger;
   onAgentCreated?: (agent: Agent) => void;
 }
@@ -174,8 +173,7 @@ export class CommandExecutor {
           metaReminder: input.metaReminder,
           progressThresholdSeconds: input.progressThresholdSeconds,
           progressMinIntervalSeconds: input.progressMinIntervalSeconds,
-          onStatusMessage: input.onStatusMessage,
-          onIntermediateResponse: input.onIntermediateResponse,
+          onResponse: input.onResponse,
           logger: input.logger,
           onAgentCreated: input.onAgentCreated,
         }));
@@ -384,14 +382,15 @@ export class CommandExecutor {
       ...selectedContext.slice(0, -1),
     ];
 
-    const toolSet = this.selectTools(message, resolved.runtime.allowedTools, runnerContext, sendResponse, triggerTs);
-
-    const progressConfig = this.agentConfig.progress;
-
-    // Build per-invocation intermediate response callback: send to room + persist in history.
-    const onIntermediateResponse: ((text: string) => void | Promise<void>) | undefined =
+    // Unified response callback: sends to room + persists in history.
+    // Used for all agent text (intermediate + final), status messages, and
+    // progress reports (via the same callback passed into selectTools).
+    // Tracks invocation so deliverResult can skip re-sending the final text.
+    let responseDeliveredViaCallback = false;
+    const onResponse: ((text: string) => void | Promise<void>) | undefined =
       sendResponse
         ? async (text: string) => {
+            responseDeliveredViaCallback = true;
             const sr = await sendResponse(text);
             const sendResult = sr ? sr : undefined;
             await this.persistBotResponse(message.arc, message, text, sendResult, {
@@ -400,6 +399,10 @@ export class CommandExecutor {
           }
         : undefined;
 
+    const toolSet = this.selectTools(message, resolved.runtime.allowedTools, runnerContext, onResponse);
+
+    const progressConfig = this.agentConfig.progress;
+
     const runner = this.runnerFactory({
       model: modelSpec,
       systemPrompt,
@@ -407,8 +410,7 @@ export class CommandExecutor {
       metaReminder: modeConfig.promptReminder,
       progressThresholdSeconds: progressConfig?.thresholdSeconds,
       progressMinIntervalSeconds: progressConfig?.minIntervalSeconds,
-      onStatusMessage: sendResponse ? (text: string) => { sendResponse(text); } : undefined,
-      onIntermediateResponse,
+      onResponse,
       logger,
       onAgentCreated,
     });
@@ -433,9 +435,12 @@ export class CommandExecutor {
     }
 
     // ── Deliver & persist ──
+    // Agent responses are already sent+persisted by onResponse callback during
+    // execution, so deliverResult only needs to handle cost followups.
 
     const result = await this.deliverResult(message, triggerTs, sendResponse, {
       response: responseText || null, resolved, model: modelSpec, usage, toolCallsCount,
+      alreadyDelivered: responseDeliveredViaCallback,
     });
 
     // Signal that the response has been delivered — callers can deregister
@@ -476,18 +481,26 @@ export class CommandExecutor {
       ...context.slice(0, -1),
     ];
 
-    const toolSet = this.selectTools(message, classifiedRuntime.allowedTools, runnerContext, sendResponse);
-
     const proactiveProgressConfig = this.agentConfig.progress;
 
-    const onIntermediateResponse: ((text: string) => void | Promise<void>) | undefined =
+    // Proactive responses are prefixed with the model tag so readers know who's talking.
+    // Tracks invocation so the post-run path can skip re-sending when the callback
+    // already delivered the final response.
+    let responseDeliveredViaCallback = false;
+    const onResponse: ((text: string) => void | Promise<void>) | undefined =
       sendResponse
         ? async (text: string) => {
-            const sr = await sendResponse(text);
+            responseDeliveredViaCallback = true;
+            const prefixed = `[${modelStrCore(modelSpec)}] ${text}`;
+            const sr = await sendResponse(prefixed);
             const sendResult = sr ? sr : undefined;
-            await this.persistBotResponse(message.arc, message, text, sendResult);
+            await this.persistBotResponse(message.arc, message, prefixed, sendResult, {
+              mode: classifiedTrigger,
+            });
           }
         : undefined;
+
+    const toolSet = this.selectTools(message, classifiedRuntime.allowedTools, runnerContext, onResponse);
 
     const runner = this.runnerFactory({
       model: modelSpec,
@@ -496,8 +509,7 @@ export class CommandExecutor {
       metaReminder: this.commandConfig.modes.serious?.promptReminder,
       progressThresholdSeconds: proactiveProgressConfig?.thresholdSeconds,
       progressMinIntervalSeconds: proactiveProgressConfig?.minIntervalSeconds,
-      onStatusMessage: sendResponse ? (text: string) => { sendResponse(text); } : undefined,
-      onIntermediateResponse,
+      onResponse,
       logger,
       onAgentCreated,
     });
@@ -527,23 +539,26 @@ export class CommandExecutor {
 
     const responseText = `[${modelStrCore(modelSpec)}] ${proactiveText}`;
 
+    // onResponse already sent + persisted when the real SessionRunner fires it.
+    // Fall back to explicit send+persist for mock/custom runner factories.
+    if (!responseDeliveredViaCallback) {
+      let proactiveSendResult: SendResult | undefined;
+      if (sendResponse) {
+        const sr = await sendResponse(responseText);
+        if (sr) proactiveSendResult = sr;
+      }
+      await this.persistBotResponse(message.arc, message, responseText, proactiveSendResult, {
+        mode: classifiedTrigger,
+      });
+    }
+
     logger.info(
-      "Sending proactive response",
+      "Proactive response delivered",
       `arc=${message.arc}`,
       `label=${classifiedTrigger}`,
       `trigger=${classifiedTrigger}`,
       `response=${responseText}`,
     );
-
-    let proactiveSendResult: SendResult | undefined;
-    if (sendResponse) {
-      const sr = await sendResponse(responseText);
-      if (sr) proactiveSendResult = sr;
-    }
-
-    await this.persistBotResponse(message.arc, message, responseText, proactiveSendResult, {
-      mode: classifiedTrigger,
-    });
 
     await result.backgroundWork;
     await this.triggerAutoChronicler(message, this.commandConfig.historySize);
@@ -574,15 +589,9 @@ export class CommandExecutor {
 
     // Extract and post-process response text immediately — don't block on
     // tool summary / memory update which are independent of the response.
+    // Fallback suffixes (refusal / vision) are now appended by SessionRunner
+    // via onResponse, so all intermediate + final messages carry them.
     let responseText = agentResult.text;
-    if (agentResult.refusalFallbackActivated && agentResult.refusalFallbackModel) {
-      const fallbackSpec = parseModelSpec(agentResult.refusalFallbackModel);
-      responseText = `${responseText} [refusal fallback to ${fallbackSpec.modelId}]`.trim();
-    }
-    if (agentResult.visionFallbackActivated && agentResult.visionFallbackModel) {
-      const fallbackSpec = parseModelSpec(agentResult.visionFallbackModel);
-      responseText = `${responseText} [vision fallback to ${fallbackSpec.modelId}]`.trim();
-    }
 
     responseText = await this.applyResponseLengthPolicy(responseText, message.arc);
     responseText = this.cleanResponseText(responseText, message.nick);
@@ -621,6 +630,9 @@ export class CommandExecutor {
   /**
    * Deliver a command execution result: log LLM call, send response,
    * persist bot message, and emit cost followups.
+   *
+   * When `alreadyDelivered` is set, the response was already sent+persisted
+   * by the onResponse callback during agent execution — only cost followups run.
    */
   private async deliverResult(
     message: RoomMessage,
@@ -632,13 +644,15 @@ export class CommandExecutor {
       model?: string | null;
       usage?: Usage | null;
       toolCallsCount?: number;
+      alreadyDelivered?: boolean;
     },
   ): Promise<CommandExecutionResult> {
+    const { alreadyDelivered, ...rest } = partial;
     const result: CommandExecutionResult = {
       model: null,
       usage: null,
       toolCallsCount: 0,
-      ...partial,
+      ...rest,
     };
 
     if (!result.response) {
@@ -647,13 +661,6 @@ export class CommandExecutor {
 
     const { logger } = this;
     const arcName = message.arc;
-
-    logger.debug(
-      "Persisting direct command response",
-      `arc=${arcName}`,
-      `model=${result.model ?? "n/a"}`,
-      `tool_calls=${result.toolCallsCount}`,
-    );
 
     const costStr = result.usage ? `$${result.usage.cost.total.toFixed(4)}` : "?";
     logger.info(
@@ -665,21 +672,35 @@ export class CommandExecutor {
       `response=${result.response}`,
     );
 
-    let sendResult: SendResult | undefined;
-    if (sendResponse) {
-      const sr = await sendResponse(result.response);
-      if (sr) sendResult = sr;
-    }
+    if (!alreadyDelivered) {
+      logger.debug(
+        "Persisting direct command response",
+        `arc=${arcName}`,
+        `model=${result.model ?? "n/a"}`,
+        `tool_calls=${result.toolCallsCount}`,
+      );
 
-    await this.persistBotResponse(arcName, message, result.response, sendResult, {
-      mode: result.resolved.selectedTrigger ?? undefined,
-      run: triggerTs || undefined,
-      call: result.model ? "agent_run" : undefined,
-      model: result.model ?? undefined,
-      inTok: result.usage?.input,
-      outTok: result.usage?.output,
-      cost: result.usage?.cost.total,
-    });
+      let sendResult: SendResult | undefined;
+      if (sendResponse) {
+        const sr = await sendResponse(result.response);
+        if (sr) sendResult = sr;
+      }
+
+      await this.persistBotResponse(arcName, message, result.response, sendResult, {
+        mode: result.resolved.selectedTrigger ?? undefined,
+        run: triggerTs || undefined,
+        call: result.model ? "agent_run" : undefined,
+        model: result.model ?? undefined,
+        inTok: result.usage?.input,
+        outTok: result.usage?.output,
+        cost: result.usage?.cost.total,
+      });
+
+      logger.debug(
+        "Direct command response stored",
+        `arc=${arcName}`,
+      );
+    }
 
     logger.debug(
       "Direct command response stored",
@@ -910,8 +931,7 @@ export class CommandExecutor {
     message: RoomMessage,
     allowedTools: string[] | null,
     conversationContext?: Message[],
-    sendResponse?: SendResponse,
-    triggerTs?: string,
+    onResponse?: (text: string) => void | Promise<void>,
   ): ToolSet {
     const invocationToolOptions: BaselineToolOptions = {
       ...this.buildToolOptions(),
@@ -919,21 +939,9 @@ export class CommandExecutor {
       secrets: message.secrets,
     };
 
-    // Build per-invocation progress callback: send to room + persist in history.
-    const onProgressReport: ((text: string) => void | Promise<void>) | undefined =
-      sendResponse
-        ? async (text: string) => {
-            const sr = await sendResponse(text);
-            const sendResult = sr ? sr : undefined;
-            await this.persistBotResponse(message.arc, message, text, sendResult, {
-              run: triggerTs,
-            });
-          }
-        : undefined;
-
     const toolSet = createBaselineAgentTools({
       ...invocationToolOptions,
-      onProgressReport,
+      onProgressReport: onResponse,
       oracleInvocation: {
         conversationContext: conversationContext ?? [],
         toolOptions: invocationToolOptions,

@@ -432,9 +432,9 @@ describe("SessionRunner", () => {
     expect(calledWith.systemPrompt).toBe("base prompt");
   });
 
-  it("fires onIntermediateResponse for intermediate turns with tool calls, not the final turn", async () => {
+  it("fires onResponse for every non-empty assistant text including the final one", async () => {
     const callbacks: Array<(event: any) => void> = [];
-    const intermediateTexts: string[] = [];
+    const deliveredTexts: string[] = [];
 
     const session = {
       messages: [] as any[],
@@ -452,19 +452,7 @@ describe("SessionRunner", () => {
         callbacks.forEach((cb) => cb({ type: "tool_execution_end", toolName: "web_search", isError: false, result: "ok" }));
         callbacks.forEach((cb) => cb({ type: "turn_end" }));
 
-        // Turn 2: another intermediate text + tool call
-        session.messages.push({
-          role: "assistant",
-          content: [{ type: "text", text: "Now reading the file." }],
-          usage: makeUsage(),
-          stopReason: "tool_use",
-        });
-        callbacks.forEach((cb) => cb({ type: "message_end", message: session.messages.at(-1) }));
-        callbacks.forEach((cb) => cb({ type: "tool_execution_start", toolName: "read", args: {} }));
-        callbacks.forEach((cb) => cb({ type: "tool_execution_end", toolName: "read", isError: false, result: "contents" }));
-        callbacks.forEach((cb) => cb({ type: "turn_end" }));
-
-        // Turn 3: final response (no tool call after)
+        // Turn 2: final response
         session.messages.push({
           role: "assistant",
           content: [{ type: "text", text: "Here is the final answer." }],
@@ -489,22 +477,22 @@ describe("SessionRunner", () => {
       authStorage: AuthStorage.inMemory(),
       logger: minimalLogger,
       modelAdapter: minimalModelAdapter,
-      onIntermediateResponse: (text) => { intermediateTexts.push(text); },
+      onResponse: (text: string) => { deliveredTexts.push(text); },
     });
 
     const result = await runner.prompt("hello");
 
-    // Only the first two texts are intermediate; the final one is returned normally
-    expect(intermediateTexts).toEqual([
+    // All non-empty texts fire — including the final response
+    expect(deliveredTexts).toEqual([
       "Let me search for that.",
-      "Now reading the file.",
+      "Here is the final answer.",
     ]);
     expect(result.text).toBe("Here is the final answer.");
   });
 
-  it("does not fire onIntermediateResponse for whitespace-only intermediate turns", async () => {
+  it("does not fire onResponse for whitespace-only assistant texts", async () => {
     const callbacks: Array<(event: any) => void> = [];
-    const intermediateTexts: string[] = [];
+    const deliveredTexts: string[] = [];
 
     const session = {
       messages: [] as any[],
@@ -547,36 +535,33 @@ describe("SessionRunner", () => {
       authStorage: AuthStorage.inMemory(),
       logger: minimalLogger,
       modelAdapter: minimalModelAdapter,
-      onIntermediateResponse: (text) => { intermediateTexts.push(text); },
+      onResponse: (text: string) => { deliveredTexts.push(text); },
     });
 
     const result = await runner.prompt("hello");
-    expect(intermediateTexts).toEqual([]);
+    // Only the non-whitespace text fires
+    expect(deliveredTexts).toEqual(["Done."]);
     expect(result.text).toBe("Done.");
   });
 
-  it("does not fire onIntermediateResponse when no tools run between messages", async () => {
+  it("appends refusal fallback suffix to messages after fallback activates", async () => {
     const callbacks: Array<(event: any) => void> = [];
-    const intermediateTexts: string[] = [];
+    const deliveredTexts: string[] = [];
+    let promptCount = 0;
 
     const session = {
       messages: [] as any[],
       subscribe: vi.fn((cb: (event: any) => void) => { callbacks.push(cb); return vi.fn(); }),
       prompt: vi.fn(async () => {
-        // Two consecutive assistant messages with NO tool calls between them.
-        // This simulates retry/fallback flows where the agent re-prompts.
+        promptCount += 1;
+        // First prompt: refusal text (detected by refusal signal)
+        // Second prompt: fallback response
+        const text = promptCount === 1
+          ? '{"is_refusal": true, "reason": "content policy"}'
+          : "The real answer.";
         session.messages.push({
           role: "assistant",
-          content: [{ type: "text", text: "First attempt." }],
-          usage: makeUsage(),
-          stopReason: "stop",
-        });
-        callbacks.forEach((cb) => cb({ type: "message_end", message: session.messages.at(-1) }));
-        callbacks.forEach((cb) => cb({ type: "turn_end" }));
-
-        session.messages.push({
-          role: "assistant",
-          content: [{ type: "text", text: "Second attempt." }],
+          content: [{ type: "text", text }],
           usage: makeUsage(),
           stopReason: "stop",
         });
@@ -585,9 +570,10 @@ describe("SessionRunner", () => {
       }),
     };
 
+    const agent = { setModel: vi.fn() };
     mockCreateAgentSessionForInvocation.mockReturnValue({
       session,
-      agent: { setModel: vi.fn() },
+      agent,
       ensureProviderKey: vi.fn(async () => {}),
       getVisionFallbackActivated: () => false,
     });
@@ -597,14 +583,22 @@ describe("SessionRunner", () => {
       systemPrompt: "sys",
       authStorage: AuthStorage.inMemory(),
       logger: minimalLogger,
-      modelAdapter: minimalModelAdapter,
-      onIntermediateResponse: (text) => { intermediateTexts.push(text); },
+      modelAdapter: {
+        resolve: (spec: string) => ({
+          spec: { provider: spec.split(":")[0], modelId: spec.split(":")[1] },
+          model: { provider: spec.split(":")[0], id: spec.split(":")[1] },
+        }),
+      } as any,
+      onResponse: (text: string) => { deliveredTexts.push(text); },
     });
 
-    const result = await runner.prompt("hello");
-    // No tools between messages → no intermediate responses fired
-    expect(intermediateTexts).toEqual([]);
-    expect(result.text).toBe("Second attempt.");
+    const result = await runner.prompt("hello", { refusalFallbackModel: "anthropic:claude-sonnet-4" });
+
+    // First message has no suffix (before fallback), second has the suffix
+    expect(deliveredTexts[0]).not.toContain("[refusal fallback");
+    expect(deliveredTexts[1]).toContain("[refusal fallback to claude-sonnet-4]");
+    expect(result.text).toBe("The real answer.");
+    expect(result.refusalFallbackActivated).toBe(true);
   });
 
   it("throws when completion remains empty after retries", async () => {

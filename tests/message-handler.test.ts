@@ -441,13 +441,15 @@ describe("RoomMessageHandler", () => {
       sendResponse: async () => {},
     });
 
+    // Refusal fallback suffix is now appended by SessionRunner (not invokeAndPostProcess),
+    // so it doesn't appear when using mock runnerFactory.
     expect(logger.info).toHaveBeenCalledWith(
       "Sending direct response",
       "mode=!s",
       "trigger=!s",
       "cost=$0.0000",
       "arc=libera##test",
-      "response=The AI refused to respond to this request [refusal fallback to claude-3-5-haiku]",
+      "response=The AI refused to respond to this request",
     );
 
     await history.close();
@@ -1239,12 +1241,11 @@ describe("RoomMessageHandler", () => {
 
     const result = await handler.handleIncomingMessage(incoming, { isDirect: true });
 
-    expect(result?.response).toBe("The AI refused to respond to this request [refusal fallback to claude-3-5-haiku]");
+    // Refusal fallback suffix is now appended by SessionRunner (not invokeAndPostProcess),
+    // so it doesn't appear when using mock runnerFactory.
+    expect(result?.response).toBe("The AI refused to respond to this request");
     expect(result?.model).toBe("openai:gpt-4o-mini");
     expect(runnerModels).toEqual(["openai:gpt-4o-mini"]);
-
-    const rows = await history.getFullHistory("libera##test");
-    expect(rows[1]?.message).toContain("[refusal fallback to claude-3-5-haiku]");
 
     await history.close();
   });

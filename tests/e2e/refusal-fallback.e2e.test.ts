@@ -86,21 +86,30 @@ describe("E2E: Refusal → fallback → annotated response", () => {
     // Verify streamSimple was called twice (primary + fallback)
     expect(mockState.calls).toHaveLength(2);
 
-    // Verify FakeSender got the response with refusal fallback annotation
-    expect(ctx.sender.sent.length).toBeGreaterThanOrEqual(1);
-    const mainResponse = ctx.sender.sent[0];
+    // onResponse sends ALL assistant texts — the refusal text first, then the
+    // fallback answer (with suffix).  Both are delivered to the room.
+    expect(ctx.sender.sent.length).toBeGreaterThanOrEqual(2);
+
+    // First message: the refusal text from the primary model (no suffix)
+    const refusalResponse = ctx.sender.sent[0];
+    expect(refusalResponse.target).toBe("#test");
+    expect(refusalResponse.server).toBe("libera");
+    expect(refusalResponse.message).toContain("is_refusal");
+
+    // Second message: the real answer from the fallback model (with suffix)
+    const mainResponse = ctx.sender.sent[1];
     expect(mainResponse.target).toBe("#test");
     expect(mainResponse.server).toBe("libera");
     expect(mainResponse.message).toContain("The answer to your question is 42.");
     expect(mainResponse.message).toContain("[refusal fallback to");
     expect(mainResponse.message).toContain("claude-3-5-sonnet-20241022");
 
-    // Verify history has the persisted messages
+    // Verify history has the persisted messages (both refusal + fallback answer)
     const historyRows = await ctx.history.getFullHistory(buildArc("libera", "#test"));
-    expect(historyRows.length).toBeGreaterThanOrEqual(2); // user message + bot response
-    const botMessage = historyRows.find((row) => row.nick === "muaddib");
-    expect(botMessage).toBeDefined();
-    expect(botMessage!.message).toContain("The answer to your question is 42.");
-    expect(botMessage!.message).toContain("[refusal fallback to");
+    const botMessages = historyRows.filter((row) => row.nick === "muaddib");
+    expect(botMessages.length).toBeGreaterThanOrEqual(2);
+    const fallbackMessage = botMessages.find((row) => row.message.includes("The answer to your question is 42."));
+    expect(fallbackMessage).toBeDefined();
+    expect(fallbackMessage!.message).toContain("[refusal fallback to");
   }, 30_000);
 });

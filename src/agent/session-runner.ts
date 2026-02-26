@@ -5,6 +5,7 @@ import type { AssistantMessage, Message, Usage } from "@mariozechner/pi-ai";
 import { detectRefusalSignal } from "./refusal-detection.js";
 import { stringifyError } from "../utils/index.js";
 import { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
+import { parseModelSpec } from "../models/model-spec.js";
 import {
   createAgentSessionForInvocation,
   type RunnerLogger,
@@ -28,13 +29,13 @@ export interface SessionRunnerOptions {
   authStorage: AuthStorage;
   maxIterations?: number;
   emptyCompletionRetryPrompt?: string;
-  onStatusMessage?: (text: string) => void | Promise<void>;
   /**
-   * Called for each non-empty intermediate assistant text response during
-   * multi-turn execution.  The final response is NOT fired here — it goes
-   * through the normal return path with full post-processing.
+   * Unified response callback — fired for every non-empty assistant text
+   * (including the final one), status messages (empty-completion retries),
+   * and progress reports.  Fallback suffixes (refusal / vision) are appended
+   * automatically once the respective fallback activates.
    */
-  onIntermediateResponse?: (text: string) => void | Promise<void>;
+  onResponse?: (text: string) => void | Promise<void>;
   llmDebugMaxChars?: number;
   metaReminder?: string;
   progressThresholdSeconds?: number;
@@ -73,8 +74,7 @@ export class SessionRunner {
   private readonly modelAdapter: PiAiModelAdapter;
   private readonly logger: RunnerLogger;
   private readonly emptyCompletionRetryPrompt: string;
-  private readonly onStatusMessage?: (text: string) => void | Promise<void>;
-  private readonly onIntermediateResponse?: (text: string) => void | Promise<void>;
+  private readonly onResponse?: (text: string) => void | Promise<void>;
   private readonly llmDebugMaxChars: number;
   private readonly options: SessionRunnerOptions;
 
@@ -86,8 +86,7 @@ export class SessionRunner {
     this.logger = options.logger ?? console;
     this.emptyCompletionRetryPrompt =
       options.emptyCompletionRetryPrompt ?? DEFAULT_EMPTY_COMPLETION_RETRY_PROMPT;
-    this.onStatusMessage = options.onStatusMessage;
-    this.onIntermediateResponse = options.onIntermediateResponse;
+    this.onResponse = options.onResponse;
     this.llmDebugMaxChars = Math.max(500, Math.floor(options.llmDebugMaxChars ?? 120_000));
   }
 
@@ -120,17 +119,11 @@ export class SessionRunner {
     let iterations = 0;
     let toolCallsCount = 0;
 
-    // Buffer for intermediate response delivery: on each assistant message_end,
-    // fire the callback for the PREVIOUS buffered text.  This ensures the final
-    // assistant text is NOT sent here (it goes through the normal return path
-    // with post-processing), while all preceding intermediate texts are delivered
-    // in real-time (delayed by one turn).
-    //
-    // Only fire when tools were executed since the previous message, so that
-    // retry/fallback flows (e.g. refusal → model swap → re-prompt) don't leak
-    // intermediate artifacts to the room.
-    let bufferedAssistantText = "";
-    let toolCalledSinceLastMessage = false;
+    // Mutable suffix appended to every onResponse call.  Updated by
+    // promptWithRefusalFallback (refusal) and the tool_execution_end
+    // handler (vision) so that all messages after a fallback carry the
+    // annotation — not just the final response.
+    let responseSuffix = "";
 
     const unsubscribe = session.subscribe((event) => {
       if (event.type === "turn_end") {
@@ -140,7 +133,6 @@ export class SessionRunner {
 
       if (event.type === "tool_execution_start") {
         toolCallsCount += 1;
-        toolCalledSinceLastMessage = true;
         this.logger.info(`Tool ${event.toolName} started: ${summarizeToolPayload(event.args, this.llmDebugMaxChars)}`);
         return;
       }
@@ -148,13 +140,10 @@ export class SessionRunner {
       if (event.type === "message_end") {
         const message = event.message as { role?: string };
         if (message.role === "assistant") {
-          // Fire callback for previously buffered text (now confirmed intermediate),
-          // but only if tools ran in between — pure retry/fallback messages are skipped.
-          if (bufferedAssistantText.trim() && toolCalledSinceLastMessage && this.onIntermediateResponse) {
-            this.onIntermediateResponse(bufferedAssistantText.trim());
+          const text = extractAssistantTextFromEvent(event.message).trim();
+          if (text && this.onResponse) {
+            this.onResponse(responseSuffix ? `${text} ${responseSuffix}` : text);
           }
-          bufferedAssistantText = extractAssistantTextFromEvent(event.message);
-          toolCalledSinceLastMessage = false;
 
           this.logger.debug(
             "llm_io response agent_stream",
@@ -178,6 +167,13 @@ export class SessionRunner {
             result: event.result,
           }, this.llmDebugMaxChars),
         );
+
+        // Vision fallback: once activated, annotate all subsequent responses.
+        if (!event.isError && !responseSuffix.includes("vision fallback") &&
+            sessionCtx.getVisionFallbackActivated() && options.visionFallbackModel) {
+          const spec = parseModelSpec(options.visionFallbackModel);
+          responseSuffix = `${responseSuffix} [vision fallback to ${spec.modelId}]`.trim();
+        }
       }
     });
 
@@ -210,6 +206,7 @@ export class SessionRunner {
         prompt,
         options.refusalFallbackModel,
         sessionCtx.ensureProviderKey,
+        (suffix) => { responseSuffix = `${responseSuffix} ${suffix}`.trim(); },
       );
 
       const EMPTY_RETRY_DELAYS_MS = [5_000, 20_000, 60_000];
@@ -221,7 +218,7 @@ export class SessionRunner {
         const delaySec = EMPTY_RETRY_DELAYS_MS[i] / 1_000;
         const retryMsg = `Empty assistant text detected (stopReason=${reason}${errorDetail}), retrying in ${delaySec}s (${i + 1}/${EMPTY_RETRY_DELAYS_MS.length})`;
         this.logger.error(retryMsg);
-        await this.onStatusMessage?.(retryMsg);
+        await this.onResponse?.(retryMsg);
         await new Promise((resolve) => setTimeout(resolve, EMPTY_RETRY_DELAYS_MS[i]));
         await session.prompt(this.emptyCompletionRetryPrompt);
         this.logLlmIo(`after_empty_retry_${i + 1}`, session.messages);
@@ -281,29 +278,25 @@ export class SessionRunner {
     prompt: string,
     refusalFallbackModel: string | undefined,
     ensureProviderKey: (provider: string) => Promise<void>,
+    addSuffix: (suffix: string) => void,
   ): Promise<boolean> {
     try {
       await session.prompt(prompt);
+
+      const text = extractLastAssistantText(session.messages);
+      if (!refusalFallbackModel || !detectRefusalSignal(text)) {
+        return false;
+      }
     } catch (error) {
       if (!refusalFallbackModel || !detectRefusalSignal(stringifyError(error))) {
         throw error;
       }
-
-      const fallbackModel = this.modelAdapter.resolve(refusalFallbackModel);
-      await ensureProviderKey(fallbackModel.spec.provider);
-      agent.setModel(fallbackModel.model);
-      await session.prompt(prompt);
-      return true;
-    }
-
-    const text = extractLastAssistantText(session.messages);
-    if (!refusalFallbackModel || !detectRefusalSignal(text)) {
-      return false;
     }
 
     const fallbackModel = this.modelAdapter.resolve(refusalFallbackModel);
     await ensureProviderKey(fallbackModel.spec.provider);
     agent.setModel(fallbackModel.model);
+    addSuffix(`[refusal fallback to ${fallbackModel.spec.modelId}]`);
     await session.prompt(prompt);
     return true;
   }
