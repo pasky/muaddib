@@ -140,7 +140,8 @@ function buildPersistenceSummaryInput(persistentToolCalls: PersistentToolCall[])
     lines.push(`\n\n# Calling tool **${call.toolName}** (persist: ${call.persistType})`);
     const inputText = call.input === undefined ? "(unavailable)" : typeof call.input === "string" ? call.input : JSON.stringify(call.input, null, 2);
     lines.push(`## **Input:**\n${inputText}\n`);
-    lines.push(`## **Output:**\n${typeof call.output === "string" ? call.output : JSON.stringify(call.output, null, 2)}\n`);
+    const sanitizedOutput = stripBinaryContent(call.output);
+    lines.push(`## **Output:**\n${typeof sanitizedOutput === "string" ? sanitizedOutput : JSON.stringify(sanitizedOutput, null, 2)}\n`);
 
     for (const artifactUrl of call.artifactUrls) {
       lines.push(`(Tool call I/O stored as artifact: ${artifactUrl})\n`);
@@ -149,6 +150,32 @@ function buildPersistenceSummaryInput(persistentToolCalls: PersistentToolCall[])
 
   lines.push("\nPlease provide a concise summary of what was accomplished in these tool calls.");
   return lines.join("\n");
+}
+
+/** Replace inline image/binary base64 blobs with a short placeholder so they
+ *  don't bloat the persistence-summary LLM prompt. */
+function stripBinaryContent(value: unknown): unknown {
+  if (value === null || value === undefined || typeof value !== "object") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(stripBinaryContent);
+  }
+
+  const record = value as Record<string, unknown>;
+
+  // Content block with type "image" carrying base64 data
+  if (record.type === "image" && typeof record.data === "string") {
+    const mimeType = typeof record.mimeType === "string" ? record.mimeType : "unknown";
+    return { type: "image", data: `[binary image data, ${mimeType}]`, mimeType: record.mimeType };
+  }
+
+  const out: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(record)) {
+    out[key] = stripBinaryContent(val);
+  }
+  return out;
 }
 
 function extractArtifactUrls(result: unknown): string[] {

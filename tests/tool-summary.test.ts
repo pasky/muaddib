@@ -60,6 +60,62 @@ describe("generateToolSummaryFromSession", () => {
     expect(userContent).not.toMatch(/\bInput:\s*\nundefined/);
   });
 
+  it("strips base64 image data from visit_webpage output before summarizing", async () => {
+    const modelAdapter = {
+      completeSimple: vi.fn(async () => ({
+        content: [{ type: "text", text: "visited an image page" }],
+      })),
+    } as any;
+
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    const fakeBase64 = "iVBORw0KGgoAAAANSUh" + "A".repeat(500);
+
+    await generateToolSummaryFromSession({
+      result: {
+        text: "ok",
+        stopReason: "stop",
+        usage: {} as any,
+        session: {
+          messages: [
+            {
+              role: "assistant",
+              content: [
+                { type: "toolCall", id: "call_img", name: "visit_webpage", arguments: { url: "https://example.test/photo.jpg" } },
+              ],
+            },
+            {
+              role: "toolResult",
+              toolCallId: "call_img",
+              toolName: "visit_webpage",
+              content: [
+                { type: "image", data: fakeBase64, mimeType: "image/jpeg" },
+              ],
+              details: { url: "https://example.test/photo.jpg", kind: "image", mimeType: "image/jpeg" },
+            },
+          ],
+        },
+      } as any,
+      tools: [{ name: "visit_webpage", persistType: "summary" }] as any,
+      persistenceSummaryModel: "openai:gpt-4o-mini",
+      modelAdapter,
+      logger,
+    });
+
+    const payload = modelAdapter.completeSimple.mock.calls[0][1];
+    const userContent: string = payload.messages[0].content;
+    // The base64 blob must NOT appear in the prompt
+    expect(userContent).not.toContain(fakeBase64);
+    // But we should still mention it was an image
+    expect(userContent).toContain("[binary image data, image/jpeg]");
+    expect(userContent).toContain("https://example.test/photo.jpg");
+  });
+
   it("renders (unavailable) when toolCallId is absent from assistant messages", async () => {
     const modelAdapter = {
       completeSimple: vi.fn(async () => ({
