@@ -17,7 +17,7 @@
         "url": "https://example.com/artifacts"
       },
       "imageGen": {
-        "model": "openrouter:google/gemini-3-pro-image-preview"
+        "model": "openrouter:google/gemini-3.1-flash-image-preview"
       },
       "oracle": {
 	"model": "openrouter:google/gemini-3.1-pro-preview",
