@@ -935,7 +935,7 @@ const EMPTY_RESOLVED: ResolvedCommand = Object.freeze({
 // ── Shared utility functions (exported for message-handler) ──
 
 export function modelStrCore(model: unknown): string {
-  return String(model).replace(/(?:[-\w]*:)?(?:[-\w]*\/)?([-\w]+)(?:#[-\w,]*)?/, "$1");
+  return String(model).replace(/(?:[-.\w]*:)?(?:[-.\w]*\/)?([-.\w]+)(?:#[-\w,/]*)?/, "$1");
 }
 
 export function pickModeModel(model: string | string[] | undefined): string | null {

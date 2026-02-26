@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { modelStrCore } from "../src/rooms/command/command-executor.js";
 import { CommandResolver } from "../src/rooms/command/resolver.js";
 
 const commandConfig = {
@@ -230,5 +231,54 @@ describe("CommandResolver", () => {
       defaultSize: 40,
     });
     expect(sarcastic.runtime?.memoryUpdate).toBe(false);
+  });
+
+  it("buildHelpMessage strips provider slug from model names via modelStrCore", () => {
+    const configWithSlug = {
+      ...commandConfig,
+      modes: {
+        ...commandConfig.modes,
+        serious: {
+          ...commandConfig.modes.serious,
+          model: "openrouter:kimi-k2.5#moonshotai/int4",
+          triggers: {
+            "!s": {},
+            "!a": {
+              reasoningEffort: "medium",
+              model: "anthropic:claude-opus-4-6",
+            },
+          },
+        },
+      },
+    };
+
+    const resolver = new CommandResolver(
+      configWithSlug as any,
+      async () => "EASY_SERIOUS",
+      "!h",
+      new Set(["!c"]),
+      modelStrCore,
+    );
+
+    const help = resolver.buildHelpMessage("libera", "#general");
+    expect(help).toContain("!s/!a = serious (kimi-k2.5/claude-opus-4-6)");
+  });
+});
+
+describe("modelStrCore", () => {
+  it("strips provider prefix", () => {
+    expect(modelStrCore("anthropic:claude-opus-4-6")).toBe("claude-opus-4-6");
+  });
+
+  it("strips provider prefix and org path", () => {
+    expect(modelStrCore("openrouter:google/gemini-pro")).toBe("gemini-pro");
+  });
+
+  it("strips provider slug after #", () => {
+    expect(modelStrCore("openrouter:kimi-k2.5#moonshotai/int4")).toBe("kimi-k2.5");
+  });
+
+  it("handles bare model name", () => {
+    expect(modelStrCore("claude-opus-4-6")).toBe("claude-opus-4-6");
   });
 });
