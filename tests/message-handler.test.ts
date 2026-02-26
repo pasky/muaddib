@@ -1624,6 +1624,90 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("deregisters steering after response delivery before background work completes", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const agentReady = createDeferred<void>();
+    const releaseAgent = createDeferred<void>();
+    // Gate that blocks triggerAutoChronicler — this runs AFTER
+    // onResponseDelivered and after backgroundWork in execute().
+    const chroniclerStarted = createDeferred<void>();
+    const releaseChronicler = createDeferred<void>();
+
+    const steerCalls: any[] = [];
+    const mockAgent = {
+      steer: (msg: any) => { steerCalls.push(msg); },
+    };
+
+    let runCount = 0;
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      // Mock autoChronicler that blocks until we release it
+      autoChronicler: {
+        checkAndChronicle: async () => {
+          chroniclerStarted.resolve();
+          await releaseChronicler.promise;
+        },
+      },
+      runnerFactory: (input) => ({
+        prompt: async (_prompt) => {
+          runCount += 1;
+          if (runCount === 1) {
+            input.onAgentCreated?.(mockAgent as any);
+            agentReady.resolve();
+            await releaseAgent.promise;
+            // No session returned → backgroundWork completes instantly
+            return makeRunnerResult("done");
+          }
+          // Second invocation — just return immediately
+          input.onAgentCreated?.({ steer() {} } as any);
+          return makeRunnerResult("second response");
+        },
+      }),
+    });
+
+    // Start first command
+    const resultPromise = handler.handleIncomingMessage(makeMessage("!s first"), {
+      isDirect: true,
+      sendResponse: async () => {},
+    });
+
+    await agentReady.promise;
+    releaseAgent.resolve();
+
+    // Wait until triggerAutoChronicler starts — by this point execute()
+    // has completed deliverResult, called onResponseDelivered (deregistering
+    // steering), and awaited backgroundWork. But execute() itself hasn't
+    // returned yet because triggerAutoChronicler is blocked.
+    await chroniclerStarted.promise;
+
+    // Send a second message from the same user while execute() is still
+    // blocked in triggerAutoChronicler. Since onResponseDelivered already
+    // deregistered steering, this should NOT be steered — it should start
+    // its own session.
+    const secondResult = handler.handleIncomingMessage(makeMessage("!s second message"), {
+      isDirect: true,
+      sendResponse: async () => {},
+    });
+
+    // Release the chronicler so execute() can return.
+    releaseChronicler.resolve();
+
+    const [result1, result2] = await Promise.all([resultPromise, secondResult]);
+
+    expect(result1?.response).toBe("done");
+    // The second message must NOT have been steered into the first session
+    expect(steerCalls).toHaveLength(0);
+    // It should have started its own session and got its own response
+    expect(result2?.response).toBe("second response");
+    expect(runCount).toBe(2);
+
+    await history.close();
+  });
+
   it("starts proactive session on passive message in proactive-enabled channel", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();

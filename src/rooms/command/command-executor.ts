@@ -226,6 +226,7 @@ export class CommandExecutor {
     triggerTs: string,
     sendResponse: SendResponse | undefined,
     onAgentCreated?: (agent: Agent) => void,
+    onResponseDelivered?: () => void,
   ): Promise<CommandExecutionResult> {
     const { commandConfig, logger } = this;
     const defaultSize = commandConfig.historySize;
@@ -420,6 +421,10 @@ export class CommandExecutor {
     const result = await this.deliverResult(message, triggerTs, sendResponse, {
       response: responseText || null, resolved, model: modelSpec, usage, toolCallsCount,
     });
+
+    // Signal that the response has been delivered — callers can deregister
+    // steering before the potentially long background work begins.
+    onResponseDelivered?.();
 
     // Tool summary, memory update, and session dispose run after the response is sent.
     await backgroundWork;

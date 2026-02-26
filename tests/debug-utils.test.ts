@@ -59,6 +59,53 @@ describe("debug-utils", () => {
       const obj = { type: "file", data: "some content" };
       expect(stripBinaryContent(obj)).toEqual(obj);
     });
+
+    it("replaces image_url with base64 data: URL with placeholder and preview", () => {
+      const dataUrl = "data:image/png;base64," + "A".repeat(2000);
+      const result = stripBinaryContent({
+        type: "image_url",
+        image_url: { url: dataUrl },
+      }) as Record<string, any>;
+
+      expect(result.type).toBe("image_url");
+      expect(result.image_url.url).toContain("[base64 data url]");
+      expect(result.image_url.url).toContain(dataUrl.slice(0, 512));
+      expect(result.image_url.url).not.toBe(dataUrl);
+      expect(result.image_url.url.length).toBeLessThan(dataUrl.length);
+    });
+
+    it("leaves image_url with short data: URL (no truncation marker)", () => {
+      const dataUrl = "data:image/gif;base64,R0lGOD";
+      const result = stripBinaryContent({
+        type: "image_url",
+        image_url: { url: dataUrl },
+      }) as Record<string, any>;
+
+      expect(result.image_url.url).toBe(`[base64 data url] ${dataUrl}`);
+    });
+
+    it("does not strip image_url with regular https URL", () => {
+      const obj = {
+        type: "image_url",
+        image_url: { url: "https://example.com/image.png" },
+      };
+      const result = stripBinaryContent(obj) as Record<string, any>;
+      expect(result.image_url.url).toBe("https://example.com/image.png");
+    });
+
+    it("recurses into arrays containing image_url blocks", () => {
+      const dataUrl = "data:image/png;base64," + "B".repeat(1000);
+      const input = {
+        content: [
+          { type: "text", text: "hello" },
+          { type: "image_url", image_url: { url: dataUrl } },
+        ],
+      };
+      const stripped = stripBinaryContent(input) as any;
+      expect(stripped.content[0]).toEqual({ type: "text", text: "hello" });
+      expect(stripped.content[1].image_url.url).toContain("[base64 data url]");
+      expect(stripped.content[1].image_url.url).not.toBe(dataUrl);
+    });
   });
 
   describe("safeJson", () => {

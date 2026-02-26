@@ -188,8 +188,16 @@ export class RoomMessageHandler {
           pending.length = 0;
           this.activeSteers.set(key, (msg) => { this.steerAgent(agent, msg); });
         },
+        () => {
+          // Deregister steering as soon as the response is delivered, before
+          // background work (memory update, tool summary) begins — prevents
+          // new messages from being steered into the session during that window.
+          this.activeSteers.delete(key);
+        },
       );
     } finally {
+      // Safety fallback: ensure cleanup even if execute() throws before
+      // invoking the onResponseDelivered callback.
       this.activeSteers.delete(key);
     }
   }

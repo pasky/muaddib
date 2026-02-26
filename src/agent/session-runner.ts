@@ -386,6 +386,16 @@ function renderContentForDebug(content: unknown, maxChars: number): unknown {
       };
     }
 
+    if (type === "image_url" && block.image_url && typeof block.image_url === "object") {
+      const inner = block.image_url as Record<string, unknown>;
+      if (typeof inner.url === "string" && inner.url.startsWith("data:")) {
+        return {
+          type: "image_url",
+          image_url: { url: truncateForDebug(inner.url, Math.min(120, maxChars)) },
+        };
+      }
+    }
+
     if (type === "toolCall") {
       return {
         ...block,

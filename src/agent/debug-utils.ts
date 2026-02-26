@@ -50,6 +50,22 @@ export function stripBinaryContent(value: unknown): unknown {
     };
   }
 
+  // Content block with type "image_url" carrying a base64 data: URL (OpenAI format)
+  if (record.type === "image_url" && record.image_url && typeof record.image_url === "object") {
+    const inner = record.image_url as Record<string, unknown>;
+    if (typeof inner.url === "string" && inner.url.startsWith("data:")) {
+      const url = inner.url;
+      const preview = url.slice(0, BINARY_DATA_PREVIEW_LENGTH);
+      const suffix = url.length > BINARY_DATA_PREVIEW_LENGTH
+        ? `...[${url.length} chars total]`
+        : "";
+      return {
+        type: "image_url",
+        image_url: { url: `[base64 data url] ${preview}${suffix}` },
+      };
+    }
+  }
+
   const out: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(record)) {
     out[key] = stripBinaryContent(val);
