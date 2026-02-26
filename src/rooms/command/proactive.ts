@@ -281,22 +281,25 @@ export class ProactiveRunner {
     const classifiedTrigger = this.resolver.triggerForLabel(classifiedLabel);
     const { modeKey: classifiedModeKey, runtime: classifiedRuntime } = this.resolver.runtimeForTrigger(classifiedTrigger);
 
-    if (classifiedModeKey !== "serious") {
-      this.logger.warn(
-        "Proactive interjection suggested but not serious mode",
-        `label=${classifiedLabel}`,
-        `trigger=${classifiedTrigger}`,
-        `reason=${evalResult.reason}`,
-      );
-      return;
-    }
-
     const lastContext = context[context.length - 1];
     const lastContentStr = lastContext
       ? (lastContext.role === "user" && typeof lastContext.content === "string"
           ? lastContext.content
           : JSON.stringify(lastContext.content))
       : "(empty)";
+
+    if (classifiedModeKey !== "serious") {
+      this.logger.warn(
+        "Proactive interjection suggested but not serious mode",
+        `arc=${message.arc}`,
+        `label=${classifiedLabel}`,
+        `trigger=${classifiedTrigger}`,
+        `lastMessage=${lastContentStr.slice(0, 150)}`,
+        `reason=${evalResult.reason}`,
+      );
+      return;
+    }
+
     this.logger.info(
       "Interjecting proactively",
       `arc=${message.arc}`,
