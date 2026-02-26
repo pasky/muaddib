@@ -29,6 +29,12 @@ export interface SessionRunnerOptions {
   maxIterations?: number;
   emptyCompletionRetryPrompt?: string;
   onStatusMessage?: (text: string) => void | Promise<void>;
+  /**
+   * Called for each non-empty intermediate assistant text response during
+   * multi-turn execution.  The final response is NOT fired here — it goes
+   * through the normal return path with full post-processing.
+   */
+  onIntermediateResponse?: (text: string) => void | Promise<void>;
   llmDebugMaxChars?: number;
   metaReminder?: string;
   progressThresholdSeconds?: number;
@@ -68,6 +74,7 @@ export class SessionRunner {
   private readonly logger: RunnerLogger;
   private readonly emptyCompletionRetryPrompt: string;
   private readonly onStatusMessage?: (text: string) => void | Promise<void>;
+  private readonly onIntermediateResponse?: (text: string) => void | Promise<void>;
   private readonly llmDebugMaxChars: number;
   private readonly options: SessionRunnerOptions;
 
@@ -80,6 +87,7 @@ export class SessionRunner {
     this.emptyCompletionRetryPrompt =
       options.emptyCompletionRetryPrompt ?? DEFAULT_EMPTY_COMPLETION_RETRY_PROMPT;
     this.onStatusMessage = options.onStatusMessage;
+    this.onIntermediateResponse = options.onIntermediateResponse;
     this.llmDebugMaxChars = Math.max(500, Math.floor(options.llmDebugMaxChars ?? 120_000));
   }
 
@@ -112,6 +120,18 @@ export class SessionRunner {
     let iterations = 0;
     let toolCallsCount = 0;
 
+    // Buffer for intermediate response delivery: on each assistant message_end,
+    // fire the callback for the PREVIOUS buffered text.  This ensures the final
+    // assistant text is NOT sent here (it goes through the normal return path
+    // with post-processing), while all preceding intermediate texts are delivered
+    // in real-time (delayed by one turn).
+    //
+    // Only fire when tools were executed since the previous message, so that
+    // retry/fallback flows (e.g. refusal → model swap → re-prompt) don't leak
+    // intermediate artifacts to the room.
+    let bufferedAssistantText = "";
+    let toolCalledSinceLastMessage = false;
+
     const unsubscribe = session.subscribe((event) => {
       if (event.type === "turn_end") {
         iterations += 1;
@@ -120,6 +140,7 @@ export class SessionRunner {
 
       if (event.type === "tool_execution_start") {
         toolCallsCount += 1;
+        toolCalledSinceLastMessage = true;
         this.logger.info(`Tool ${event.toolName} started: ${summarizeToolPayload(event.args, this.llmDebugMaxChars)}`);
         return;
       }
@@ -127,6 +148,14 @@ export class SessionRunner {
       if (event.type === "message_end") {
         const message = event.message as { role?: string };
         if (message.role === "assistant") {
+          // Fire callback for previously buffered text (now confirmed intermediate),
+          // but only if tools ran in between — pure retry/fallback messages are skipped.
+          if (bufferedAssistantText.trim() && toolCalledSinceLastMessage && this.onIntermediateResponse) {
+            this.onIntermediateResponse(bufferedAssistantText.trim());
+          }
+          bufferedAssistantText = extractAssistantTextFromEvent(event.message);
+          toolCalledSinceLastMessage = false;
+
           this.logger.debug(
             "llm_io response agent_stream",
             safeJson(renderMessageForDebug(event.message, this.llmDebugMaxChars), this.llmDebugMaxChars),
@@ -404,6 +433,17 @@ function renderContentForDebug(content: unknown, maxChars: number): unknown {
 
     return block;
   });
+}
+
+/** Extract text from a single assistant message event payload. */
+function extractAssistantTextFromEvent(message: unknown): string {
+  if (!message || typeof message !== "object") return "";
+  const content = (message as Record<string, unknown>).content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((item: unknown) => item && typeof item === "object" && (item as Record<string, unknown>).type === "text")
+    .map((item: unknown) => String((item as Record<string, unknown>).text ?? ""))
+    .join("\n");
 }
 
 function summarizeToolPayload(value: unknown, maxChars: number): string {

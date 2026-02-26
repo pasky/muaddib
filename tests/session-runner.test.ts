@@ -432,6 +432,181 @@ describe("SessionRunner", () => {
     expect(calledWith.systemPrompt).toBe("base prompt");
   });
 
+  it("fires onIntermediateResponse for intermediate turns with tool calls, not the final turn", async () => {
+    const callbacks: Array<(event: any) => void> = [];
+    const intermediateTexts: string[] = [];
+
+    const session = {
+      messages: [] as any[],
+      subscribe: vi.fn((cb: (event: any) => void) => { callbacks.push(cb); return vi.fn(); }),
+      prompt: vi.fn(async () => {
+        // Turn 1: intermediate text + tool call
+        session.messages.push({
+          role: "assistant",
+          content: [{ type: "text", text: "Let me search for that." }],
+          usage: makeUsage(),
+          stopReason: "tool_use",
+        });
+        callbacks.forEach((cb) => cb({ type: "message_end", message: session.messages.at(-1) }));
+        callbacks.forEach((cb) => cb({ type: "tool_execution_start", toolName: "web_search", args: {} }));
+        callbacks.forEach((cb) => cb({ type: "tool_execution_end", toolName: "web_search", isError: false, result: "ok" }));
+        callbacks.forEach((cb) => cb({ type: "turn_end" }));
+
+        // Turn 2: another intermediate text + tool call
+        session.messages.push({
+          role: "assistant",
+          content: [{ type: "text", text: "Now reading the file." }],
+          usage: makeUsage(),
+          stopReason: "tool_use",
+        });
+        callbacks.forEach((cb) => cb({ type: "message_end", message: session.messages.at(-1) }));
+        callbacks.forEach((cb) => cb({ type: "tool_execution_start", toolName: "read", args: {} }));
+        callbacks.forEach((cb) => cb({ type: "tool_execution_end", toolName: "read", isError: false, result: "contents" }));
+        callbacks.forEach((cb) => cb({ type: "turn_end" }));
+
+        // Turn 3: final response (no tool call after)
+        session.messages.push({
+          role: "assistant",
+          content: [{ type: "text", text: "Here is the final answer." }],
+          usage: makeUsage(),
+          stopReason: "stop",
+        });
+        callbacks.forEach((cb) => cb({ type: "message_end", message: session.messages.at(-1) }));
+        callbacks.forEach((cb) => cb({ type: "turn_end" }));
+      }),
+    };
+
+    mockCreateAgentSessionForInvocation.mockReturnValue({
+      session,
+      agent: { setModel: vi.fn() },
+      ensureProviderKey: vi.fn(async () => {}),
+      getVisionFallbackActivated: () => false,
+    });
+
+    const runner = new SessionRunner({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "sys",
+      authStorage: AuthStorage.inMemory(),
+      logger: minimalLogger,
+      modelAdapter: minimalModelAdapter,
+      onIntermediateResponse: (text) => { intermediateTexts.push(text); },
+    });
+
+    const result = await runner.prompt("hello");
+
+    // Only the first two texts are intermediate; the final one is returned normally
+    expect(intermediateTexts).toEqual([
+      "Let me search for that.",
+      "Now reading the file.",
+    ]);
+    expect(result.text).toBe("Here is the final answer.");
+  });
+
+  it("does not fire onIntermediateResponse for whitespace-only intermediate turns", async () => {
+    const callbacks: Array<(event: any) => void> = [];
+    const intermediateTexts: string[] = [];
+
+    const session = {
+      messages: [] as any[],
+      subscribe: vi.fn((cb: (event: any) => void) => { callbacks.push(cb); return vi.fn(); }),
+      prompt: vi.fn(async () => {
+        // Turn 1: whitespace-only text + tool call
+        session.messages.push({
+          role: "assistant",
+          content: [{ type: "text", text: "   " }],
+          usage: makeUsage(),
+          stopReason: "tool_use",
+        });
+        callbacks.forEach((cb) => cb({ type: "message_end", message: session.messages.at(-1) }));
+        callbacks.forEach((cb) => cb({ type: "tool_execution_start", toolName: "bash", args: {} }));
+        callbacks.forEach((cb) => cb({ type: "tool_execution_end", toolName: "bash", isError: false, result: "ok" }));
+        callbacks.forEach((cb) => cb({ type: "turn_end" }));
+
+        // Turn 2: final response
+        session.messages.push({
+          role: "assistant",
+          content: [{ type: "text", text: "Done." }],
+          usage: makeUsage(),
+          stopReason: "stop",
+        });
+        callbacks.forEach((cb) => cb({ type: "message_end", message: session.messages.at(-1) }));
+        callbacks.forEach((cb) => cb({ type: "turn_end" }));
+      }),
+    };
+
+    mockCreateAgentSessionForInvocation.mockReturnValue({
+      session,
+      agent: { setModel: vi.fn() },
+      ensureProviderKey: vi.fn(async () => {}),
+      getVisionFallbackActivated: () => false,
+    });
+
+    const runner = new SessionRunner({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "sys",
+      authStorage: AuthStorage.inMemory(),
+      logger: minimalLogger,
+      modelAdapter: minimalModelAdapter,
+      onIntermediateResponse: (text) => { intermediateTexts.push(text); },
+    });
+
+    const result = await runner.prompt("hello");
+    expect(intermediateTexts).toEqual([]);
+    expect(result.text).toBe("Done.");
+  });
+
+  it("does not fire onIntermediateResponse when no tools run between messages", async () => {
+    const callbacks: Array<(event: any) => void> = [];
+    const intermediateTexts: string[] = [];
+
+    const session = {
+      messages: [] as any[],
+      subscribe: vi.fn((cb: (event: any) => void) => { callbacks.push(cb); return vi.fn(); }),
+      prompt: vi.fn(async () => {
+        // Two consecutive assistant messages with NO tool calls between them.
+        // This simulates retry/fallback flows where the agent re-prompts.
+        session.messages.push({
+          role: "assistant",
+          content: [{ type: "text", text: "First attempt." }],
+          usage: makeUsage(),
+          stopReason: "stop",
+        });
+        callbacks.forEach((cb) => cb({ type: "message_end", message: session.messages.at(-1) }));
+        callbacks.forEach((cb) => cb({ type: "turn_end" }));
+
+        session.messages.push({
+          role: "assistant",
+          content: [{ type: "text", text: "Second attempt." }],
+          usage: makeUsage(),
+          stopReason: "stop",
+        });
+        callbacks.forEach((cb) => cb({ type: "message_end", message: session.messages.at(-1) }));
+        callbacks.forEach((cb) => cb({ type: "turn_end" }));
+      }),
+    };
+
+    mockCreateAgentSessionForInvocation.mockReturnValue({
+      session,
+      agent: { setModel: vi.fn() },
+      ensureProviderKey: vi.fn(async () => {}),
+      getVisionFallbackActivated: () => false,
+    });
+
+    const runner = new SessionRunner({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "sys",
+      authStorage: AuthStorage.inMemory(),
+      logger: minimalLogger,
+      modelAdapter: minimalModelAdapter,
+      onIntermediateResponse: (text) => { intermediateTexts.push(text); },
+    });
+
+    const result = await runner.prompt("hello");
+    // No tools between messages → no intermediate responses fired
+    expect(intermediateTexts).toEqual([]);
+    expect(result.text).toBe("Second attempt.");
+  });
+
   it("throws when completion remains empty after retries", async () => {
     vi.useFakeTimers();
     try {

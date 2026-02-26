@@ -78,6 +78,7 @@ export interface CommandRunnerFactoryInput {
   progressThresholdSeconds?: number;
   progressMinIntervalSeconds?: number;
   onStatusMessage?: (text: string) => void | Promise<void>;
+  onIntermediateResponse?: (text: string) => void | Promise<void>;
   logger?: Logger;
   onAgentCreated?: (agent: Agent) => void;
 }
@@ -174,6 +175,7 @@ export class CommandExecutor {
           progressThresholdSeconds: input.progressThresholdSeconds,
           progressMinIntervalSeconds: input.progressMinIntervalSeconds,
           onStatusMessage: input.onStatusMessage,
+          onIntermediateResponse: input.onIntermediateResponse,
           logger: input.logger,
           onAgentCreated: input.onAgentCreated,
         }));
@@ -385,6 +387,19 @@ export class CommandExecutor {
     const toolSet = this.selectTools(message, resolved.runtime.allowedTools, runnerContext, sendResponse, triggerTs);
 
     const progressConfig = this.agentConfig.progress;
+
+    // Build per-invocation intermediate response callback: send to room + persist in history.
+    const onIntermediateResponse: ((text: string) => void | Promise<void>) | undefined =
+      sendResponse
+        ? async (text: string) => {
+            const sr = await sendResponse(text);
+            const sendResult = sr ? sr : undefined;
+            await this.persistBotResponse(message.arc, message, text, sendResult, {
+              run: triggerTs,
+            });
+          }
+        : undefined;
+
     const runner = this.runnerFactory({
       model: modelSpec,
       systemPrompt,
@@ -393,6 +408,7 @@ export class CommandExecutor {
       progressThresholdSeconds: progressConfig?.thresholdSeconds,
       progressMinIntervalSeconds: progressConfig?.minIntervalSeconds,
       onStatusMessage: sendResponse ? (text: string) => { sendResponse(text); } : undefined,
+      onIntermediateResponse,
       logger,
       onAgentCreated,
     });
@@ -463,6 +479,16 @@ export class CommandExecutor {
     const toolSet = this.selectTools(message, classifiedRuntime.allowedTools, runnerContext, sendResponse);
 
     const proactiveProgressConfig = this.agentConfig.progress;
+
+    const onIntermediateResponse: ((text: string) => void | Promise<void>) | undefined =
+      sendResponse
+        ? async (text: string) => {
+            const sr = await sendResponse(text);
+            const sendResult = sr ? sr : undefined;
+            await this.persistBotResponse(message.arc, message, text, sendResult);
+          }
+        : undefined;
+
     const runner = this.runnerFactory({
       model: modelSpec,
       systemPrompt,
@@ -471,6 +497,7 @@ export class CommandExecutor {
       progressThresholdSeconds: proactiveProgressConfig?.thresholdSeconds,
       progressMinIntervalSeconds: proactiveProgressConfig?.minIntervalSeconds,
       onStatusMessage: sendResponse ? (text: string) => { sendResponse(text); } : undefined,
+      onIntermediateResponse,
       logger,
       onAgentCreated,
     });
