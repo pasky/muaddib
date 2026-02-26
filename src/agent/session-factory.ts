@@ -154,6 +154,7 @@ interface CreateAgentSessionResult {
   agent: Agent;
   ensureProviderKey: (provider: string) => Promise<void>;
   getVisionFallbackActivated: () => boolean;
+  bumpMaxIterations: (n: number) => void;
   dispose: () => void;
 }
 
@@ -185,7 +186,7 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
   // Compute maxIterations, session start, and nudge state before Agent construction
   // so they can be captured in the transformContext closure.
   const rawIterations = Number(input.maxIterations);
-  const maxIterations = Number.isFinite(rawIterations) && rawIterations >= 1
+  let maxIterations = Number.isFinite(rawIterations) && rawIterations >= 1
     ? Math.floor(rawIterations)
     : DEFAULT_MAX_ITERATIONS;
   const sessionStartTime = Date.now();
@@ -310,6 +311,7 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
       }
     },
     getVisionFallbackActivated: () => visionState.activated,
+    bumpMaxIterations: (n: number) => { maxIterations += n; },
     dispose: () => {
       unsubscribe();
       session.dispose();

@@ -57,6 +57,8 @@ export interface PromptResult {
   refusalFallbackActivated?: boolean;
   refusalFallbackModel?: string;
   session?: AgentSession;
+  /** Increase the session's max iteration limit (e.g. before a follow-up prompt). */
+  bumpMaxIterations?: (n: number) => void;
 }
 
 export class SessionRunner {
@@ -218,6 +220,7 @@ export class SessionRunner {
           ? options.refusalFallbackModel
           : undefined,
         session,
+        bumpMaxIterations: sessionCtx.bumpMaxIterations,
       };
     } finally {
       // Error-path safety: if the session is never returned (exception before return),

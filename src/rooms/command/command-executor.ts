@@ -538,6 +538,7 @@ export class CommandExecutor {
     // ── Memory update ──
     if (opts.memoryUpdate !== false && agentResult.session) {
       try {
+        agentResult.bumpMaxIterations?.(3);
         const memoryPrompt = buildMemoryUpdatePrompt(message.arc, this.agentConfig.tools?.memory);
         await agentResult.session.prompt(memoryPrompt);
       } catch (err) {
