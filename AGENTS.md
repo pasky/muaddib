@@ -1,15 +1,12 @@
 # muaddib Agent Guide
 
 ## Build/Test Commands
-- Install dependencies: `npm ci`
-- Typecheck: `npm run typecheck`
 - Tests: ALWAYS wrap with timeout to prevent zombie vitest workers: `timeout 30 npm test 2>&1 | tail -40` or `timeout 30 npm test 2>&1 | grep -A5 'FAIL\|Error'`
-- Build runtime: `npm run build`
-- Any change should be accompanied with tests update. (Always prefer updating existing unit tests over adding new ones.)
+- Any change should be accompanied with tests update. (Always check existing unit tests and prefer updating these over adding new ones.)
 - Any change where viable should be tested by actually running the CLI e2e test: `MUADDIB_HOME=. npm run cli:message -- --message "your message here"`
-- **Rely on pre-commit hooks** for typecheck/tests/lint — don't run them manually before committing unless you need to debug a specific failure. The pre-commit pipeline runs typecheck, tests, lint, and build automatically on `git commit`.
-- You must test and commit your work once finished. Never respond with "Tests not run (not requested)."
-- NEVER use `git add -A` blindly, there may be untracked files that must not be committed; use `git add -u` instead
+- **Rely on pre-commit hooks** for typecheck/tests/lint/build - don't run them manually before committing unless you need to debug a specific failure.
+- You must test and commit your work once finished. Never respond with "Tests not run (not requested)." If post-commit user feedback led you to do an immediate fixup, amend the previous commit.
+- NEVER use `git add -A` blindly, there may be untracked files that must not be committed; use `git add -u` instead.
 
 ## Architecture
 - **Built on**: [`pi-coding-agent`](https://github.com/badlogic/pi-mono) SDK (`@mariozechner/pi-agent-core` and `@mariozechner/pi-ai`). Muaddib uses the `Agent` class from pi-agent-core but overrides all built-in tools via `baseToolsOverride` — pi's default read/write/bash tools are **not** exposed to the agent. All tools (bash, read, write, edit, web_search, etc.) are muaddib's own, defined in `src/agent/tools/`.
@@ -45,14 +42,13 @@
 - **CLAUDE.md** is a symlink to **AGENTS.md**
 
 ## Testing
-- Vitest behavioral tests in `tests/`
-- Prefer extending existing tests instead of creating new files unless justified
-- Keep room/command behavior parity covered when changing handler logic
+- Vitest behavioral tests in `tests/`.
+- Keep room/command behavior parity covered when changing handler logic.
 - Tests should avoid mocking low-level API client constructors when validating control flow. Prefer patching router calls to inject fake responses, and ensure provider configs are referenced via `providers.*`.
 - Do NOT introduce compatibility shims for legacy config fields; update tests and fixtures instead.
 - When changing tests, prefer modifying/extending existing test files and cases rather than adding new test files, unless there is a compelling reason.
 
-## Contributing Guideline
+## Final Guidelines
 - All new changes follow the red-green-refactor TDD approach!
 - For AI agents: When user is frustrated, stop and think: why? Consider whether not to append an additional behavioral instruction to this AGENTS.md file.
 - Every time after committing your work, stop and think: how could I improve the codebase I just touched? Did I notice any case of spaghetti code, useless adapters, wrong decoupling, invalid separation of concerns? Propose concrete ideas to the user.
