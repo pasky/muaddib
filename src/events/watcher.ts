@@ -16,6 +16,7 @@ import { Cron } from "croner";
 
 import type { Logger } from "../app/logging.js";
 import { getMuaddibHome } from "../config/paths.js";
+import { getArcEventsDir } from "../agent/gondolin/fs.js";
 import type { RoomGateway } from "../rooms/room-gateway.js";
 
 // ── Event schema ────────────────────────────────────────────────────────
@@ -77,9 +78,7 @@ function cancelJob(job: ScheduledJob): void {
 
 // ── ArcEventsWatcher ────────────────────────────────────────────────────
 
-export function getArcEventsDir(arc: string): string {
-  return join(getMuaddibHome(), "arcs", arc, "events");
-}
+export { getArcEventsDir };
 
 export class ArcEventsWatcher {
   /** Map from `${arc}/${filename}` to its scheduled job. */

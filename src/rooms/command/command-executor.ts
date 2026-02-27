@@ -43,9 +43,7 @@ import type { ProactiveConfig } from "./proactive.js";
 import { extractAssistantText, generateToolSummaryFromSession } from "./tool-summary.js";
 import type { Logger } from "../../app/logging.js";
 import type { AgentConfig, MemoryConfig, SkillsConfig } from "../../config/muaddib-config.js";
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
-import { getArcWorkspacePath } from "../../agent/gondolin/index.js";
+import { loadArcMemoryFile } from "../../agent/gondolin/index.js";
 import type { ArcEventsWatcher } from "../../events/watcher.js";
 
 // ── Public types ──
@@ -984,17 +982,7 @@ export interface PostSessionOptions {
 
 export function buildMemoryUpdatePrompt(arc: string, memoryConfig?: MemoryConfig, options?: PostSessionOptions): string {
   const charLimit = memoryConfig?.charLimit ?? DEFAULT_MEMORY_CHAR_LIMIT;
-  const workspacePath = getArcWorkspacePath(arc);
-  const memoryPath = join(workspacePath, "MEMORY.md");
-
-  let content = "";
-  if (existsSync(memoryPath)) {
-    try {
-      content = readFileSync(memoryPath, "utf8");
-    } catch {
-      // Best-effort read
-    }
-  }
+  const content = loadArcMemoryFile(arc);
 
   const chars = content.length;
   const capacityWarning = chars >= charLimit * 0.8

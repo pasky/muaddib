@@ -14,6 +14,8 @@ import { fileURLToPath } from "node:url";
 
 import { formatSkillsForPrompt, loadSkillsFromDir, type Skill } from "@mariozechner/pi-coding-agent";
 
+import { getArcWorkspacePath } from "../gondolin/fs.js";
+
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 
 /**
@@ -77,8 +79,8 @@ export const VM_WORKSPACE_SKILLS_BASE = "/workspace/skills";
  *
  * Returns `[]` if the directory doesn't exist.
  */
-export function loadWorkspaceSkills(workspacePath: string): LoadedSkill[] {
-  const dir = join(workspacePath, "skills");
+export function loadWorkspaceSkills(arc: string): LoadedSkill[] {
+  const dir = join(getArcWorkspacePath(arc), "skills");
   if (!existsSync(dir)) return [];
 
   try {

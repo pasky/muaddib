@@ -2,6 +2,7 @@ export {
   getArcWorkspacePath,
   getArcChronicleDir,
   getArcChatHistoryDir,
+  loadArcMemoryFile,
 } from "./fs.js";
 
 export {

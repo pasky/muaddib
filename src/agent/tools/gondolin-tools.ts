@@ -7,8 +7,7 @@
  * the pi-coding-agent tool interfaces.
  */
 
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
 
 import {
   createBashTool,
@@ -31,12 +30,13 @@ import {
   loadWorkspaceSkills,
   formatSkillsForVmPrompt,
 } from "../skills/load-skills.js";
+
 import type { ArcEventsWatcher } from "../../events/watcher.js";
 
 import {
-  getArcWorkspacePath,
   getArcChronicleDir,
   getArcChatHistoryDir,
+  loadArcMemoryFile,
   createVmReadOps,
   createVmWriteOps,
   createVmEditOps,
@@ -98,8 +98,7 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
     shareArtifactTool,
   ];
 
-  const workspacePath = getArcWorkspacePath(arc);
-  const systemPromptSuffix = buildSystemPromptSuffix(arc, sessionDir, workspacePath, toolsConfig);
+  const systemPromptSuffix = buildSystemPromptSuffix(arc, sessionDir, toolsConfig);
 
   const dispose = () => checkpointGondolinArc(arc, logger);
 
@@ -111,11 +110,10 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
 function buildSystemPromptSuffix(
   arc: string,
   sessionDir: string,
-  workspacePath: string,
   toolsConfig?: ToolsConfig,
 ): string {
   const skills = loadBundledSkills();
-  const workspaceSkills = loadWorkspaceSkills(workspacePath);
+  const workspaceSkills = loadWorkspaceSkills(arc);
   const allSkills = [...skills, ...workspaceSkills];
   const skillsSection = formatSkillsForVmPrompt(allSkills);
 
@@ -131,19 +129,10 @@ function buildSystemPromptSuffix(
     ? " Chat history: raw JSONL logs at /chat_history/ (read-only)."
     : "";
 
-  // Inject MEMORY.md if present in workspace
-  const memoryPath = join(workspacePath, "MEMORY.md");
-  let memorySuffix = "";
-  if (existsSync(memoryPath)) {
-    try {
-      const memoryContent = readFileSync(memoryPath, "utf8");
-      if (memoryContent.trim()) {
-        memorySuffix = `\n<memory file="/workspace/MEMORY.md">\n${memoryContent}\n</memory>`;
-      }
-    } catch {
-      // Ignore read errors — memory is best-effort
-    }
-  }
+  const memoryContent = loadArcMemoryFile(arc);
+  const memorySuffix = memoryContent.trim()
+    ? `\n<memory file="/workspace/MEMORY.md">\n${memoryContent}\n</memory>`
+    : "";
 
   return (
     `Filesystem: /workspace persists across sessions; ${sessionDir} is your session working directory (last 8 session dirs in /tmp/session-* are kept).` +

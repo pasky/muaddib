@@ -863,24 +863,25 @@ describe("core tool executors generate_image support", () => {
 // ── Workspace skills ──────────────────────────────────────────────────────
 
 import { loadWorkspaceSkills } from "../src/agent/skills/load-skills.js";
+import { getArcWorkspacePath } from "../src/agent/gondolin/index.js";
 
 describe("loadWorkspaceSkills", () => {
   it("returns empty array when skills directory does not exist", () => {
-    const result = loadWorkspaceSkills("/nonexistent/workspace");
+    const result = loadWorkspaceSkills("nonexistent-ws-skills-arc");
     expect(result).toEqual([]);
   });
 
-  it("loads valid workspace skills and rewrites filePath", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "muaddib-ws-skills-"));
-    tempDirs.push(dir);
-    const skillDir = join(dir, "skills", "my-skill");
+  it("loads valid workspace skills and rewrites filePath", () => {
+    const arc = "ws-skills-load-arc";
+    const workspacePath = getArcWorkspacePath(arc);
+    const skillDir = join(workspacePath, "skills", "my-skill");
     mkdirSync(skillDir, { recursive: true });
     writeFileSync(
       join(skillDir, "SKILL.md"),
       "---\nname: my-skill\ndescription: A test skill.\n---\nDo the thing.\n",
     );
 
-    const skills = loadWorkspaceSkills(dir);
+    const skills = loadWorkspaceSkills(arc);
     expect(skills).toHaveLength(1);
     expect(skills[0].name).toBe("my-skill");
     expect(skills[0].description).toBe("A test skill.");
@@ -888,12 +889,12 @@ describe("loadWorkspaceSkills", () => {
     expect(skills[0].content).toContain("Do the thing.");
   });
 
-  it("returns empty array when skills directory exists but is empty", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "muaddib-ws-skills-"));
-    tempDirs.push(dir);
-    mkdirSync(join(dir, "skills"), { recursive: true });
+  it("returns empty array when skills directory exists but is empty", () => {
+    const arc = "ws-skills-empty-arc";
+    const workspacePath = getArcWorkspacePath(arc);
+    mkdirSync(join(workspacePath, "skills"), { recursive: true });
 
-    const skills = loadWorkspaceSkills(dir);
+    const skills = loadWorkspaceSkills(arc);
     expect(skills).toEqual([]);
   });
 });
@@ -901,7 +902,6 @@ describe("loadWorkspaceSkills", () => {
 // ── Memory update prompt ──────────────────────────────────────────────────
 
 import { buildMemoryUpdatePrompt } from "../src/rooms/command/command-executor.js";
-import { getArcWorkspacePath } from "../src/agent/gondolin/index.js";
 
 describe("buildMemoryUpdatePrompt", () => {
   it("returns prompt with empty-file marker when MEMORY.md does not exist", () => {

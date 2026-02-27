@@ -6,7 +6,7 @@
  * VFS mount table handed to Gondolin's VM constructor.
  */
 
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { VirtualProvider } from "@earendil-works/gondolin";
@@ -41,6 +41,20 @@ export function getArcChatHistoryDir(arc: string): string {
 
 export function getArcEventsDir(arc: string): string {
   return join(getMuaddibHome(), "arcs", arc, "events");
+}
+
+/**
+ * Best-effort read of `/workspace/MEMORY.md` for the given arc.
+ * Returns the file content, or `""` if the file is absent or unreadable.
+ */
+export function loadArcMemoryFile(arc: string): string {
+  const memoryPath = join(getArcWorkspacePath(arc), "MEMORY.md");
+  if (!existsSync(memoryPath)) return "";
+  try {
+    return readFileSync(memoryPath, "utf8");
+  } catch {
+    return "";
+  }
 }
 
 // ── VM mount table ─────────────────────────────────────────────────────────
