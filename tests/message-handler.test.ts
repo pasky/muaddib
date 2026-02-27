@@ -166,6 +166,23 @@ function makeRunnerResult(
   };
 }
 
+/**
+ * Returns a CommandRunnerFactory that fires input.onResponse with the given text
+ * and then returns makeRunnerResult(text, options).
+ */
+function makeRunner(
+  text: string,
+  options: Parameters<typeof makeRunnerResult>[1] = {},
+): import("../src/rooms/command/message-handler.js").CommandRunnerFactory {
+  return (input) => ({
+    prompt: async () => {
+      const result = makeRunnerResult(text, options);
+      await input.onResponse(result.text);
+      return result;
+    },
+  });
+}
+
 describe("RoomMessageHandler", () => {
   it("routes command to runner without duplicating trigger message and propagates reasoning level", async () => {
     const history = createTempHistoryStore(40);
@@ -177,13 +194,14 @@ describe("RoomMessageHandler", () => {
     });
 
     const incoming = makeMessage("!a hello there");
-    await history.addMessage(incoming);
+    // Note: handleIncomingMessage adds the trigger to history automatically; don't pre-add it.
 
     let runnerModel: string | null = null;
     let runnerPrompt = "";
     let runnerThinkingLevel: string | undefined;
     let runnerContextContents: string[] = [];
 
+    const sent: string[] = [];
     const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
@@ -195,45 +213,17 @@ describe("RoomMessageHandler", () => {
             runnerPrompt = prompt;
             runnerThinkingLevel = options?.thinkingLevel;
             runnerContextContents = (options?.contextMessages ?? []).map((entry) => typeof entry.content === 'string' ? entry.content : entry.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join(' '));
-            return {
-              assistantMessage: {
-                role: "assistant",
-                content: [{ type: "text", text: "done" }],
-                api: "openai-completions",
-                provider: "openai",
-                model: "gpt-4o-mini",
-                usage: {
-                  input: 1,
-                  output: 1,
-                  cacheRead: 0,
-                  cacheWrite: 0,
-                  totalTokens: 2,
-                  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-                },
-                stopReason: "stop",
-                timestamp: Date.now(),
-              },
-              text: "done",
-              stopReason: "stop",
-              usage: {
-                input: 1,
-                output: 1,
-                cacheRead: 0,
-                cacheWrite: 0,
-                totalTokens: 2,
-                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-              },
-            };
+            const result = makeRunnerResult("done");
+            await input.onResponse(result.text);
+            return result;
           },
         };
       },
     });
 
-    const result = await handler.execute(incoming);
+    await handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async (text) => { sent.push(text); } });
 
-    expect(result.response).toBe("done");
-    expect(result.resolved.modeKey).toBe("serious");
-    expect(result.model).toBe("openai:gpt-4o-mini");
+    expect(sent[0]).toBe("done");
     expect(runnerModel).toBe("openai:gpt-4o-mini");
     expect(runnerPrompt).toMatch(/^\[\d{2}:\d{2}\] <alice> hello there$/);
     expect(runnerThinkingLevel).toBe("medium");
@@ -253,15 +243,13 @@ describe("RoomMessageHandler", () => {
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: () => ({
-        prompt: async () =>
-          makeRunnerResult("[02:32] <MuaddibLLM> pasky: Pong! S latenci nizsi nez moje chut."),
-      }),
+      runnerFactory: makeRunner("[02:32] <MuaddibLLM> pasky: Pong! S latenci nizsi nez moje chut."),
     });
 
-    const result = await handler.execute(incoming);
+    const sent: string[] = [];
+    await handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async (text) => { sent.push(text); } });
 
-    expect(result.response).toBe("pasky: Pong! S latenci nizsi nez moje chut.");
+    expect(sent[0]).toBe("pasky: Pong! S latenci nizsi nez moje chut.");
 
     await history.close();
   });
@@ -277,10 +265,7 @@ describe("RoomMessageHandler", () => {
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: () => ({
-        prompt: async () =>
-          makeRunnerResult("[01:21] <MuaddibLLM> pasky: clean answer here"),
-      }),
+      runnerFactory: makeRunner("[01:21] <MuaddibLLM> pasky: clean answer here"),
     });
 
     await handler.handleIncomingMessage(incoming, {
@@ -305,15 +290,13 @@ describe("RoomMessageHandler", () => {
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: () => ({
-        prompt: async () =>
-          makeRunnerResult("[serious] [02:32] <MuaddibLLM> Here is the answer."),
-      }),
+      runnerFactory: makeRunner("[serious] [02:32] <MuaddibLLM> Here is the answer."),
     });
 
-    const result = await handler.execute(incoming);
+    const sent: string[] = [];
+    await handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async (text) => { sent.push(text); } });
 
-    expect(result.response).toBe("Here is the answer.");
+    expect(sent[0]).toBe("Here is the answer.");
 
     await history.close();
   });
@@ -335,12 +318,10 @@ describe("RoomMessageHandler", () => {
       history,
       classifyMode: async () => "EASY_SERIOUS",
       logger,
-      runnerFactory: () => ({
-        prompt: async () => makeRunnerResult("pong"),
-      }),
+      runnerFactory: makeRunner("pong"),
     });
 
-    await handler.handleIncomingMessage(incoming, { isDirect: true });
+    await handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async () => {} });
 
     expect(logger.debug).toHaveBeenCalledWith(
       "Handling direct command",
@@ -354,16 +335,6 @@ describe("RoomMessageHandler", () => {
       "trigger=!s",
       "model=openai:gpt-4o-mini",
       "context_disabled=false",
-    );
-    expect(logger.debug).toHaveBeenCalledWith(
-      "Persisting direct command response",
-      "arc=libera##test",
-      "model=openai:gpt-4o-mini",
-      "tool_calls=0",
-    );
-    expect(logger.debug).toHaveBeenCalledWith(
-      "Direct command response stored",
-      "arc=libera##test",
     );
 
     await history.close();
@@ -456,31 +427,21 @@ describe("RoomMessageHandler", () => {
       classifyMode: async () => "EASY_SERIOUS",
       configData: { agent: { refusalFallbackModel: "anthropic:claude-3-5-haiku" } },
       logger,
-      runnerFactory: () => ({
-        prompt: async () =>
-          makeRunnerResult("The AI refused to respond to this request", {
-            refusalFallbackActivated: true,
-            refusalFallbackModel: "anthropic:claude-3-5-haiku",
-          }),
+      runnerFactory: makeRunner("The AI refused to respond to this request", {
+        refusalFallbackActivated: true,
+        refusalFallbackModel: "anthropic:claude-3-5-haiku",
       }),
     });
 
+    const sent: string[] = [];
     await handler.handleIncomingMessage(makeMessage("!s expensive fallback"), {
       isDirect: true,
-      sendResponse: async () => {},
+      sendResponse: async (text) => { sent.push(text); },
     });
 
     // Refusal fallback suffix is now appended by SessionRunner (not invokeAndPostProcess),
     // so it doesn't appear when using mock runnerFactory.
-    expect(logger.info).toHaveBeenCalledWith(
-      "Sending direct response",
-      "mode=!s",
-      "trigger=!s",
-      expect.stringMatching(/^ctx=0k/),
-      "cost=$0.0000",
-      "arc=libera##test",
-      "response=The AI refused to respond to this request",
-    );
+    expect(sent[0]).toBe("The AI refused to respond to this request");
 
     await history.close();
   });
@@ -538,9 +499,7 @@ describe("RoomMessageHandler", () => {
       history,
       classifyMode: async () => "EASY_SERIOUS",
       runtimeLogger: runtimeLogs,
-      runnerFactory: () => ({
-        prompt: async () => makeRunnerResult("pong"),
-      }),
+      runnerFactory: makeRunner("pong"),
     });
 
     await runtimeLogs.withMessageContext(
@@ -552,6 +511,7 @@ describe("RoomMessageHandler", () => {
       async () => {
         await handler.handleIncomingMessage(makeMessage("!s ping"), {
           isDirect: true,
+          sendResponse: async () => {},
         });
       },
     );
@@ -564,7 +524,6 @@ describe("RoomMessageHandler", () => {
     const messageLog = await readFile(join(arcDir, arcFiles[0]), "utf-8");
     expect(messageLog).toContain(" - DEBUG - Handling direct command");
     expect(messageLog).toContain(" - DEBUG - Resolved direct command");
-    expect(messageLog).toContain(" - DEBUG - Persisting direct command response");
 
     await rm(logsHome, { recursive: true, force: true });
     await history.close();
@@ -613,18 +572,19 @@ describe("RoomMessageHandler", () => {
       history,
       classifyMode: async () => "EASY_SERIOUS",
       contextReducer,
-      runnerFactory: () => ({
+      runnerFactory: (input) => ({
         prompt: async (prompt, options) => {
           runnerPrompt = prompt;
           runnerContextContents = (options?.contextMessages ?? []).map((entry) => typeof entry.content === 'string' ? entry.content : entry.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join(' '));
-          return makeRunnerResult("done");
+          const result = makeRunnerResult("done");
+          await input.onResponse(result.text);
+          return result;
         },
       }),
     });
 
-    const result = await handler.execute(incoming);
+    await handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async () => {} });
 
-    expect(result.response).toBe("done");
     expect(contextReducer.reduce).toHaveBeenCalledTimes(1);
     expect(runnerPrompt).toMatch(/^\[\d{2}:\d{2}\] <alice> reduce context please$/);
     expect(runnerContextContents).toEqual(["[10:00] <summary> reduced context"]);
@@ -663,15 +623,17 @@ describe("RoomMessageHandler", () => {
       history,
       classifyMode: async () => "EASY_SERIOUS",
       chronicleStore,
-      runnerFactory: () => ({
+      runnerFactory: (input) => ({
         prompt: async (_prompt, options) => {
           runnerContextWithSummary.push((options?.contextMessages ?? []).map((entry) => typeof entry.content === 'string' ? entry.content : entry.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join(' ')));
-          return makeRunnerResult("done");
+          const result = makeRunnerResult("done");
+          await input.onResponse(result.text);
+          return result;
         },
       }),
     });
 
-    await handlerWithSummary.execute(incoming);
+    await handlerWithSummary.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async () => {} });
 
     expect(chronicleStore.getChapterContextMessages).toHaveBeenCalledWith("libera##test");
     expect(runnerContextWithSummary[0][0]).toBe("<context_summary>chapter recap</context_summary>");
@@ -693,12 +655,10 @@ describe("RoomMessageHandler", () => {
       history,
       classifyMode: async () => "EASY_SERIOUS",
       chronicleStore,
-      runnerFactory: () => ({
-        prompt: async () => makeRunnerResult("done"),
-      }),
+      runnerFactory: makeRunner("done"),
     });
 
-    await handlerWithoutSummary.execute(incoming);
+    await handlerWithoutSummary.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async () => {} });
     expect(chronicleStore.getChapterContextMessages).toHaveBeenCalledTimes(1);
 
     await history.close();
@@ -729,15 +689,12 @@ describe("RoomMessageHandler", () => {
       classifyMode: async () => "EASY_SERIOUS",
       runnerFactory: (input) => {
         seenToolNames.push(...input.toolSet.tools.map((tool) => tool.name));
-        return {
-          prompt: async () => makeRunnerResult("done"),
-        };
+        return makeRunner("done")(input);
       },
     });
 
-    const result = await handler.execute(incoming);
+    await handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async () => {} });
 
-    expect(result.response).toBe("done");
     expect(seenToolNames).toEqual(["web_search", "make_plan"]);
 
     await history.close();
@@ -768,15 +725,16 @@ describe("RoomMessageHandler", () => {
         return {
           prompt: async (_prompt: string, opts?: { contextMessages?: any[] }) => {
             seenContextMessages = opts?.contextMessages ?? [];
-            return makeRunnerResult("done");
+            const result = makeRunnerResult("done");
+            await input.onResponse(result.text);
+            return result;
           },
         };
       },
     });
 
-    const result = await handler.execute(incoming);
+    await handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async () => {} });
 
-    expect(result.response).toBe("done");
     // Oracle tool should be present in the tool set
     expect(oracleTool).toBeDefined();
     expect(oracleTool.name).toBe("oracle");
@@ -814,14 +772,17 @@ describe("RoomMessageHandler", () => {
           input.onAgentCreated?.(mockAgent as any);
           firstStarted.resolve();
           await releaseFirst.promise;
-          return makeRunnerResult("done");
+          const result = makeRunnerResult("done");
+          await input.onResponse(result.text);
+          return result;
         },
       }),
     });
 
+    const sent: string[] = [];
     const resultPromise = handler.handleIncomingMessage(incoming, {
       isDirect: true,
-      sendResponse: async () => {},
+      sendResponse: async (text) => { sent.push(text); },
     });
 
     await firstStarted.promise;
@@ -838,10 +799,9 @@ describe("RoomMessageHandler", () => {
 
     releaseFirst.resolve();
 
-    const [result, followupResult] = await Promise.all([resultPromise, followupPromise]);
+    await Promise.all([resultPromise, followupPromise]);
 
-    expect(result?.response).toBe("done");
-    expect(followupResult).toBeNull();
+    expect(sent[0]).toBe("done");
     expect(promptCallCount).toBe(1);
     expect(steerCalls).toHaveLength(1);
     expect(steerCalls[0].content[0].text).toContain("second line");
@@ -865,10 +825,10 @@ describe("RoomMessageHandler", () => {
       },
     });
 
-    const result = await handler.execute(incoming);
+    const sent: string[] = [];
+    await handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async (text) => { sent.push(text); } });
 
-    expect(result.response).toContain("default is");
-    expect(result.resolved.helpRequested).toBe(true);
+    expect(sent[0]).toContain("default is");
 
     await history.close();
   });
@@ -892,16 +852,13 @@ describe("RoomMessageHandler", () => {
       },
     });
 
-    const result = await handler.handleIncomingMessage(incoming, {
+    await handler.handleIncomingMessage(incoming, {
       isDirect: true,
       sendResponse: async (text) => {
         sent.push(text);
       },
     });
 
-    expect(result?.response).toContain("rate limiting");
-    expect(result?.model).toBeNull();
-    expect(result?.usage).toBeNull();
     expect(sent).toEqual(["alice: Slow down a little, will you? (rate limiting)"]);
 
     const rows = await history.getFullHistory("libera##test");
@@ -926,12 +883,10 @@ describe("RoomMessageHandler", () => {
       history,
       classifyMode: async () => "EASY_SERIOUS",
       autoChronicler,
-      runnerFactory: () => ({
-        prompt: async () => makeRunnerResult("done"),
-      }),
+      runnerFactory: makeRunner("done"),
     });
 
-    await handler.handleIncomingMessage(makeMessage("!s trigger chronicler"), { isDirect: true });
+    await handler.handleIncomingMessage(makeMessage("!s trigger chronicler"), { isDirect: true, sendResponse: async () => {} });
     await handler.handleIncomingMessage(makeMessage("ambient channel line"), { isDirect: false });
 
     expect(autoChronicler.checkAndChronicle).toHaveBeenCalledTimes(2);
@@ -986,40 +941,10 @@ describe("RoomMessageHandler", () => {
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: () => ({
-        prompt: async () => ({
-          assistantMessage: {
-            role: "assistant",
-            content: [{ type: "text", text: "persisted response" }],
-            api: "openai-completions",
-            provider: "openai",
-            model: "gpt-4o-mini",
-            usage: {
-              input: 1,
-              output: 1,
-              cacheRead: 0,
-              cacheWrite: 0,
-              totalTokens: 2,
-              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-            },
-            stopReason: "stop",
-            timestamp: Date.now(),
-          },
-          text: "persisted response",
-          stopReason: "stop",
-          usage: {
-            input: 1,
-            output: 1,
-            cacheRead: 0,
-            cacheWrite: 0,
-            totalTokens: 2,
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-          },
-        }),
-      }),
+      runnerFactory: makeRunner("persisted response"),
     });
 
-    await handler.handleIncomingMessage(incoming, { isDirect: true });
+    await handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async () => {} });
 
     const rows = await history.getFullHistory("libera##test");
     expect(rows).toHaveLength(2);
@@ -1060,26 +985,21 @@ describe("RoomMessageHandler", () => {
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: () => ({
-        prompt: async () =>
-          makeRunnerResult("primary response", {
-            inputTokens: 123,
-            outputTokens: 45,
-            totalCost: 0.35,
-            toolCallsCount: 2,
-          }),
+      runnerFactory: makeRunner("primary response", {
+        inputTokens: 123,
+        outputTokens: 45,
+        totalCost: 0.35,
+        toolCallsCount: 2,
       }),
     });
 
-    const result = await handler.handleIncomingMessage(incoming, {
+    await handler.handleIncomingMessage(incoming, {
       isDirect: true,
       sendResponse: async (text) => {
         sent.push(text);
       },
     });
 
-    expect(result?.response).toBe("primary response");
-    expect(result?.toolCallsCount).toBe(2);
     expect(sent).toEqual([
       "primary response",
       "(this message used 2 tool calls, 123 in / 45 out tokens, and cost $0.3500)",
@@ -1135,20 +1055,18 @@ describe("RoomMessageHandler", () => {
           },
         },
       },
-      runnerFactory: () => ({
-        prompt: async () => makeRunnerResult(longResponse),
-      }),
+      runnerFactory: makeRunner(longResponse),
     });
 
-    const result = await handler.handleIncomingMessage(incoming, {
+    await handler.handleIncomingMessage(incoming, {
       isDirect: true,
       sendResponse: async (text) => {
         sent.push(text);
       },
     });
 
-    expect(result?.response).toContain("... full response: https://example.com/artifacts/?");
-    expect(sent).toEqual([result?.response ?? ""]);
+    expect(sent[0]).toContain("... full response: https://example.com/artifacts/?");
+    expect(sent).toHaveLength(1);
 
     const rows = await history.getFullHistory("libera##test");
     expect(rows).toHaveLength(2);
@@ -1173,14 +1091,13 @@ describe("RoomMessageHandler", () => {
       } as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: () => ({
-        prompt: async () => makeRunnerResult("short answer"),
-      }),
+      runnerFactory: makeRunner("short answer"),
     });
 
-    const result = await handler.handleIncomingMessage(incoming, { isDirect: true });
+    const sent: string[] = [];
+    await handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async (text) => { sent.push(text); } });
 
-    expect(result?.response).toBe("short answer");
+    expect(sent[0]).toBe("short answer");
 
     await history.close();
   });
@@ -1202,19 +1119,16 @@ describe("RoomMessageHandler", () => {
       history,
       classifyMode: async () => "EASY_SERIOUS",
       configData: { agent: { refusalFallbackModel: "anthropic:claude-3-5-haiku" } },
-      runnerFactory: () => ({
-        prompt: async () =>
-          makeRunnerResult("The AI refused to respond to this request", {
-            refusalFallbackActivated: true,
-            refusalFallbackModel: "anthropic:claude-3-5-haiku",
-          }),
+      runnerFactory: makeRunner("The AI refused to respond to this request", {
+        refusalFallbackActivated: true,
+        refusalFallbackModel: "anthropic:claude-3-5-haiku",
       }),
     });
 
-    const result = await handler.handleIncomingMessage(incoming, { isDirect: true });
+    const sent: string[] = [];
+    await handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async (text) => { sent.push(text); } });
 
-    expect(result?.model).toBe("openai:gpt-4o-mini");
-    expect(result?.response).toContain("The AI refused to respond to this request");
+    expect(sent[0]).toContain("The AI refused to respond to this request");
 
     const rows = await history.getFullHistory("libera##test");
     expect(rows).toHaveLength(2);
@@ -1259,22 +1173,19 @@ describe("RoomMessageHandler", () => {
       configData: { agent: { refusalFallbackModel: "anthropic:claude-3-5-haiku" } },
       runnerFactory: (input) => {
         runnerModels.push(input.model);
-        return {
-          prompt: async () =>
-            makeRunnerResult("The AI refused to respond to this request", {
-              refusalFallbackActivated: true,
-              refusalFallbackModel: "anthropic:claude-3-5-haiku",
-            }),
-        };
+        return makeRunner("The AI refused to respond to this request", {
+          refusalFallbackActivated: true,
+          refusalFallbackModel: "anthropic:claude-3-5-haiku",
+        })(input);
       },
     });
 
-    const result = await handler.handleIncomingMessage(incoming, { isDirect: true });
+    const sent: string[] = [];
+    await handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async (text) => { sent.push(text); } });
 
     // Refusal fallback suffix is now appended by SessionRunner (not invokeAndPostProcess),
     // so it doesn't appear when using mock runnerFactory.
-    expect(result?.response).toBe("The AI refused to respond to this request");
-    expect(result?.model).toBe("openai:gpt-4o-mini");
+    expect(sent[0]).toBe("The AI refused to respond to this request");
     expect(runnerModels).toEqual(["openai:gpt-4o-mini"]);
 
     await history.close();
@@ -1298,7 +1209,9 @@ describe("RoomMessageHandler", () => {
       }),
     });
 
-    await expect(handler.execute(incoming)).rejects.toThrow(
+    await expect(
+      handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async () => {} }),
+    ).rejects.toThrow(
       "Agent run failed: invalid_prompt blocked for safety reasons.",
     );
 
@@ -1319,16 +1232,14 @@ describe("RoomMessageHandler", () => {
       configData: { agent: { refusalFallbackModel: "anthropic:claude-3-5-haiku" } },
       runnerFactory: (input) => {
         runnerModels.push(input.model);
-        return {
-          prompt: async () => makeRunnerResult("normal answer"),
-        };
+        return makeRunner("normal answer")(input);
       },
     });
 
-    const result = await handler.handleIncomingMessage(incoming, { isDirect: true });
+    const sent: string[] = [];
+    await handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async (text) => { sent.push(text); } });
 
-    expect(result?.response).toBe("normal answer");
-    expect(result?.model).toBe("openai:gpt-4o-mini");
+    expect(sent[0]).toBe("normal answer");
     expect(runnerModels).toEqual(["openai:gpt-4o-mini"]);
 
     await history.close();
@@ -1357,14 +1268,17 @@ describe("RoomMessageHandler", () => {
           input.onAgentCreated?.(mockAgent as any);
           firstStarted.resolve();
           await releaseFirst.promise;
-          return makeRunnerResult("first response");
+          const result = makeRunnerResult("first response");
+          await input.onResponse(result.text);
+          return result;
         },
       }),
     });
 
+    const sent: string[] = [];
     const t1 = handler.handleIncomingMessage(makeMessage("!s first"), {
       isDirect: true,
-      sendResponse: async () => {},
+      sendResponse: async (text) => { sent.push(text); },
     });
 
     await firstStarted.promise;
@@ -1380,12 +1294,10 @@ describe("RoomMessageHandler", () => {
 
     releaseFirst.resolve();
 
-    const [result1, result2, result3] = await Promise.all([t1, t2, t3]);
+    await Promise.all([t1, t2, t3]);
 
     expect(runCount).toBe(1);
-    expect(result1?.response).toBe("first response");
-    expect(result2).toBeNull();
-    expect(result3).toBeNull();
+    expect(sent[0]).toBe("first response");
     expect(steerCalls).toHaveLength(2);
     const steeredTexts = steerCalls.map((c: any) => c.content[0].text);
     expect(steeredTexts.some((t: string) => t.includes("second"))).toBe(true);
@@ -1417,7 +1329,9 @@ describe("RoomMessageHandler", () => {
           resolveStarted.resolve();
           await releaseResolve.promise;
           input.onAgentCreated?.(mockAgent as any);
-          return makeRunnerResult("done");
+          const result = makeRunnerResult("done");
+          await input.onResponse(result.text);
+          return result;
         },
       }),
     });
@@ -1476,14 +1390,17 @@ describe("RoomMessageHandler", () => {
           input.onAgentCreated?.(mockAgent as any);
           firstStarted.resolve();
           await releaseFirst.promise;
-          return makeRunnerResult("first response");
+          const result = makeRunnerResult("first response");
+          await input.onResponse(result.text);
+          return result;
         },
       }),
     });
 
+    const sent: string[] = [];
     const t1 = handler.handleIncomingMessage(
       { ...makeMessage("!s first"), threadId: "thread-1" },
-      { isDirect: true, sendResponse: async () => {} },
+      { isDirect: true, sendResponse: async (text) => { sent.push(text); } },
     );
 
     await firstStarted.promise;
@@ -1500,11 +1417,9 @@ describe("RoomMessageHandler", () => {
 
     releaseFirst.resolve();
 
-    const [result1, result2, result3] = await Promise.all([t1, t2, t3]);
+    await Promise.all([t1, t2, t3]);
 
-    expect(result1?.response).toBe("first response");
-    expect(result2).toBeNull();
-    expect(result3).toBeNull();
+    expect(sent[0]).toBe("first response");
     expect(steerCalls).toHaveLength(2);
     const steeredTexts = steerCalls.map((c: any) => c.content[0].text);
     expect(steeredTexts).toContainEqual(expect.stringContaining("bob"));
@@ -1535,7 +1450,9 @@ describe("RoomMessageHandler", () => {
           input.onAgentCreated?.(mockAgent as any);
           firstStarted.resolve();
           await releaseFirst.promise;
-          return makeRunnerResult("first response");
+          const result = makeRunnerResult("first response");
+          await input.onResponse(result.text);
+          return result;
         },
       }),
     });
@@ -1559,16 +1476,9 @@ describe("RoomMessageHandler", () => {
     await p3Persisted;
     releaseFirst.resolve();
 
-    const [result1, passiveResult1, passiveResult2, commandResult2, passiveResult3] = await Promise.all([
-      t1, p1, p2, c2, p3,
-    ]);
+    await Promise.all([t1, p1, p2, c2, p3]);
 
-    expect(result1?.response).toBe("first response");
     expect(sent).toEqual(["first response"]);
-    expect(passiveResult1).toBeNull();
-    expect(passiveResult2).toBeNull();
-    expect(commandResult2).toBeNull(); // steered, not a separate run
-    expect(passiveResult3).toBeNull();
     // All 4 messages should have been steered into the agent
     expect(steerCalls).toHaveLength(4);
 
@@ -1587,13 +1497,11 @@ describe("RoomMessageHandler", () => {
       classifyMode: async () => "EASY_SERIOUS",
       runnerFactory: (input) => {
         capturedCallback = input.onAgentCreated;
-        return {
-          prompt: async () => makeRunnerResult("ok"),
-        };
+        return makeRunner("ok")(input);
       },
     });
 
-    await handler.handleIncomingMessage(makeMessage("!s hello"), { isDirect: true });
+    await handler.handleIncomingMessage(makeMessage("!s hello"), { isDirect: true, sendResponse: async () => {} });
 
     expect(capturedCallback).toBeDefined();
 
@@ -1617,17 +1525,16 @@ describe("RoomMessageHandler", () => {
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: (input) => {
-        return {
-          prompt: async () => {
-            // Simulate agent creation callback
-            input.onAgentCreated?.(mockAgent as any);
-            firstStarted.resolve();
-            await releaseFirst.promise;
-            return makeRunnerResult("done");
-          },
-        };
-      },
+      runnerFactory: (input) => ({
+        prompt: async () => {
+          input.onAgentCreated?.(mockAgent as any);
+          firstStarted.resolve();
+          await releaseFirst.promise;
+          const result = makeRunnerResult("done");
+          await input.onResponse(result.text);
+          return result;
+        },
+      }),
     });
 
     const t1 = handler.handleIncomingMessage(makeMessage("!s first"), {
@@ -1690,29 +1597,35 @@ describe("RoomMessageHandler", () => {
             input.onAgentCreated?.(mockAgent as any);
             agentReady.resolve();
             await releaseAgent.promise;
-            // No session returned → backgroundWork completes instantly
-            return makeRunnerResult("done");
+            const result = makeRunnerResult("done");
+            await input.onResponse(result.text);
+            return result;
           }
           // Second invocation — just return immediately
           input.onAgentCreated?.({ steer() {} } as any);
-          return makeRunnerResult("second response");
+          const result = makeRunnerResult("second response");
+          await input.onResponse(result.text);
+          return result;
         },
       }),
     });
 
+    const sent1: string[] = [];
+    const sent2: string[] = [];
+
     // Start first command
     const resultPromise = handler.handleIncomingMessage(makeMessage("!s first"), {
       isDirect: true,
-      sendResponse: async () => {},
+      sendResponse: async (text) => { sent1.push(text); },
     });
 
     await agentReady.promise;
     releaseAgent.resolve();
 
     // Wait until triggerAutoChronicler starts — by this point execute()
-    // has completed deliverResult, called onResponseDelivered (deregistering
-    // steering), and awaited backgroundWork. But execute() itself hasn't
-    // returned yet because triggerAutoChronicler is blocked.
+    // has completed delivering the response and called onResponseDelivered
+    // (deregistering steering), and awaited backgroundWork. But execute()
+    // itself hasn't returned yet because triggerAutoChronicler is blocked.
     await chroniclerStarted.promise;
 
     // Send a second message from the same user while execute() is still
@@ -1721,19 +1634,19 @@ describe("RoomMessageHandler", () => {
     // its own session.
     const secondResult = handler.handleIncomingMessage(makeMessage("!s second message"), {
       isDirect: true,
-      sendResponse: async () => {},
+      sendResponse: async (text) => { sent2.push(text); },
     });
 
     // Release the chronicler so execute() can return.
     releaseChronicler.resolve();
 
-    const [result1, result2] = await Promise.all([resultPromise, secondResult]);
+    await Promise.all([resultPromise, secondResult]);
 
-    expect(result1?.response).toBe("done");
+    expect(sent1[0]).toBe("done");
     // The second message must NOT have been steered into the first session
     expect(steerCalls).toHaveLength(0);
     // It should have started its own session and got its own response
-    expect(result2?.response).toBe("second response");
+    expect(sent2[0]).toBe("second response");
     expect(runCount).toBe(2);
 
     await history.close();
@@ -1769,10 +1682,12 @@ describe("RoomMessageHandler", () => {
       roomConfig: proactiveRoomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: () => ({
+      runnerFactory: (input) => ({
         prompt: async () => {
           runnerCalled = true;
-          return makeRunnerResult("proactive response");
+          const result = makeRunnerResult("proactive response");
+          await input.onResponse(result.text);
+          return result;
         },
       }),
       // Mock the model adapter to return a low score so proactive declines
@@ -1824,10 +1739,12 @@ describe("RoomMessageHandler", () => {
     const handler = createHandler({
       roomConfig: proactiveRoomConfig as any,
       history,
-      runnerFactory: () => ({
+      runnerFactory: (input) => ({
         prompt: async () => {
           proactivePromptReached.resolve();
-          return makeRunnerResult("NULL");
+          const result = makeRunnerResult("NULL");
+          await input.onResponse(result.text);
+          return result;
         },
       }),
       modelAdapter: {
@@ -1911,10 +1828,12 @@ describe("RoomMessageHandler", () => {
       roomConfig: proactiveRoomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: () => ({
+      runnerFactory: (input) => ({
         prompt: async (prompt) => {
           runnerPrompts.push(prompt);
-          return makeRunnerResult("command response");
+          const result = makeRunnerResult("command response");
+          await input.onResponse(result.text);
+          return result;
         },
       }),
     });
@@ -1931,7 +1850,7 @@ describe("RoomMessageHandler", () => {
     await passivePersisted;
 
     // Now send a command — should preempt the proactive debounce
-    const commandResult = await handler.handleIncomingMessage(makeMessage("!s direct question"), {
+    await handler.handleIncomingMessage(makeMessage("!s direct question"), {
       isDirect: true,
       sendResponse: async (text) => { sent.push(text); },
     });
@@ -1939,7 +1858,6 @@ describe("RoomMessageHandler", () => {
     await passivePromise;
 
     // The command should have been executed
-    expect(commandResult?.response).toBe("command response");
     expect(sent).toContain("command response");
     expect(runnerPrompts.some(p => p.includes("direct question"))).toBe(true);
 
@@ -1977,10 +1895,12 @@ describe("RoomMessageHandler", () => {
       roomConfig: proactiveRoomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: () => ({
+      runnerFactory: (input) => ({
         prompt: async (prompt) => {
           runnerPrompts.push(prompt);
-          return makeRunnerResult("command response");
+          const result = makeRunnerResult("command response");
+          await input.onResponse(result.text);
+          return result;
         },
       }),
     });
@@ -1997,7 +1917,7 @@ describe("RoomMessageHandler", () => {
     await passivePersisted;
 
     // Command from bob (different nick) — should preempt the proactive debounce
-    const commandResult = await handler.handleIncomingMessage(
+    await handler.handleIncomingMessage(
       { ...makeMessage("!s direct question"), nick: "bob" },
       {
         isDirect: true,
@@ -2008,7 +1928,6 @@ describe("RoomMessageHandler", () => {
     await passivePromise;
 
     // The command should have been executed
-    expect(commandResult?.response).toBe("command response");
     expect(sent).toContain("command response");
     expect(runnerPrompts.some(p => p.includes("direct question"))).toBe(true);
 
@@ -2061,7 +1980,9 @@ describe("RoomMessageHandler", () => {
           input.onAgentCreated?.(fakeAgent as any);
           agentStarted.resolve();
           await releaseAgent.promise;
-          return makeRunnerResult("proactive response");
+          const result = makeRunnerResult("proactive response");
+          await input.onResponse(result.text);
+          return result;
         },
       }),
       modelAdapter: {
@@ -2156,11 +2077,15 @@ describe("RoomMessageHandler", () => {
             input.onAgentCreated?.({ steer() {} } as any);
             agentStarted.resolve();
             await releaseAgent.promise;
-            return makeRunnerResult("proactive response");
+            const r = makeRunnerResult("proactive response");
+            await input.onResponse(r.text);
+            return r;
           }
           commandRunnerCalled = true;
           input.onAgentCreated?.({ steer() {} } as any);
-          return makeRunnerResult("command response");
+          const r = makeRunnerResult("command response");
+          await input.onResponse(r.text);
+          return r;
         },
       }),
       modelAdapter: {
@@ -2180,12 +2105,14 @@ describe("RoomMessageHandler", () => {
 
     // Command should still execute independently
     isProactiveCall = false;
-    const result = await handler.handleIncomingMessage(makeMessage("!s direct question"), {
+    const sent: string[] = [];
+    await handler.handleIncomingMessage(makeMessage("!s direct question"), {
       isDirect: true,
+      sendResponse: async (text) => { sent.push(text); },
     });
 
     expect(commandRunnerCalled).toBe(true);
-    expect(result?.response).toBe("command response");
+    expect(sent[0]).toBe("command response");
 
     releaseAgent.resolve();
     await passivePromise;
@@ -2207,7 +2134,7 @@ describe("RoomMessageHandler", () => {
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: () => ({
+      runnerFactory: (input) => ({
         prompt: async (prompt) => {
           runCount += 1;
           prompts.push(prompt);
@@ -2215,9 +2142,13 @@ describe("RoomMessageHandler", () => {
           if (runCount === 1) {
             aliceStarted.resolve();
             await releaseAlice.promise;
-            return makeRunnerResult("alice reply");
+            const result = makeRunnerResult("alice reply");
+            await input.onResponse(result.text);
+            return result;
           }
-          return makeRunnerResult("bob reply");
+          const result = makeRunnerResult("bob reply");
+          await input.onResponse(result.text);
+          return result;
         },
       }),
     });
@@ -2239,11 +2170,11 @@ describe("RoomMessageHandler", () => {
     );
 
     releaseAlice.resolve();
-    const [r1, r2] = await Promise.all([t1, t2]);
+    await Promise.all([t1, t2]);
 
     expect(runCount).toBe(2);
-    expect(r1?.response).toBe("alice reply");
-    expect(r2?.response).toBe("bob reply");
+    expect(sent).toContain("alice reply");
+    expect(sent).toContain("bob reply");
     expect(prompts.some(p => p.includes("<alice> alice question"))).toBe(true);
     expect(prompts.some(p => p.includes("<bob> bob question"))).toBe(true);
 
@@ -2264,7 +2195,7 @@ describe("RoomMessageHandler", () => {
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: () => ({
+      runnerFactory: (input) => ({
         prompt: async (prompt) => {
           runCount += 1;
           prompts.push(prompt);
@@ -2272,31 +2203,37 @@ describe("RoomMessageHandler", () => {
           if (runCount === 1) {
             firstStarted.resolve();
             await releaseFirst.promise;
-            return makeRunnerResult("chan1 reply");
+            const result = makeRunnerResult("chan1 reply");
+            await input.onResponse(result.text);
+            return result;
           }
-          return makeRunnerResult("chan2 reply");
+          const result = makeRunnerResult("chan2 reply");
+          await input.onResponse(result.text);
+          return result;
         },
       }),
     });
 
+    const sent1: string[] = [];
+    const sent2: string[] = [];
     const t1 = handler.handleIncomingMessage(
       { ...makeMessage("!s first"), channelName: "#foo", arc: "libera##foo" },
-      { isDirect: true, sendResponse: async () => {} },
+      { isDirect: true, sendResponse: async (text) => { sent1.push(text); } },
     );
 
     await firstStarted.promise;
 
     const t2 = handler.handleIncomingMessage(
       { ...makeMessage("!s second"), channelName: "#bar", arc: "libera##bar" },
-      { isDirect: true, sendResponse: async () => {} },
+      { isDirect: true, sendResponse: async (text) => { sent2.push(text); } },
     );
 
     releaseFirst.resolve();
-    const [r1, r2] = await Promise.all([t1, t2]);
+    await Promise.all([t1, t2]);
 
     expect(runCount).toBe(2);
-    expect(r1?.response).toBe("chan1 reply");
-    expect(r2?.response).toBe("chan2 reply");
+    expect(sent1[0]).toBe("chan1 reply");
+    expect(sent2[0]).toBe("chan2 reply");
 
     await history.close();
   });
@@ -2325,7 +2262,9 @@ describe("RoomMessageHandler", () => {
           input.onAgentCreated?.(mockAgent as any);
           firstStarted.resolve();
           await releaseFirst.promise;
-          return makeRunnerResult("reply 1");
+          const result = makeRunnerResult("reply 1");
+          await input.onResponse(result.text);
+          return result;
         },
       }),
     });
@@ -2347,12 +2286,9 @@ describe("RoomMessageHandler", () => {
     });
 
     releaseFirst.resolve();
-    const [r1, r2, r3] = await Promise.all([t1, t2, t3]);
+    await Promise.all([t1, t2, t3]);
 
     expect(runCount).toBe(1);
-    expect(r1?.response).toBe("reply 1");
-    expect(r2).toBeNull();
-    expect(r3).toBeNull();
     expect(steerCalls).toHaveLength(2);
     expect(sent).toEqual(["reply 1"]);
 
@@ -2370,13 +2306,15 @@ describe("RoomMessageHandler", () => {
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: (_input) => ({
+      runnerFactory: (input) => ({
         prompt: async () => {
           runCount += 1;
           if (runCount === 1) {
             throw new Error("runner exploded");
           }
-          return makeRunnerResult("recovered");
+          const result = makeRunnerResult("recovered");
+          await input.onResponse(result.text);
+          return result;
         },
       }),
     });
@@ -2390,13 +2328,12 @@ describe("RoomMessageHandler", () => {
     ).rejects.toThrow("runner exploded");
 
     // Second command should start a fresh session (no stale entry in map)
-    const result = await handler.handleIncomingMessage(makeMessage("!s second"), {
+    await handler.handleIncomingMessage(makeMessage("!s second"), {
       isDirect: true,
       sendResponse: async (text) => { sent.push(text); },
     });
 
     expect(runCount).toBe(2);
-    expect(result?.response).toBe("recovered");
     expect(sent).toContain("recovered");
 
     await history.close();
@@ -2420,15 +2357,13 @@ describe("RoomMessageHandler", () => {
       }),
     });
 
-    const r1 = await handler.handleIncomingMessage(makeMessage("just chatting"), {
+    await handler.handleIncomingMessage(makeMessage("just chatting"), {
       isDirect: false,
     });
-    const r2 = await handler.handleIncomingMessage(makeMessage("more chat"), {
+    await handler.handleIncomingMessage(makeMessage("more chat"), {
       isDirect: false,
     });
 
-    expect(r1).toBeNull();
-    expect(r2).toBeNull();
     expect(runCount).toBe(0);
 
     await history.close();
@@ -2455,9 +2390,7 @@ describe("RoomMessageHandler", () => {
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: () => ({
-        prompt: async () => makeRunnerResult("bot reply"),
-      }),
+      runnerFactory: makeRunner("bot reply"),
     });
 
     await handler.handleIncomingMessage(incoming, {
@@ -2493,9 +2426,7 @@ describe("RoomMessageHandler", () => {
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: () => ({
-        prompt: async () => makeRunnerResult("bot reply"),
-      }),
+      runnerFactory: makeRunner("bot reply"),
     });
 
     await handler.handleIncomingMessage(incoming, {
@@ -2536,9 +2467,7 @@ describe("RoomMessageHandler", () => {
       } as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: () => ({
-        prompt: async () => makeRunnerResult("expensive answer", { totalCost: 0.5, toolCallsCount: 3 }),
-      }),
+      runnerFactory: makeRunner("expensive answer", { totalCost: 0.5, toolCallsCount: 3 }),
     });
 
     await handler.handleIncomingMessage(incoming, {
@@ -2595,9 +2524,7 @@ describe("RoomMessageHandler", () => {
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: () => ({
-        prompt: async () => makeRunnerResult("bot reply"),
-      }),
+      runnerFactory: makeRunner("bot reply"),
     });
 
     await handler.handleIncomingMessage(incoming, {

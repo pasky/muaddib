@@ -155,7 +155,7 @@ export class ProactiveRunner {
    */
   steerOrStart(
     message: RoomMessage,
-    sendResponse: SendResponse | undefined,
+    sendResponse: SendResponse,
     hasActiveCommandSession: () => boolean,
   ): boolean {
     const channelKey = CommandResolver.channelKey(message.serverTag, message.channelName);
@@ -199,7 +199,7 @@ export class ProactiveRunner {
    */
   private async runSession(
     message: RoomMessage,
-    sendResponse: SendResponse | undefined,
+    sendResponse: SendResponse,
     hasActiveCommandSession: () => boolean,
   ): Promise<void> {
     const debounceMs = this.config.debounceSeconds * 1000;
@@ -243,7 +243,7 @@ export class ProactiveRunner {
 
   private async evaluateAndMaybeInterject(
     message: RoomMessage,
-    sendResponse: SendResponse | undefined,
+    sendResponse: SendResponse,
     channelKey: string,
   ): Promise<void> {
     if (!this.rateLimiter.checkLimit()) {

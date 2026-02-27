@@ -70,14 +70,29 @@ describe("runCliMessageMode", () => {
     const result = await runCliMessageMode({
       configPath,
       message: "!s hi",
-      runnerFactory: () => ({
-        prompt: async () => ({
-          assistantMessage: {
-            role: "assistant",
-            content: [{ type: "text", text: "cli ok" }],
-            api: "openai-completions",
-            provider: "openai",
-            model: "gpt-4o-mini",
+      runnerFactory: (input) => ({
+        prompt: async () => {
+          await input.onResponse("cli ok");
+          return {
+            assistantMessage: {
+              role: "assistant",
+              content: [{ type: "text", text: "cli ok" }],
+              api: "openai-completions",
+              provider: "openai",
+              model: "gpt-4o-mini",
+              usage: {
+                input: 1,
+                output: 1,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 2,
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+              },
+              stopReason: "stop",
+              timestamp: Date.now(),
+            },
+            text: "cli ok",
+            stopReason: "stop",
             usage: {
               input: 1,
               output: 1,
@@ -86,26 +101,12 @@ describe("runCliMessageMode", () => {
               totalTokens: 2,
               cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
             },
-            stopReason: "stop",
-            timestamp: Date.now(),
-          },
-          text: "cli ok",
-          stopReason: "stop",
-          usage: {
-            input: 1,
-            output: 1,
-            cacheRead: 0,
-            cacheWrite: 0,
-            totalTokens: 2,
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-          },
-        }),
+          };
+        },
       }),
     });
 
     expect(result.response).toBe("cli ok");
-    expect(result.mode).toBe("serious");
-    expect(result.trigger).toBe("!s");
 
     const date = new Date().toISOString().slice(0, 10);
     const arcLogDir = join(dir, "logs", date, "testserver##testchannel");
@@ -152,14 +153,29 @@ describe("runCliMessageMode", () => {
     const result = await runCliMessageMode({
       configPath,
       message: "!s hi",
-      runnerFactory: () => ({
-        prompt: async () => ({
-          assistantMessage: {
-            role: "assistant",
-            content: [{ type: "text", text: "cli ok" }],
-            api: "openai-completions",
-            provider: "openai",
-            model: "gpt-4o-mini",
+      runnerFactory: (input) => ({
+        prompt: async () => {
+          await input.onResponse("cli ok");
+          return {
+            assistantMessage: {
+              role: "assistant",
+              content: [{ type: "text", text: "cli ok" }],
+              api: "openai-completions",
+              provider: "openai",
+              model: "gpt-4o-mini",
+              usage: {
+                input: 1,
+                output: 1,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 2,
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+              },
+              stopReason: "stop",
+              timestamp: Date.now(),
+            },
+            text: "cli ok",
+            stopReason: "stop",
             usage: {
               input: 1,
               output: 1,
@@ -168,20 +184,8 @@ describe("runCliMessageMode", () => {
               totalTokens: 2,
               cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
             },
-            stopReason: "stop",
-            timestamp: Date.now(),
-          },
-          text: "cli ok",
-          stopReason: "stop",
-          usage: {
-            input: 1,
-            output: 1,
-            cacheRead: 0,
-            cacheWrite: 0,
-            totalTokens: 2,
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-          },
-        }),
+          };
+        },
       }),
     });
 
@@ -330,14 +334,29 @@ describe("runCliMessageMode", () => {
     const result = await runCliMessageMode({
       configPath,
       message: "!s hi",
-      runnerFactory: () => ({
-        prompt: async () => ({
-          assistantMessage: {
-            role: "assistant",
-            content: [{ type: "text", text: "cli ok" }],
-            api: "openai-completions",
-            provider: "openai",
-            model: "gpt-4o-mini",
+      runnerFactory: (input) => ({
+        prompt: async () => {
+          await input.onResponse("cli ok");
+          return {
+            assistantMessage: {
+              role: "assistant",
+              content: [{ type: "text", text: "cli ok" }],
+              api: "openai-completions",
+              provider: "openai",
+              model: "gpt-4o-mini",
+              usage: {
+                input: 1,
+                output: 1,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 2,
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+              },
+              stopReason: "stop",
+              timestamp: Date.now(),
+            },
+            text: "cli ok",
+            stopReason: "stop",
             usage: {
               input: 1,
               output: 1,
@@ -346,20 +365,8 @@ describe("runCliMessageMode", () => {
               totalTokens: 2,
               cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
             },
-            stopReason: "stop",
-            timestamp: Date.now(),
-          },
-          text: "cli ok",
-          stopReason: "stop",
-          usage: {
-            input: 1,
-            output: 1,
-            cacheRead: 0,
-            cacheWrite: 0,
-            totalTokens: 2,
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-          },
-        }),
+          };
+        },
       }),
     });
 

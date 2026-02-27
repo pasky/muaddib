@@ -13,7 +13,6 @@ import { CommandResolver } from "./resolver.js";
 import { buildProactiveConfig, ProactiveRunner } from "./proactive.js";
 import {
   CommandExecutor,
-  type CommandExecutionResult,
   type CommandExecutorOverrides,
   type CommandExecutorLogger,
   type SendResponse,
@@ -25,7 +24,6 @@ import { formatUtcTime } from "../../utils/index.js";
 
 // Re-export types that external consumers depend on
 export type {
-  CommandExecutionResult,
   CommandRunnerFactory,
   CommandRunnerFactoryInput,
   CommandRateLimiter,
@@ -95,7 +93,11 @@ export class RoomMessageHandler {
   async handleIncomingMessage(
     message: RoomMessage,
     options: { isDirect: boolean; sendResponse?: SendResponse },
-  ): Promise<CommandExecutionResult | null> {
+  ): Promise<void> {
+    // Wrap optional sendResponse with a no-op so all internal paths receive a
+    // required SendResponse without needing to guard against undefined.
+    const sendResponse: SendResponse = options.sendResponse ?? (async () => {});
+
     // ── Synchronous steer fast-path ──
     // Check for an active session BEFORE the async addMessage call.  Without
     // this, the addMessage await creates a gap during which the session can
@@ -111,7 +113,7 @@ export class RoomMessageHandler {
         this.history.addMessage(message).catch((err) => {
           this.logger.error("Failed to persist steered message to history", String(err));
         });
-        return null;
+        return;
       }
     }
 
@@ -123,8 +125,8 @@ export class RoomMessageHandler {
         `arc=${message.arc}`,
         `nick=${message.nick}`,
       );
-      await this.handlePassiveMessage(message, options.sendResponse);
-      return null;
+      await this.handlePassiveMessage(message, sendResponse);
+      return;
     }
 
     this.logger.debug(
@@ -136,25 +138,19 @@ export class RoomMessageHandler {
     // Messages that bypass steering (help, parse errors, no-context, non-steering modes)
     try {
       if (this.resolver.shouldBypassSteering(message)) {
-        return await this.executor.execute(message, triggerTs, options.sendResponse);
+        await this.executor.execute(message, triggerTs, sendResponse);
+        return;
       }
 
-      return await this.handleCommandMessage(message, triggerTs, options.sendResponse);
+      await this.handleCommandMessage(message, triggerTs, sendResponse);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       this.logger.error("Agent execution failed", `nick=${message.nick}`, `error=${errorMsg}`);
-      if (options.sendResponse) {
-        await options.sendResponse(errorMsg).catch((sendErr) => {
-          this.logger.error("Failed to send error reply to room", sendErr);
-        });
-      }
+      await sendResponse(errorMsg).catch((sendErr) => {
+        this.logger.error("Failed to send error reply to room", sendErr);
+      });
       throw error;
     }
-  }
-
-  /** Direct execution without steering (for CLI / tests). */
-  async execute(message: RoomMessage): Promise<CommandExecutionResult> {
-    return this.executor.execute(message, "", undefined);
   }
 
   // ── Session lifecycle: commands ──
@@ -162,14 +158,14 @@ export class RoomMessageHandler {
   private async handleCommandMessage(
     message: RoomMessage,
     triggerTs: string,
-    sendResponse: SendResponse | undefined,
-  ): Promise<CommandExecutionResult | null> {
+    sendResponse: SendResponse,
+  ): Promise<void> {
     const key = sessionKey(message);
     const existing = this.activeSteers.get(key);
 
     if (existing) {
       existing(message);
-      return null;
+      return;
     }
 
     // Register a buffering steer function immediately so messages arriving
@@ -178,7 +174,7 @@ export class RoomMessageHandler {
     this.activeSteers.set(key, (msg) => { pending.push(msg); });
 
     try {
-      return await this.executor.execute(
+      await this.executor.execute(
         message, triggerTs, sendResponse,
         (agent) => {
           // Flush buffered messages, then swap to direct steering.
@@ -231,7 +227,7 @@ export class RoomMessageHandler {
 
   private async handlePassiveMessage(
     message: RoomMessage,
-    sendResponse: SendResponse | undefined,
+    sendResponse: SendResponse,
   ): Promise<void> {
     const key = sessionKey(message);
 

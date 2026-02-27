@@ -137,7 +137,7 @@ describe("SlackRoomMonitor", () => {
         handleIncomingMessage: async (message, options) => {
           seenText = message.content;
           isDirect = options.isDirect;
-          return { response: "ok" };
+          await options.sendResponse?.("ok");
         },
       },
     });
@@ -170,7 +170,6 @@ describe("SlackRoomMonitor", () => {
         handleIncomingMessage: async (message) => {
           seenText = message.content;
           seenSecrets = message.secrets as Record<string, unknown> | undefined;
-          return null;
         },
       },
     });
@@ -225,7 +224,6 @@ describe("SlackRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async (message) => {
           seenText = message.content;
-          return null;
         },
       },
     });
@@ -256,7 +254,6 @@ describe("SlackRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async (message) => {
           seenText = message.content;
-          return null;
         },
       },
     });
@@ -286,7 +283,6 @@ describe("SlackRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async (message) => {
           seenText = message.content;
-          return null;
         },
       },
     });
@@ -326,7 +322,6 @@ describe("SlackRoomMonitor", () => {
           mappedPlatformId = message.platformId ?? "";
           mappedNick = message.nick;
           mappedMynick = message.mynick;
-          return null;
         },
       },
     });
@@ -371,7 +366,6 @@ describe("SlackRoomMonitor", () => {
           seenThreadId = message.threadId;
           seenResponseThreadId = message.responseThreadId;
           await options.sendResponse?.("ok");
-          return { response: "ok" };
         },
       },
     });
@@ -414,7 +408,6 @@ describe("SlackRoomMonitor", () => {
         handleIncomingMessage: async (message, options) => {
           seenResponseThreadId = message.responseThreadId;
           await options.sendResponse?.("ok");
-          return { response: "ok" };
         },
       },
     });
@@ -454,7 +447,6 @@ describe("SlackRoomMonitor", () => {
         handleIncomingMessage: async (message, options) => {
           seenThreadId = message.threadId;
           await options.sendResponse?.("ok");
-          return { response: "ok" };
         },
       },
     });
@@ -506,7 +498,6 @@ describe("SlackRoomMonitor", () => {
         handleIncomingMessage: async (_message, options) => {
           await options.sendResponse?.("first");
           await options.sendResponse?.("second");
-          return { response: "second" };
         },
       },
     });
@@ -559,7 +550,7 @@ describe("SlackRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async (_message, options) => {
           await options.sendResponse?.("@Alice please check this");
-          return { response: "ok" };
+          await options.sendResponse?.("ok");
         },
       },
     });
@@ -576,7 +567,7 @@ describe("SlackRoomMonitor", () => {
       mentionsBot: true,
     });
 
-    expect(sent).toEqual(["<@U123> please check this"]);
+    expect(sent).toEqual(["<@U123> please check this", "ok"]);
 
     await history.close();
   });
@@ -603,7 +594,6 @@ describe("SlackRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async (_message, options) => {
           await options.sendResponse?.("working");
-          return { response: "working" };
         },
       },
     });
@@ -646,7 +636,7 @@ describe("SlackRoomMonitor", () => {
       roomConfig: { enabled: true },
       history,
       commandHandler: {
-        handleIncomingMessage: async () => null,
+        handleIncomingMessage: async () => {},
       },
     });
 
@@ -684,7 +674,6 @@ describe("SlackRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async () => {
           called = true;
-          return null;
         },
       },
     });
@@ -731,7 +720,6 @@ describe("SlackRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async (_message, options) => {
           await options.sendResponse?.("ok");
-          return { response: "ok" };
         },
       },
     });
@@ -774,7 +762,6 @@ describe("SlackRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async (_message, options) => {
           await options.sendResponse?.("ok");
-          return { response: "ok" };
         },
       },
     });
@@ -825,7 +812,7 @@ describe("SlackRoomMonitor", () => {
         sendMessage: async () => {},
       },
       commandHandler: {
-        handleIncomingMessage: async () => null,
+        handleIncomingMessage: async () => {},
       },
     });
 
@@ -885,7 +872,6 @@ describe("SlackRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async (message) => {
           processed.push(message.content);
-          return null;
         },
       },
     });
@@ -924,7 +910,7 @@ describe("SlackRoomMonitor", () => {
         receiveEvent: async () => null,
       },
       commandHandler: {
-        handleIncomingMessage: async () => null,
+        handleIncomingMessage: async () => {},
       },
     });
 
@@ -963,7 +949,7 @@ describe("SlackRoomMonitor", () => {
         },
       },
       commandHandler: {
-        handleIncomingMessage: async () => null,
+        handleIncomingMessage: async () => {},
       },
     });
 
@@ -1002,7 +988,7 @@ describe("SlackRoomMonitor", () => {
         },
       },
       commandHandler: {
-        handleIncomingMessage: async () => null,
+        handleIncomingMessage: async () => {},
       },
     });
 
@@ -1060,7 +1046,6 @@ describe("SlackRoomMonitor", () => {
           if (processed.length === 1) {
             throw new Error("boom");
           }
-          return null;
         },
       },
     });

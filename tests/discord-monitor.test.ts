@@ -114,7 +114,6 @@ describe("DiscordRoomMonitor", () => {
           seenMessage = message.content;
           isDirect = options.isDirect;
           await options.sendResponse?.("ok");
-          return { response: "ok" };
         },
       },
     });
@@ -157,7 +156,6 @@ describe("DiscordRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async (_message, options) => {
           await options.sendResponse?.("ok");
-          return { response: "ok" };
         },
       },
     });
@@ -188,7 +186,7 @@ describe("DiscordRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async (message) => {
           seenContent = message.content;
-          return null;
+
         },
       },
     });
@@ -239,7 +237,7 @@ describe("DiscordRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async () => {
           runtimeLogs.getLogger("muaddib.tests.command").debug("inside discord direct handler");
-          return null;
+
         },
       },
     });
@@ -281,7 +279,7 @@ describe("DiscordRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async (message) => {
           seenMessage = message.content;
-          return null;
+
         },
       },
     });
@@ -314,7 +312,7 @@ describe("DiscordRoomMonitor", () => {
         handleIncomingMessage: async (message) => {
           mappedServerTag = message.serverTag;
           mappedPlatformId = message.platformId ?? "";
-          return null;
+
         },
       },
     });
@@ -354,7 +352,6 @@ describe("DiscordRoomMonitor", () => {
         handleIncomingMessage: async (message, options) => {
           seenThreadId = message.threadId;
           await options.sendResponse?.("ok");
-          return { response: "ok" };
         },
       },
     });
@@ -410,7 +407,6 @@ describe("DiscordRoomMonitor", () => {
         handleIncomingMessage: async (_message, options) => {
           await options.sendResponse?.("first");
           await options.sendResponse?.("second");
-          return { response: "second" };
         },
       },
     });
@@ -467,7 +463,6 @@ describe("DiscordRoomMonitor", () => {
         handleIncomingMessage: async (_message, options) => {
           await options.sendResponse?.("first");
           await options.sendResponse?.("second");
-          return { response: "second" };
         },
       },
     });
@@ -519,7 +514,7 @@ describe("DiscordRoomMonitor", () => {
       roomConfig: { enabled: true },
       history,
       commandHandler: {
-        handleIncomingMessage: async () => null,
+        handleIncomingMessage: async () => {},
       },
     });
 
@@ -555,7 +550,7 @@ describe("DiscordRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async (_message, options) => {
           isDirect = options.isDirect;
-          return null;
+
         },
       },
     });
@@ -601,7 +596,6 @@ describe("DiscordRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async (_message, options) => {
           await options.sendResponse?.("ok");
-          return { response: "ok" };
         },
       },
     });
@@ -643,7 +637,6 @@ describe("DiscordRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async (_message, options) => {
           await options.sendResponse?.("ok");
-          return { response: "ok" };
         },
       },
     });
@@ -693,7 +686,7 @@ describe("DiscordRoomMonitor", () => {
         sendMessage: async () => {},
       },
       commandHandler: {
-        handleIncomingMessage: async () => null,
+        handleIncomingMessage: async () => {},
       },
     });
 
@@ -752,7 +745,6 @@ describe("DiscordRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async (message) => {
           processed.push(message.content);
-          return null;
         },
       },
     });
@@ -791,7 +783,7 @@ describe("DiscordRoomMonitor", () => {
         receiveEvent: async () => null,
       },
       commandHandler: {
-        handleIncomingMessage: async () => null,
+        handleIncomingMessage: async () => {},
       },
     });
 
@@ -830,7 +822,7 @@ describe("DiscordRoomMonitor", () => {
         },
       },
       commandHandler: {
-        handleIncomingMessage: async () => null,
+        handleIncomingMessage: async () => {},
       },
     });
 
@@ -869,7 +861,7 @@ describe("DiscordRoomMonitor", () => {
         },
       },
       commandHandler: {
-        handleIncomingMessage: async () => null,
+        handleIncomingMessage: async () => {},
       },
     });
 
@@ -925,7 +917,7 @@ describe("DiscordRoomMonitor", () => {
           if (processed.length === 1) {
             throw new Error("boom");
           }
-          return null;
+
         },
       },
     });
@@ -949,7 +941,7 @@ describe("DiscordRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async (message) => {
           seenMessage = message.content;
-          return null;
+
         },
       },
     });

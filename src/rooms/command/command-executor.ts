@@ -37,7 +37,7 @@ import { RateLimiter } from "./rate-limiter.js";
 import {
   CommandResolver,
   type CommandConfig,
-  type ResolvedCommand,
+
 } from "./resolver.js";
 import type { ProactiveConfig } from "./proactive.js";
 import { extractAssistantText, generateToolSummaryFromSession } from "./tool-summary.js";
@@ -62,14 +62,6 @@ export interface SendResult {
 /** Callback for sending a message to the room. May return the outbound platform ID. */
 export type SendResponse = (text: string) => Promise<SendResult | void>;
 
-export interface CommandExecutionResult {
-  response: string | null;
-  resolved: ResolvedCommand;
-  model: string | null;
-  usage: Usage | null;
-  toolCallsCount: number;
-}
-
 export interface CommandRunnerFactoryInput {
   model: string;
   systemPrompt: string;
@@ -77,7 +69,7 @@ export interface CommandRunnerFactoryInput {
   metaReminder?: string;
   progressThresholdSeconds?: number;
   progressMinIntervalSeconds?: number;
-  onResponse?: (text: string) => void | Promise<void>;
+  onResponse: (text: string) => void | Promise<void>;
   logger?: Logger;
   onAgentCreated?: (agent: Agent) => void;
 }
@@ -224,10 +216,10 @@ export class CommandExecutor {
   async execute(
     message: RoomMessage,
     triggerTs: string,
-    sendResponse: SendResponse | undefined,
+    sendResponse: SendResponse,
     onAgentCreated?: (agent: Agent) => void,
     onResponseDelivered?: () => void,
-  ): Promise<CommandExecutionResult> {
+  ): Promise<void> {
     const { commandConfig, logger } = this;
     const defaultSize = commandConfig.historySize;
     const maxSize = Math.max(
@@ -235,14 +227,22 @@ export class CommandExecutor {
       ...Object.values(commandConfig.modes).map((mode) => Number(mode.historySize ?? 0)),
     );
 
+    // ── Unified delivery: send + persist (used for all responses) ──
+    const deliver = async (text: string, persistOptions?: { cost?: number; mode?: string }): Promise<void> => {
+      logger.info("Delivering response", `arc=${message.arc}`, `response=${text}`);
+      const sr = await sendResponse(text);
+      await this.persistBotResponse(message.arc, message, text, sr ?? undefined, {
+        run: triggerTs,
+        ...persistOptions,
+      });
+    };
+
     // ── Rate limit ──
 
     if (!this.rateLimiter.checkLimit()) {
       logger.warn("Rate limit triggered", `arc=${message.arc}`, `nick=${message.nick}`);
-      return await this.deliverResult(message, triggerTs, sendResponse, {
-        response: `${message.nick}: Slow down a little, will you? (rate limiting)`,
-        resolved: EMPTY_RESOLVED,
-      });
+      await deliver(`${message.nick}: Slow down a little, will you? (rate limiting)`);
+      return;
     }
 
     logger.info(
@@ -270,22 +270,19 @@ export class CommandExecutor {
         `error=${resolved.error}`,
         `content=${message.content}`,
       );
-      return await this.deliverResult(message, triggerTs, sendResponse, {
-        response: `${message.nick}: ${resolved.error}`, resolved,
-      });
+      await deliver(`${message.nick}: ${resolved.error}`);
+      return;
     }
 
     if (resolved.helpRequested) {
       logger.debug("Sending help message", `nick=${message.nick}`);
-      return await this.deliverResult(message, triggerTs, sendResponse, {
-        response: this.resolver.buildHelpMessage(message.serverTag, message.channelName), resolved,
-      });
+      await deliver(this.resolver.buildHelpMessage(message.serverTag, message.channelName));
+      return;
     }
 
     if (!resolved.modeKey || !resolved.runtime || !resolved.selectedTrigger) {
-      return await this.deliverResult(message, triggerTs, sendResponse, {
-        response: `${message.nick}: Internal command resolution error.`, resolved,
-      });
+      await deliver(`${message.nick}: Internal command resolution error.`);
+      return;
     }
 
     const modeConfig = commandConfig.modes[resolved.modeKey];
@@ -296,9 +293,8 @@ export class CommandExecutor {
       null;
 
     if (!modelSpec) {
-      return await this.deliverResult(message, triggerTs, sendResponse, {
-        response: `${message.nick}: No model configured for mode '${resolved.modeKey}'.`, resolved,
-      });
+      await deliver(`${message.nick}: No model configured for mode '${resolved.modeKey}'.`);
+      return;
     }
 
     if (resolved.modelOverride) {
@@ -382,24 +378,13 @@ export class CommandExecutor {
       ...selectedContext.slice(0, -1),
     ];
 
-    // Unified response callback: sends to room + persists in history.
-    // Used for all agent text (intermediate + final), status messages, and
-    // progress reports (via the same callback passed into selectTools).
-    // Tracks invocation so deliverResult can skip re-sending the final text.
-    let responseDeliveredViaCallback = false;
-    const onResponse: ((text: string) => void | Promise<void>) | undefined =
-      sendResponse
-        ? async (text: string) => {
-            responseDeliveredViaCallback = true;
-            let cleaned = this.cleanResponseText(text, message.nick);
-            cleaned = await this.applyResponseLengthPolicy(cleaned, message.arc);
-            const sr = await sendResponse(cleaned);
-            const sendResult = sr ? sr : undefined;
-            await this.persistBotResponse(message.arc, message, cleaned, sendResult, {
-              run: triggerTs,
-            });
-          }
-        : undefined;
+    // Agent response callback: cleans text + applies length policy, then delivers.
+    // Used for all agent text (intermediate + final) and progress reports.
+    const onResponse = async (text: string): Promise<void> => {
+      let cleaned = this.cleanResponseText(text, message.nick);
+      cleaned = await this.applyResponseLengthPolicy(cleaned, message.arc);
+      await deliver(cleaned, { mode: resolved.selectedTrigger ?? undefined });
+    };
 
     const toolSet = this.selectTools(message, resolved.runtime.allowedTools, runnerContext, onResponse);
 
@@ -427,42 +412,62 @@ export class CommandExecutor {
       }, triggerTs,
     );
 
+    // Log the completed agent run with cost/context stats.
+    const costStr = usage ? `$${usage.cost.total.toFixed(4)}` : "?";
+    let ctxStr = usage ? `${Math.round(usage.input / 1000)}k` : "?";
+    if (usage) {
+      try {
+        const ctxWindow = this.modelAdapter.resolve(modelSpec).model.contextWindow;
+        if (ctxWindow > 0) {
+          ctxStr += `/${Math.round(ctxWindow / 1000)}k(${Math.round((usage.input / ctxWindow) * 100)}%)`;
+        }
+      } catch { /* model resolution may fail for edge cases — keep absolute count */ }
+    }
+
     if (!responseText) {
       logger.info(
         "Agent chose not to answer",
         `arc=${message.arc}`,
         `mode=${resolved.selectedLabel}`,
         `trigger=${resolved.selectedTrigger}`,
+        `ctx=${ctxStr}`,
+        `cost=${costStr}`,
+      );
+    } else {
+      logger.info(
+        "Agent response delivered",
+        `mode=${resolved.selectedLabel ?? "n/a"}`,
+        `trigger=${resolved.selectedTrigger ?? "n/a"}`,
+        `ctx=${ctxStr}`,
+        `cost=${costStr}`,
+        `arc=${message.arc}`,
+        `response=${responseText}`,
       );
     }
 
-    // ── Deliver & persist ──
-    // Agent responses are already sent+persisted by onResponse callback during
-    // execution, so deliverResult only needs to handle cost followups.
-
-    const result = await this.deliverResult(message, triggerTs, sendResponse, {
-      response: responseText || null, resolved, model: modelSpec, usage, toolCallsCount,
-      alreadyDelivered: responseDeliveredViaCallback,
-    });
-
-    // Signal that the response has been delivered — callers can deregister
+    // Signal that the primary response has been delivered — callers can deregister
     // steering before the potentially long background work begins.
     onResponseDelivered?.();
 
-    // Tool summary, memory update, and session dispose run after the response is sent.
+    // Cost followups, background work, and chronicle run after the response is delivered.
+    if (usage) {
+      await this.emitCostFollowups(message, usage, toolCallsCount, deliver);
+    }
+
     await backgroundWork;
     await this.triggerAutoChronicler(message, this.commandConfig.historySize);
-
-    return result;
   }
 
   /**
    * Execute a proactive interjection in serious mode with extra prompt.
    * Returns true if a response was actually sent.
+   *
+   * Proactive responses send only model text outputs — no progress reports,
+   * no error messages to the room.
    */
   async executeProactive(
     message: RoomMessage,
-    sendResponse: SendResponse | undefined,
+    sendResponse: SendResponse,
     proactiveConfig: ProactiveConfig,
     classifiedTrigger: string,
     classifiedRuntime: { reasoningEffort: string; allowedTools: string[] | null },
@@ -485,26 +490,29 @@ export class CommandExecutor {
 
     const proactiveProgressConfig = this.agentConfig.progress;
 
-    // Proactive responses are prefixed with the model tag so readers know who's talking.
-    // Tracks invocation so the post-run path can skip re-sending when the callback
-    // already delivered the final response.
-    let responseDeliveredViaCallback = false;
-    const onResponse: ((text: string) => void | Promise<void>) | undefined =
-      sendResponse
-        ? async (text: string) => {
-            responseDeliveredViaCallback = true;
-            let cleaned = this.cleanResponseText(text, message.nick);
-            cleaned = await this.applyResponseLengthPolicy(cleaned, message.arc);
-            const prefixed = `[${modelStrCore(modelSpec)}] ${cleaned}`;
-            const sr = await sendResponse(prefixed);
-            const sendResult = sr ? sr : undefined;
-            await this.persistBotResponse(message.arc, message, prefixed, sendResult, {
-              mode: classifiedTrigger,
-            });
-          }
-        : undefined;
+    // Proactive delivery: prefix with model tag, send + persist.
+    const deliver = async (text: string): Promise<void> => {
+      const sr = await sendResponse(text);
+      await this.persistBotResponse(message.arc, message, text, sr ?? undefined, {
+        mode: classifiedTrigger,
+      });
+    };
 
-    const toolSet = this.selectTools(message, classifiedRuntime.allowedTools, runnerContext, onResponse);
+    // Proactive agent response: cleans text, prefixes with model tag, then delivers.
+    // Progress reports are intentionally excluded — only model text outputs are sent.
+    // NULL sentinels and error prefixes are suppressed here so they never reach the room.
+    let proactiveDelivered = false;
+    const onResponse = async (text: string): Promise<void> => {
+      let cleaned = this.cleanResponseText(text, message.nick);
+      cleaned = await this.applyResponseLengthPolicy(cleaned, message.arc);
+      if (!cleaned || isNullSentinel(cleaned) || cleaned.startsWith("Error: ")) return;
+      proactiveDelivered = true;
+      await deliver(`[${modelStrCore(modelSpec)}] ${cleaned}`);
+    };
+
+    // selectTools is called WITHOUT onResponse as onProgressReport — proactive
+    // sessions must not flood the room with tool progress messages.
+    const toolSet = this.selectTools(message, classifiedRuntime.allowedTools, runnerContext);
 
     const runner = this.runnerFactory({
       model: modelSpec,
@@ -531,29 +539,12 @@ export class CommandExecutor {
       return false;
     }
 
-    const proactiveText = result.responseText.trim();
-    if (!proactiveText || proactiveText.startsWith("Error: ") || isNullSentinel(proactiveText)) {
-      logger.info(
-        "Agent decided not to interject proactively",
-        `arc=${message.arc}`,
-      );
+    // onResponse already filters NULL sentinels, errors, and empty text —
+    // check whether anything was actually delivered to the room.
+    if (!proactiveDelivered) {
+      logger.info("Agent decided not to interject proactively", `arc=${message.arc}`);
       await result.backgroundWork;
       return false;
-    }
-
-    const responseText = `[${modelStrCore(modelSpec)}] ${proactiveText}`;
-
-    // onResponse already sent + persisted when the real SessionRunner fires it.
-    // Fall back to explicit send+persist for mock/custom runner factories.
-    if (!responseDeliveredViaCallback) {
-      let proactiveSendResult: SendResult | undefined;
-      if (sendResponse) {
-        const sr = await sendResponse(responseText);
-        if (sr) proactiveSendResult = sr;
-      }
-      await this.persistBotResponse(message.arc, message, responseText, proactiveSendResult, {
-        mode: classifiedTrigger,
-      });
     }
 
     logger.info(
@@ -561,7 +552,7 @@ export class CommandExecutor {
       `arc=${message.arc}`,
       `label=${classifiedTrigger}`,
       `trigger=${classifiedTrigger}`,
-      `response=${responseText}`,
+      `response=${result.responseText}`,
     );
 
     await result.backgroundWork;
@@ -641,132 +632,45 @@ export class CommandExecutor {
     };
   }
 
-  // ── Response delivery & persistence ──
+  // ── Cost followups ──
 
   /**
-   * Deliver a command execution result: log LLM call, send response,
-   * persist bot message, and emit cost followups.
+   * Emit cost followup and daily milestone messages after an agent run.
    *
-   * When `alreadyDelivered` is set, the response was already sent+persisted
-   * by the onResponse callback during agent execution — only cost followups run.
+   * The cost is recorded in the JSONL via the cost followup persist (cost > 0.2).
+   * Small costs (≤ 0.2) are not stored individually; they're too small to shift
+   * a whole-dollar milestone boundary on their own.
+   *
+   * `deliver` is the same send+persist closure used for all other responses,
+   * ensuring cost messages are logged and persisted consistently.
    */
-  private async deliverResult(
-    message: RoomMessage,
-    triggerTs: string,
-    sendResponse: SendResponse | undefined,
-    partial: {
-      response: string | null;
-      resolved: ResolvedCommand;
-      model?: string | null;
-      usage?: Usage | null;
-      toolCallsCount?: number;
-      alreadyDelivered?: boolean;
-    },
-  ): Promise<CommandExecutionResult> {
-    const { alreadyDelivered, ...rest } = partial;
-    const result: CommandExecutionResult = {
-      model: null,
-      usage: null,
-      toolCallsCount: 0,
-      ...rest,
-    };
-
-    if (!result.response) {
-      return result;
-    }
-
-    const { logger } = this;
-    const arcName = message.arc;
-
-    const costStr = result.usage ? `$${result.usage.cost.total.toFixed(4)}` : "?";
-    let ctxStr = result.usage ? `${Math.round(result.usage.input / 1000)}k` : "?";
-    if (result.usage && result.model) {
-      try {
-        const ctxWindow = this.modelAdapter.resolve(result.model).model.contextWindow;
-        if (ctxWindow > 0) {
-          ctxStr += `/${Math.round(ctxWindow / 1000)}k(${Math.round((result.usage.input / ctxWindow) * 100)}%)`;
-        }
-      } catch { /* model resolution may fail for edge cases — keep absolute count */ }
-    }
-    logger.info(
-      "Sending direct response",
-      `mode=${result.resolved.selectedLabel ?? "n/a"}`,
-      `trigger=${result.resolved.selectedTrigger ?? "n/a"}`,
-      `ctx=${ctxStr}`,
-      `cost=${costStr}`,
-      `arc=${arcName}`,
-      `response=${result.response}`,
-    );
-
-    if (!alreadyDelivered) {
-      logger.debug(
-        "Persisting direct command response",
-        `arc=${arcName}`,
-        `model=${result.model ?? "n/a"}`,
-        `tool_calls=${result.toolCallsCount}`,
-      );
-
-      let sendResult: SendResult | undefined;
-      if (sendResponse) {
-        const sr = await sendResponse(result.response);
-        if (sr) sendResult = sr;
-      }
-
-      await this.persistBotResponse(arcName, message, result.response, sendResult, {
-        mode: result.resolved.selectedTrigger ?? undefined,
-        run: triggerTs || undefined,
-        call: result.model ? "agent_run" : undefined,
-        model: result.model ?? undefined,
-        inTok: result.usage?.input,
-        outTok: result.usage?.output,
-        cost: result.usage?.cost.total,
-      });
-
-      logger.debug(
-        "Direct command response stored",
-        `arc=${arcName}`,
-      );
-    }
-
-    logger.debug(
-      "Direct command response stored",
-      `arc=${arcName}`,
-    );
-
-    await this.emitCostFollowups(message, result, arcName, sendResponse, triggerTs);
-
-    return result;
-  }
-
   private async emitCostFollowups(
     message: RoomMessage,
-    result: CommandExecutionResult,
-    arcName: string,
-    sendResponse: SendResponse | undefined,
-    triggerTs?: string,
+    usage: Usage,
+    toolCallsCount: number,
+    deliver: (text: string, opts?: { cost?: number }) => Promise<void>,
   ): Promise<void> {
-    if (!sendResponse || !result.usage) {
-      return;
-    }
-
     const { history, logger } = this;
-    const totalCost = result.usage.cost.total;
+    const arcName = message.arc;
+    const totalCost = usage.cost.total;
     if (!(totalCost > 0)) {
       return;
     }
 
     if (totalCost > 0.2) {
       const costMessage = `(${[
-        `this message used ${result.toolCallsCount} tool calls`,
-        `${result.usage.input} in / ${result.usage.output} out tokens`,
+        `this message used ${toolCallsCount} tool calls`,
+        `${usage.input} in / ${usage.output} out tokens`,
         `and cost $${totalCost.toFixed(4)}`,
       ].join(", ")})`;
 
       logger.info("Sending cost followup", `arc=${arcName}`, `cost=${totalCost.toFixed(4)}`);
-      const costSendResult = await sendResponse(costMessage);
-      const costSR = costSendResult ? costSendResult : undefined;
-      await this.persistBotResponse(arcName, message, costMessage, costSR, { run: triggerTs });
+      // Pass cost so getArcCostToday includes it for the milestone check below.
+      await deliver(costMessage, { cost: totalCost });
     }
+    // Costs ≤ $0.20 are not stored (no followup message sent).
+    // They're too small to trigger a whole-dollar milestone on their own,
+    // so the milestone check below remains accurate in practice.
 
     const totalToday = await history.getArcCostToday(arcName);
     const costBefore = totalToday - totalCost;
@@ -779,9 +683,7 @@ export class CommandExecutor {
     const milestoneMessage =
       `(fun fact: my messages in this channel have already cost $${totalToday.toFixed(4)} today)`;
     logger.info("Sending daily cost milestone", `arc=${arcName}`, `total_today=${totalToday.toFixed(4)}`);
-    const milestoneSendResult = await sendResponse(milestoneMessage);
-    const milestoneSR = milestoneSendResult ? milestoneSendResult : undefined;
-    await this.persistBotResponse(arcName, message, milestoneMessage, milestoneSR, { run: triggerTs });
+    await deliver(milestoneMessage);
   }
 
   // ── Bot message persistence ──
@@ -985,20 +887,6 @@ export class CommandExecutor {
     return { tools: toolSet.tools.filter((tool) => allowed.has(tool.name)), dispose: toolSet.dispose, systemPromptSuffix: toolSet.systemPromptSuffix };
   }
 }
-
-const EMPTY_RESOLVED: ResolvedCommand = Object.freeze({
-  noContext: false,
-  queryText: "",
-  modelOverride: null,
-  selectedLabel: null,
-  selectedTrigger: null,
-  modeKey: null,
-  runtime: null,
-  helpRequested: false,
-  selectedAutomatically: false,
-});
-
-// ── Module-level helpers ──
 
 // ── Shared utility functions (exported for message-handler) ──
 

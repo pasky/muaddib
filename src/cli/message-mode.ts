@@ -21,9 +21,6 @@ export interface CliMessageModeOptions {
 
 export interface CliMessageModeResult {
   response: string | null;
-  mode: string | null;
-  trigger: string | null;
-  selectedAutomatically: boolean;
 }
 
 /**
@@ -60,7 +57,10 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
     };
 
     const arc = message.arc;
-    const result = await runtimeLogger.withMessageContext(
+    const responses: string[] = [];
+    const sendResponse = async (text: string) => { responses.push(text); };
+
+    await runtimeLogger.withMessageContext(
       {
         arc,
         nick: message.nick,
@@ -69,14 +69,12 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
       async () =>
         await commandHandler.handleIncomingMessage(message, {
           isDirect: true,
+          sendResponse,
         }),
     );
 
     return {
-      response: result?.response ?? null,
-      mode: result?.resolved.modeKey ?? null,
-      trigger: result?.resolved.selectedTrigger ?? null,
-      selectedAutomatically: result?.resolved.selectedAutomatically ?? false,
+      response: responses.length > 0 ? responses[responses.length - 1] : null,
     };
   } finally {
     await shutdownRuntime(runtime);

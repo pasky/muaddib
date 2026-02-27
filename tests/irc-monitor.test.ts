@@ -120,7 +120,7 @@ describe("IrcRoomMonitor", () => {
             nick: message.mynick,
             content: "line1\nline2",
           });
-          return { response: "line1\nline2" };
+
         },
       },
       varlinkEvents: new FakeEventsClient(),
@@ -174,7 +174,6 @@ describe("IrcRoomMonitor", () => {
         handleIncomingMessage: async (message, options) => {
           directFlag = options.isDirect;
           await history.addMessage(message);
-          return null;
         },
       },
       varlinkEvents: new FakeEventsClient(),
@@ -265,7 +264,6 @@ describe("IrcRoomMonitor", () => {
             content: message.content,
             isDirect: options.isDirect,
           });
-          return null;
         },
       },
       varlinkEvents: {
@@ -315,7 +313,7 @@ describe("IrcRoomMonitor", () => {
       },
       history,
       commandHandler: {
-        handleIncomingMessage: async () => null,
+        handleIncomingMessage: async () => {},
       },
       varlinkEvents: {
         connect: async () => {},
@@ -367,7 +365,7 @@ describe("IrcRoomMonitor", () => {
       },
       history,
       commandHandler: {
-        handleIncomingMessage: async () => null,
+        handleIncomingMessage: async () => {},
       },
       varlinkEvents: {
         connect: async () => {},
@@ -418,7 +416,7 @@ describe("IrcRoomMonitor", () => {
         } as unknown as NodeJS.WriteStream,
       }).getLogger("muaddib.rooms.irc.monitor"),
       commandHandler: {
-        handleIncomingMessage: async () => null,
+        handleIncomingMessage: async () => {},
       },
       varlinkEvents: {
         connect: async () => {
@@ -482,7 +480,6 @@ describe("IrcRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async () => {
           runtimeLogs.getLogger("muaddib.tests.command").debug("inside direct handler marker");
-          return null;
         },
       },
       varlinkEvents: new FakeEventsClient(),
@@ -571,7 +568,6 @@ describe("IrcRoomMonitor", () => {
           if (processed.length === 1) {
             throw new Error("boom");
           }
-          return null;
         },
       },
       varlinkEvents: {
@@ -644,7 +640,6 @@ describe("IrcRoomMonitor", () => {
           if (message.content === "first") {
             firstStarted.resolve();
             await releaseFirst.promise;
-            return null;
           }
 
           if (message.content === "second") {
@@ -652,7 +647,6 @@ describe("IrcRoomMonitor", () => {
             releaseFirst.resolve();
           }
 
-          return null;
         },
       },
       varlinkEvents: {

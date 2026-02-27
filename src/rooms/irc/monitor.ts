@@ -34,7 +34,7 @@ interface CommandLike {
   handleIncomingMessage(
     message: RoomMessage,
     options: { isDirect: boolean; sendResponse?: (text: string) => Promise<void> },
-  ): Promise<{ response: string | null } | null>;
+  ): Promise<void>;
   cancelProactive?(): void;
 }
 

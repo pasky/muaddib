@@ -33,6 +33,38 @@ function buildRoomConfig() {
   };
 }
 
+function makeRunnerResult(text: string) {
+  return {
+    assistantMessage: {
+      role: "assistant",
+      content: [{ type: "text", text }],
+      api: "openai-completions",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      usage: {
+        input: 1,
+        output: 1,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 2,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "stop",
+      timestamp: Date.now(),
+    },
+    text,
+    stopReason: "stop",
+    usage: {
+      input: 1,
+      output: 1,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 2,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+  };
+}
+
 describe("room adapters share RoomMessageHandler behavior", () => {
   it("Discord adapter persists user+assistant via shared handler", async () => {
     const history = createTempHistoryStore(20);
@@ -49,38 +81,15 @@ describe("room adapters share RoomMessageHandler behavior", () => {
       }),
       "irc",
       {
-        runnerFactory: () => ({
-          prompt: async () => ({
-            assistantMessage: {
-              role: "assistant",
-              content: [{ type: "text", text: "discord-shared" }],
-            api: "openai-completions",
-            provider: "openai",
-            model: "gpt-4o-mini",
-            usage: {
-              input: 1,
-              output: 1,
-              cacheRead: 0,
-              cacheWrite: 0,
-              totalTokens: 2,
-              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-            },
-            stopReason: "stop",
-            timestamp: Date.now(),
-          },
-          text: "discord-shared",
-          stopReason: "stop",
-          usage: {
-            input: 1,
-            output: 1,
-            cacheRead: 0,
-            cacheWrite: 0,
-            totalTokens: 2,
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        runnerFactory: (input) => ({
+          prompt: async () => {
+            const result = makeRunnerResult("discord-shared");
+            await input.onResponse(result.text);
+            return result;
           },
         }),
-      }),
-    });
+      },
+    );
 
     const sent: string[] = [];
     const monitor = new DiscordRoomMonitor({
@@ -133,36 +142,12 @@ describe("room adapters share RoomMessageHandler behavior", () => {
       }),
       "irc",
       {
-        runnerFactory: () => ({
-          prompt: async () => ({
-            assistantMessage: {
-              role: "assistant",
-              content: [{ type: "text", text: "slack-shared" }],
-              api: "openai-completions",
-              provider: "openai",
-              model: "gpt-4o-mini",
-              usage: {
-                input: 1,
-                output: 1,
-                cacheRead: 0,
-                cacheWrite: 0,
-                totalTokens: 2,
-                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-              },
-              stopReason: "stop",
-              timestamp: Date.now(),
-            },
-            text: "slack-shared",
-            stopReason: "stop",
-            usage: {
-              input: 1,
-              output: 1,
-              cacheRead: 0,
-              cacheWrite: 0,
-              totalTokens: 2,
-              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-            },
-          }),
+        runnerFactory: (input) => ({
+          prompt: async () => {
+            const result = makeRunnerResult("slack-shared");
+            await input.onResponse(result.text);
+            return result;
+          },
         }),
       },
     );
