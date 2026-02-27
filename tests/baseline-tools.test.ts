@@ -106,6 +106,18 @@ describe("baseline agent tools", () => {
     expect(onProgress).toHaveBeenCalledTimes(1);
   });
 
+  it("progress_report suppresses callback when muted", async () => {
+    const onProgress = vi.fn(async () => {});
+    const tool = createProgressReportTool({ onProgressReport: onProgress });
+    tool.muted = true;
+
+    const result = await tool.execute("call-1", { text: "working" }, undefined, undefined);
+
+    expect(onProgress).not.toHaveBeenCalled();
+    expect(result.content[0]).toEqual({ type: "text", text: "OK (muted)" });
+    expect(result.details.muted).toBe(true);
+  });
+
   it("progress_report returns OK for empty text without calling callback", async () => {
     const onProgress = vi.fn(async () => {});
     const tool = createProgressReportTool({ onProgressReport: onProgress });

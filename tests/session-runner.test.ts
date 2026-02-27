@@ -608,7 +608,7 @@ describe("SessionRunner", () => {
     expect(deliveredTexts).toEqual(["Main response."]);
     // Suppressed text should be logged at info level
     const infoArgs = logger.info.mock.calls.map((c: any[]) => c[0]);
-    expect(infoArgs).toContain("Suppressing post-prompt text response");
+    expect(infoArgs).toContain("Suppressing post-response text");
   });
 
   it("appends refusal fallback suffix to messages after fallback activates", async () => {

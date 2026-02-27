@@ -13,6 +13,7 @@ import {
 } from "./session-factory.js";
 import { compactJson, emptyUsage, safeJson, truncateForDebug } from "./debug-utils.js";
 import type { ToolSet } from "./tools/types.js";
+import type { ProgressReportTool } from "./tools/control.js";
 
 const DEFAULT_EMPTY_COMPLETION_RETRY_PROMPT =
   "<meta>No valid text or tool use found in response. Please try again.</meta>";
@@ -153,7 +154,7 @@ export class SessionRunner {
           if (text && this.onResponse && !responseMuted) {
             this.onResponse(responseSuffix ? `${text} ${responseSuffix}` : text);
           } else if (text && responseMuted) {
-            this.logger.info("Suppressing post-prompt text response", truncateForDebug(text, 200));
+            this.logger.info("Suppressing post-response text", truncateForDebug(text, 200));
           }
 
           this.logger.debug(
@@ -258,7 +259,11 @@ export class SessionRunner {
           : undefined,
         session,
         bumpMaxIterations: sessionCtx.bumpMaxIterations,
-        muteResponses: () => { responseMuted = true; },
+        muteResponses: () => {
+          responseMuted = true;
+          const prTool = this.tools.find((t) => t.name === "progress_report") as ProgressReportTool | undefined;
+          if (prTool) prTool.muted = true;
+        },
       };
     } finally {
       // Error-path safety: if the session is never returned (exception before return),

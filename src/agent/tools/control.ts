@@ -9,6 +9,8 @@ interface ProgressReportToolOptions {
 
 export interface ProgressReportTool extends MuaddibTool {
   lastSentAt: number;
+  /** When true, execute silently returns OK without firing the callback. */
+  muted: boolean;
 }
 
 export function createProgressReportTool(options: ProgressReportToolOptions = {}): ProgressReportTool {
@@ -16,6 +18,7 @@ export function createProgressReportTool(options: ProgressReportToolOptions = {}
 
   const tool: ProgressReportTool = {
     lastSentAt: 0,
+    muted: false,
     name: "progress_report",
     persistType: "none",
     label: "Progress Report",
@@ -40,6 +43,13 @@ export function createProgressReportTool(options: ProgressReportToolOptions = {}
         return {
           content: [{ type: "text", text: `OK (rate-limited, next report available in ~${waitSec}s)` }],
           details: { reported: clean, rateLimited: true },
+        };
+      }
+
+      if (tool.muted) {
+        return {
+          content: [{ type: "text", text: "OK (muted)" }],
+          details: { reported: clean, muted: true },
         };
       }
 
