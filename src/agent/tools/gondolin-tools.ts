@@ -124,7 +124,6 @@ function buildSystemPromptSuffix(
   const chronicleSuffix = existsSync(getArcChronicleDir(arc))
     ? " Chronicle: you chapters and paragraphs chronicling your experiences, plans, thoughts and observations,.forming the backbone of your consciousness, are at /chronicle/ (read-only)."
     : "";
-  const eventsSuffix = " Events: /events/ for scheduling one-shot and periodic (cron) jobs.";
   const chatHistorySuffix = existsSync(getArcChatHistoryDir(arc))
     ? " Chat history: raw JSONL logs at /chat_history/ (read-only)."
     : "";
@@ -139,7 +138,6 @@ function buildSystemPromptSuffix(
     " Environment: Alpine Linux, uv venv is active." +
     chronicleSuffix +
     chatHistorySuffix +
-    eventsSuffix +
     artifactsSuffix +
     skillsSection +
     memorySuffix
