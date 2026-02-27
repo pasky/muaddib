@@ -432,15 +432,6 @@ export class CommandExecutor {
       } catch { /* model resolution may fail for edge cases — keep absolute count */ }
     }
 
-    logger.info(
-      "Agent run complete",
-      `arc=${message.arc}`,
-      `mode=${resolved.selectedLabel ?? "n/a"}`,
-      `trigger=${resolved.selectedTrigger ?? "n/a"}`,
-      `ctx=${ctxStr}`,
-      `cost=${costStr}`,
-    );
-
     // Signal that the primary response has been delivered — callers can deregister
     // steering before the potentially long background work begins.
     onResponseDelivered?.();
@@ -452,6 +443,15 @@ export class CommandExecutor {
 
     await backgroundWork;
     await this.triggerAutoChronicler(message, this.commandConfig.historySize);
+
+    logger.info(
+      "Agent run complete",
+      `arc=${message.arc}`,
+      `mode=${resolved.selectedLabel ?? "n/a"}`,
+      `trigger=${resolved.selectedTrigger ?? "n/a"}`,
+      `ctx=${ctxStr}`,
+      `cost=${costStr}`,
+    );
   }
 
   /**
@@ -543,14 +543,14 @@ export class CommandExecutor {
       return false;
     }
 
+    await result.backgroundWork;
+    await this.triggerAutoChronicler(message, this.commandConfig.historySize);
+
     logger.info(
       "Proactive response delivered",
       `arc=${message.arc}`,
       `trigger=${classifiedTrigger}`,
     );
-
-    await result.backgroundWork;
-    await this.triggerAutoChronicler(message, this.commandConfig.historySize);
     return true;
   }
 
