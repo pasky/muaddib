@@ -137,24 +137,29 @@ export class DiscordRoomMonitor {
 
     // Register Discord transport on the gateway so events can inject messages.
     if (options?.gateway) {
+      const logWriter = runtime.logger;
       options.gateway.register("discord", {
         inject: async (serverTag, channelName, content) => {
           const guildName = serverTag.replace(/^discord:/, "");
           const channelId = await transport.resolveChannelId(channelName, guildName);
+          const arc = buildArc(serverTag, channelName);
           const message: RoomMessage = {
             serverTag,
             channelName,
-            arc: buildArc(serverTag, channelName),
+            arc,
             nick: "event",
             mynick: roomConfig.botName ?? "Muaddib",
             content,
           };
-          await commandHandler.handleIncomingMessage(message, {
-            isDirect: true,
-            sendResponse: async (text) => {
-              await transport.sendMessage(channelId, text);
-            },
-          });
+          const run = async (): Promise<void> => {
+            await commandHandler.handleIncomingMessage(message, {
+              isDirect: true,
+              sendResponse: async (text) => {
+                await transport.sendMessage(channelId, text);
+              },
+            });
+          };
+          await logWriter.withMessageContext({ arc, nick: "event", message: content }, run);
         },
         send: async (serverTag, channelName, text) => {
           const guildName = serverTag.replace(/^discord:/, "");

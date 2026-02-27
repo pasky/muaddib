@@ -176,24 +176,29 @@ export class SlackRoomMonitor {
     // Use the first transport for sending (all workspaces share the same commandHandler).
     if (options?.gateway && monitors.length > 0) {
       const firstTransport = monitors[0]!.transport;
+      const logWriter = runtime.logger;
       options.gateway.register("slack", {
         inject: async (serverTag, channelName, content) => {
           const rawName = channelName.replace(/^#/, "");
           const channelId = await firstTransport.resolveChannelId(rawName);
+          const arc = buildArc(serverTag, channelName);
           const message: RoomMessage = {
             serverTag,
             channelName,
-            arc: buildArc(serverTag, channelName),
+            arc,
             nick: "event",
             mynick: "Muaddib",
             content,
           };
-          await commandHandler.handleIncomingMessage(message, {
-            isDirect: true,
-            sendResponse: async (text) => {
-              await firstTransport.sendMessage(channelId, text);
-            },
-          });
+          const run = async (): Promise<void> => {
+            await commandHandler.handleIncomingMessage(message, {
+              isDirect: true,
+              sendResponse: async (text) => {
+                await firstTransport.sendMessage(channelId, text);
+              },
+            });
+          };
+          await logWriter.withMessageContext({ arc, nick: "event", message: content }, run);
         },
         send: async (_serverTag, channelName, text) => {
           const rawName = channelName.replace(/^#/, "");

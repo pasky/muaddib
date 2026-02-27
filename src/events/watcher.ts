@@ -9,6 +9,7 @@
  * (synchronous with the VFS operation — no fs.watch needed).
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { readFileSync, readdirSync, unlinkSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -38,6 +39,17 @@ type ParsedEvent = OneShotEvent | PeriodicEvent;
 
 /** Minimum interval for periodic events: 30 minutes. */
 const MIN_PERIOD_MS = 30 * 60 * 1000;
+
+/**
+ * Detach a callback from the current AsyncLocalStorage context.
+ *
+ * `onFileWritten` fires inside the calling agent's `withMessageContext()`,
+ * which means `setTimeout` / `Cron` callbacks inherit that context and
+ * route their logs to the (now-closed) per-message log instead of system.log.
+ * Wrapping with `AsyncLocalStorage.snapshot()` at module-load time captures
+ * an empty context, ensuring timer callbacks always log to system.log.
+ */
+const detach = AsyncLocalStorage.snapshot();
 
 // ── Synthetic message format ────────────────────────────────────────────
 
@@ -207,11 +219,11 @@ export class ArcEventsWatcher {
         return;
       }
 
-      const timer = setTimeout(() => {
+      const timer = setTimeout(() => detach(() => {
         this.jobs.delete(key);
         this.fire(arc, filename, event);
         this.deleteEventFile(arc, filename);
-      }, delayMs);
+      }), delayMs);
 
       // Don't keep the process alive just for event timers.
       if (timer.unref) timer.unref();
@@ -221,7 +233,7 @@ export class ArcEventsWatcher {
       // periodic
       const cron = new Cron(event.schedule, {
         timezone: event.timezone,
-      }, () => {
+      }, () => detach(() => {
         // Rate-limit: enforce minimum 30-minute gap between fires.
         const now = Date.now();
         const last = this.lastFireTime.get(key);
@@ -231,7 +243,7 @@ export class ArcEventsWatcher {
         }
         this.lastFireTime.set(key, now);
         this.fire(arc, filename, event);
-      });
+      }));
 
       this.jobs.set(key, { type: "periodic", handle: cron });
       this.logger?.info(`Events: scheduled periodic ${key} [${event.schedule}]`);

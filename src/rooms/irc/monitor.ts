@@ -104,6 +104,7 @@ export class IrcRoomMonitor {
 
     // Register IRC transport on the gateway so events can inject messages.
     if (options?.gateway) {
+      const logWriter = runtime.logger;
       options.gateway.register("irc", {
         inject: async (serverTag, channelName, content) => {
           await monitor.ready;
@@ -111,21 +112,25 @@ export class IrcRoomMonitor {
           if (!mynick) {
             throw new Error(`Cannot inject into IRC: no nick for server ${serverTag}`);
           }
+          const arc = buildArc(serverTag, channelName);
           const message: RoomMessage = {
             serverTag,
             channelName,
-            arc: buildArc(serverTag, channelName),
+            arc,
             nick: "event",
             mynick,
             content,
           };
-          await commandHandler.handleIncomingMessage(message, {
-            isDirect: true,
-            sendResponse: async (text) => {
-              const responseText = text.replace(/\n+/g, "; ").trim();
-              await varlinkSender.sendMessage(channelName, responseText, serverTag);
-            },
-          });
+          const run = async (): Promise<void> => {
+            await commandHandler.handleIncomingMessage(message, {
+              isDirect: true,
+              sendResponse: async (text) => {
+                const responseText = text.replace(/\n+/g, "; ").trim();
+                await varlinkSender.sendMessage(channelName, responseText, serverTag);
+              },
+            });
+          };
+          await logWriter.withMessageContext({ arc, nick: "event", message: content }, run);
         },
         send: async (serverTag, channelName, text) => {
           await monitor.ready;
