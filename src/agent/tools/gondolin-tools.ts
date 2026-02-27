@@ -734,8 +734,8 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
 
   const tools: MuaddibTool[] = [
     { ...piReadTool, persistType: "none" } as MuaddibTool,
-    { ...piWriteTool, persistType: "none" } as MuaddibTool,
-    { ...piEditTool, persistType: "none" } as MuaddibTool,
+    { ...piWriteTool, persistType: "summary" } as MuaddibTool,
+    { ...piEditTool, persistType: "summary" } as MuaddibTool,
     { ...piBashTool, persistType: "summary" } as MuaddibTool,
     shareArtifactTool,
   ];
