@@ -667,10 +667,20 @@ export class CommandExecutor {
     const arcName = message.arc;
 
     const costStr = result.usage ? `$${result.usage.cost.total.toFixed(4)}` : "?";
+    let ctxStr = result.usage ? `${Math.round(result.usage.input / 1000)}k` : "?";
+    if (result.usage && result.model) {
+      try {
+        const ctxWindow = this.modelAdapter.resolve(result.model).model.contextWindow;
+        if (ctxWindow > 0) {
+          ctxStr += `/${Math.round(ctxWindow / 1000)}k(${Math.round((result.usage.input / ctxWindow) * 100)}%)`;
+        }
+      } catch { /* model resolution may fail for edge cases — keep absolute count */ }
+    }
     logger.info(
       "Sending direct response",
       `mode=${result.resolved.selectedLabel ?? "n/a"}`,
       `trigger=${result.resolved.selectedTrigger ?? "n/a"}`,
+      `ctx=${ctxStr}`,
       `cost=${costStr}`,
       `arc=${arcName}`,
       `response=${result.response}`,

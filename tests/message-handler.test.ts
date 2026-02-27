@@ -476,6 +476,7 @@ describe("RoomMessageHandler", () => {
       "Sending direct response",
       "mode=!s",
       "trigger=!s",
+      expect.stringMatching(/^ctx=0k/),
       "cost=$0.0000",
       "arc=libera##test",
       "response=The AI refused to respond to this request",
