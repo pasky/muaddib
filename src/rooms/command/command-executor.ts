@@ -744,7 +744,7 @@ export class CommandExecutor {
     const vars: Record<string, string> = {
       ...promptVars,
       mynick,
-      current_time: formatUtcTime(),
+      current_time: formatUtcTime() + " UTC",
       ...(selectedTrigger ? { current_trigger: selectedTrigger } : {}),
       ...(selectedTrigger && triggerModelVars[`${selectedTrigger}_model`]
         ? { current_model: triggerModelVars[`${selectedTrigger}_model`] }
