@@ -141,8 +141,10 @@ export class SessionRunner {
         const message = event.message as { role?: string };
         if (message.role === "assistant") {
           const text = extractAssistantTextFromEvent(event.message).trim();
-          if (text && this.onResponse) {
+          if (text && this.onResponse && !sessionReturned) {
             this.onResponse(responseSuffix ? `${text} ${responseSuffix}` : text);
+          } else if (text && sessionReturned) {
+            this.logger.info("Suppressing post-prompt text response", truncateForDebug(text, 200));
           }
 
           this.logger.debug(

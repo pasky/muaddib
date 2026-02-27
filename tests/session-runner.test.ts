@@ -544,6 +544,67 @@ describe("SessionRunner", () => {
     expect(result.text).toBe("Done.");
   });
 
+  it("does not fire onResponse for session reuse (e.g. memory update) after main prompt returns", async () => {
+    const callbacks: Array<(event: any) => void> = [];
+    const deliveredTexts: string[] = [];
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    const session = {
+      messages: [] as any[],
+      subscribe: vi.fn((cb: (event: any) => void) => { callbacks.push(cb); return vi.fn(); }),
+      prompt: vi.fn(async () => {
+        session.messages.push({
+          role: "assistant",
+          content: [{ type: "text", text: "Main response." }],
+          usage: makeUsage(),
+          stopReason: "stop",
+        });
+        callbacks.forEach((cb) => cb({ type: "message_end", message: session.messages.at(-1) }));
+        callbacks.forEach((cb) => cb({ type: "turn_end" }));
+      }),
+    };
+
+    mockCreateAgentSessionForInvocation.mockReturnValue({
+      session,
+      agent: { setModel: vi.fn() },
+      ensureProviderKey: vi.fn(async () => {}),
+      getVisionFallbackActivated: () => false,
+    });
+
+    const runner = new SessionRunner({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "sys",
+      authStorage: AuthStorage.inMemory(),
+      logger,
+      modelAdapter: minimalModelAdapter,
+      onResponse: (text: string) => { deliveredTexts.push(text); },
+    });
+
+    const result = await runner.prompt("hello");
+    expect(deliveredTexts).toEqual(["Main response."]);
+    expect(result.session).toBeDefined();
+
+    // Simulate memory update: reuse the returned session for a follow-up prompt
+    session.prompt.mockImplementation(async () => {
+      session.messages.push({
+        role: "assistant",
+        content: [{ type: "text", text: "Memory updated." }],
+        usage: makeUsage(),
+        stopReason: "stop",
+      });
+      callbacks.forEach((cb) => cb({ type: "message_end", message: session.messages.at(-1) }));
+      callbacks.forEach((cb) => cb({ type: "turn_end" }));
+    });
+
+    await result.session!.prompt("update memory");
+
+    // onResponse must NOT have been called for the follow-up text
+    expect(deliveredTexts).toEqual(["Main response."]);
+    // Suppressed text should be logged at info level
+    const infoArgs = logger.info.mock.calls.map((c: any[]) => c[0]);
+    expect(infoArgs).toContain("Suppressing post-prompt text response");
+  });
+
   it("appends refusal fallback suffix to messages after fallback activates", async () => {
     const callbacks: Array<(event: any) => void> = [];
     const deliveredTexts: string[] = [];
