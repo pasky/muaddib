@@ -583,6 +583,10 @@ describe("SessionRunner", () => {
     const result = await runner.prompt("hello");
     expect(deliveredTexts).toEqual(["Main response."]);
     expect(result.session).toBeDefined();
+    expect(result.muteResponses).toBeTypeOf("function");
+
+    // Caller mutes before background work (memory update)
+    result.muteResponses!();
 
     // Simulate memory update: reuse the returned session for a follow-up prompt
     session.prompt.mockImplementation(async () => {

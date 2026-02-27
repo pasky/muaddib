@@ -24,6 +24,8 @@ interface GenerateToolSummaryInput {
   modelAdapter: PiAiModelAdapter;
   logger: Logger;
   arc?: string;
+  /** Assistant text produced during the post-session memory update phase. */
+  memoryUpdateText?: string;
 }
 
 export async function generateToolSummaryFromSession(input: GenerateToolSummaryInput): Promise<string | null> {
@@ -34,6 +36,7 @@ export async function generateToolSummaryFromSession(input: GenerateToolSummaryI
     modelAdapter,
     logger,
     arc,
+    memoryUpdateText,
   } = input;
 
   if (!persistenceSummaryModel || !result.session) {
@@ -53,7 +56,7 @@ export async function generateToolSummaryFromSession(input: GenerateToolSummaryI
         messages: [
           {
             role: "user",
-            content: buildPersistenceSummaryInput(calls),
+            content: buildPersistenceSummaryInput(calls, memoryUpdateText),
             timestamp: Date.now(),
           },
         ],
@@ -133,7 +136,7 @@ function collectPersistentToolCalls(messages: AgentMessage[], tools: MuaddibTool
     });
 }
 
-function buildPersistenceSummaryInput(persistentToolCalls: PersistentToolCall[]): string {
+function buildPersistenceSummaryInput(persistentToolCalls: PersistentToolCall[], memoryUpdateText?: string): string {
   const lines: string[] = ["The following tool calls were made during this conversation:"];
 
   for (const call of persistentToolCalls) {
@@ -146,6 +149,10 @@ function buildPersistenceSummaryInput(persistentToolCalls: PersistentToolCall[])
     for (const artifactUrl of call.artifactUrls) {
       lines.push(`(Tool call I/O stored as artifact: ${artifactUrl})\n`);
     }
+  }
+
+  if (memoryUpdateText) {
+    lines.push(`\n\n# Post-session memory update reasoning\n${memoryUpdateText}`);
   }
 
   lines.push("\nPlease provide a concise summary of what was accomplished in these tool calls.");
@@ -175,4 +182,21 @@ function extractArtifactUrls(result: unknown): string[] {
 
 export function formatToolSummaryLogPreview(text: string, maxChars = 180): string {
   return truncateForDebug(text.replace(/\s+/gu, " ").trim(), maxChars);
+}
+
+/** Extract concatenated text blocks from assistant messages in a message slice. */
+export function extractAssistantText(messages: AgentMessage[]): string | undefined {
+  const parts: string[] = [];
+  for (const msg of messages) {
+    if (msg.role !== "assistant") continue;
+    const content = (msg as AgentMessage & { content?: Array<{ type: string; text?: string }> }).content;
+    if (!Array.isArray(content)) continue;
+    for (const block of content) {
+      if (block.type === "text" && block.text) {
+        parts.push(block.text);
+      }
+    }
+  }
+  const joined = parts.join("\n").trim();
+  return joined || undefined;
 }

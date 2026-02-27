@@ -40,7 +40,7 @@ import {
   type ResolvedCommand,
 } from "./resolver.js";
 import type { ProactiveConfig } from "./proactive.js";
-import { generateToolSummaryFromSession } from "./tool-summary.js";
+import { extractAssistantText, generateToolSummaryFromSession } from "./tool-summary.js";
 import type { Logger } from "../../app/logging.js";
 import type { AgentConfig, MemoryConfig, SkillsConfig } from "../../config/muaddib-config.js";
 import { readFileSync, existsSync } from "node:fs";
@@ -600,12 +600,18 @@ export class CommandExecutor {
     responseText = await this.applyResponseLengthPolicy(responseText, message.arc);
     responseText = this.cleanResponseText(responseText, message.nick);
 
-    // Deferred: tool summary persistence, memory update, session dispose.
+    // Deferred: memory update, tool summary persistence, session dispose.
+    // Memory update runs first so that any tool calls it produces (write/edit
+    // to MEMORY.md) and model reasoning are captured in the persistence summary.
     // Callers await this *after* sending the response so the user isn't blocked.
     const backgroundWork = (async () => {
-      await this.persistGeneratedToolSummary(message, agentResult, tools, triggerTs);
+      // Stop delivering text to the channel — anything produced from here on
+      // (memory update, tool summary) is internal background work.
+      agentResult.muteResponses?.();
+      let memoryUpdateText: string | undefined;
 
       if (opts.memoryUpdate !== false && agentResult.session) {
+        const preMemoryMsgCount = agentResult.session.messages.length;
         try {
           agentResult.bumpMaxIterations?.(5);
           const memoryPrompt = buildMemoryUpdatePrompt(message.arc, this.agentConfig.tools?.memory, {
@@ -616,7 +622,13 @@ export class CommandExecutor {
         } catch (err) {
           this.logger.warn("Memory update failed", String(err));
         }
+        // Collect assistant text produced during memory update for the summary.
+        memoryUpdateText = extractAssistantText(
+          agentResult.session.messages.slice(preMemoryMsgCount),
+        );
       }
+
+      await this.persistGeneratedToolSummary(message, agentResult, tools, triggerTs, memoryUpdateText);
 
       agentResult.session?.dispose();
     })();
@@ -921,6 +933,7 @@ export class CommandExecutor {
     result: PromptResult,
     tools: MuaddibTool[],
     triggerTs?: string,
+    memoryUpdateText?: string,
   ): Promise<void> {
     const summaryText = await generateToolSummaryFromSession({
       result,
@@ -929,6 +942,7 @@ export class CommandExecutor {
       modelAdapter: this.modelAdapter,
       logger: this.logger,
       arc: message.arc,
+      memoryUpdateText,
     });
 
     if (!summaryText) {

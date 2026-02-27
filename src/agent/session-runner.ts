@@ -66,6 +66,8 @@ export interface PromptResult {
   session?: AgentSession;
   /** Increase the session's max iteration limit (e.g. before a follow-up prompt). */
   bumpMaxIterations?: (n: number) => void;
+  /** Stop firing onResponse for subsequent session.prompt() calls (e.g. memory update). */
+  muteResponses?: () => void;
 }
 
 export class SessionRunner {
@@ -124,6 +126,10 @@ export class SessionRunner {
     // handler (vision) so that all messages after a fallback carry the
     // annotation — not just the final response.
     let responseSuffix = "";
+    // When true, onResponse is skipped and text is logged at INFO instead.
+    // Toggled by the muteResponses() handle returned in PromptResult so
+    // callers can silence delivery before background work (memory update).
+    let responseMuted = false;
 
     const unsubscribe = session.subscribe((event) => {
       if (event.type === "turn_end") {
@@ -141,9 +147,9 @@ export class SessionRunner {
         const message = event.message as { role?: string };
         if (message.role === "assistant") {
           const text = extractAssistantTextFromEvent(event.message).trim();
-          if (text && this.onResponse && !sessionReturned) {
+          if (text && this.onResponse && !responseMuted) {
             this.onResponse(responseSuffix ? `${text} ${responseSuffix}` : text);
-          } else if (text && sessionReturned) {
+          } else if (text && responseMuted) {
             this.logger.info("Suppressing post-prompt text response", truncateForDebug(text, 200));
           }
 
@@ -249,6 +255,7 @@ export class SessionRunner {
           : undefined,
         session,
         bumpMaxIterations: sessionCtx.bumpMaxIterations,
+        muteResponses: () => { responseMuted = true; },
       };
     } finally {
       // Error-path safety: if the session is never returned (exception before return),

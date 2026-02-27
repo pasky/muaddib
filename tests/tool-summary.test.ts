@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { generateToolSummaryFromSession } from "../src/rooms/command/tool-summary.js";
+import { extractAssistantText, generateToolSummaryFromSession } from "../src/rooms/command/tool-summary.js";
 
 describe("generateToolSummaryFromSession", () => {
   it("returns a summary for summary/artifact tools", async () => {
@@ -159,5 +159,80 @@ describe("generateToolSummaryFromSession", () => {
     const userContent: string = payload.messages[0].content;
     expect(userContent).toContain("(unavailable)");
     expect(userContent).not.toMatch(/\bInput:\s*\nundefined/);
+  });
+
+  it("includes memoryUpdateText in the summary input when provided", async () => {
+    const modelAdapter = {
+      completeSimple: vi.fn(async () => ({
+        content: [{ type: "text", text: "summary with memory" }],
+      })),
+    } as any;
+
+    const logger = {
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+
+    await generateToolSummaryFromSession({
+      result: {
+        text: "ok",
+        stopReason: "stop",
+        usage: {} as any,
+        session: {
+          messages: [
+            {
+              role: "assistant",
+              content: [
+                { type: "toolCall", id: "call_1", name: "bash", arguments: { command: "ls" } },
+              ],
+            },
+            {
+              role: "toolResult",
+              toolCallId: "call_1",
+              toolName: "bash",
+              details: {},
+            },
+          ],
+        },
+      } as any,
+      tools: [{ name: "bash", persistType: "summary" }] as any,
+      persistenceSummaryModel: "openai:gpt-4o-mini",
+      modelAdapter,
+      logger,
+      memoryUpdateText: "Updated MEMORY.md with new project preferences",
+    });
+
+    const payload = modelAdapter.completeSimple.mock.calls[0][1];
+    const userContent: string = payload.messages[0].content;
+    expect(userContent).toContain("Post-session memory update reasoning");
+    expect(userContent).toContain("Updated MEMORY.md with new project preferences");
+  });
+});
+
+describe("extractAssistantText", () => {
+  it("extracts text blocks from assistant messages", () => {
+    const messages = [
+      { role: "user", content: "hello" },
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "I will update memory." },
+          { type: "toolCall", id: "c1", name: "write", arguments: {} },
+        ],
+      },
+      { role: "toolResult", toolCallId: "c1", toolName: "write" },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Done updating." }],
+      },
+    ] as any[];
+    expect(extractAssistantText(messages)).toBe("I will update memory.\nDone updating.");
+  });
+
+  it("returns undefined for empty or non-assistant messages", () => {
+    expect(extractAssistantText([])).toBeUndefined();
+    expect(extractAssistantText([{ role: "user", content: "hello" }] as any[])).toBeUndefined();
   });
 });
