@@ -109,6 +109,8 @@ describe("SessionRunner", () => {
     expect(result.iterations).toBe(2);
     expect(result.toolCallsCount).toBe(2);
     expect(result.usage.totalTokens).toBe(15);
+    // peakTurnInput = max(input + cacheRead + cacheWrite) across turns = makeUsage(2) → 2+6+8 = 16
+    expect(result.peakTurnInput).toBe(16);
     expect(result.stopReason).toBe("stop");
     expect(ensureProviderKey).toHaveBeenCalledWith("openai");
     // unsubscribe is deferred to session.dispose() on the success path

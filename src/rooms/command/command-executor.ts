@@ -87,6 +87,8 @@ export interface CommandRateLimiter {
 interface PromptRunResult {
   responseText: string;
   usage: Usage | null;
+  /** Peak single-turn input tokens (input + cacheRead + cacheWrite) — actual context window fill. */
+  peakTurnInput: number;
   toolCallsCount: number;
   /** Deferred work (tool summary, memory update, session dispose) that callers await after sending the response. */
   backgroundWork?: Promise<void>;
@@ -409,7 +411,7 @@ export class CommandExecutor {
 
     const queryTimestamp = formatUtcTime().slice(-5); // HH:MM in UTC, matching history format
     const queryContent = message.originalContent ?? resolved.queryText;
-    const { responseText, usage, toolCallsCount, backgroundWork } = await this.invokeAndPostProcess(
+    const { responseText, usage, peakTurnInput, toolCallsCount, backgroundWork } = await this.invokeAndPostProcess(
       runner, message, `[${queryTimestamp}] <${message.nick}> ${queryContent}`, runnerContext, toolSet.tools, {
         reasoningEffort: resolved.runtime.reasoningEffort,
         visionModel: resolved.runtime.visionModel ?? undefined,
@@ -418,13 +420,15 @@ export class CommandExecutor {
     );
 
     // Log the completed agent run with cost/context stats.
+    // peakTurnInput (input + cacheRead + cacheWrite for the largest turn) represents
+    // actual context window fill; summed usage.input excludes cached tokens.
     const costStr = usage ? `$${usage.cost.total.toFixed(4)}` : "?";
-    let ctxStr = usage ? `${Math.round(usage.input / 1000)}k` : "?";
-    if (usage) {
+    let ctxStr = peakTurnInput > 0 ? `${Math.round(peakTurnInput / 1000)}k` : "?";
+    if (peakTurnInput > 0) {
       try {
         const ctxWindow = this.modelAdapter.resolve(modelSpec).model.contextWindow;
         if (ctxWindow > 0) {
-          ctxStr += `/${Math.round(ctxWindow / 1000)}k(${Math.round((usage.input / ctxWindow) * 100)}%)`;
+          ctxStr += `/${Math.round(ctxWindow / 1000)}k(${Math.round((peakTurnInput / ctxWindow) * 100)}%)`;
         }
       } catch { /* model resolution may fail for edge cases — keep absolute count */ }
     }
@@ -632,6 +636,7 @@ export class CommandExecutor {
     return {
       responseText,
       usage: agentResult.usage,
+      peakTurnInput: agentResult.peakTurnInput,
       toolCallsCount: agentResult.toolCallsCount ?? 0,
       backgroundWork,
     };
@@ -665,7 +670,7 @@ export class CommandExecutor {
     if (totalCost > 0.2) {
       const costMessage = `(${[
         `this message used ${toolCallsCount} tool calls`,
-        `${usage.input} in / ${usage.output} out tokens`,
+        `${usage.input + usage.cacheRead + usage.cacheWrite} in / ${usage.output} out tokens`,
         `and cost $${totalCost.toFixed(4)}`,
       ].join(", ")})`;
 

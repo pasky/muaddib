@@ -93,6 +93,7 @@ describe("runCliMessageMode", () => {
             },
             text: "cli ok",
             stopReason: "stop",
+            peakTurnInput: 1,
             usage: {
               input: 1,
               output: 1,
@@ -176,6 +177,7 @@ describe("runCliMessageMode", () => {
             },
             text: "cli ok",
             stopReason: "stop",
+            peakTurnInput: 1,
             usage: {
               input: 1,
               output: 1,
@@ -357,6 +359,7 @@ describe("runCliMessageMode", () => {
             },
             text: "cli ok",
             stopReason: "stop",
+            peakTurnInput: 1,
             usage: {
               input: 1,
               output: 1,

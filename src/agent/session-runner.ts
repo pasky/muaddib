@@ -58,6 +58,8 @@ export interface PromptResult {
   text: string;
   stopReason: string;
   usage: Usage;
+  /** Peak single-turn input tokens (input + cacheRead + cacheWrite) — represents actual context window fill. */
+  peakTurnInput: number;
   iterations?: number;
   toolCallsCount?: number;
   visionFallbackActivated?: boolean;
@@ -243,7 +245,7 @@ export class SessionRunner {
       return {
         text,
         stopReason: lastAssistant?.stopReason ?? "stop",
-        usage: sumAssistantUsage(session.messages),
+        ...sumAssistantUsage(session.messages),
         iterations,
         toolCallsCount,
         visionFallbackActivated: sessionCtx.getVisionFallbackActivated(),
@@ -331,8 +333,9 @@ function findLastAssistantMessage(messages: readonly AgentMessage[]): AssistantM
   return null;
 }
 
-function sumAssistantUsage(messages: readonly AgentMessage[]): Usage {
+function sumAssistantUsage(messages: readonly AgentMessage[]): { usage: Usage; peakTurnInput: number } {
   const total = emptyUsage();
+  let peakTurnInput = 0;
 
   for (const message of messages) {
     if (!isAssistantMessage(message)) {
@@ -350,9 +353,14 @@ function sumAssistantUsage(messages: readonly AgentMessage[]): Usage {
     total.cost.cacheRead += usage.cost.cacheRead;
     total.cost.cacheWrite += usage.cost.cacheWrite;
     total.cost.total += usage.cost.total;
+
+    const turnInput = usage.input + usage.cacheRead + usage.cacheWrite;
+    if (turnInput > peakTurnInput) {
+      peakTurnInput = turnInput;
+    }
   }
 
-  return total;
+  return { usage: total, peakTurnInput };
 }
 
 function renderMessageForDebug(message: unknown, maxChars: number): Record<string, unknown> {

@@ -54,6 +54,7 @@ function makeRunnerResult(text: string) {
     },
     text,
     stopReason: "stop",
+    peakTurnInput: 1,
     usage: {
       input: 1,
       output: 1,

@@ -152,6 +152,7 @@ function makeRunnerResult(
     },
     text,
     stopReason: "stop" as const,
+    peakTurnInput: inputTokens,
     usage: {
       input: inputTokens,
       output: outputTokens,
