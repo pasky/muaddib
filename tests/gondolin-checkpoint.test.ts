@@ -10,16 +10,18 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ── pull the internals we need ─────────────────────────────────────────────
 
+import { createGondolinTools } from "../src/agent/tools/gondolin-tools.js";
 import {
-  createGondolinTools,
   checkpointGondolinArc,
-  resetGondolinVmCache,
-  closeAllVms,
-  getVmSlotState,
   getArcChronicleDir,
   getArcChatHistoryDir,
   getArcWorkspacePath,
-} from "../src/agent/tools/gondolin-tools.js";
+} from "../src/agent/gondolin/index.js";
+import {
+  resetGondolinVmCache,
+  closeAllVms,
+  getVmSlotState,
+} from "../src/agent/gondolin/vm.js";
 
 import {
   loadBundledSkills,
@@ -1068,7 +1070,7 @@ describe("gondolin — post-resume health check", () => {
     await registerFakeVm(healthyVm);
 
     // Create a fake checkpoint file so existsSync returns true
-    const { getArcCheckpointPath } = await import("../src/agent/tools/gondolin-tools.js");
+    const { getArcCheckpointPath } = await import("../src/agent/gondolin/fs.js");
     const checkpointPath = getArcCheckpointPath("health-check-arc");
     const { mkdirSync, writeFileSync, existsSync } = await import("node:fs");
     const { dirname } = await import("node:path");
@@ -1112,7 +1114,7 @@ describe("gondolin — post-resume health check", () => {
       resume: vi.fn(async () => healthyVm),
     });
 
-    const { getArcCheckpointPath } = await import("../src/agent/tools/gondolin-tools.js");
+    const { getArcCheckpointPath } = await import("../src/agent/gondolin/fs.js");
     const checkpointPath = getArcCheckpointPath("healthy-resume-arc");
     const { mkdirSync, writeFileSync, existsSync } = await import("node:fs");
     const { dirname } = await import("node:path");

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { RealFSProvider, type VirtualProvider } from "@earendil-works/gondolin";
-import { SizeLimitProvider } from "../src/agent/tools/size-limit-provider.js";
+import { SizeLimitProvider } from "../src/agent/gondolin/fs/size-limit-provider.js";
 
 function createTestProvider(limitBytes: number): { provider: SizeLimitProvider; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), "slp-test-"));

@@ -12,14 +12,14 @@ import {
   createWebSearchTool,
 } from "../src/agent/tools/baseline-tools.js";
 import { createShareArtifactTool } from "../src/agent/tools/artifact.js";
+import { createGondolinTools } from "../src/agent/tools/gondolin-tools.js";
 import {
   checkpointGondolinArc,
-  createGondolinTools,
-  getArcCheckpointPath,
   getArcWorkspacePath,
-  isIpInCidr,
-  resetGondolinVmCache,
-} from "../src/agent/tools/gondolin-tools.js";
+} from "../src/agent/gondolin/index.js";
+import { getArcCheckpointPath } from "../src/agent/gondolin/fs.js";
+import { isIpInCidr } from "../src/agent/gondolin/network.js";
+import { resetGondolinVmCache } from "../src/agent/gondolin/vm.js";
 import { buildArc } from "../src/rooms/message.js";
 
 function createTools(options: Record<string, unknown>) {

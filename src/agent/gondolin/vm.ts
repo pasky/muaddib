@@ -1,0 +1,561 @@
+/**
+ * Gondolin VM lifecycle: cache, concurrency slots, creation, checkpoint,
+ * close, process-cleanup handlers, and the operation bridges that adapt
+ * pi-coding-agent's Read/Write/Edit/BashOperations to a Gondolin VM.
+ */
+
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { join, posix } from "node:path";
+
+import type {
+  BashOperations,
+  EditOperations,
+  ReadOperations,
+  WriteOperations,
+} from "@mariozechner/pi-coding-agent";
+import type { VM } from "@earendil-works/gondolin";
+
+import type { GondolinConfig } from "../../config/muaddib-config.js";
+import type { Logger } from "../../app/logging.js";
+import type { ArcEventsWatcher } from "../../events/watcher.js";
+import { loadBundledSkills, type LoadedSkill } from "../skills/load-skills.js";
+import { getArcWorkspacePath, getArcCheckpointPath, createVmMounts } from "./fs.js";
+import { createVmHttpHooks } from "./network.js";
+import { getMuaddibHome } from "../../config/paths.js";
+
+// ── VM cache: one VM per arc ───────────────────────────────────────────────
+
+const vmCache = new Map<string, VM>();
+const vmCacheLocks = new Map<string, Promise<VM>>();
+/** Active session count per arcId — prevents checkpointing while another session is still running. */
+const vmActiveSessions = new Map<string, number>();
+/** In-flight checkpoint promise per arcId — prevents concurrent writes to the same .qcow2 file. */
+const vmCheckpointInProgress = new Map<string, Promise<void>>();
+
+// ── Global QEMU concurrency semaphore ──────────────────────────────────────
+
+/**
+ * Current maximum number of simultaneously running arc VMs.
+ * Undefined until the first VM is created (limit is taken from the first config seen).
+ * All subsequent VM creations must agree with this value — mismatches throw.
+ */
+let vmSlotLimit: number | undefined = undefined;
+/** How many arc VMs are currently running (held slots). */
+let vmSlotActive = 0;
+/** Resolve callbacks for callers waiting to acquire a slot. */
+const vmSlotWaiters: Array<() => void> = [];
+
+export function resolveVmSlotLimit(value: unknown): number {
+  if (value === undefined || value === null) return 8;
+  if (!Number.isInteger(value) || (value as number) < 1) {
+    throw new Error(
+      `agent.tools.gondolin.maxConcurrentVms must be a positive integer, got ${JSON.stringify(value)}`,
+    );
+  }
+  return value as number;
+}
+
+/** Block until a QEMU slot is available, then claim it. */
+async function acquireVmSlot(limit: number): Promise<void> {
+  if (vmSlotLimit === undefined) {
+    vmSlotLimit = limit;
+  } else if (vmSlotLimit !== limit) {
+    throw new Error(
+      `agent.tools.gondolin.maxConcurrentVms conflict: limit is already set to ${vmSlotLimit}, cannot change to ${limit} at runtime`,
+    );
+  }
+  if (vmSlotActive < vmSlotLimit) {
+    vmSlotActive++;
+    return;
+  }
+  await new Promise<void>((resolve) => vmSlotWaiters.push(resolve));
+  vmSlotActive++;
+}
+
+/** Release a previously acquired QEMU slot and wake the next waiter if any. */
+function releaseVmSlot(): void {
+  vmSlotActive = Math.max(0, vmSlotActive - 1);
+  const waiter = vmSlotWaiters.shift();
+  if (waiter) waiter();
+}
+
+// ── Config helpers ─────────────────────────────────────────────────────────
+
+export type SupportedDnsMode = NonNullable<GondolinConfig["dnsMode"]>;
+
+export function resolveDnsMode(dnsMode: unknown): SupportedDnsMode {
+  if (dnsMode === undefined) return "synthetic";
+  if (dnsMode === "open" || dnsMode === "synthetic") return dnsMode;
+  if (dnsMode === "trusted") {
+    throw new Error(
+      "agent.tools.gondolin.dnsMode=\"trusted\" is no longer supported; use \"synthetic\" or \"open\"",
+    );
+  }
+  throw new Error(
+    `Invalid agent.tools.gondolin.dnsMode: ${JSON.stringify(dnsMode)} (expected "synthetic" or "open")`,
+  );
+}
+
+// ── Constants ──────────────────────────────────────────────────────────────
+
+/**
+ * Maximum bytes forwarded from VM bash output to the upstream bash tool.
+ *
+ * The upstream pi bash tool (createBashTool) writes full output to a host
+ * /tmp/pi-bash-*.log file and appends that path to the response when output
+ * exceeds its DEFAULT_MAX_BYTES limit (50 KB).  In Gondolin mode the agent
+ * cannot read that host path through the VM's read tool, and exposing it
+ * leaks host filesystem details into the agent's context.
+ *
+ * By capping what we deliver via onData to strictly below 50 KB, we ensure
+ * the upstream tool's temp-file branch is never triggered.  When the cap is
+ * hit we append a VM-specific truncation notice in place of the host path.
+ */
+const VM_BASH_OUTPUT_CAP_BYTES = 48 * 1024; // 48 KB — below upstream's 50 KB threshold
+
+const VM_HEALTH_CHECK_TIMEOUT_MS = 20_000;
+
+// ── Shell quoting ──────────────────────────────────────────────────────────
+
+export function shQuote(value: string): string {
+  return "'" + value.replace(/'/g, "'\\''") + "'";
+}
+
+// ── VM creation ────────────────────────────────────────────────────────────
+
+async function ensureVm(
+  arc: string,
+  config: GondolinConfig,
+  dnsMode: SupportedDnsMode,
+  skills: LoadedSkill[],
+  artifactsUrl: string | undefined,
+  logger?: Logger,
+  eventsWatcher?: ArcEventsWatcher,
+): Promise<VM> {
+  // If a checkpoint is in progress for this arc, wait for it to complete before
+  // creating or returning a VM.
+  const pendingCheckpoint = vmCheckpointInProgress.get(arc);
+  if (pendingCheckpoint) {
+    await pendingCheckpoint;
+  }
+
+  const cached = vmCache.get(arc);
+  if (cached) return cached;
+
+  const pending = vmCacheLocks.get(arc);
+  if (pending) return pending;
+
+  const createPromise = (async () => {
+    const slotLimit = resolveVmSlotLimit(config.maxConcurrentVms);
+    await acquireVmSlot(slotLimit);
+
+    let slotAcquired = true;
+    try {
+      const { VM: VMClass, VmCheckpoint } = await import("@earendil-works/gondolin");
+
+      if (!process.env.GONDOLIN_GUEST_DIR) {
+        const customImageDir = getMuaddibHome() + "/gondolin-image";
+        if (existsSync(customImageDir)) {
+          process.env.GONDOLIN_GUEST_DIR = customImageDir;
+        }
+      }
+
+      const workspacePath = getArcWorkspacePath(arc);
+
+      const httpHooks = await createVmHttpHooks({
+        blockedCidrs: config.blockedCidrs ?? [],
+        artifactsUrl,
+        logger,
+      });
+
+      const mounts = await createVmMounts({
+        arc,
+        workspacePath,
+        workspaceSizeMb: config.workspaceSizeMb ?? 4096,
+        skills,
+        eventsWatcher,
+        logger,
+      });
+
+      // Forward QEMU serial console output (guest kernel + init messages) to
+      // the logger so stuck boots are diagnosable.
+      const debugLog: import("@earendil-works/gondolin").DebugLogFn = (component, message) => {
+        logger?.debug(`Gondolin VM [${arc}] ${component}: ${message}`);
+      };
+
+      const vmOptions: import("@earendil-works/gondolin").VMOptions = {
+        vfs: { mounts },
+        httpHooks,
+        dns: { mode: dnsMode },
+        sandbox: { debug: ["protocol"] },
+        debugLog,
+      };
+
+      const checkpointPath = getArcCheckpointPath(arc);
+      let vm: import("@earendil-works/gondolin").VM;
+      if (existsSync(checkpointPath)) {
+        try {
+          const checkpoint = VmCheckpoint.load(checkpointPath);
+          vm = await checkpoint.resume(vmOptions);
+          logger?.info(`Gondolin VM resumed from checkpoint for arc ${arc}: ${checkpointPath}`);
+          // Health check: verify the guest is actually responsive after resume.
+          await vm.exec(["/bin/true"], { signal: AbortSignal.timeout(VM_HEALTH_CHECK_TIMEOUT_MS) });
+          logger?.info(`Gondolin VM health check passed for arc ${arc}`);
+        } catch (err) {
+          logger?.warn(`Gondolin checkpoint resume/health-check failed for arc ${arc}, deleting checkpoint and starting fresh VM`, String(err));
+          try { vm!.close().catch(() => {}); } catch { /* ignore */ }
+          try { unlinkSync(checkpointPath); } catch { /* ignore */ }
+          vm = await VMClass.create(vmOptions);
+          logger?.info(`Gondolin VM started fresh (after checkpoint failure) for arc ${arc}, workspace: ${workspacePath}`);
+        }
+      } else {
+        vm = await VMClass.create(vmOptions);
+        logger?.info(`Gondolin VM started for arc ${arc}, workspace: ${workspacePath}`);
+      }
+
+      vmCache.set(arc, vm);
+      slotAcquired = false; // slot is now owned by the VM lifetime, released on checkpoint/close
+      return vm;
+    } finally {
+      if (slotAcquired) {
+        releaseVmSlot();
+      }
+    }
+  })();
+
+  vmCacheLocks.set(arc, createPromise);
+  try {
+    const vm = await createPromise;
+    return vm;
+  } finally {
+    vmCacheLocks.delete(arc);
+  }
+}
+
+// ── VM operations factories ────────────────────────────────────────────────
+
+export function createVmReadOps(getVm: () => Promise<VM>, opTimeoutMs: number, logger?: Logger): ReadOperations {
+  return {
+    readFile: async (absolutePath) => {
+      const vm = await getVm();
+      return vm.fs.readFile(absolutePath, { signal: AbortSignal.timeout(opTimeoutMs) });
+    },
+    access: async (absolutePath) => {
+      const vm = await getVm();
+      const r = await vm.exec(["/bin/sh", "-lc", `test -r ${shQuote(absolutePath)}`], {
+        signal: AbortSignal.timeout(opTimeoutMs),
+      });
+      if (!r.ok) {
+        throw new Error(`not readable: ${absolutePath}`);
+      }
+    },
+    detectImageMimeType: async (absolutePath) => {
+      const vm = await getVm();
+      try {
+        const r = await vm.exec([
+          "/bin/sh",
+          "-lc",
+          `file --mime-type -b ${shQuote(absolutePath)}`,
+        ], { signal: AbortSignal.timeout(opTimeoutMs) });
+        if (!r.ok) {
+          logger?.warn(`Gondolin detectImageMimeType: 'file' failed for ${absolutePath} (exit ${r.exitCode}): ${r.stderr}`);
+          return null;
+        }
+        const m = r.stdout.trim();
+        const supported = ["image/jpeg", "image/png", "image/gif", "image/webp"].includes(m);
+        if (!supported && m.startsWith("image/")) {
+          logger?.info(`Gondolin detectImageMimeType: unsupported image MIME type '${m}' for ${absolutePath}`);
+        }
+        return supported ? m : null;
+      } catch (err) {
+        logger?.warn(`Gondolin detectImageMimeType: exception for ${absolutePath}`, String(err));
+        return null;
+      }
+    },
+  };
+}
+
+export function createVmWriteOps(getVm: () => Promise<VM>, opTimeoutMs: number): WriteOperations {
+  return {
+    writeFile: async (absolutePath, content) => {
+      const vm = await getVm();
+      const dir = posix.dirname(absolutePath);
+      await vm.exec(["/bin/mkdir", "-p", dir], { signal: AbortSignal.timeout(opTimeoutMs) });
+      await vm.fs.writeFile(absolutePath, content, { encoding: "utf8", signal: AbortSignal.timeout(opTimeoutMs) });
+    },
+    mkdir: async (dir) => {
+      const vm = await getVm();
+      const r = await vm.exec(["/bin/mkdir", "-p", dir], { signal: AbortSignal.timeout(opTimeoutMs) });
+      if (!r.ok) {
+        throw new Error(`mkdir failed (${r.exitCode}): ${r.stderr}`);
+      }
+    },
+  };
+}
+
+export function createVmEditOps(getVm: () => Promise<VM>, opTimeoutMs: number, logger?: Logger): EditOperations {
+  const readOps = createVmReadOps(getVm, opTimeoutMs, logger);
+  const writeOps = createVmWriteOps(getVm, opTimeoutMs);
+  return {
+    readFile: readOps.readFile,
+    access: readOps.access,
+    writeFile: writeOps.writeFile,
+  };
+}
+
+export function createVmBashOps(getVm: () => Promise<VM>, defaultTimeoutSeconds: number): BashOperations {
+  return {
+    exec: async (command, cwd, { onData, signal, timeout }) => {
+      const vm = await getVm();
+
+      const ac = new AbortController();
+      const onAbort = () => ac.abort();
+      signal?.addEventListener("abort", onAbort, { once: true });
+
+      const effectiveTimeout =
+        timeout && timeout > 0
+          ? Math.min(timeout, defaultTimeoutSeconds)
+          : defaultTimeoutSeconds;
+
+      let timedOut = false;
+      const timer =
+        effectiveTimeout > 0
+          ? setTimeout(() => {
+              timedOut = true;
+              ac.abort();
+            }, effectiveTimeout * 1000)
+          : undefined;
+
+      try {
+        const proc = vm.exec(["/bin/bash", "-lc", command], {
+          cwd,
+          signal: ac.signal,
+          stdout: "pipe",
+          stderr: "pipe",
+        });
+
+        let totalBytes = 0;
+        let capped = false;
+        for await (const chunk of proc.output()) {
+          if (capped) {
+            continue;
+          }
+          const data = chunk.data;
+          const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+          const newTotal = totalBytes + buf.length;
+          if (newTotal > VM_BASH_OUTPUT_CAP_BYTES) {
+            const remaining = VM_BASH_OUTPUT_CAP_BYTES - totalBytes;
+            if (remaining > 0) {
+              onData(buf.subarray(0, remaining));
+            }
+            onData(
+              Buffer.from(
+                `\n[output truncated — VM stream capped at ${VM_BASH_OUTPUT_CAP_BYTES / 1024}KB]\n`,
+              ),
+            );
+            capped = true;
+          } else {
+            totalBytes = newTotal;
+            onData(data);
+          }
+        }
+
+        const r = await proc;
+        return { exitCode: r.exitCode };
+      } catch (err) {
+        if (signal?.aborted) throw new Error("aborted", { cause: err });
+        if (timedOut) throw new Error(`timeout:${effectiveTimeout}`, { cause: err });
+        throw err;
+      } finally {
+        if (timer) clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+      }
+    },
+  };
+}
+
+// ── Close / checkpoint / cleanup ───────────────────────────────────────────
+
+/** Close all cached VMs. Exported for testing and used by process exit handlers. */
+export async function closeAllVms(): Promise<void> {
+  const vmCount = vmCache.size;
+  const vms = [...vmCache.values()];
+  vmCache.clear();
+  await Promise.allSettled(vms.map((vm) => vm.close().catch(() => {})));
+  for (let i = 0; i < vmCount; i++) {
+    releaseVmSlot();
+  }
+}
+
+function installProcessCleanupHandlers() {
+  let cleanupDone = false;
+
+  const asyncCleanup = async (signal: string) => {
+    if (cleanupDone) return;
+    cleanupDone = true;
+    await closeAllVms();
+    process.removeListener("SIGTERM", sigtermHandler);
+    process.removeListener("SIGINT", sigintHandler);
+    process.kill(process.pid, signal as NodeJS.Signals);
+  };
+
+  const sigintHandler = () => void asyncCleanup("SIGINT");
+  const sigtermHandler = () => void asyncCleanup("SIGTERM");
+
+  process.on("SIGTERM", sigtermHandler);
+  process.on("SIGINT", sigintHandler);
+
+  process.on("exit", () => {
+    for (const vm of vmCache.values()) {
+      try {
+        vm.close().catch(() => {});
+      } catch {
+        // ignore
+      }
+    }
+    vmCache.clear();
+  });
+}
+
+installProcessCleanupHandlers();
+
+/** Register a session as active (prevents checkpoint while running). */
+export function registerActiveSession(arc: string): void {
+  vmActiveSessions.set(arc, (vmActiveSessions.get(arc) ?? 0) + 1);
+}
+
+/**
+ * Checkpoint the Gondolin VM for an arc after a session ends.
+ *
+ * Prunes old session directories inside /tmp (keeping the 8 most recent), then
+ * stops the VM and persists its disk state to `$MUADDIB_HOME/arcs/<arcId>/checkpoint.qcow2`.
+ * The VM is removed from the cache so the next invocation resumes from the checkpoint.
+ *
+ * This is a no-op if no VM is running for the arc.
+ */
+export async function checkpointGondolinArc(
+  arc: string,
+  logger?: Logger,
+): Promise<void> {
+  const current = vmActiveSessions.get(arc) ?? 0;
+  if (current <= 0) {
+    logger?.warn(`Gondolin arc ${arc}: checkpointGondolinArc called with no active sessions registered; ignoring`);
+    return;
+  }
+  const remaining = current - 1;
+  vmActiveSessions.set(arc, remaining);
+
+  if (remaining > 0) {
+    logger?.debug(`Gondolin arc ${arc}: ${remaining} session(s) still active, deferring checkpoint`);
+    return;
+  }
+
+  vmActiveSessions.delete(arc);
+  const vm = vmCache.get(arc);
+  if (!vm) return;
+
+  const inFlight = vmCheckpointInProgress.get(arc);
+  if (inFlight) {
+    logger?.debug(`Gondolin arc ${arc}: checkpoint already in progress, waiting`);
+    return inFlight;
+  }
+
+  const checkpointPath = getArcCheckpointPath(arc);
+
+  vmCache.delete(arc);
+
+  const checkpointPromise = (async () => {
+    try {
+      await vm.exec(["/bin/sh", "-c",
+        "ls -1dt /tmp/session-* 2>/dev/null | tail -n +9 | xargs rm -rf"]);
+      await vm.checkpoint(checkpointPath);
+      logger?.info(`Gondolin VM checkpointed for arc ${arc}: ${checkpointPath}`);
+    } catch (err) {
+      logger?.error(`Gondolin checkpoint failed for arc ${arc}`, String(err));
+      await vm.close().catch(() => {});
+    } finally {
+      vmCheckpointInProgress.delete(arc);
+      releaseVmSlot();
+    }
+  })();
+
+  vmCheckpointInProgress.set(arc, checkpointPromise);
+  return checkpointPromise;
+}
+
+// ── Exported for testing ───────────────────────────────────────────────────
+
+/** Returns current semaphore state — for tests only. */
+export function getVmSlotState(): { active: number; limit: number | undefined; waiters: number } {
+  return { active: vmSlotActive, limit: vmSlotLimit, waiters: vmSlotWaiters.length };
+}
+
+export function resetGondolinVmCache(): void {
+  vmCache.clear();
+  vmCacheLocks.clear();
+  vmActiveSessions.clear();
+  vmCheckpointInProgress.clear();
+  vmSlotActive = 0;
+  vmSlotLimit = undefined;
+  vmSlotWaiters.splice(0);
+}
+
+// ── Session VM accessor ─────────────────────────────────────────────────────
+
+export interface VmSessionOptions {
+  arc: string;
+  config: GondolinConfig;
+  artifactsUrl?: string;
+  vmOpTimeoutMs: number;
+  logger?: Logger;
+  eventsWatcher?: ArcEventsWatcher;
+}
+
+export interface VmSession {
+  getVm: () => Promise<VM>;
+  sessionDir: string;
+}
+
+/**
+ * Create a lazy VM accessor for a single session.
+ *
+ * Ensures the host workspace directory exists, registers the session as active
+ * (so checkpoint is deferred), and returns a `getVm()` function that ensures
+ * the VM exists (creating it on first call) and creates the session working
+ * directory inside the guest.
+ */
+export function createVmSession(opts: VmSessionOptions): VmSession {
+  const { arc, config, vmOpTimeoutMs, logger, eventsWatcher } = opts;
+  const dnsMode = resolveDnsMode(config.dnsMode);
+
+  // Ensure the workspace directory exists and stamp the arc name into it so
+  // external tools (e.g. scripts/gondolin-shell.sh) can identify which arc
+  // owns a given workspace ID.
+  const workspacePath = getArcWorkspacePath(arc);
+  mkdirSync(workspacePath, { recursive: true });
+  writeFileSync(join(workspacePath, ".arc-name"), arc, "utf8");
+
+  // Register this session immediately so checkpointGondolinArc knows it is
+  // active even before the VM has been started or any tool has been called.
+  registerActiveSession(arc);
+
+  const sessionDir = `/tmp/session-${randomUUID().slice(0, 8)}`;
+
+  let vmReady: Promise<VM> | null = null;
+
+  function getVm(): Promise<VM> {
+    if (!vmReady) {
+      vmReady = ensureVm(arc, config, dnsMode, loadBundledSkills(), opts.artifactsUrl, logger, eventsWatcher).then(
+        async (vm) => {
+          await vm.exec(["/bin/mkdir", "-p", sessionDir], { signal: AbortSignal.timeout(vmOpTimeoutMs) });
+          logger?.info(`Gondolin session dir: ${sessionDir} (arc: ${arc})`);
+          return vm;
+        },
+      );
+    }
+    return vmReady;
+  }
+
+  return { getVm, sessionDir };
+}

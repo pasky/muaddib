@@ -901,7 +901,7 @@ describe("loadWorkspaceSkills", () => {
 // ── Memory update prompt ──────────────────────────────────────────────────
 
 import { buildMemoryUpdatePrompt } from "../src/rooms/command/command-executor.js";
-import { getArcWorkspacePath } from "../src/agent/tools/gondolin-tools.js";
+import { getArcWorkspacePath } from "../src/agent/gondolin/index.js";
 
 describe("buildMemoryUpdatePrompt", () => {
   it("returns prompt with empty-file marker when MEMORY.md does not exist", () => {

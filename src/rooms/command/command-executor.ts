@@ -45,7 +45,7 @@ import type { Logger } from "../../app/logging.js";
 import type { AgentConfig, MemoryConfig, SkillsConfig } from "../../config/muaddib-config.js";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { getArcWorkspacePath } from "../../agent/tools/gondolin-tools.js";
+import { getArcWorkspacePath } from "../../agent/gondolin/index.js";
 import type { ArcEventsWatcher } from "../../events/watcher.js";
 
 // ── Public types ──
