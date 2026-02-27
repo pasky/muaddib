@@ -85,7 +85,6 @@ export interface CommandRateLimiter {
 
 /** Result from invokeAndPostProcess — the shared agent invocation tail. */
 interface PromptRunResult {
-  responseText: string;
   usage: Usage | null;
   /** Peak single-turn input tokens (input + cacheRead + cacheWrite) — actual context window fill. */
   peakTurnInput: number;
@@ -411,7 +410,7 @@ export class CommandExecutor {
 
     const queryTimestamp = formatUtcTime().slice(-5); // HH:MM in UTC, matching history format
     const queryContent = message.originalContent ?? resolved.queryText;
-    const { responseText, usage, peakTurnInput, toolCallsCount, backgroundWork } = await this.invokeAndPostProcess(
+    const { usage, peakTurnInput, toolCallsCount, backgroundWork } = await this.invokeAndPostProcess(
       runner, message, `[${queryTimestamp}] <${message.nick}> ${queryContent}`, runnerContext, toolSet.tools, {
         reasoningEffort: resolved.runtime.reasoningEffort,
         visionModel: resolved.runtime.visionModel ?? undefined,
@@ -433,26 +432,14 @@ export class CommandExecutor {
       } catch { /* model resolution may fail for edge cases — keep absolute count */ }
     }
 
-    if (!responseText) {
-      logger.info(
-        "Agent chose not to answer",
-        `arc=${message.arc}`,
-        `mode=${resolved.selectedLabel}`,
-        `trigger=${resolved.selectedTrigger}`,
-        `ctx=${ctxStr}`,
-        `cost=${costStr}`,
-      );
-    } else {
-      logger.info(
-        "Agent response delivered",
-        `mode=${resolved.selectedLabel ?? "n/a"}`,
-        `trigger=${resolved.selectedTrigger ?? "n/a"}`,
-        `ctx=${ctxStr}`,
-        `cost=${costStr}`,
-        `arc=${message.arc}`,
-        `response=${responseText}`,
-      );
-    }
+    logger.info(
+      "Agent run complete",
+      `arc=${message.arc}`,
+      `mode=${resolved.selectedLabel ?? "n/a"}`,
+      `trigger=${resolved.selectedTrigger ?? "n/a"}`,
+      `ctx=${ctxStr}`,
+      `cost=${costStr}`,
+    );
 
     // Signal that the primary response has been delivered — callers can deregister
     // steering before the potentially long background work begins.
@@ -559,9 +546,7 @@ export class CommandExecutor {
     logger.info(
       "Proactive response delivered",
       `arc=${message.arc}`,
-      `label=${classifiedTrigger}`,
       `trigger=${classifiedTrigger}`,
-      `response=${result.responseText}`,
     );
 
     await result.backgroundWork;
@@ -590,15 +575,6 @@ export class CommandExecutor {
       visionFallbackModel: opts.visionModel,
       refusalFallbackModel: this.refusalFallbackModel ?? undefined,
     });
-
-    // Extract and post-process response text immediately — don't block on
-    // tool summary / memory update which are independent of the response.
-    // Fallback suffixes (refusal / vision) are now appended by SessionRunner
-    // via onResponse, so all intermediate + final messages carry them.
-    let responseText = agentResult.text;
-
-    responseText = await this.applyResponseLengthPolicy(responseText, message.arc);
-    responseText = this.cleanResponseText(responseText, message.nick);
 
     // Deferred: memory update, tool summary persistence, session dispose.
     // Memory update runs first so that any tool calls it produces (write/edit
@@ -634,7 +610,6 @@ export class CommandExecutor {
     })();
 
     return {
-      responseText,
       usage: agentResult.usage,
       peakTurnInput: agentResult.peakTurnInput,
       toolCallsCount: agentResult.toolCallsCount ?? 0,
