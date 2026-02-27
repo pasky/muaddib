@@ -64,6 +64,7 @@ export interface ProactiveEvalResult {
 
 export interface ProactiveEvaluatorOptions {
   modelAdapter: PiAiModelAdapter;
+  mynick: string;
   logger?: CommandExecutorLogger;
 }
 
@@ -265,6 +266,7 @@ export class ProactiveRunner {
       context,
       {
         modelAdapter: this.runtime.modelAdapter,
+        mynick: message.mynick,
         logger: this.logger,
       },
     );
@@ -339,7 +341,9 @@ export async function evaluateProactiveInterjection(
   }
 
   const currentMessage = extractCurrentMessage(context[context.length - 1]);
-  const prompt = config.prompts.interject.replace("{message}", currentMessage);
+  const prompt = config.prompts.interject
+    .replace("{mynick}", options.mynick)
+    .replace("{message}", currentMessage);
   const validationModels = config.models.validation;
 
   try {
