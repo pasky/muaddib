@@ -2,6 +2,7 @@
 import type { Logger } from "../app/logging.js";
 import { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
 import { responseText } from "../agent/message.js";
+import { ArcLockManager } from "../utils/arc-lock.js";
 import {
   ChronicleStore,
   type Chapter,
@@ -39,7 +40,7 @@ export class ChronicleLifecycleTs implements ChronicleLifecycle {
   private readonly config: ChronicleLifecycleConfig;
   private readonly modelAdapter: PiAiModelAdapter;
   private readonly logger: Logger;
-  private readonly arcQueues = new Map<string, Promise<void>>();
+  private readonly arcLock = new ArcLockManager();
 
   constructor(options: ChronicleLifecycleTsOptions) {
     this.chronicleStore = options.chronicleStore;
@@ -57,7 +58,7 @@ export class ChronicleLifecycleTs implements ChronicleLifecycle {
       throw new Error("paragraph_text must be non-empty");
     }
 
-    return await this.withArcLock(arc, async () => {
+    return await this.arcLock.run(arc, async () => {
       const currentChapter = await this.chronicleStore.getOrOpenCurrentChapter(arc);
       await this.rollChapterIfNeeded(arc, currentChapter);
       const appended = await this.chronicleStore.appendParagraph(arc, trimmed);
@@ -136,26 +137,4 @@ export class ChronicleLifecycleTs implements ChronicleLifecycle {
     return Math.trunc(parsed);
   }
 
-  private async withArcLock<T>(arc: string, fn: () => Promise<T>): Promise<T> {
-    const previous = this.arcQueues.get(arc) ?? Promise.resolve();
-
-    let release: (() => void) | undefined;
-    const signal = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-
-    const queued = previous.then(async () => await signal);
-    this.arcQueues.set(arc, queued);
-
-    await previous;
-
-    try {
-      return await fn();
-    } finally {
-      release?.();
-      if (this.arcQueues.get(arc) === queued) {
-        this.arcQueues.delete(arc);
-      }
-    }
-  }
 }

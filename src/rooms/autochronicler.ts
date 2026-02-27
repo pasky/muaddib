@@ -6,6 +6,7 @@ import { CONSOLE_LOGGER, type Logger } from "../app/logging.js";
 import { buildArc } from "./message.js";
 import { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
 import { responseText } from "../agent/message.js";
+import { ArcLockManager } from "../utils/arc-lock.js";
 
 export interface AutoChronicler {
   checkAndChronicle(
@@ -39,7 +40,7 @@ Retain not just critical facts, but also the tone of voice and emotional charge 
 export class AutoChroniclerTs implements AutoChronicler {
   private readonly modelAdapter: PiAiModelAdapter;
   private readonly logger: Logger;
-  private readonly arcQueues = new Map<string, Promise<void>>();
+  private readonly arcLock = new ArcLockManager();
 
   static readonly MAX_CHRONICLE_BATCH = 100;
   static readonly MAX_LOOKBACK_DAYS = 7;
@@ -58,7 +59,7 @@ export class AutoChroniclerTs implements AutoChronicler {
   ): Promise<boolean> {
     const arc = buildArc(server, channel);
 
-    return await this.withArcLock(arc, async () => {
+    return await this.arcLock.run(arc, async () => {
       const unchronicledCount = await this.options.history.countRecentUnchronicled(
         arc,
         AutoChroniclerTs.MAX_LOOKBACK_DAYS,
@@ -166,26 +167,4 @@ export class AutoChroniclerTs implements AutoChronicler {
     return this.options.config.arcModels?.[arc] ?? this.options.config.model;
   }
 
-  private async withArcLock<T>(arc: string, fn: () => Promise<T>): Promise<T> {
-    const previous = this.arcQueues.get(arc) ?? Promise.resolve();
-
-    let release: (() => void) | undefined;
-    const signal = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-
-    const queued = previous.then(async () => await signal);
-    this.arcQueues.set(arc, queued);
-
-    await previous;
-
-    try {
-      return await fn();
-    } finally {
-      release?.();
-      if (this.arcQueues.get(arc) === queued) {
-        this.arcQueues.delete(arc);
-      }
-    }
-  }
 }

@@ -1,4 +1,4 @@
-import { type Agent, type AgentTool, type ThinkingLevel } from "@mariozechner/pi-agent-core";
+import { type Agent, type AgentMessage, type AgentTool, type ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { AgentSession, AuthStorage } from "@mariozechner/pi-coding-agent";
 import type { AssistantMessage, Message, Usage } from "@mariozechner/pi-ai";
 
@@ -273,7 +273,7 @@ export class SessionRunner {
     }
   }
 
-  private logLlmIo(stage: string, messages: readonly unknown[]): void {
+  private logLlmIo(stage: string, messages: readonly AgentMessage[]): void {
     const rendered = messages.map((message) => renderMessageForDebug(message, this.llmDebugMaxChars));
     this.logger.debug(`llm_io ${stage}`, safeJson(rendered, this.llmDebugMaxChars));
   }
@@ -312,7 +312,7 @@ export class SessionRunner {
   }
 }
 
-function extractLastAssistantText(messages: readonly unknown[]): string {
+function extractLastAssistantText(messages: readonly AgentMessage[]): string {
   const assistant = findLastAssistantMessage(messages);
   if (!assistant) {
     return "";
@@ -321,24 +321,25 @@ function extractLastAssistantText(messages: readonly unknown[]): string {
   return responseText(assistant);
 }
 
-function findLastAssistantMessage(messages: readonly unknown[]): AssistantMessage | null {
+function findLastAssistantMessage(messages: readonly AgentMessage[]): AssistantMessage | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
-    if (isAssistantMessage(messages[i] as import("@mariozechner/pi-agent-core").AgentMessage)) {
-      return messages[i] as AssistantMessage;
+    const msg = messages[i];
+    if (isAssistantMessage(msg)) {
+      return msg;
     }
   }
   return null;
 }
 
-function sumAssistantUsage(messages: readonly unknown[]): Usage {
+function sumAssistantUsage(messages: readonly AgentMessage[]): Usage {
   const total = emptyUsage();
 
   for (const message of messages) {
-    if (!isAssistantMessage(message as import("@mariozechner/pi-agent-core").AgentMessage)) {
+    if (!isAssistantMessage(message)) {
       continue;
     }
 
-    const usage = (message as AssistantMessage).usage;
+    const usage = message.usage;
     total.input += usage.input;
     total.output += usage.output;
     total.cacheRead += usage.cacheRead;
@@ -435,7 +436,7 @@ function renderContentForDebug(content: unknown, maxChars: number): unknown {
 /** Extract text from a single assistant message event payload. */
 function extractAssistantTextFromEvent(message: unknown): string {
   if (!message || typeof message !== "object") return "";
-  const msg = message as import("@mariozechner/pi-agent-core").AgentMessage;
+  const msg = message as AgentMessage;
   if (!isAssistantMessage(msg)) return "";
   return responseText(msg);
 }
