@@ -46,6 +46,7 @@ import type { AgentConfig, MemoryConfig, SkillsConfig } from "../../config/muadd
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { getArcWorkspacePath } from "../../agent/tools/gondolin-tools.js";
+import type { ArcEventsWatcher } from "../../events/watcher.js";
 
 // ── Public types ──
 
@@ -96,6 +97,7 @@ export interface CommandExecutorOverrides {
   runnerFactory?: CommandRunnerFactory;
   rateLimiter?: CommandRateLimiter;
   contextReducer?: ContextReducer;
+  eventsWatcher?: ArcEventsWatcher;
 }
 
 // ── Executor ──
@@ -117,6 +119,7 @@ export class CommandExecutor {
   private readonly refusalFallbackModel: string | null;
   private readonly persistenceSummaryModel: string | null;
   private readonly responseMaxBytes: number;
+  private readonly eventsWatcher?: ArcEventsWatcher;
 
   private readonly agentConfig: AgentConfig;
 
@@ -197,6 +200,7 @@ export class CommandExecutor {
         logger: this.logger,
       });
 
+    this.eventsWatcher = overrides?.eventsWatcher;
 
   }
 
@@ -206,6 +210,7 @@ export class CommandExecutor {
       authStorage: this.runtime.authStorage,
       modelAdapter: this.modelAdapter,
       logger: this.logger,
+      eventsWatcher: this.eventsWatcher,
     };
   }
 

@@ -17,6 +17,7 @@ import {
   createWebSearchTool,
 } from "./web.js";
 import { createGondolinTools } from "./gondolin-tools.js";
+import type { ArcEventsWatcher } from "../../events/watcher.js";
 import type { GenerateImageExecutor } from "./image.js";
 import type { OracleExecutor } from "./oracle.js";
 import type { WebSearchExecutor, VisitWebpageExecutor } from "./web.js";
@@ -56,6 +57,9 @@ export interface BaselineToolOptions extends ToolContext {
    * falls back to a simple toolless completion.
    */
   oracleInvocation?: OracleInvocationContext;
+
+  /** Arc events watcher for Gondolin /events/ mount notifications. */
+  eventsWatcher?: ArcEventsWatcher;
 }
 
 type ExecutorBackedToolFactory = (executors: BaselineToolExecutors, options: BaselineToolOptions) => MuaddibTool;
@@ -104,6 +108,7 @@ export function createBaselineAgentTools(options: BaselineToolOptions): ToolSet 
     config: gondolinConfig,
     toolsConfig: options.toolsConfig,
     logger: options.logger,
+    eventsWatcher: options.eventsWatcher,
   });
 
   const tools = [

@@ -11,6 +11,8 @@ import {
   createSendRetryEventLogger,
 } from "../send-retry.js";
 import { SlackSocketTransport } from "./transport.js";
+import type { RoomGateway } from "../room-gateway.js";
+import type { ArcEventsWatcher } from "../../events/watcher.js";
 
 interface CommandLike {
   handleIncomingMessage(
@@ -116,7 +118,10 @@ export class SlackRoomMonitor {
   private readonly logger: Logger;
   private readonly logWriter?: RuntimeLogWriter;
 
-  static async fromRuntime(runtime: MuaddibRuntime): Promise<SlackRoomMonitor[]> {
+  static async fromRuntime(
+    runtime: MuaddibRuntime,
+    options?: { gateway?: RoomGateway; eventsWatcher?: ArcEventsWatcher },
+  ): Promise<SlackRoomMonitor[]> {
     const roomConfig = runtime.config.getRoomConfig("slack");
     const enabled = roomConfig.enabled ?? false;
     if (!enabled) {
@@ -133,9 +138,11 @@ export class SlackRoomMonitor {
       throw new Error("Slack room is enabled but rooms.slack.workspaces is missing.");
     }
 
-    const commandHandler = new RoomMessageHandler(runtime, "slack");
+    const commandHandler = new RoomMessageHandler(runtime, "slack", {
+      eventsWatcher: options?.eventsWatcher,
+    });
 
-    return await Promise.all(workspaceEntries.map(async ([workspaceId, workspaceConfig]) => {
+    const monitors = await Promise.all(workspaceEntries.map(async ([workspaceId, workspaceConfig]) => {
       const botToken = requireNonEmptyString(
         await runtime.authStorage.getApiKey(`slack-${workspaceId}`),
         `Slack room is enabled but 'slack-${workspaceId}' API key is missing from auth.json.`,
@@ -149,7 +156,7 @@ export class SlackRoomMonitor {
         botNameFallback: workspaceConfig.name,
       });
 
-      return new SlackRoomMonitor({
+      return { monitor: new SlackRoomMonitor({
         roomConfig,
         ignoreUsers: roomConfig.command?.ignoreUsers?.map(String),
         history: runtime.history,
@@ -161,8 +168,37 @@ export class SlackRoomMonitor {
         ),
         logger: runtime.logger.getLogger(`muaddib.rooms.slack.monitor.${workspaceId}`),
         logWriter: runtime.logger,
-      });
+      }), transport, channelName: workspaceConfig.name ?? workspaceId };
     }));
+
+    // Register Slack transport on the gateway so events can inject messages.
+    // Use the first transport for sending (all workspaces share the same commandHandler).
+    if (options?.gateway && monitors.length > 0) {
+      const firstTransport = monitors[0]!.transport;
+      options.gateway.register("slack", {
+        inject: async (serverTag, channelName, content) => {
+          const message: RoomMessage = {
+            serverTag,
+            channelName,
+            arc: buildArc(serverTag, channelName),
+            nick: "event",
+            mynick: "Muaddib",
+            content,
+          };
+          await commandHandler.handleIncomingMessage(message, {
+            isDirect: true,
+            sendResponse: async (text) => {
+              await firstTransport.sendMessage(channelName, text);
+            },
+          });
+        },
+        send: async (_serverTag, channelName, text) => {
+          await firstTransport.sendMessage(channelName, text);
+        },
+      });
+    }
+
+    return monitors.map((m) => m.monitor);
   }
 
   constructor(private readonly options: SlackRoomMonitorOptions) {

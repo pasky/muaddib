@@ -11,6 +11,8 @@ import {
   createSendRetryEventLogger,
 } from "../send-retry.js";
 import { DiscordGatewayTransport } from "./transport.js";
+import type { RoomGateway } from "../room-gateway.js";
+import type { ArcEventsWatcher } from "../../events/watcher.js";
 
 interface CommandLike {
   handleIncomingMessage(
@@ -108,7 +110,10 @@ export class DiscordRoomMonitor {
   private readonly logger: Logger;
   private readonly logWriter?: RuntimeLogWriter;
 
-  static async fromRuntime(runtime: MuaddibRuntime): Promise<DiscordRoomMonitor[]> {
+  static async fromRuntime(
+    runtime: MuaddibRuntime,
+    options?: { gateway?: RoomGateway; eventsWatcher?: ArcEventsWatcher },
+  ): Promise<DiscordRoomMonitor[]> {
     const roomConfig = runtime.config.getRoomConfig("discord");
     const enabled = roomConfig.enabled ?? false;
     if (!enabled) {
@@ -122,11 +127,37 @@ export class DiscordRoomMonitor {
 
     const commandHandler = new RoomMessageHandler(runtime, "discord", {
       responseCleaner: stripDiscordNickPrefix,
+      eventsWatcher: options?.eventsWatcher,
     });
     const transport = new DiscordGatewayTransport({
       token,
       botNameFallback: roomConfig.botName,
     });
+
+    // Register Discord transport on the gateway so events can inject messages.
+    if (options?.gateway) {
+      options.gateway.register("discord", {
+        inject: async (serverTag, channelName, content) => {
+          const message: RoomMessage = {
+            serverTag,
+            channelName,
+            arc: buildArc(serverTag, channelName),
+            nick: "event",
+            mynick: roomConfig.botName ?? "Muaddib",
+            content,
+          };
+          await commandHandler.handleIncomingMessage(message, {
+            isDirect: true,
+            sendResponse: async (text) => {
+              await transport.sendMessage(channelName, text);
+            },
+          });
+        },
+        send: async (_serverTag, channelName, text) => {
+          await transport.sendMessage(channelName, text);
+        },
+      });
+    }
 
     return [
       new DiscordRoomMonitor({

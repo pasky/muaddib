@@ -10,6 +10,8 @@ import { RuntimeLogWriter } from "./logging.js";
 import { DiscordRoomMonitor } from "../rooms/discord/monitor.js";
 import { IrcRoomMonitor } from "../rooms/irc/monitor.js";
 import { SlackRoomMonitor } from "../rooms/slack/monitor.js";
+import { RoomGateway } from "../rooms/room-gateway.js";
+import { ArcEventsWatcher } from "../events/watcher.js";
 import { getMuaddibHome } from "../config/paths.js";
 import { createMuaddibRuntime, shutdownRuntime, type MuaddibRuntime } from "../runtime.js";
 
@@ -44,26 +46,36 @@ export async function runMuaddibMain(argv: string[] = process.argv.slice(2)): Pr
     logger: runtimeLogger,
   });
 
+  const gateway = new RoomGateway();
+  const eventsWatcher = new ArcEventsWatcher(gateway, logger);
+
   try {
-    const monitors = await createMonitors(runtime);
+    const monitors = await createMonitors(runtime, gateway, eventsWatcher);
     if (monitors.length === 0) {
       logger.error("No room monitors enabled.");
       throw new Error("No room monitors enabled.");
     }
 
+    eventsWatcher.start();
     logger.info("Launching room monitors", `count=${monitors.length}`);
     await Promise.all(monitors.map(async (monitor) => await monitor.run()));
   } finally {
+    eventsWatcher.stop();
     logger.info("Shutting down history storage");
     await shutdownRuntime(runtime);
   }
 }
 
-async function createMonitors(runtime: MuaddibRuntime): Promise<Array<{ run(): Promise<void> }>> {
+async function createMonitors(
+  runtime: MuaddibRuntime,
+  gateway: RoomGateway,
+  eventsWatcher: ArcEventsWatcher,
+): Promise<Array<{ run(): Promise<void> }>> {
+  const opts = { gateway, eventsWatcher };
   const monitors: Array<{ run(): Promise<void> }> = [];
-  monitors.push(...IrcRoomMonitor.fromRuntime(runtime));
-  monitors.push(...await DiscordRoomMonitor.fromRuntime(runtime));
-  monitors.push(...await SlackRoomMonitor.fromRuntime(runtime));
+  monitors.push(...IrcRoomMonitor.fromRuntime(runtime, opts));
+  monitors.push(...await DiscordRoomMonitor.fromRuntime(runtime, opts));
+  monitors.push(...await SlackRoomMonitor.fromRuntime(runtime, opts));
   return monitors;
 }
 

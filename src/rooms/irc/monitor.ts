@@ -6,6 +6,8 @@ import type { MuaddibRuntime } from "../../runtime.js";
 import { buildArc, type RoomMessage } from "../message.js";
 import { RoomMessageHandler } from "../command/message-handler.js";
 import { VarlinkClient, VarlinkSender } from "./varlink.js";
+import type { RoomGateway } from "../room-gateway.js";
+import type { ArcEventsWatcher } from "../../events/watcher.js";
 
 export interface IrcEvent {
   type?: string;
@@ -58,7 +60,10 @@ export class IrcRoomMonitor {
   private readonly logWriter?: RuntimeLogWriter;
   private readonly serverNicks = new Map<string, string>();
 
-  static fromRuntime(runtime: MuaddibRuntime): IrcRoomMonitor[] {
+  static fromRuntime(
+    runtime: MuaddibRuntime,
+    options?: { gateway?: RoomGateway; eventsWatcher?: ArcEventsWatcher },
+  ): IrcRoomMonitor[] {
     const roomConfig = runtime.config.getRoomConfig("irc");
     const enabled = roomConfig.enabled ?? true;
     if (!enabled) {
@@ -72,22 +77,57 @@ export class IrcRoomMonitor {
 
     const commandHandler = new RoomMessageHandler(runtime, "irc", {
       responseCleaner: (text) => text.replace(/\n+/g, "; ").trim(),
+      eventsWatcher: options?.eventsWatcher,
     });
 
-    return [
-      new IrcRoomMonitor({
-        roomConfig: {
-          varlink: {
-            socketPath,
-          },
+    const varlinkSender = new VarlinkSender(socketPath);
+
+    const monitor = new IrcRoomMonitor({
+      roomConfig: {
+        varlink: {
+          socketPath,
         },
-        ignoreUsers: roomConfig.command?.ignoreUsers?.map(String),
-        history: runtime.history,
-        commandHandler,
-        logger: runtime.logger.getLogger("muaddib.rooms.irc.monitor"),
-        logWriter: runtime.logger,
-      }),
-    ];
+      },
+      ignoreUsers: roomConfig.command?.ignoreUsers?.map(String),
+      history: runtime.history,
+      commandHandler,
+      varlinkSender,
+      logger: runtime.logger.getLogger("muaddib.rooms.irc.monitor"),
+      logWriter: runtime.logger,
+    });
+
+    // Register IRC transport on the gateway so events can inject messages.
+    if (options?.gateway) {
+      options.gateway.register("irc", {
+        inject: async (serverTag, channelName, content) => {
+          const mynick = await varlinkSender.getServerNick(serverTag);
+          if (!mynick) {
+            throw new Error(`Cannot inject into IRC: no nick for server ${serverTag}`);
+          }
+          const message: RoomMessage = {
+            serverTag,
+            channelName,
+            arc: buildArc(serverTag, channelName),
+            nick: "event",
+            mynick,
+            content,
+          };
+          await commandHandler.handleIncomingMessage(message, {
+            isDirect: true,
+            sendResponse: async (text) => {
+              const responseText = text.replace(/\n+/g, "; ").trim();
+              await varlinkSender.sendMessage(channelName, responseText, serverTag);
+            },
+          });
+        },
+        send: async (serverTag, channelName, text) => {
+          const responseText = text.replace(/\n+/g, "; ").trim();
+          await varlinkSender.sendMessage(channelName, responseText, serverTag);
+        },
+      });
+    }
+
+    return [monitor];
   }
 
   constructor(private readonly options: IrcRoomMonitorOptions) {

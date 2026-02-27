@@ -42,6 +42,7 @@ import {
   type SandboxReadFile,
 } from "./artifact.js";
 import { SizeLimitProvider } from "./size-limit-provider.js";
+import { NotifyingProvider } from "./notifying-provider.js";
 import {
   loadBundledSkills,
   loadWorkspaceSkills,
@@ -49,6 +50,7 @@ import {
   VM_SKILLS_BASE,
   type LoadedSkill,
 } from "../skills/load-skills.js";
+import type { ArcEventsWatcher } from "../../events/watcher.js";
 
 // ── Arc ID / workspace path / checkpoint path ──────────────────────────────
 // Arc IDs are already filesystem-safe (percent-encoded at construction in
@@ -69,6 +71,10 @@ export function getArcChronicleDir(arc: string): string {
 
 export function getArcChatHistoryDir(arc: string): string {
   return join(getMuaddibHome(), "arcs", arc, "chat_history");
+}
+
+export function getArcEventsDir(arc: string): string {
+  return join(getMuaddibHome(), "arcs", arc, "events");
 }
 
 // ── VM cache: one VM per arc ───────────────────────────────────────────────
@@ -199,6 +205,7 @@ async function ensureVm(
   skills: LoadedSkill[],
   artifactHostname: string | undefined,
   logger?: Logger,
+  eventsWatcher?: ArcEventsWatcher,
 ): Promise<VM> {
   // If a checkpoint is in progress for this arc, wait for it to complete before
   // creating or returning a VM.  The checkpointing operation removes the VM from
@@ -288,6 +295,17 @@ async function ensureVm(
       if (existsSync(chatHistoryDir)) {
         mounts["/chat_history"] = new ReadonlyProvider(new RealFSProvider(chatHistoryDir));
       }
+
+      // Mount /events/ for arc event scheduling (one-shot and cron jobs).
+      const eventsDir = getArcEventsDir(arc);
+      mkdirSync(eventsDir, { recursive: true });
+      const EVENTS_QUOTA_BYTES = 1 * 1024 * 1024; // 1 MB
+      const eventsBackend = new NotifyingProvider(
+        new RealFSProvider(eventsDir),
+        (name) => eventsWatcher?.onFileWritten(arc, name),
+        (name) => eventsWatcher?.onFileDeleted(arc, name),
+      );
+      mounts["/events"] = new SizeLimitProvider(eventsBackend, EVENTS_QUOTA_BYTES, eventsDir);
 
       // Forward QEMU serial console output (guest kernel + init messages) to
       // the logger so stuck boots are diagnosable.  The "qemu" debug component
@@ -667,6 +685,7 @@ export interface GondolinToolsOptions {
   config: GondolinConfig;
   toolsConfig?: ToolsConfig;
   logger?: Logger;
+  eventsWatcher?: ArcEventsWatcher;
 }
 
 /**
@@ -680,7 +699,7 @@ export interface GondolinToolsOptions {
  * The last 8 session dirs are kept across checkpoints so the agent can revisit them.
  */
 export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
-  const { arc, config, toolsConfig, logger } = options;
+  const { arc, config, toolsConfig, logger, eventsWatcher } = options;
   const dnsMode = resolveDnsMode(config.dnsMode);
   const sessionDir = `/tmp/session-${randomUUID().slice(0, 8)}`;
 
@@ -708,7 +727,7 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
 
   function getVm(): Promise<VM> {
     if (!vmReady) {
-      vmReady = ensureVm(arc, config, dnsMode, skills, artifactHostname, logger).then(async (vm) => {
+      vmReady = ensureVm(arc, config, dnsMode, skills, artifactHostname, logger, eventsWatcher).then(async (vm) => {
         await vm.exec(["/bin/mkdir", "-p", sessionDir], { signal: AbortSignal.timeout(vmOpTimeoutMs) });
         logger?.info(`Gondolin session dir: ${sessionDir} (arc: ${arc})`);
         return vm;
@@ -748,6 +767,7 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
   const chronicleSuffix = existsSync(getArcChronicleDir(arc))
     ? " Chronicle: you chapters and paragraphs chronicling your experiences, plans, thoughts and observations,.forming the backbone of your consciousness, are at /chronicle/ (read-only)."
     : "";
+  const eventsSuffix = " Events: /events/ for scheduling one-shot and periodic (cron) jobs.";
   const chatHistorySuffix = existsSync(getArcChatHistoryDir(arc))
     ? " Chat history: raw JSONL logs at /chat_history/ (read-only)."
     : "";
@@ -770,6 +790,7 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
     " Environment: Alpine Linux, uv venv is active." +
     chronicleSuffix +
     chatHistorySuffix +
+    eventsSuffix +
     artifactsSuffix +
     skillsSection +
     memorySuffix;
