@@ -59,6 +59,12 @@ export class IrcRoomMonitor {
   private readonly logger: Logger;
   private readonly logWriter?: RuntimeLogWriter;
   private readonly serverNicks = new Map<string, string>();
+  private readyResolve?: () => void;
+  private readyReject?: (err: Error) => void;
+  readonly ready = new Promise<void>((resolve, reject) => {
+    this.readyResolve = resolve;
+    this.readyReject = reject;
+  });
 
   static fromRuntime(
     runtime: MuaddibRuntime,
@@ -100,6 +106,7 @@ export class IrcRoomMonitor {
     if (options?.gateway) {
       options.gateway.register("irc", {
         inject: async (serverTag, channelName, content) => {
+          await monitor.ready;
           const mynick = await varlinkSender.getServerNick(serverTag);
           if (!mynick) {
             throw new Error(`Cannot inject into IRC: no nick for server ${serverTag}`);
@@ -121,6 +128,7 @@ export class IrcRoomMonitor {
           });
         },
         send: async (serverTag, channelName, text) => {
+          await monitor.ready;
           const responseText = text.replace(/\n+/g, "; ").trim();
           await varlinkSender.sendMessage(channelName, responseText, serverTag);
         },
@@ -142,10 +150,12 @@ export class IrcRoomMonitor {
 
   async run(): Promise<void> {
     if (!(await this.connectWithRetry())) {
+      this.readyReject?.(new Error("IRC monitor failed to connect"));
       this.logger.error("Could not establish varlink connection; exiting IRC monitor.");
       return;
     }
 
+    this.readyResolve?.();
     this.logger.info("Muaddib started, waiting for IRC events...");
 
     const inFlightEvents = new Set<Promise<void>>();

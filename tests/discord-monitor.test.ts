@@ -8,6 +8,7 @@ import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { RuntimeLogWriter } from "../src/app/logging.js";
 import { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { DiscordRoomMonitor } from "../src/rooms/discord/monitor.js";
+import { DiscordGatewayTransport } from "../src/rooms/discord/transport.js";
 import { buildArc } from "../src/rooms/message.js";
 import { createTempHistoryStore } from "./test-helpers.js";
 import { createTestRuntime } from "./test-runtime.js";
@@ -962,5 +963,77 @@ describe("DiscordRoomMonitor", () => {
     expect(seenMessage).toBe("@Bob hey check this");
 
     await history.close();
+  });
+});
+
+/** Create a fake Discord.js Collection (Map with a `find` method). */
+function fakeCollection<V>(entries: Array<[string, V]>): Map<string, V> & { find(fn: (v: V) => boolean): V | undefined } {
+  const map = new Map(entries) as Map<string, V> & { find(fn: (v: V) => boolean): V | undefined };
+  map.find = (fn: (v: V) => boolean) => {
+    for (const v of map.values()) {
+      if (fn(v)) return v;
+    }
+    return undefined;
+  };
+  return map;
+}
+
+describe("DiscordGatewayTransport.resolveChannelId", () => {
+  it("returns channelName as fallback when no guilds are cached", async () => {
+    const transport = Object.create(DiscordGatewayTransport.prototype) as DiscordGatewayTransport;
+    (transport as any).client = {
+      guilds: {
+        cache: new Map(),
+      },
+    };
+
+    const result = await transport.resolveChannelId("general", "MyGuild");
+    expect(result).toBe("general");
+  });
+
+  it("resolves channel name to id from guild cache", async () => {
+    const transport = Object.create(DiscordGatewayTransport.prototype) as DiscordGatewayTransport;
+    (transport as any).client = {
+      guilds: {
+        cache: new Map([
+          ["guild-1", {
+            name: "MyGuild",
+            id: "guild-1",
+            channels: {
+              cache: fakeCollection([
+                ["chan-123", { name: "general", id: "chan-123", isTextBased: () => true }],
+                ["chan-456", { name: "random", id: "chan-456", isTextBased: () => true }],
+              ]),
+            },
+          }],
+        ]),
+      },
+    };
+
+    const result = await transport.resolveChannelId("general", "MyGuild");
+    expect(result).toBe("chan-123");
+  });
+
+  it("filters by guild identifier", async () => {
+    const transport = Object.create(DiscordGatewayTransport.prototype) as DiscordGatewayTransport;
+    (transport as any).client = {
+      guilds: {
+        cache: new Map([
+          ["guild-1", {
+            name: "OtherGuild",
+            id: "guild-1",
+            channels: {
+              cache: fakeCollection([
+                ["chan-999", { name: "general", id: "chan-999", isTextBased: () => true }],
+              ]),
+            },
+          }],
+        ]),
+      },
+    };
+
+    // Guild name doesn't match, so fallback
+    const result = await transport.resolveChannelId("general", "MyGuild");
+    expect(result).toBe("general");
   });
 });

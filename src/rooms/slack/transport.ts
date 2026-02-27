@@ -154,6 +154,28 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
     };
   }
 
+  async resolveChannelId(channelName: string): Promise<string> {
+    // Reverse-search the name→id cache first.
+    for (const [id, name] of this.channelNameCache.entries()) {
+      if (name === channelName) return id;
+    }
+    // Fall back to the conversations.list API.
+    try {
+      const result = await this.getApp().client.conversations.list({
+        token: this.options.botToken,
+        types: "public_channel,private_channel",
+        limit: 1000,
+      });
+      for (const ch of result.channels ?? []) {
+        if (ch.name === channelName && ch.id) {
+          this.channelNameCache.set(ch.id, channelName);
+          return ch.id;
+        }
+      }
+    } catch { /* fall through */ }
+    return channelName; // fallback: might already be an ID
+  }
+
   async formatOutgoingMentions(message: string): Promise<string> {
     if (!message) {
       return message;

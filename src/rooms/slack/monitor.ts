@@ -87,6 +87,7 @@ export interface SlackSendResult {
 export interface SlackSender {
   connect?(): Promise<void>;
   disconnect?(): Promise<void>;
+  resolveChannelId?(channelName: string): Promise<string>;
   sendMessage(
     channelId: string,
     message: string,
@@ -177,6 +178,8 @@ export class SlackRoomMonitor {
       const firstTransport = monitors[0]!.transport;
       options.gateway.register("slack", {
         inject: async (serverTag, channelName, content) => {
+          const rawName = channelName.replace(/^#/, "");
+          const channelId = await firstTransport.resolveChannelId(rawName);
           const message: RoomMessage = {
             serverTag,
             channelName,
@@ -188,12 +191,14 @@ export class SlackRoomMonitor {
           await commandHandler.handleIncomingMessage(message, {
             isDirect: true,
             sendResponse: async (text) => {
-              await firstTransport.sendMessage(channelName, text);
+              await firstTransport.sendMessage(channelId, text);
             },
           });
         },
         send: async (_serverTag, channelName, text) => {
-          await firstTransport.sendMessage(channelName, text);
+          const rawName = channelName.replace(/^#/, "");
+          const channelId = await firstTransport.resolveChannelId(rawName);
+          await firstTransport.sendMessage(channelId, text);
         },
       });
     }

@@ -169,6 +169,17 @@ export class DiscordGatewayTransport implements DiscordEventSource, DiscordSende
     };
   }
 
+  async resolveChannelId(channelName: string, guildIdentifier?: string): Promise<string> {
+    for (const guild of this.client.guilds.cache.values()) {
+      if (guildIdentifier && guild.name !== guildIdentifier && guild.id !== guildIdentifier) continue;
+      const channel = guild.channels.cache.find(
+        (ch) => ch.isTextBased() && normalizeName(ch.name) === channelName,
+      );
+      if (channel) return channel.id;
+    }
+    return channelName; // fallback: might already be an ID
+  }
+
   async setTypingIndicator(channelId: string): Promise<void> {
     const channel = await this.client.channels.fetch(channelId);
     if (!channel || !channel.isTextBased()) {

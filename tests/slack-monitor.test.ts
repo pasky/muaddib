@@ -1058,3 +1058,31 @@ describe("SlackRoomMonitor", () => {
     await history.close();
   });
 });
+
+describe("SlackSocketTransport.resolveChannelId", () => {
+  it("resolves channel name from channelNameCache", async () => {
+    // Import the real class and construct a minimal mock
+    const { SlackSocketTransport } = await import("../src/rooms/slack/transport.js");
+    const transport = Object.create(SlackSocketTransport.prototype) as InstanceType<typeof SlackSocketTransport>;
+    (transport as any).channelNameCache = new Map([
+      ["C123", "general"],
+      ["C456", "random"],
+    ]);
+    // Ensure getApp won't be called since cache hit should suffice
+    (transport as any).app = null;
+
+    const result = await transport.resolveChannelId("general");
+    expect(result).toBe("C123");
+  });
+
+  it("returns channelName as fallback when not in cache and no app", async () => {
+    const { SlackSocketTransport } = await import("../src/rooms/slack/transport.js");
+    const transport = Object.create(SlackSocketTransport.prototype) as InstanceType<typeof SlackSocketTransport>;
+    (transport as any).channelNameCache = new Map();
+    // getApp() will throw "not connected", which resolveChannelId catches
+    (transport as any).app = null;
+
+    const result = await transport.resolveChannelId("unknown-channel");
+    expect(result).toBe("unknown-channel");
+  });
+});

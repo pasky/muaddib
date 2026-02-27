@@ -80,6 +80,7 @@ export interface DiscordSendResult {
 export interface DiscordSender {
   connect?(): Promise<void>;
   disconnect?(): Promise<void>;
+  resolveChannelId?(channelName: string, guildIdentifier?: string): Promise<string>;
   sendMessage(
     channelId: string,
     message: string,
@@ -138,6 +139,8 @@ export class DiscordRoomMonitor {
     if (options?.gateway) {
       options.gateway.register("discord", {
         inject: async (serverTag, channelName, content) => {
+          const guildName = serverTag.replace(/^discord:/, "");
+          const channelId = await transport.resolveChannelId(channelName, guildName);
           const message: RoomMessage = {
             serverTag,
             channelName,
@@ -149,12 +152,14 @@ export class DiscordRoomMonitor {
           await commandHandler.handleIncomingMessage(message, {
             isDirect: true,
             sendResponse: async (text) => {
-              await transport.sendMessage(channelName, text);
+              await transport.sendMessage(channelId, text);
             },
           });
         },
-        send: async (_serverTag, channelName, text) => {
-          await transport.sendMessage(channelName, text);
+        send: async (serverTag, channelName, text) => {
+          const guildName = serverTag.replace(/^discord:/, "");
+          const channelId = await transport.resolveChannelId(channelName, guildName);
+          await transport.sendMessage(channelId, text);
         },
       });
     }

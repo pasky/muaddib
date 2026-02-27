@@ -589,6 +589,76 @@ describe("IrcRoomMonitor", () => {
     await history.close();
   });
 
+  it("ready promise resolves after successful connectWithRetry", async () => {
+    const history = createTempHistoryStore(20);
+    await history.initialize();
+
+    const monitor = new IrcRoomMonitor({
+      roomConfig: {
+        varlink: {
+          socketPath: "/tmp/varlink.sock",
+        },
+      },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async () => {},
+      },
+      varlinkEvents: {
+        connect: async () => {},
+        disconnect: async () => {},
+        waitForEvents: async () => {},
+        receiveResponse: async () => ({ error: "done" }),
+      },
+      varlinkSender: new FakeSender(),
+    });
+
+    const runPromise = monitor.run();
+    // ready should resolve once connectWithRetry succeeds
+    await expect(monitor.ready).resolves.toBeUndefined();
+    await runPromise;
+
+    await history.close();
+  });
+
+  it("ready promise rejects when connectWithRetry fails", async () => {
+    const history = createTempHistoryStore(20);
+    await history.initialize();
+
+    const monitor = new IrcRoomMonitor({
+      roomConfig: {
+        varlink: {
+          socketPath: "/tmp/varlink.sock",
+        },
+      },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async () => {},
+      },
+      varlinkEvents: {
+        connect: async () => {
+          throw new Error("connection refused");
+        },
+        disconnect: async () => {},
+        waitForEvents: async () => {},
+        receiveResponse: async () => null,
+      },
+      varlinkSender: {
+        connect: async () => {
+          throw new Error("connection refused");
+        },
+        disconnect: async () => {},
+        sendMessage: async () => true,
+        getServerNick: async () => "muaddib",
+      },
+    });
+
+    const runPromise = monitor.run();
+    await expect(monitor.ready).rejects.toThrow("IRC monitor failed to connect");
+    await runPromise;
+
+    await history.close();
+  });
+
   it("processes IRC events concurrently without waiting for previous handler completion", async () => {
     const history = createTempHistoryStore(20);
     await history.initialize();
