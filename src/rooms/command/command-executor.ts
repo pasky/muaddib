@@ -184,10 +184,10 @@ export class CommandExecutor {
       "agent.refusalFallbackModel",
     ) ?? null;
 
-    this.persistenceSummaryModel = resolveConfigModelSpec(
-      this.commandConfig.toolSummary?.model,
-      "command.toolSummary.model",
-    ) ?? null;
+    const rawToolSummaryModel = this.commandConfig.toolSummary?.model;
+    this.persistenceSummaryModel = rawToolSummaryModel === ""
+      ? ""
+      : resolveConfigModelSpec(rawToolSummaryModel, "command.toolSummary.model") ?? null;
 
     this.responseMaxBytes = parseResponseMaxBytes(this.commandConfig.responseMaxBytes);
 

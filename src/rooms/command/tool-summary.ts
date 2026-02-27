@@ -32,13 +32,11 @@ export async function generateToolSummaryFromSession(input: GenerateToolSummaryI
     result,
     tools,
     persistenceSummaryModel,
-    modelAdapter,
     logger,
     arc,
-    memoryUpdateText,
   } = input;
 
-  if (!persistenceSummaryModel || !result.session) {
+  if (persistenceSummaryModel == null || !result.session) {
     return null;
   }
 
@@ -47,9 +45,59 @@ export async function generateToolSummaryFromSession(input: GenerateToolSummaryI
     return null;
   }
 
+  if (persistenceSummaryModel === "") {
+    return generateInSessionToolSummary(input, logger, arc);
+  }
+
+  return generateDedicatedModelToolSummary(input, calls, logger, arc);
+}
+
+/** In-session follow-up — reuses cached conversation context (cheap cache reads). */
+async function generateInSessionToolSummary(
+  input: GenerateToolSummaryInput,
+  logger: Logger,
+  arc?: string,
+): Promise<string | null> {
+  const { result, tools } = input;
+  const session = result.session!;
+  const preSummaryMsgCount = session.messages.length;
+
+  try {
+    result.bumpMaxIterations?.(2);
+    await session.prompt(buildToolSummaryFollowUpPrompt(tools));
+  } catch (error) {
+    logger.error("In-session tool summary failed", error);
+    return null;
+  }
+
+  const summaryText = extractAssistantText(
+    session.messages.slice(preSummaryMsgCount),
+  );
+
+  if (summaryText) {
+    logger.debug(
+      "Generated in-session tool summary",
+      `arc=${arc ?? "unknown"}`,
+      `chars=${summaryText.length}`,
+      `summary=${formatToolSummaryLogPreview(summaryText)}`,
+    );
+  }
+
+  return summaryText ?? null;
+}
+
+/** Dedicated model single-shot completion (existing path). */
+async function generateDedicatedModelToolSummary(
+  input: GenerateToolSummaryInput,
+  calls: PersistentToolCall[],
+  logger: Logger,
+  arc?: string,
+): Promise<string | null> {
+  const { persistenceSummaryModel, modelAdapter, memoryUpdateText } = input;
+
   try {
     const summaryResponse = await modelAdapter.completeSimple(
-      persistenceSummaryModel,
+      persistenceSummaryModel!,
       {
         systemPrompt: PERSISTENCE_SUMMARY_SYSTEM_PROMPT,
         messages: [
@@ -82,7 +130,7 @@ export async function generateToolSummaryFromSession(input: GenerateToolSummaryI
   }
 }
 
-function collectPersistentToolCalls(messages: AgentMessage[], tools: MuaddibTool[]): PersistentToolCall[] {
+export function collectPersistentToolCalls(messages: AgentMessage[], tools: MuaddibTool[]): PersistentToolCall[] {
   const toolPersistMap = new Map<string, ToolPersistType>();
   for (const tool of tools) {
     toolPersistMap.set(tool.name, tool.persistType);
@@ -143,6 +191,25 @@ function buildPersistenceSummaryInput(persistentToolCalls: PersistentToolCall[],
 
   lines.push("\nPlease provide a concise summary of what was accomplished in these tool calls.");
   return lines.join("\n");
+}
+
+/**
+ * Build a follow-up prompt for in-session tool summary generation.
+ * Uses the same `<meta>Session complete.` envelope as memory update prompts.
+ */
+export function buildToolSummaryFollowUpPrompt(tools: MuaddibTool[]): string {
+  const summaryToolNames = tools
+    .filter((t) => t.persistType === "summary")
+    .map((t) => t.name);
+
+  const toolList = summaryToolNames.join(", ");
+
+  return [
+    "<meta>Session complete. DO NOT RESPOND ANYMORE.",
+    "",
+    `Wrap-up task: As an AI agent, you need to remember in the future what tools you used when generating a response, and what the tools told you. Summarize the tool calls from this session in a single concise paragraph. Only cover these tools: ${toolList}. Include every artifact link and tie each link to the corresponding tool call. Include /tmp/session-* working directory paths so you can return to previous work. Do NOT use any tools.`,
+    "</meta>",
+  ].join("\n");
 }
 
 export function formatToolSummaryLogPreview(text: string, maxChars = 180): string {

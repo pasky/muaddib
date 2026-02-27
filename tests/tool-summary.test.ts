@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { extractAssistantText, generateToolSummaryFromSession } from "../src/rooms/command/tool-summary.js";
+import {
+  buildToolSummaryFollowUpPrompt,
+  collectPersistentToolCalls,
+  extractAssistantText,
+  generateToolSummaryFromSession,
+} from "../src/rooms/command/tool-summary.js";
 
 describe("generateToolSummaryFromSession", () => {
   it("returns a summary for summary tools", async () => {
@@ -207,6 +212,63 @@ describe("generateToolSummaryFromSession", () => {
     const userContent: string = payload.messages[0].content;
     expect(userContent).toContain("Post-session memory update reasoning");
     expect(userContent).toContain("Updated MEMORY.md with new project preferences");
+  });
+});
+
+describe("buildToolSummaryFollowUpPrompt", () => {
+  it("lists only summary-type tool names in the prompt", () => {
+    const tools = [
+      { name: "web_search", persistType: "summary" },
+      { name: "bash", persistType: "summary" },
+      { name: "read", persistType: "none" },
+    ] as any[];
+
+    const prompt = buildToolSummaryFollowUpPrompt(tools);
+
+    expect(prompt).toContain("<meta>Session complete. DO NOT RESPOND ANYMORE.");
+    expect(prompt).toContain("web_search, bash");
+    expect(prompt).not.toContain("read");
+    expect(prompt).toContain("Do NOT use any tools");
+    expect(prompt).toContain("</meta>");
+  });
+});
+
+describe("collectPersistentToolCalls", () => {
+  it("collects only summary-type tool results", () => {
+    const messages = [
+      {
+        role: "assistant",
+        content: [
+          { type: "toolCall", id: "c1", name: "web_search", arguments: { query: "test" } },
+          { type: "toolCall", id: "c2", name: "read", arguments: { path: "/tmp" } },
+        ],
+      },
+      { role: "toolResult", toolCallId: "c1", toolName: "web_search", details: {} },
+      { role: "toolResult", toolCallId: "c2", toolName: "read", details: {} },
+    ] as any[];
+
+    const tools = [
+      { name: "web_search", persistType: "summary" },
+      { name: "read", persistType: "none" },
+    ] as any[];
+
+    const calls = collectPersistentToolCalls(messages, tools);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].toolName).toBe("web_search");
+    expect(calls[0].input).toEqual({ query: "test" });
+  });
+
+  it("skips error tool results", () => {
+    const messages = [
+      {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "c1", name: "bash", arguments: { cmd: "fail" } }],
+      },
+      { role: "toolResult", toolCallId: "c1", toolName: "bash", isError: true, details: {} },
+    ] as any[];
+
+    const tools = [{ name: "bash", persistType: "summary" }] as any[];
+    expect(collectPersistentToolCalls(messages, tools)).toHaveLength(0);
   });
 });
 
