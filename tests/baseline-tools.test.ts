@@ -223,6 +223,17 @@ describe("baseline agent tools", () => {
     expect(tool.description).toContain("creative work");
   });
 
+  it("oracle tool description includes configured model ID", () => {
+    const tool = createOracleTool({ oracle: async () => "" }, "anthropic:claude-sonnet-4");
+    expect(tool.description).toContain("anthropic:claude-sonnet-4");
+  });
+
+  it("oracle tool description omits model clause when no model ID given", () => {
+    const tool = createOracleTool({ oracle: async () => "" });
+    expect(tool.description).not.toContain("using");
+    expect(tool.description).toMatch(/^Consult the oracle -/);
+  });
+
   it("ORACLE_EXCLUDED_TOOLS prevents recursion and irrelevant nested tools", () => {
     expect(ORACLE_EXCLUDED_TOOLS).toContain("oracle");
     expect(ORACLE_EXCLUDED_TOOLS).toContain("progress_report");

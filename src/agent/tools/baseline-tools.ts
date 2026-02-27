@@ -64,7 +64,7 @@ const BASELINE_TOOL_FACTORIES: ReadonlyArray<ExecutorBackedToolFactory> = [
   createWebSearchTool,
   createVisitWebpageTool,
   (executors, options) => createGenerateImageTool(executors, toConfiguredString(options.toolsConfig?.imageGen?.model)),
-  createOracleTool,
+  (executors, options) => createOracleTool(executors, toConfiguredString(options.toolsConfig?.oracle?.model)),
 ];
 
 export function createDefaultToolExecutors(

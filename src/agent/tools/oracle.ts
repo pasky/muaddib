@@ -27,13 +27,14 @@ export const ORACLE_EXCLUDED_TOOLS = new Set([
 
 const ORACLE_LOG_SEPARATOR = "----------------------------------------------";
 
-export function createOracleTool(executors: { oracle: OracleExecutor }): MuaddibTool {
+export function createOracleTool(executors: { oracle: OracleExecutor }, modelId?: string): MuaddibTool {
+  const modelClause = modelId ? ` (${modelId})` : "";
   return {
     name: "oracle",
     persistType: "none",
     label: "Oracle",
     description:
-      "Consult the oracle - a more powerful reasoning model that may be consulted for complex analysis and creative work. " +
+      `Consult the oracle${modelClause} - a more powerful reasoning model that may be consulted for complex analysis and creative work. ` +
       "Invoke it whenever it would be helpful to get deep advice on complex problems or produce a high quality creative piece.",
     parameters: Type.Object({
       query: Type.String({
