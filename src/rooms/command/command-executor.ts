@@ -1130,7 +1130,7 @@ export function buildMemoryUpdatePrompt(arc: string, memoryConfig?: MemoryConfig
 
   const displayContent = content.trim() || "(empty - not yet created)";
 
-  let prompt = `<meta>Session complete. Here is your current /workspace/MEMORY.md (${chars}/${charLimit} chars${capacityWarning}):\n---\n${displayContent}\n---\nIf you learned something worth persisting for the long term (beyond the continuously moving chronicle: user preferences, big lessons, key decisions), update /workspace/MEMORY.md using the edit or write tool. Keep entries concise. If nothing worth saving, do nothing.`;
+  let prompt = `<meta>Session complete. DO NOT RESPOND ANYMORE.\n\nWrap-up task: Here is your current /workspace/MEMORY.md (${chars}/${charLimit} chars${capacityWarning}):\n---\n${displayContent}\n---\nIf you learned something worth persisting for the long term (beyond the continuously moving chronicle: user preferences, big lessons, key decisions), update /workspace/MEMORY.md using the edit or write tool. Keep entries concise. If nothing worth saving, do nothing.`;
 
   // Skill creation section - appended when session was complex enough
   const toolCallsCount = options?.toolCallsCount ?? 0;
