@@ -1,4 +1,5 @@
 .*.sw?
+.claude
 chat_history.db
 chronicle.db
 auth.json
