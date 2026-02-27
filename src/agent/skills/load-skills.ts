@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 
 import { formatSkillsForPrompt, loadSkillsFromDir, type Skill } from "@mariozechner/pi-coding-agent";
 
-import { getArcWorkspacePath } from "../gondolin/fs.js";
+import { getArcWorkspacePath, VM_SKILLS_BASE, VM_WORKSPACE_SKILLS_BASE } from "../gondolin/fs.js";
 
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 
@@ -63,12 +63,6 @@ export function loadBundledSkills(): LoadedSkill[] {
     filePath: `${VM_SKILLS_BASE}/${skill.name}/SKILL.md`,
   }));
 }
-
-/** VM-local base path where skills are installed. */
-export const VM_SKILLS_BASE = "/skills";
-
-/** VM-local base path where workspace skills live (inside the /workspace RealFS mount). */
-export const VM_WORKSPACE_SKILLS_BASE = "/workspace/skills";
 
 /**
  * Load workspace skills from the arc's workspace directory.

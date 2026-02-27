@@ -16,7 +16,13 @@ import type { Logger } from "../../app/logging.js";
 import type { ArcEventsWatcher } from "../../events/watcher.js";
 import { SizeLimitProvider } from "./fs/size-limit-provider.js";
 import { NotifyingProvider } from "./fs/notifying-provider.js";
-import { VM_SKILLS_BASE, type LoadedSkill } from "../skills/load-skills.js";
+import type { LoadedSkill } from "../skills/load-skills.js";
+
+/** VM-internal mount point for bundled skills. */
+export const VM_SKILLS_BASE = "/skills";
+
+/** VM-internal path for workspace skills (inside the /workspace RealFS mount). */
+export const VM_WORKSPACE_SKILLS_BASE = "/workspace/skills";
 
 // ── Arc ID / workspace path / checkpoint path ──────────────────────────────
 // Arc IDs are already filesystem-safe (percent-encoded at construction in

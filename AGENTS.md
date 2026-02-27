@@ -37,7 +37,7 @@
 - **Dependency Injection**: core runtime dependencies (especially `modelAdapter`/auth) must be explicitly injected and required in types; no hidden local fallback instantiation (`?? new ...`) in internal services.
 - **Search before creating**: Before writing any helper function, interface, error class, or abstraction, search the codebase for existing equivalents. If found, import and reuse (narrow with `Pick<>` if needed). If the same logic already exists in another file, extract to a shared module first.
 - **No silent normalization**: If a config/input value is present but has the wrong type or range, throw — don't silently coerce to a default. Use `?? default` only for genuinely absent values, never to paper over invalid ones.
-- **No deprecated shims**: Never add `@deprecated` type aliases or compatibility wrappers. Delete the old thing and update all references.
+- **No deprecated shims**: Never add `@deprecated` type aliases or compatibility wrappers. Delete the old thing and update all references. Never re-export a moved symbol from its old location — update all import sites instead.
 - **No over-engineering for single use cases**: If a function, class, or abstraction has exactly one call site and adds no testability or clarity, inline it. This includes: single-re-export barrel files, identity wrapper functions, custom error classes with no discriminant fields, normalize wrappers that just set one default.
 - **CLAUDE.md** is a symlink to **AGENTS.md**
 
