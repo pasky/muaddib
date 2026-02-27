@@ -40,7 +40,7 @@ export function createGenerateImageTool(
   const modelClause = modelId ? `using ${modelId}` : "using the configured image generation model";
   return {
     name: "generate_image",
-    persistType: "artifact",
+    persistType: "summary",
     label: "Generate Image",
     description:
       `Generate image(s) ${modelClause}. Optionally include reference image URLs for edits or variations.`,
@@ -68,7 +68,6 @@ export function createGenerateImageTool(
         details: {
           kind: "generate_image",
           count: output.images.length,
-          artifactUrls: output.images.map((image) => image.artifactUrl),
         },
       };
     },

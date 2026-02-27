@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { extractAssistantText, generateToolSummaryFromSession } from "../src/rooms/command/tool-summary.js";
 
 describe("generateToolSummaryFromSession", () => {
-  it("returns a summary for summary/artifact tools", async () => {
+  it("returns a summary for summary tools", async () => {
     const modelAdapter = {
       completeSimple: vi.fn(async () => ({
         content: [{ type: "text", text: "ran tool and produced artifact" }],
@@ -36,7 +36,6 @@ describe("generateToolSummaryFromSession", () => {
               toolName: "web_search",
               details: {
                 query: "pi docs",
-                artifactUrls: ["https://example.test/a"],
               },
             },
           ],

@@ -14,8 +14,6 @@ interface PersistentToolCall {
   toolName: string;
   input: unknown;
   output: unknown;
-  persistType: ToolPersistType;
-  artifactUrls: string[];
 }
 
 interface GenerateToolSummaryInput {
@@ -114,7 +112,7 @@ function collectPersistentToolCalls(messages: AgentMessage[], tools: MuaddibTool
         return [];
       }
       const policy = toolPersistMap.get(toolResult.toolName) ?? "none";
-      if (policy !== "summary" && policy !== "artifact") {
+      if (policy !== "summary") {
         return [];
       }
 
@@ -124,8 +122,6 @@ function collectPersistentToolCalls(messages: AgentMessage[], tools: MuaddibTool
         toolName: toolResult.toolName,
         input,
         output: toolResult,
-        persistType: policy,
-        artifactUrls: extractArtifactUrls(toolResult),
       }];
     });
 }
@@ -134,15 +130,11 @@ function buildPersistenceSummaryInput(persistentToolCalls: PersistentToolCall[],
   const lines: string[] = ["The following tool calls were made during this conversation:"];
 
   for (const call of persistentToolCalls) {
-    lines.push(`\n\n# Calling tool **${call.toolName}** (persist: ${call.persistType})`);
+    lines.push(`\n\n# Calling tool **${call.toolName}**`);
     const inputText = call.input === undefined ? "(unavailable)" : typeof call.input === "string" ? call.input : JSON.stringify(call.input, null, 2);
     lines.push(`## **Input:**\n${inputText}\n`);
     const sanitizedOutput = stripBinaryContent(call.output);
     lines.push(`## **Output:**\n${typeof sanitizedOutput === "string" ? sanitizedOutput : JSON.stringify(sanitizedOutput, null, 2)}\n`);
-
-    for (const artifactUrl of call.artifactUrls) {
-      lines.push(`(Tool call I/O stored as artifact: ${artifactUrl})\n`);
-    }
   }
 
   if (memoryUpdateText) {
@@ -151,27 +143,6 @@ function buildPersistenceSummaryInput(persistentToolCalls: PersistentToolCall[],
 
   lines.push("\nPlease provide a concise summary of what was accomplished in these tool calls.");
   return lines.join("\n");
-}
-
-function extractArtifactUrls(result: unknown): string[] {
-  const urls = new Set<string>();
-
-  if (!result || typeof result !== "object") {
-    return [];
-  }
-
-  const record = result as Record<string, unknown>;
-  const details = record.details as Record<string, unknown> | undefined;
-  const artifactUrls = details?.artifactUrls;
-  if (Array.isArray(artifactUrls)) {
-    for (const artifactUrl of artifactUrls) {
-      if (typeof artifactUrl === "string" && artifactUrl.trim().length > 0) {
-        urls.add(artifactUrl.trim());
-      }
-    }
-  }
-
-  return Array.from(urls);
 }
 
 export function formatToolSummaryLogPreview(text: string, maxChars = 180): string {

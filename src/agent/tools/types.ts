@@ -5,7 +5,7 @@ import type { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import type { Logger } from "../../app/logging.js";
 
 /** How a tool's I/O is persisted for future context recall. */
-export type ToolPersistType = "none" | "summary" | "artifact";
+export type ToolPersistType = "none" | "summary";
 
 /**
  * Tools returned by a tool-set factory, together with an optional cleanup
