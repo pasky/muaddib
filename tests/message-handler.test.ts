@@ -266,6 +266,35 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("strips echoed IRC context prefixes in onResponse callback (sendResponse path)", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const incoming = makeMessage("!s ping");
+    const sent: string[] = [];
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: () => ({
+        prompt: async () =>
+          makeRunnerResult("[01:21] <MuaddibLLM> pasky: clean answer here"),
+      }),
+    });
+
+    await handler.handleIncomingMessage(incoming, {
+      isDirect: true,
+      sendResponse: async (text) => { sent.push(text); },
+    });
+
+    // The sendResponse callback must receive cleaned text, not the raw echoed prefix
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toBe("pasky: clean answer here");
+
+    await history.close();
+  });
+
   it("strips IRC echo prefixes including angle-bracketed nicks", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();

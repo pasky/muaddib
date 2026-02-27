@@ -391,9 +391,11 @@ export class CommandExecutor {
       sendResponse
         ? async (text: string) => {
             responseDeliveredViaCallback = true;
-            const sr = await sendResponse(text);
+            let cleaned = this.cleanResponseText(text, message.nick);
+            cleaned = await this.applyResponseLengthPolicy(cleaned, message.arc);
+            const sr = await sendResponse(cleaned);
             const sendResult = sr ? sr : undefined;
-            await this.persistBotResponse(message.arc, message, text, sendResult, {
+            await this.persistBotResponse(message.arc, message, cleaned, sendResult, {
               run: triggerTs,
             });
           }
@@ -491,7 +493,9 @@ export class CommandExecutor {
       sendResponse
         ? async (text: string) => {
             responseDeliveredViaCallback = true;
-            const prefixed = `[${modelStrCore(modelSpec)}] ${text}`;
+            let cleaned = this.cleanResponseText(text, message.nick);
+            cleaned = await this.applyResponseLengthPolicy(cleaned, message.arc);
+            const prefixed = `[${modelStrCore(modelSpec)}] ${cleaned}`;
             const sr = await sendResponse(prefixed);
             const sendResult = sr ? sr : undefined;
             await this.persistBotResponse(message.arc, message, prefixed, sendResult, {
