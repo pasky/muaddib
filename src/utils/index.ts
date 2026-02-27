@@ -166,6 +166,8 @@ export function appendAttachmentBlock(content: string, attachmentBlock: string):
   return `${content.trim()}\n\n${attachmentBlock}`;
 }
 
+import { isTextContent, responseText } from "../agent/message.js";
+
 /**
  * Extract plain text from a pi-ai Message (UserMessage, AssistantMessage, or ToolResultMessage).
  * For assistant messages, concatenates all text content blocks; for user/tool-result messages,
@@ -173,10 +175,10 @@ export function appendAttachmentBlock(content: string, attachmentBlock: string):
  */
 export function messageText(msg: import("@mariozechner/pi-ai").Message): string {
   if (msg.role === "assistant") {
-    return msg.content.filter((b) => b.type === "text").map((b) => b.text).join(" ");
+    return responseText(msg, " ");
   }
   if (typeof msg.content === "string") {
     return msg.content;
   }
-  return msg.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join(" ");
+  return msg.content.filter(isTextContent).map((b) => b.text).join(" ");
 }

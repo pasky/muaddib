@@ -11,6 +11,7 @@ import type { Agent } from "@mariozechner/pi-agent-core";
 import type { Message } from "@mariozechner/pi-ai";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { formatUtcTime, messageText } from "../../utils/index.js";
+import { responseText } from "../../agent/message.js";
 import type { ProactiveRoomConfig } from "../../config/muaddib-config.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import type { CommandConfig } from "./resolver.js";
@@ -359,23 +360,19 @@ export async function evaluateProactiveInterjection(
         },
       );
 
-      const responseText = response.content
-        .filter((block) => block.type === "text")
-        .map((block) => block.text)
-        .join(" ")
-        .trim();
+      const validationText = responseText(response, " ");
 
-      if (!responseText) {
+      if (!validationText) {
         return { shouldInterject: false, reason: `No response from validation model ${i + 1}` };
       }
 
-      const scoreMatch = responseText.match(/(\d+)\/10/);
+      const scoreMatch = validationText.match(/(\d+)\/10/);
       if (!scoreMatch) {
         logger?.warn(
           "No valid score in proactive response",
           `model=${model}`,
           `step=${i + 1}`,
-          `response=${responseText}`,
+          `response=${validationText}`,
         );
         return { shouldInterject: false, reason: `No score found in validation step ${i + 1}` };
       }

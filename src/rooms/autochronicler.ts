@@ -5,6 +5,7 @@ import type { ChatHistoryStore } from "../history/chat-history-store.js";
 import { CONSOLE_LOGGER, type Logger } from "../app/logging.js";
 import { buildArc } from "./message.js";
 import { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
+import { responseText } from "../agent/message.js";
 
 export interface AutoChronicler {
   checkAndChronicle(
@@ -148,11 +149,7 @@ export class AutoChroniclerTs implements AutoChronicler {
       },
     );
 
-    const text = response.content
-      .filter((entry) => entry.type === "text")
-      .map((entry) => entry.text)
-      .join("\n")
-      .trim();
+    const text = responseText(response);
 
     if (!text) {
       this.logger.warn(

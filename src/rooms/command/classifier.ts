@@ -3,6 +3,7 @@ import type { Message } from "@mariozechner/pi-ai";
 import { NOOP_LOGGER, type Logger } from "../../app/logging.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { messageText } from "../../utils/index.js";
+import { responseText as extractResponseText } from "../../agent/message.js";
 import type { CommandConfig } from "./resolver.js";
 
 export interface ModeClassifierOptions {
@@ -49,12 +50,8 @@ export function createModeClassifier(
         },
       );
 
-      const responseText = response.content
-        .filter((block) => block.type === "text")
-        .map((block) => block.text)
-        .join(" ")
-        .trim();
-      const normalizedText = responseText.toUpperCase();
+      const classifierResponse = extractResponseText(response, " ");
+      const normalizedText = classifierResponse.toUpperCase();
 
       // Try exact match first (the prompt asks for exactly one token).
       for (const label of labels) {
@@ -76,7 +73,7 @@ export function createModeClassifier(
       }
 
       if (bestCount === 0) {
-        logger.warn("Invalid mode classification response", `response=${responseText}`);
+        logger.warn("Invalid mode classification response", `response=${classifierResponse}`);
         return fallbackLabel;
       }
 

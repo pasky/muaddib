@@ -1,6 +1,7 @@
 
 import type { Logger } from "../app/logging.js";
 import { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
+import { responseText } from "../agent/message.js";
 import {
   ChronicleStore,
   type Chapter,
@@ -109,11 +110,7 @@ export class ChronicleLifecycleTs implements ChronicleLifecycle {
       },
     );
 
-    const summary = response.content
-      .filter((entry) => entry.type === "text")
-      .map((entry) => entry.text)
-      .join("\n")
-      .trim();
+    const summary = responseText(response);
 
     if (!summary) {
       throw new Error("Chronicler chapter summary model returned empty response.");

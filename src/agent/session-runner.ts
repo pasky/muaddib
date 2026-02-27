@@ -2,6 +2,7 @@ import { type Agent, type AgentTool, type ThinkingLevel } from "@mariozechner/pi
 import type { AgentSession, AuthStorage } from "@mariozechner/pi-coding-agent";
 import type { AssistantMessage, Message, Usage } from "@mariozechner/pi-ai";
 
+import { isAssistantMessage, isTextContent, isToolCall, responseText } from "./message.js";
 import { detectRefusalSignal } from "./refusal-detection.js";
 import { stringifyError } from "../utils/index.js";
 import { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
@@ -317,17 +318,12 @@ function extractLastAssistantText(messages: readonly unknown[]): string {
     return "";
   }
 
-  return assistant.content
-    .filter((item) => item.type === "text")
-    .map((item) => item.text)
-    .join("\n")
-    .trim();
+  return responseText(assistant);
 }
 
 function findLastAssistantMessage(messages: readonly unknown[]): AssistantMessage | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const message = messages[i] as { role?: string };
-    if (message.role === "assistant") {
+    if (isAssistantMessage(messages[i] as import("@mariozechner/pi-agent-core").AgentMessage)) {
       return messages[i] as AssistantMessage;
     }
   }
@@ -337,12 +333,12 @@ function findLastAssistantMessage(messages: readonly unknown[]): AssistantMessag
 function sumAssistantUsage(messages: readonly unknown[]): Usage {
   const total = emptyUsage();
 
-  for (const message of messages as AssistantMessage[]) {
-    if (message.role !== "assistant") {
+  for (const message of messages) {
+    if (!isAssistantMessage(message as import("@mariozechner/pi-agent-core").AgentMessage)) {
       continue;
     }
 
-    const usage = message.usage;
+    const usage = (message as AssistantMessage).usage;
     total.input += usage.input;
     total.output += usage.output;
     total.cacheRead += usage.cacheRead;
@@ -390,24 +386,23 @@ function renderContentForDebug(content: unknown, maxChars: number): unknown {
       return entry;
     }
 
-    const block = entry as Record<string, unknown>;
-    const type = block.type;
+    const block = entry as { type: string } & Record<string, unknown>;
 
-    if (type === "text") {
+    if (isTextContent(block)) {
       return {
         ...block,
-        text: truncateForDebug(String(block.text ?? ""), maxChars),
+        text: truncateForDebug(block.text, maxChars),
       };
     }
 
-    if (type === "thinking") {
+    if (block.type === "thinking") {
       return {
         ...block,
         thinking: truncateForDebug(String(block.thinking ?? ""), maxChars),
       };
     }
 
-    if (type === "image") {
+    if (block.type === "image") {
       const data = typeof block.data === "string" ? block.data : "";
       const { data: _data, ...rest } = block;
       return {
@@ -417,7 +412,7 @@ function renderContentForDebug(content: unknown, maxChars: number): unknown {
       };
     }
 
-    if (type === "image_url" && block.image_url && typeof block.image_url === "object") {
+    if (block.type === "image_url" && block.image_url && typeof block.image_url === "object") {
       const inner = block.image_url as Record<string, unknown>;
       if (typeof inner.url === "string" && inner.url.startsWith("data:")) {
         return {
@@ -427,7 +422,7 @@ function renderContentForDebug(content: unknown, maxChars: number): unknown {
       }
     }
 
-    if (type === "toolCall") {
+    if (isToolCall(block)) {
       return {
         ...block,
       };
@@ -440,12 +435,9 @@ function renderContentForDebug(content: unknown, maxChars: number): unknown {
 /** Extract text from a single assistant message event payload. */
 function extractAssistantTextFromEvent(message: unknown): string {
   if (!message || typeof message !== "object") return "";
-  const content = (message as Record<string, unknown>).content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter((item: unknown) => item && typeof item === "object" && (item as Record<string, unknown>).type === "text")
-    .map((item: unknown) => String((item as Record<string, unknown>).text ?? ""))
-    .join("\n");
+  const msg = message as import("@mariozechner/pi-agent-core").AgentMessage;
+  if (!isAssistantMessage(msg)) return "";
+  return responseText(msg);
 }
 
 function summarizeToolPayload(value: unknown, maxChars: number): string {

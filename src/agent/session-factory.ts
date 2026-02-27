@@ -1,5 +1,6 @@
 import { Agent, type AgentMessage, type AgentTool, type StreamFn, type ThinkingLevel } from "@mariozechner/pi-agent-core";
 import { streamSimple, type Message } from "@mariozechner/pi-ai";
+import { isAssistantMessage, isTextContent, isToolCall } from "./message.js";
 import type { ProgressReportTool } from "./tools/control.js";
 import {
   AgentSession,
@@ -75,9 +76,7 @@ function createInternalNudgeTransform(
   return async (messages: AgentMessage[]): Promise<AgentMessage[]> => {
     // Count assistant turns produced in this invocation (not from preloaded context).
     const invocationMessages = messages.slice(invocationStartMessageCount);
-    const turnCount = (invocationMessages as Array<{ role: string }>).filter(
-      (m) => m.role === "assistant",
-    ).length;
+    const turnCount = invocationMessages.filter(isAssistantMessage).length;
 
     // Inject on the very first call (no prior assistant turns) or after a toolUse turn,
     // but never at or above the iteration ceiling.
@@ -88,9 +87,7 @@ function createInternalNudgeTransform(
     const lastMsg = invocationMessages.at(-1) as { role?: string; stopReason?: string } | undefined;
     const lastIsToolResult = lastMsg?.role === "toolResult";
     // The most recent assistant message (immediately before the toolResult block)
-    const lastAssistant = [...(invocationMessages as Array<{ role: string; stopReason?: string }>)]
-      .reverse()
-      .find((m) => m.role === "assistant");
+    const lastAssistant = [...invocationMessages].reverse().find(isAssistantMessage);
     const lastStopReason = lastAssistant?.stopReason;
     const isAfterToolUse = lastIsToolResult && lastStopReason === "toolUse";
 
@@ -268,12 +265,12 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
       const stopReason = (event.message as { stopReason?: string }).stopReason;
 
       // Warn when assistant produces text alongside tool calls — may indicate confused output
-      if (stopReason === "toolUse") {
-        const content = (event.message as { content?: Array<{ type: string }> }).content;
-        if (content && content.some((b) => b.type === "text") && content.some((b) => b.type === "toolCall")) {
+      if (stopReason === "toolUse" && isAssistantMessage(event.message)) {
+        const { content } = event.message;
+        if (content.some(isTextContent) && content.some(isToolCall)) {
           const textSnippet = content
-            .filter((b): b is { type: string; text?: string } => b.type === "text")
-            .map((b) => b.text ?? "")
+            .filter(isTextContent)
+            .map((b) => b.text)
             .join(" | ");
           if (textSnippet.trim()) {
             logger.warn(`Turn ${turnCount}: assistant produced text output alongside tool_use: ${textSnippet}`);

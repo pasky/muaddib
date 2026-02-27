@@ -1,5 +1,6 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 
+import { isAssistantMessage, isToolCall, responseText } from "../../agent/message.js";
 import type { MuaddibTool, ToolPersistType } from "../../agent/tools/baseline-tools.js";
 import type { PromptResult } from "../../agent/session-runner.js";
 import type { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
@@ -67,11 +68,7 @@ export async function generateToolSummaryFromSession(input: GenerateToolSummaryI
       },
     );
 
-    const summaryText = summaryResponse.content
-      .filter((block) => block.type === "text")
-      .map((block) => block.text)
-      .join("\n")
-      .trim();
+    const summaryText = responseText(summaryResponse);
 
     logger.debug(
       "Generated internal monologue summary",
@@ -96,12 +93,9 @@ function collectPersistentToolCalls(messages: AgentMessage[], tools: MuaddibTool
   // Build a map from toolCallId → arguments by scanning assistant messages.
   const toolCallArgs = new Map<string, unknown>();
   for (const message of messages) {
-    if (message.role !== "assistant") continue;
-    const assistantMessage = message as AgentMessage & {
-      content?: Array<{ type: string; id?: string; name?: string; arguments?: unknown }>;
-    };
-    for (const block of assistantMessage.content ?? []) {
-      if (block.type === "toolCall" && block.id) {
+    if (!isAssistantMessage(message)) continue;
+    for (const block of message.content) {
+      if (isToolCall(block)) {
         toolCallArgs.set(block.id, block.arguments);
       }
     }
@@ -188,13 +182,10 @@ export function formatToolSummaryLogPreview(text: string, maxChars = 180): strin
 export function extractAssistantText(messages: AgentMessage[]): string | undefined {
   const parts: string[] = [];
   for (const msg of messages) {
-    if (msg.role !== "assistant") continue;
-    const content = (msg as AgentMessage & { content?: Array<{ type: string; text?: string }> }).content;
-    if (!Array.isArray(content)) continue;
-    for (const block of content) {
-      if (block.type === "text" && block.text) {
-        parts.push(block.text);
-      }
+    if (!isAssistantMessage(msg)) continue;
+    const text = responseText(msg);
+    if (text) {
+      parts.push(text);
     }
   }
   const joined = parts.join("\n").trim();

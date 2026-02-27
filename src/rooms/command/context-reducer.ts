@@ -3,6 +3,7 @@ import { createStubAssistantFields } from "../../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import type { Logger } from "../../app/logging.js";
 import { messageText } from "../../utils/index.js";
+import { responseText } from "../../agent/message.js";
 
 export interface ContextReducerConfig {
   model?: string;
@@ -74,11 +75,7 @@ export class ContextReducerTs implements ContextReducer {
         },
       );
 
-      const reducedText = response.content
-        .filter((entry) => entry.type === "text")
-        .map((entry) => entry.text)
-        .join("\n")
-        .trim();
+      const reducedText = responseText(response);
 
       if (!reducedText) {
         return contextToReduce;
