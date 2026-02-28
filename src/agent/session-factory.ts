@@ -1,7 +1,6 @@
 import { Agent, type AgentMessage, type AgentTool, type StreamFn, type ThinkingLevel } from "@mariozechner/pi-agent-core";
 import { streamSimple, type Message } from "@mariozechner/pi-ai";
 import { isAssistantMessage, isTextContent, isToolCall } from "./message.js";
-import type { ProgressReportTool } from "./tools/control.js";
 import {
   AgentSession,
   AuthStorage,
@@ -38,13 +37,18 @@ interface SessionLimitState {
   turnsSinceSoftLimit: number;
 }
 
+/** Mutable timestamp holder — bumped externally when a response is delivered. */
+export interface ResponseTimestamp {
+  lastResponseAt: number;
+}
+
 function createNudgeDecider(
   limitState: SessionLimitState,
   sessionStartTime: number,
   thinkingLevel: NonNullable<CreateAgentSessionInput["thinkingLevel"]>,
+  responseTimestamp: ResponseTimestamp,
   metaReminder?: string,
   progressThresholdSeconds?: number,
-  progressReportTool?: ProgressReportTool,
 ): (turnCount: number) => string | null {
   return (turnCount: number): string | null => {
     const parts: string[] = [];
@@ -60,13 +64,13 @@ function createNudgeDecider(
 
     if (progressThresholdSeconds != null && !nearLimit) {
       const now = Date.now();
-      const lastActivity = Math.max(sessionStartTime, progressReportTool?.lastSentAt ?? 0);
+      const lastActivity = Math.max(sessionStartTime, responseTimestamp.lastResponseAt);
       const elapsedSinceLastReport = (now - lastActivity) / 1000;
       const isFirstTurnHighReasoning =
         turnCount === 1 && (thinkingLevel === "medium" || thinkingLevel === "high" || thinkingLevel === "xhigh");
 
       if (isFirstTurnHighReasoning || elapsedSinceLastReport >= progressThresholdSeconds) {
-        parts.push("If you are going to call more tools, you MUST ALSO use the progress_report tool now.");
+        parts.push("If you are going to call more tools, write also an extremely brief one-line status of what you are doing and why.");
       }
     }
 
@@ -158,13 +162,13 @@ interface CreateAgentSessionInput {
   llmDebugMaxChars?: number;
   metaReminder?: string;
   progressThresholdSeconds?: number;
-  progressMinIntervalSeconds?: number;
   logger?: Logger;
 }
 
 interface CreateAgentSessionResult {
   session: AgentSession;
   agent: Agent;
+  responseTimestamp: ResponseTimestamp;
   ensureProviderKey: (provider: string) => Promise<void>;
   getVisionFallbackActivated: () => boolean;
   bumpSessionLimits: (tokens: number, costUsd: number) => void;
@@ -208,18 +212,16 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
   const initialMaxTokens = limitState.maxTokens;
   const initialMaxCostUsd = limitState.maxCostUsd;
   const sessionStartTime = Date.now();
-  const progressReportTool = input.tools.find(
-    (t): t is ProgressReportTool => t.name === "progress_report",
-  ) as ProgressReportTool | undefined;
+  const responseTimestamp: ResponseTimestamp = { lastResponseAt: 0 };
   const invocationStartMessageCount = input.contextMessages?.length ?? 0;
 
   const getNudgeText = createNudgeDecider(
     limitState,
     sessionStartTime,
     input.thinkingLevel ?? "off",
+    responseTimestamp,
     input.metaReminder,
     input.progressThresholdSeconds,
-    progressReportTool,
   );
 
   const transformContext = createInternalNudgeTransform(invocationStartMessageCount, limitState, getNudgeText, logger);
@@ -337,6 +339,7 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
   return {
     session,
     agent,
+    responseTimestamp,
     ensureProviderKey: async (provider: string) => {
       const key = await input.authStorage.getApiKey(provider);
       if (!key) {

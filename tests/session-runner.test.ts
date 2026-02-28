@@ -84,6 +84,7 @@ describe("SessionRunner", () => {
       session,
       agent,
       ensureProviderKey,
+      responseTimestamp: { lastResponseAt: 0 },
       getVisionFallbackActivated: () => false,
     });
 
@@ -138,6 +139,7 @@ describe("SessionRunner", () => {
       session,
       agent,
       ensureProviderKey,
+      responseTimestamp: { lastResponseAt: 0 },
       getVisionFallbackActivated: () => false,
     });
 
@@ -189,6 +191,7 @@ describe("SessionRunner", () => {
       session,
       agent: { setModel: vi.fn() },
       ensureProviderKey: vi.fn(async () => {}),
+      responseTimestamp: { lastResponseAt: 0 },
       getVisionFallbackActivated: () => false,
     });
 
@@ -230,6 +233,7 @@ describe("SessionRunner", () => {
       session,
       agent: { setModel: vi.fn() },
       ensureProviderKey: vi.fn(async () => {}),
+      responseTimestamp: { lastResponseAt: 0 },
       getVisionFallbackActivated: () => false,
     });
 
@@ -260,6 +264,7 @@ describe("SessionRunner", () => {
       session,
       agent: { setModel: vi.fn() },
       ensureProviderKey: vi.fn(async () => {}),
+      responseTimestamp: { lastResponseAt: 0 },
       getVisionFallbackActivated: () => false,
     });
 
@@ -321,6 +326,7 @@ describe("SessionRunner", () => {
       session,
       agent: { setModel: vi.fn() },
       ensureProviderKey: vi.fn(async () => {}),
+      responseTimestamp: { lastResponseAt: 0 },
       getVisionFallbackActivated: () => false,
     });
 
@@ -393,6 +399,7 @@ describe("SessionRunner", () => {
       session: makeMinimalSession(),
       agent: { setModel: vi.fn() },
       ensureProviderKey: vi.fn(async () => {}),
+      responseTimestamp: { lastResponseAt: 0 },
       getVisionFallbackActivated: () => false,
     });
 
@@ -416,6 +423,7 @@ describe("SessionRunner", () => {
       session: makeMinimalSession(),
       agent: { setModel: vi.fn() },
       ensureProviderKey: vi.fn(async () => {}),
+      responseTimestamp: { lastResponseAt: 0 },
       getVisionFallbackActivated: () => false,
     });
 
@@ -470,6 +478,7 @@ describe("SessionRunner", () => {
       session,
       agent: { setModel: vi.fn() },
       ensureProviderKey: vi.fn(async () => {}),
+      responseTimestamp: { lastResponseAt: 0 },
       getVisionFallbackActivated: () => false,
     });
 
@@ -528,6 +537,7 @@ describe("SessionRunner", () => {
       session,
       agent: { setModel: vi.fn() },
       ensureProviderKey: vi.fn(async () => {}),
+      responseTimestamp: { lastResponseAt: 0 },
       getVisionFallbackActivated: () => false,
     });
 
@@ -570,6 +580,7 @@ describe("SessionRunner", () => {
       session,
       agent: { setModel: vi.fn() },
       ensureProviderKey: vi.fn(async () => {}),
+      responseTimestamp: { lastResponseAt: 0 },
       getVisionFallbackActivated: () => false,
     });
 
@@ -642,6 +653,7 @@ describe("SessionRunner", () => {
       session,
       agent,
       ensureProviderKey: vi.fn(async () => {}),
+      responseTimestamp: { lastResponseAt: 0 },
       getVisionFallbackActivated: () => false,
     });
 
@@ -697,6 +709,7 @@ describe("SessionRunner", () => {
       session,
       agent: { setModel: vi.fn() },
       ensureProviderKey: vi.fn(async () => {}),
+      responseTimestamp: { lastResponseAt: 0 },
       getVisionFallbackActivated: () => false,
     });
 
@@ -732,6 +745,7 @@ describe("SessionRunner", () => {
         session,
         agent: { setModel: vi.fn() },
         ensureProviderKey: vi.fn(async () => {}),
+        responseTimestamp: { lastResponseAt: 0 },
         getVisionFallbackActivated: () => false,
       });
 

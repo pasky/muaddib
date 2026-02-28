@@ -8,8 +8,7 @@
       "maxCostUsd": 1.0
     },
     "progress": {
-      "thresholdSeconds": 10,
-      "minIntervalSeconds": 8
+      "thresholdSeconds": 10
     },
     "tools": {
       "jina": {

@@ -213,7 +213,6 @@ describe("oracle executor with invocation context", () => {
         { name: "web_search" },
         { name: "oracle" },
         { name: "bash" },
-        { name: "progress_report" },
         { name: "visit_webpage" },
       ] as any[],
       dispose: undefined,
@@ -241,7 +240,7 @@ describe("oracle executor with invocation context", () => {
     expect(toolNames).toContain("bash");
     expect(toolNames).toContain("visit_webpage");
     expect(toolNames).not.toContain("oracle");
-    expect(toolNames).not.toContain("progress_report");
+    // oracle and deep_research are excluded to prevent recursion
   });
 
   it("passes conversation context and thinkingLevel high to SessionRunner.prompt", async () => {

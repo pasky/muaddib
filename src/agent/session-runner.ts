@@ -13,7 +13,6 @@ import {
 } from "./session-factory.js";
 import { compactJson, emptyUsage, safeJson, truncateForDebug } from "./debug-utils.js";
 import type { ToolSet } from "./tools/types.js";
-import type { ProgressReportTool } from "./tools/control.js";
 import type { SessionLimitsConfig } from "../config/muaddib-config.js";
 
 const DEFAULT_EMPTY_COMPLETION_RETRY_PROMPT =
@@ -42,7 +41,6 @@ export interface SessionRunnerOptions {
   llmDebugMaxChars?: number;
   metaReminder?: string;
   progressThresholdSeconds?: number;
-  progressMinIntervalSeconds?: number;
   logger?: RunnerLogger;
   onAgentCreated?: (agent: Agent) => void;
 }
@@ -115,7 +113,6 @@ export class SessionRunner {
       llmDebugMaxChars: this.llmDebugMaxChars,
       metaReminder: this.options.metaReminder,
       progressThresholdSeconds: this.options.progressThresholdSeconds,
-      progressMinIntervalSeconds: this.options.progressMinIntervalSeconds,
       logger: this.logger,
     });
 
@@ -153,6 +150,7 @@ export class SessionRunner {
         if (message.role === "assistant") {
           const text = extractAssistantTextFromEvent(event.message).trim();
           if (text && this.onResponse && !responseMuted) {
+            sessionCtx.responseTimestamp.lastResponseAt = Date.now();
             this.onResponse(responseSuffix ? `${text} ${responseSuffix}` : text);
           } else if (text && responseMuted) {
             this.logger.info("Suppressing post-response text", truncateForDebug(text, 200));
@@ -262,8 +260,6 @@ export class SessionRunner {
         bumpSessionLimits: sessionCtx.bumpSessionLimits,
         muteResponses: () => {
           responseMuted = true;
-          const prTool = this.tools.find((t) => t.name === "progress_report") as ProgressReportTool | undefined;
-          if (prTool) prTool.muted = true;
         },
       };
     } finally {

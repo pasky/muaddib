@@ -67,7 +67,6 @@ export interface CommandRunnerFactoryInput {
   toolSet: ToolSet;
   metaReminder?: string;
   progressThresholdSeconds?: number;
-  progressMinIntervalSeconds?: number;
   onResponse: (text: string) => void | Promise<void>;
   logger?: Logger;
   onAgentCreated?: (agent: Agent) => void;
@@ -166,7 +165,6 @@ export class CommandExecutor {
           llmDebugMaxChars: agentConfig.llmDebugMaxChars,
           metaReminder: input.metaReminder,
           progressThresholdSeconds: input.progressThresholdSeconds,
-          progressMinIntervalSeconds: input.progressMinIntervalSeconds,
           onResponse: input.onResponse,
           logger: input.logger,
           onAgentCreated: input.onAgentCreated,
@@ -203,7 +201,7 @@ export class CommandExecutor {
 
   }
 
-  private buildToolOptions(): Omit<BaselineToolOptions, "arc" | "onProgressReport"> {
+  private buildToolOptions(): Omit<BaselineToolOptions, "arc"> {
     return {
       toolsConfig: this.agentConfig.tools,
       authStorage: this.runtime.authStorage,
@@ -390,7 +388,7 @@ export class CommandExecutor {
       await deliver(cleaned, { mode: resolved.selectedTrigger ?? undefined });
     };
 
-    const toolSet = this.selectTools(message, resolved.runtime.allowedTools, runnerContext, onResponse);
+    const toolSet = this.selectTools(message, resolved.runtime.allowedTools, runnerContext);
 
     const progressConfig = this.agentConfig.progress;
 
@@ -400,7 +398,6 @@ export class CommandExecutor {
       toolSet,
       metaReminder: modeConfig.promptReminder,
       progressThresholdSeconds: progressConfig?.thresholdSeconds,
-      progressMinIntervalSeconds: progressConfig?.minIntervalSeconds,
       onResponse,
       logger,
       onAgentCreated,
@@ -504,8 +501,8 @@ export class CommandExecutor {
       await deliver(`[${modelStrCore(modelSpec)}] ${cleaned}`);
     };
 
-    // selectTools is called WITHOUT onResponse as onProgressReport — proactive
-    // sessions must not flood the room with tool progress messages.
+    // selectTools is called WITHOUT onResponse — proactive
+    // sessions must not flood the room with progress messages.
     const toolSet = this.selectTools(message, classifiedRuntime.allowedTools, runnerContext);
 
     const runner = this.runnerFactory({
@@ -514,7 +511,6 @@ export class CommandExecutor {
       toolSet,
       metaReminder: this.commandConfig.modes.serious?.promptReminder,
       progressThresholdSeconds: proactiveProgressConfig?.thresholdSeconds,
-      progressMinIntervalSeconds: proactiveProgressConfig?.minIntervalSeconds,
       onResponse,
       logger,
       onAgentCreated,
@@ -847,7 +843,6 @@ export class CommandExecutor {
     message: RoomMessage,
     allowedTools: string[] | null,
     conversationContext?: Message[],
-    onResponse?: (text: string) => void | Promise<void>,
   ): ToolSet {
     const invocationToolOptions: BaselineToolOptions = {
       ...this.buildToolOptions(),
@@ -857,7 +852,6 @@ export class CommandExecutor {
 
     const toolSet = createBaselineAgentTools({
       ...invocationToolOptions,
-      onProgressReport: onResponse,
       oracleInvocation: {
         conversationContext: conversationContext ?? [],
         toolOptions: invocationToolOptions,

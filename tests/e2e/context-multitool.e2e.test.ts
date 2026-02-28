@@ -1,8 +1,8 @@
 /**
- * E2E test: Context reduction + multi-tool + progress reports + tool summary (Scenario #2)
+ * E2E test: Context reduction + multi-tool + tool summary (Scenario #2)
  *
  * Exercises: 10 seeded history messages → context reduction via completeSimple →
- * agent calls web_search (fetch mock) → progress_report tool → final text response →
+ * agent calls web_search (fetch mock) → final text response →
  * tool summary via completeSimple persisted as internal monologue.
  *
  * Mock boundaries:
@@ -107,7 +107,7 @@ function scenario2Config(): Record<string, unknown> {
 
 // ── Test suite ──
 
-describe("E2E: Context reduction + multi-tool + progress + tool summary", () => {
+describe("E2E: Context reduction + multi-tool + tool summary", () => {
   let ctx: E2EContext;
   let fetchCalls: Array<{ url: string }>;
   let originalFetch: typeof globalThis.fetch;
@@ -143,7 +143,7 @@ describe("E2E: Context reduction + multi-tool + progress + tool summary", () => 
     await rm(ctx.tmpHome, { recursive: true, force: true });
   });
 
-  it("reduces context, runs web_search + progress_report, generates tool summary", async () => {
+  it("reduces context, runs web_search, generates tool summary", async () => {
     // ── Seed 10 history messages ──
     const arc = { serverTag: "libera", channelName: "#test", arc: "libera##test", mynick: "muaddib" };
     for (let i = 0; i < 10; i++) {
@@ -178,14 +178,7 @@ describe("E2E: Context reduction + multi-tool + progress + tool summary", () => 
         name: "web_search",
         arguments: { query: "TypeScript handbook" },
       }),
-      // Call 2: agent sends a progress report
-      toolCallStream({
-        type: "toolCall",
-        id: "tc_pr_1",
-        name: "progress_report",
-        arguments: { text: "Searching for TypeScript docs..." },
-      }),
-      // Call 3: final text response
+      // Call 2: final text response
       textStream("Here's what I found about TypeScript: it's a typed superset of JavaScript developed by Microsoft."),
     ];
 
@@ -211,8 +204,8 @@ describe("E2E: Context reduction + multi-tool + progress + tool summary", () => 
     expect(fetchCalls).toHaveLength(1);
     expect(fetchCalls[0].url).toContain("TypeScript");
 
-    // ── Verify all 3 streamSimple calls happened ──
-    expect(mockState.calls).toHaveLength(3);
+    // ── Verify all 2 streamSimple calls happened ──
+    expect(mockState.calls).toHaveLength(2);
 
     // ── Verify context was reduced (first streamSimple call should have reduced context) ──
     // The reduced context should contain the summary, not all 10 original messages
@@ -221,14 +214,6 @@ describe("E2E: Context reduction + multi-tool + progress + tool summary", () => 
     // With reduction, we should have fewer messages than the original 10
     // (reduced context + the triggering message)
     expect(contextMessages.length).toBeLessThan(10);
-
-    // ── Verify progress report was delivered to the channel ──
-    expect(ctx.sender.sent.length).toBeGreaterThanOrEqual(2);
-    const progressMessage = ctx.sender.sent.find((s: any) =>
-      s.message.includes("Searching for TypeScript docs"),
-    );
-    expect(progressMessage).toBeDefined();
-    expect(progressMessage!.target).toBe("#test");
 
     // ── Verify FakeSender got the final response ──
     const mainResponse = ctx.sender.sent.find((s: any) =>

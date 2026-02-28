@@ -24,7 +24,6 @@ const DEFAULT_ORACLE_SYSTEM_PROMPT =
 export const ORACLE_EXCLUDED_TOOLS = new Set([
   "oracle",
   "deep_research",
-  "progress_report",
 ]);
 
 const ORACLE_LOG_SEPARATOR = "----------------------------------------------";

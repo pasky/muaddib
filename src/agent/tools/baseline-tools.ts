@@ -1,5 +1,5 @@
 import { toConfiguredString } from "../../utils/index.js";
-import { createMakePlanTool, createProgressReportTool } from "./control.js";
+import { createMakePlanTool } from "./control.js";
 import {
   createDefaultGenerateImageExecutor,
   createGenerateImageTool,
@@ -49,14 +49,12 @@ export {
   createMakePlanTool,
   createOracleTool,
   createDeepResearchTool,
-  createProgressReportTool,
   createVisitWebpageTool,
   createWebSearchTool,
   ORACLE_EXCLUDED_TOOLS,
 };
 
 export interface BaselineToolOptions extends ToolContext {
-  onProgressReport?: (text: string) => void | Promise<void>;
   executors?: Partial<BaselineToolExecutors>;
 
   /**
@@ -132,7 +130,6 @@ export function createBaselineAgentTools(options: BaselineToolOptions): ToolSet 
   const tools = [
     ...executorBackedTools,
     ...gondolinToolSet.tools,
-    createProgressReportTool(options),
     createMakePlanTool(),
   ];
 

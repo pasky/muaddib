@@ -123,7 +123,6 @@ export interface AgentConfig {
   llmDebugMaxChars?: number;
   progress?: {
     thresholdSeconds?: number;
-    minIntervalSeconds?: number;
   };
   /** Model to retry with when the primary model issues a content refusal. */
   refusalFallbackModel?: string;

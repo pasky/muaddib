@@ -478,17 +478,15 @@ describe("createAgentSessionForInvocation", () => {
   });
 
   it("transformContext injects both reminder and progress nudge when threshold elapsed", async () => {
-    const progressTool = { name: "progress_report", lastSentAt: 0 };
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
-      tools: [progressTool as any],
+      tools: [],
       authStorage: AuthStorage.inMemory(),
       modelAdapter: defaultModelAdapter,
       sessionLimits: { maxTokens: 500_000, maxCostUsd: 10 },
       metaReminder: "Stay focused.",
       progressThresholdSeconds: 0, // always triggers
-      progressMinIntervalSeconds: 0,
     });
 
     const transform = await getTransform(ctx);
@@ -496,7 +494,7 @@ describe("createAgentSessionForInvocation", () => {
     expect(hasMetaInLast(out)).toBe(true);
     const text = (out.at(-1) as any).content[0].text as string;
     expect(text).toContain("Stay focused.");
-    expect(text).toContain("progress_report");
+    expect(text).toContain("brief");
   });
 
   it("transformContext nudges are ephemeral: each call is independent and does not accumulate", async () => {
@@ -509,7 +507,6 @@ describe("createAgentSessionForInvocation", () => {
       sessionLimits: { maxTokens: 500_000, maxCostUsd: 10 },
       metaReminder: "Stay focused.",
       progressThresholdSeconds: 0,
-      progressMinIntervalSeconds: 0,
     });
 
     const transform = await getTransform(ctx);
@@ -534,16 +531,14 @@ describe("createAgentSessionForInvocation", () => {
   });
 
   it("does not inject progress nudge after a non-tool assistant turn", () => {
-    const progressTool = { name: "progress_report", lastSentAt: 0 };
     createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
-      tools: [progressTool as any],
+      tools: [],
       authStorage: AuthStorage.inMemory(),
       modelAdapter: defaultModelAdapter,
       sessionLimits: { maxTokens: 500_000, maxCostUsd: 10 },
       progressThresholdSeconds: 0,
-      progressMinIntervalSeconds: 0,
     });
 
     const session = mockState.sessions[0];
@@ -564,16 +559,14 @@ describe("createAgentSessionForInvocation", () => {
   });
 
   it("transformContext injects progress nudge on first tool-using turn with high reasoning, not on second", async () => {
-    const progressTool = { name: "progress_report", lastSentAt: 0 };
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
-      tools: [progressTool as any],
+      tools: [],
       authStorage: AuthStorage.inMemory(),
       modelAdapter: defaultModelAdapter,
       sessionLimits: { maxTokens: 500_000, maxCostUsd: 10 },
       progressThresholdSeconds: 9999, // won't trigger by elapsed time alone
-      progressMinIntervalSeconds: 0,
       thinkingLevel: "high",
     });
 
@@ -583,7 +576,7 @@ describe("createAgentSessionForInvocation", () => {
     const afterTurn1 = toolUseContext(); // 1 assistant turn
     const out1 = await transform(afterTurn1);
     expect(hasMetaInLast(out1)).toBe(true);
-    expect((out1.at(-1) as any).content[0].text).toContain("progress_report");
+    expect((out1.at(-1) as any).content[0].text).toContain("brief");
 
     // Second turn (turnCount=2, threshold=9999s not met, not first turn) → no nudge
     const afterTurn2 = toolUseContext(1); // 2 assistant turns
@@ -593,16 +586,14 @@ describe("createAgentSessionForInvocation", () => {
   });
 
   it("suppresses progress nudge near session limit (80% of token budget)", async () => {
-    const progressTool = { name: "progress_report", lastSentAt: 0 };
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
-      tools: [progressTool as any],
+      tools: [],
       authStorage: AuthStorage.inMemory(),
       modelAdapter: defaultModelAdapter,
       sessionLimits: { maxTokens: 10_000, maxCostUsd: 10 },
       progressThresholdSeconds: 0,
-      progressMinIntervalSeconds: 0,
       thinkingLevel: "high",
     });
 
@@ -629,7 +620,7 @@ describe("createAgentSessionForInvocation", () => {
     expect(hasMetaInLast(out)).toBe(false);
   });
 
-  it("transformContext injects progress nudge even without progress_report tool in tools array", async () => {
+  it("transformContext injects progress nudge with text output instruction", async () => {
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
@@ -638,46 +629,33 @@ describe("createAgentSessionForInvocation", () => {
       modelAdapter: defaultModelAdapter,
       sessionLimits: { maxTokens: 500_000, maxCostUsd: 10 },
       progressThresholdSeconds: 0,
-      progressMinIntervalSeconds: 0,
     });
 
     const transform = await getTransform(ctx);
     const out = await transform(toolUseContext());
     expect(hasMetaInLast(out)).toBe(true);
-    expect((out.at(-1) as any).content[0].text).toContain("progress_report");
+    expect((out.at(-1) as any).content[0].text).toContain("brief");
   });
 
-  it("resets progress nudge debounce when progress_report tool is used", () => {
-    const progressTool = { name: "progress_report", lastSentAt: 0 };
-    createAgentSessionForInvocation({
+  it("resets progress nudge debounce when responseTimestamp is bumped", async () => {
+    const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
-      tools: [progressTool as any],
+      tools: [],
       authStorage: AuthStorage.inMemory(),
       modelAdapter: defaultModelAdapter,
       sessionLimits: { maxTokens: 500_000, maxCostUsd: 10 },
       progressThresholdSeconds: 1, // 1 second threshold
-      progressMinIntervalSeconds: 0,
     });
 
-    const session = mockState.sessions[0];
-    const agent = (session as any).agent;
+    const transform = await getTransform(ctx);
 
-    // Simulate the tool having been used (lastSentAt set to now)
-    progressTool.lastSentAt = Date.now();
+    // Simulate a recent response delivery
+    ctx.responseTimestamp.lastResponseAt = Date.now();
 
-    // Turn 1: tool was just used, so elapsed since last report ~0s < 1s threshold → no nudge
-    session.emit({
-      type: "turn_end",
-      message: {
-        role: "assistant",
-        content: [{ type: "toolCall", id: "t1", name: "web_search", arguments: {} }],
-        stopReason: "toolUse",
-        usage: mockUsage(),
-      },
-      toolResults: [{ role: "toolResult" }],
-    });
-    expect(agent.steer).not.toHaveBeenCalled();
+    // Elapsed since last response ~0s < 1s threshold → no progress nudge
+    const out = await transform(toolUseContext());
+    expect(hasMetaInLast(out)).toBe(false);
   });
 
   it("warns when assistant produces text alongside tool_use", () => {

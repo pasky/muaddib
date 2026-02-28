@@ -8,7 +8,6 @@ import {
   createDeepResearchTool,
   ORACLE_EXCLUDED_TOOLS,
   createMakePlanTool,
-  createProgressReportTool,
   createVisitWebpageTool,
   createWebSearchTool,
 } from "../src/agent/tools/baseline-tools.js";
@@ -55,7 +54,6 @@ describe("baseline agent tools", () => {
       "edit",
       "bash",
       "share_artifact",
-      "progress_report",
       "make_plan",
     ]);
   });
@@ -75,61 +73,6 @@ describe("baseline agent tools", () => {
     for (const tool of tools) {
       expect((tool as any).persistType, `${tool.name} missing persistType`).toBeDefined();
     }
-  });
-
-  it("progress_report tool invokes callback and returns OK", async () => {
-    const onProgress = vi.fn(async () => {});
-    const tool = createProgressReportTool({ onProgressReport: onProgress });
-
-    const result = await tool.execute("call-1", { text: "working" }, undefined, undefined);
-
-    expect(onProgress).toHaveBeenCalledWith("working");
-    expect(result.content[0]).toEqual({ type: "text", text: "OK" });
-  });
-
-  it("progress_report sanitizes whitespace to single line", async () => {
-    const onProgress = vi.fn(async () => {});
-    const tool = createProgressReportTool({ onProgressReport: onProgress });
-
-    await tool.execute("call-1", { text: "  hello\n  world\t! " }, undefined, undefined);
-
-    expect(onProgress).toHaveBeenCalledWith("hello world !");
-  });
-
-  it("progress_report rate-limits repeated calls", async () => {
-    const onProgress = vi.fn(async () => {});
-    const tool = createProgressReportTool({ onProgressReport: onProgress, minIntervalSeconds: 60 });
-
-    const r1 = await tool.execute("call-1", { text: "first" }, undefined, undefined);
-    expect(r1.content[0]).toEqual({ type: "text", text: "OK" });
-    expect(onProgress).toHaveBeenCalledTimes(1);
-
-    const r2 = await tool.execute("call-2", { text: "second" }, undefined, undefined);
-    expect((r2.content[0] as { text: string }).text).toMatch(/rate-limited/);
-    expect(r2.details.rateLimited).toBe(true);
-    expect(onProgress).toHaveBeenCalledTimes(1);
-  });
-
-  it("progress_report suppresses callback when muted", async () => {
-    const onProgress = vi.fn(async () => {});
-    const tool = createProgressReportTool({ onProgressReport: onProgress });
-    tool.muted = true;
-
-    const result = await tool.execute("call-1", { text: "working" }, undefined, undefined);
-
-    expect(onProgress).not.toHaveBeenCalled();
-    expect(result.content[0]).toEqual({ type: "text", text: "OK (muted)" });
-    expect(result.details.muted).toBe(true);
-  });
-
-  it("progress_report returns OK for empty text without calling callback", async () => {
-    const onProgress = vi.fn(async () => {});
-    const tool = createProgressReportTool({ onProgressReport: onProgress });
-
-    const result = await tool.execute("call-1", { text: "   " }, undefined, undefined);
-
-    expect(result.content[0]).toEqual({ type: "text", text: "OK" });
-    expect(onProgress).not.toHaveBeenCalled();
   });
 
   it("make_plan tool returns OK and stores plan details", async () => {
@@ -253,7 +196,6 @@ describe("baseline agent tools", () => {
   it("ORACLE_EXCLUDED_TOOLS prevents recursion and irrelevant nested tools", () => {
     expect(ORACLE_EXCLUDED_TOOLS).toContain("oracle");
     expect(ORACLE_EXCLUDED_TOOLS).toContain("deep_research");
-    expect(ORACLE_EXCLUDED_TOOLS).toContain("progress_report");
     // Useful tools should NOT be excluded
     expect(ORACLE_EXCLUDED_TOOLS).not.toContain("web_search");
   });
@@ -318,7 +260,6 @@ describe("baseline tools with Gondolin", () => {
     expect(names).toContain("visit_webpage");
     expect(names).toContain("generate_image");
     expect(names).toContain("oracle");
-    expect(names).toContain("progress_report");
     expect(names).toContain("make_plan");
   });
 
