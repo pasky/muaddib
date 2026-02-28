@@ -63,7 +63,10 @@ async function generateInSessionToolSummary(
   const preSummaryMsgCount = session.messages.length;
 
   try {
-    result.bumpMaxIterations?.(2);
+    result.bumpSessionLimits?.(
+      Math.ceil((result.usage?.input ?? 0) * 0.1 + (result.usage?.cacheRead ?? 0) * 0.1 + (result.usage?.cacheWrite ?? 0) * 0.1),
+      (result.usage?.cost.total ?? 0) * 0.1,
+    );
     await session.prompt(buildToolSummaryFollowUpPrompt(tools));
   } catch (error) {
     logger.error("In-session tool summary failed", error);

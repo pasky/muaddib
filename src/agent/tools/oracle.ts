@@ -6,6 +6,7 @@ import type { MuaddibTool, ToolContext, ToolSet } from "./types.js";
 import type { Message } from "@mariozechner/pi-ai";
 import type { RunnerLogger } from "../session-factory.js";
 import { stringifyError, toConfiguredString } from "../../utils/index.js";
+import { iterationsToSessionLimits } from "../../config/muaddib-config.js";
 
 export interface OracleInput {
   query: string;
@@ -32,7 +33,7 @@ export function createOracleTool(executors: { oracle: OracleExecutor }, modelId?
   const modelClause = modelId ? ` (${modelId})` : "";
   return {
     name: "oracle",
-    persistType: "none",
+    persistType: "summary",
     label: "Oracle",
     description:
       `Consult the oracle${modelClause} - a more powerful reasoning model that may be consulted for complex analysis and creative work. ` +
@@ -116,7 +117,7 @@ export function createDefaultOracleExecutor(
       toolSet: oracleToolSet,
       modelAdapter,
       authStorage: options.authStorage,
-      maxIterations: options.toolsConfig?.oracle?.maxIterations,
+      sessionLimits: iterationsToSessionLimits(options.toolsConfig?.oracle?.maxIterations),
       logger,
     });
 

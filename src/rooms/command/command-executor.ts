@@ -162,7 +162,7 @@ export class CommandExecutor {
           toolSet: input.toolSet,
           modelAdapter: this.modelAdapter,
           authStorage: runtime.authStorage,
-          maxIterations: agentConfig.maxIterations,
+          sessionLimits: agentConfig.sessionLimits,
           llmDebugMaxChars: agentConfig.llmDebugMaxChars,
           metaReminder: input.metaReminder,
           progressThresholdSeconds: input.progressThresholdSeconds,
@@ -587,7 +587,10 @@ export class CommandExecutor {
       if (opts.memoryUpdate !== false && agentResult.session) {
         const preMemoryMsgCount = agentResult.session.messages.length;
         try {
-          agentResult.bumpMaxIterations?.(5);
+          agentResult.bumpSessionLimits?.(
+            Math.ceil((agentResult.usage?.input ?? 0) * 0.1 + (agentResult.usage?.cacheRead ?? 0) * 0.1 + (agentResult.usage?.cacheWrite ?? 0) * 0.1),
+            (agentResult.usage?.cost.total ?? 0) * 0.1,
+          );
           const memoryPrompt = buildMemoryUpdatePrompt(message.arc, this.agentConfig.tools?.memory, {
             toolCallsCount: agentResult.toolCallsCount ?? 0,
             skillsConfig: this.agentConfig.tools?.skills,

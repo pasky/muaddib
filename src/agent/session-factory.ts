@@ -17,8 +17,10 @@ import {
 import { PiAiModelAdapter, type ResolvedPiAiModel } from "../models/pi-ai-model-adapter.js";
 import type { Logger } from "../app/logging.js";
 import { safeJson } from "./debug-utils.js";
+import type { SessionLimitsConfig } from "../config/muaddib-config.js";
 
-const DEFAULT_MAX_ITERATIONS = 25;
+const DEFAULT_MAX_TOKENS = 100_000;
+const DEFAULT_MAX_COST_USD = 1.0;
 
 // ── Internal nudge transform ──
 
@@ -27,8 +29,17 @@ const DEFAULT_MAX_ITERATIONS = 25;
  * assistant turn count. Encapsulates all policy: metaReminder, progress threshold,
  * high-reasoning first-turn special case, and near-limit suppression.
  */
+/** Mutable session-limit state shared between turn_end subscriber and nudge logic. */
+interface SessionLimitState {
+  maxTokens: number;
+  maxCostUsd: number;
+  cumulativeTokens: number;
+  cumulativeCost: number;
+  turnsSinceSoftLimit: number;
+}
+
 function createNudgeDecider(
-  maxIterations: number,
+  limitState: SessionLimitState,
   sessionStartTime: number,
   thinkingLevel: NonNullable<CreateAgentSessionInput["thinkingLevel"]>,
   metaReminder?: string,
@@ -42,7 +53,12 @@ function createNudgeDecider(
       parts.push(metaReminder);
     }
 
-    if (progressThresholdSeconds != null && turnCount < maxIterations - 2) {
+    // Suppress progress nudges when within 80% of either limit.
+    const nearLimit =
+      limitState.cumulativeTokens >= limitState.maxTokens * 0.8 ||
+      limitState.cumulativeCost >= limitState.maxCostUsd * 0.8;
+
+    if (progressThresholdSeconds != null && !nearLimit) {
       const now = Date.now();
       const lastActivity = Math.max(sessionStartTime, progressReportTool?.lastSentAt ?? 0);
       const elapsedSinceLastReport = (now - lastActivity) / 1000;
@@ -68,7 +84,7 @@ function createNudgeDecider(
  */
 function createInternalNudgeTransform(
   invocationStartMessageCount: number,
-  maxIterations: number,
+  limitState: SessionLimitState,
   getNudgeText: (turnCount: number) => string | null,
   logger: Logger,
 ) {
@@ -78,9 +94,9 @@ function createInternalNudgeTransform(
     const invocationMessages = messages.slice(invocationStartMessageCount);
     const turnCount = invocationMessages.filter(isAssistantMessage).length;
 
-    // Inject on the very first call (no prior assistant turns) or after a toolUse turn,
-    // but never at or above the iteration ceiling.
-    if (turnCount >= maxIterations) {
+    // Don't inject nudges once a session limit has been reached.
+    if (limitState.cumulativeTokens >= limitState.maxTokens ||
+        limitState.cumulativeCost >= limitState.maxCostUsd) {
       return messages;
     }
     const isFirstTurn = turnCount === 0;
@@ -137,7 +153,7 @@ interface CreateAgentSessionInput {
   modelAdapter: PiAiModelAdapter;
   contextMessages?: Message[];
   thinkingLevel?: ThinkingLevel;
-  maxIterations?: number;
+  sessionLimits?: SessionLimitsConfig;
   visionFallbackModel?: string;
   llmDebugMaxChars?: number;
   metaReminder?: string;
@@ -151,7 +167,7 @@ interface CreateAgentSessionResult {
   agent: Agent;
   ensureProviderKey: (provider: string) => Promise<void>;
   getVisionFallbackActivated: () => boolean;
-  bumpMaxIterations: (n: number) => void;
+  bumpSessionLimits: (tokens: number, costUsd: number) => void;
   dispose: () => void;
 }
 
@@ -180,12 +196,17 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
   const visionState = { activated: false, model: null as ResolvedPiAiModel["model"] | null };
   const streamFn = createTracingStreamFn(logger, llmDebugMaxChars, visionState);
 
-  // Compute maxIterations, session start, and nudge state before Agent construction
+  // Compute session limits, session start, and nudge state before Agent construction
   // so they can be captured in the transformContext closure.
-  const rawIterations = Number(input.maxIterations);
-  let maxIterations = Number.isFinite(rawIterations) && rawIterations >= 1
-    ? Math.floor(rawIterations)
-    : DEFAULT_MAX_ITERATIONS;
+  const limitState: SessionLimitState = {
+    maxTokens: input.sessionLimits?.maxTokens ?? DEFAULT_MAX_TOKENS,
+    maxCostUsd: input.sessionLimits?.maxCostUsd ?? DEFAULT_MAX_COST_USD,
+    cumulativeTokens: 0,
+    cumulativeCost: 0,
+    turnsSinceSoftLimit: 0,
+  };
+  const initialMaxTokens = limitState.maxTokens;
+  const initialMaxCostUsd = limitState.maxCostUsd;
   const sessionStartTime = Date.now();
   const progressReportTool = input.tools.find(
     (t): t is ProgressReportTool => t.name === "progress_report",
@@ -193,7 +214,7 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
   const invocationStartMessageCount = input.contextMessages?.length ?? 0;
 
   const getNudgeText = createNudgeDecider(
-    maxIterations,
+    limitState,
     sessionStartTime,
     input.thinkingLevel ?? "off",
     input.metaReminder,
@@ -201,7 +222,7 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
     progressReportTool,
   );
 
-  const transformContext = createInternalNudgeTransform(invocationStartMessageCount, maxIterations, getNudgeText, logger);
+  const transformContext = createInternalNudgeTransform(invocationStartMessageCount, limitState, getNudgeText, logger);
 
   const agent = new Agent({
     initialState: {
@@ -244,13 +265,24 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
   const unsubscribe = session.subscribe((event) => {
     if (event.type === "turn_end") {
       turnCount += 1;
-      const stopReason = (event.message as { stopReason?: string }).stopReason;
+      // Accumulate usage from this assistant turn.
+      const msg = event.message as { usage?: { input: number; cacheRead: number; cacheWrite: number; cost: { total: number } }; stopReason?: string };
+      if (msg.usage) {
+        limitState.cumulativeTokens += msg.usage.input + msg.usage.cacheRead + msg.usage.cacheWrite;
+        limitState.cumulativeCost += msg.usage.cost.total;
+      }
 
-      // Inject iteration-limit steer when at or past maxIterations, but only
+      const stopReason = msg.stopReason;
+      const limitReached =
+        limitState.cumulativeTokens >= limitState.maxTokens ||
+        limitState.cumulativeCost >= limitState.maxCostUsd;
+
+      // Inject session-limit steer when at or past limits, but only
       // if the agent is still calling tools.  When the agent already stopped
       // (stopReason !== "toolUse"), re-injecting a steer would queue a user
       // message that forces pi-agent-core to continue the loop despite "stop".
-      if (turnCount >= maxIterations && stopReason === "toolUse") {
+      if (limitReached && stopReason === "toolUse") {
+        limitState.turnsSinceSoftLimit += 1;
         agent.steer({
           role: "user",
           content: [
@@ -263,8 +295,8 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
           timestamp: Date.now(),
         });
       }
-      if (turnCount >= maxIterations + 10) { // purely a safety vent
-        logger.warn("Exceeding max iterations, aborting session prompt loop.");
+      if (limitReached && limitState.turnsSinceSoftLimit >= 10) { // purely a safety vent
+        logger.warn("Exceeding session limits, aborting session prompt loop.");
         void session.abort();
       }
 
@@ -312,7 +344,13 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
       }
     },
     getVisionFallbackActivated: () => visionState.activated,
-    bumpMaxIterations: (n: number) => { maxIterations += n; },
+    bumpSessionLimits: (tokens: number, costUsd: number) => {
+      // Floor: bump by at least 10% of the original configured limit.
+      const minTokens = Math.ceil(initialMaxTokens * 0.1);
+      const minCost = initialMaxCostUsd * 0.1;
+      limitState.maxTokens += Math.max(tokens, minTokens);
+      limitState.maxCostUsd += Math.max(costUsd, minCost);
+    },
     dispose: () => {
       unsubscribe();
       session.dispose();

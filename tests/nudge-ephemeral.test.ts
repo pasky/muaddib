@@ -117,7 +117,7 @@ describe("internal nudge ephemerality", () => {
       tools: [pingTool],
       authStorage,
       modelAdapter,
-      maxIterations: 10,
+      sessionLimits: { maxTokens: 500_000, maxCostUsd: 10 },
       metaReminder: META_REMINDER,
     });
 

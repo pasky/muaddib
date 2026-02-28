@@ -6,6 +6,7 @@ import type { MuaddibTool, ToolContext, ToolSet } from "./types.js";
 import type { Message } from "@mariozechner/pi-ai";
 import type { RunnerLogger } from "../session-factory.js";
 import { stringifyError, toConfiguredString } from "../../utils/index.js";
+import { iterationsToSessionLimits } from "../../config/muaddib-config.js";
 import {
   createDefaultWebSearchExecutor,
   createDefaultVisitWebpageExecutor,
@@ -30,7 +31,7 @@ export function createDeepResearchTool(executors: { deepResearch: DeepResearchEx
   const modelClause = modelId ? ` (${modelId})` : "";
   return {
     name: "deep_research",
-    persistType: "none",
+    persistType: "summary",
     label: "Deep Research",
     description:
       `Launch a web researcher ${modelClause} - a fast agent ` +
@@ -102,7 +103,7 @@ export function createDefaultDeepResearchExecutor(
       toolSet: webTools,
       modelAdapter,
       authStorage: options.authStorage,
-      maxIterations: options.toolsConfig?.deepResearch?.maxIterations,
+      sessionLimits: iterationsToSessionLimits(options.toolsConfig?.deepResearch?.maxIterations),
       logger,
     });
 

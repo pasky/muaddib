@@ -119,6 +119,23 @@ function hasMetaInLast(msgs: unknown[]): boolean {
   return (last.content ?? []).some((c) => c.type === "text" && (c.text ?? "").includes("<meta>"));
 }
 
+/** Build a mock usage object for turn_end events. */
+function mockUsage(input = 1000, cacheRead = 0, cacheWrite = 0, costTotal = 0.01) {
+  return {
+    input,
+    output: 100,
+    cacheRead,
+    cacheWrite,
+    totalTokens: input + 100 + cacheRead + cacheWrite,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: costTotal },
+  };
+}
+
+const defaultModelAdapter = { resolve: vi.fn(() => ({
+  spec: { provider: "openai", modelId: "gpt-4o-mini" },
+  model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
+})) } as any;
+
 describe("createAgentSessionForInvocation", () => {
   beforeEach(() => {
     mockState.sessions.length = 0;
@@ -177,7 +194,7 @@ describe("createAgentSessionForInvocation", () => {
     expect(authStorage.getApiKey).toHaveBeenCalledWith("openai");
   });
 
-  it("activates vision fallback model on image tool output and enforces max-iteration abort", () => {
+  it("activates vision fallback model on image tool output and enforces session-limit abort", () => {
     const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const visionModel = {
       provider: "anthropic",
@@ -197,6 +214,7 @@ describe("createAgentSessionForInvocation", () => {
       };
     });
 
+    // Set token limit low enough to trigger after first turn_end with usage
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
@@ -204,7 +222,7 @@ describe("createAgentSessionForInvocation", () => {
       authStorage: AuthStorage.inMemory(),
       modelAdapter: { resolve } as any,
       visionFallbackModel: "anthropic:claude-sonnet-4",
-      maxIterations: 2,
+      sessionLimits: { maxTokens: 5000, maxCostUsd: 10 },
       logger,
     });
 
@@ -216,8 +234,6 @@ describe("createAgentSessionForInvocation", () => {
     expect(ctx.getVisionFallbackActivated()).toBe(true);
 
     // After vision fallback activates, the streamFn should use the vision model
-    // instead of the passed-in model parameter (fixing the race condition where
-    // pi-agent-core's _runLoop captures config.model by value at loop start).
     mockState.streamSimpleMock.mockClear();
     const streamFn = agent.config.streamFn;
     const originalModel = { provider: "openai", id: "gpt-4o-mini", api: "responses" };
@@ -225,26 +241,42 @@ describe("createAgentSessionForInvocation", () => {
     expect(mockState.streamSimpleMock).toHaveBeenCalledTimes(1);
     expect(mockState.streamSimpleMock.mock.calls[0][0]).toBe(visionModel);
 
-    // Turn 1 (toolUse): turnCount=1, below maxIterations=2 → no steer
+    // Turn 1 (toolUse, 3000 tokens): cumulative=3000 < maxTokens=5000 → no steer
     session.emit({
       type: "turn_end",
       message: {
         role: "assistant",
         content: [{ type: "toolCall", id: "t1", name: "web_search", arguments: {} }],
         stopReason: "toolUse",
+        usage: mockUsage(3000),
       },
       toolResults: [],
     });
     expect(agent.steer).not.toHaveBeenCalled();
 
-    // Turns 2–11 (toolUse): turnCount >= maxIterations=2 → steer injected each time, no abort yet
-    for (let turn = 2; turn <= 11; turn++) {
+    // Turn 2 (toolUse, 3000 tokens): cumulative=6000 >= maxTokens=5000 → steer injected
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "t2", name: "web_search", arguments: {} }],
+        stopReason: "toolUse",
+        usage: mockUsage(3000),
+      },
+      toolResults: [],
+    });
+    expect(agent.steer).toHaveBeenCalledTimes(1);
+    expect(session.abort).not.toHaveBeenCalled();
+
+    // Turns 3–10 (toolUse): all over limit → steer each time, no abort yet (turnsSinceSoftLimit < 10)
+    for (let turn = 3; turn <= 10; turn++) {
       session.emit({
         type: "turn_end",
         message: {
           role: "assistant",
           content: [{ type: "toolCall", id: `t${turn}`, name: "web_search", arguments: {} }],
           stopReason: "toolUse",
+          usage: mockUsage(100),
         },
         toolResults: [],
       });
@@ -252,32 +284,76 @@ describe("createAgentSessionForInvocation", () => {
       expect(session.abort).not.toHaveBeenCalled();
     }
 
-    // Turn 12 (toolUse): turnCount=12 >= maxIterations+10=12 → abort
+    // Turn 11 (toolUse): turnsSinceSoftLimit=10 → abort
     session.emit({
       type: "turn_end",
       message: {
         role: "assistant",
-        content: [{ type: "toolCall", id: "t12", name: "web_search", arguments: {} }],
+        content: [{ type: "toolCall", id: "t11", name: "web_search", arguments: {} }],
         stopReason: "toolUse",
+        usage: mockUsage(100),
       },
       toolResults: [],
     });
-    expect(agent.steer).toHaveBeenCalledTimes(11);
+    expect(agent.steer).toHaveBeenCalledTimes(10);
     expect(session.abort).toHaveBeenCalledTimes(1);
-    expect(logger.warn).toHaveBeenCalledWith("Exceeding max iterations, aborting session prompt loop.");
+    expect(logger.warn).toHaveBeenCalledWith("Exceeding session limits, aborting session prompt loop.");
 
-    // Turn 13 (stop): agent finally stops → no steer (stopReason is not toolUse)
+    // Turn 12 (stop): agent finally stops → no steer (stopReason is not toolUse)
     session.emit({
       type: "turn_end",
       message: {
         role: "assistant",
         content: [{ type: "text", text: "done" }],
         stopReason: "stop",
+        usage: mockUsage(100),
       },
       toolResults: [],
     });
     // Steer count unchanged — stop turns don't re-inject
-    expect(agent.steer).toHaveBeenCalledTimes(11);
+    expect(agent.steer).toHaveBeenCalledTimes(10);
+  });
+
+  it("triggers soft limit on cost threshold", () => {
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const ctx = createAgentSessionForInvocation({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "system",
+      tools: [],
+      authStorage: AuthStorage.inMemory(),
+      modelAdapter: defaultModelAdapter,
+      sessionLimits: { maxTokens: 1_000_000, maxCostUsd: 0.05 },
+      logger,
+    });
+
+    const session = mockState.sessions[0];
+    const agent = ctx.agent as any;
+
+    // Turn 1: $0.03 → no limit yet
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "t1", name: "web_search", arguments: {} }],
+        stopReason: "toolUse",
+        usage: mockUsage(1000, 0, 0, 0.03),
+      },
+      toolResults: [],
+    });
+    expect(agent.steer).not.toHaveBeenCalled();
+
+    // Turn 2: $0.03 more → cumulative $0.06 >= $0.05 → steer
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "t2", name: "web_search", arguments: {} }],
+        stopReason: "toolUse",
+        usage: mockUsage(1000, 0, 0, 0.03),
+      },
+      toolResults: [],
+    });
+    expect(agent.steer).toHaveBeenCalledTimes(1);
   });
 
   it("streamFn uses original model when vision fallback is not activated", () => {
@@ -304,18 +380,15 @@ describe("createAgentSessionForInvocation", () => {
     expect(ctx.getVisionFallbackActivated()).toBe(false);
   });
 
-  it("transformContext injects metaReminder on first turn, after toolUse, but not after stop or at iteration limit", async () => {
+  it("transformContext injects metaReminder on first turn, after toolUse, but not after stop or at session limit", async () => {
     const REMINDER = "Stay focused on the quest.";
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
       authStorage: AuthStorage.inMemory(),
-      modelAdapter: { resolve: vi.fn(() => ({
-        spec: { provider: "openai", modelId: "gpt-4o-mini" },
-        model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
-      })) } as any,
-      maxIterations: 3,
+      modelAdapter: defaultModelAdapter,
+      sessionLimits: { maxTokens: 500_000, maxCostUsd: 10 },
       metaReminder: REMINDER,
     });
 
@@ -347,19 +420,43 @@ describe("createAgentSessionForInvocation", () => {
     expect(hasMetaInLast(outStop)).toBe(false);
     expect(outStop).toHaveLength(afterStop.length);
 
-    // After second toolUse turn (turnCount=2, maxIterations=3): nudge still injected
+    // After second toolUse turn: nudge still injected (well within limits)
     const afterTurn2 = toolUseContext(1); // 2 assistant turns
     const out2 = await transform(afterTurn2);
     expect(hasMetaInLast(out2)).toBe(true);
+  });
 
-    // After third toolUse turn (turnCount=3, >= maxIterations=3): no nudge from transform
-    const afterTurn3 = toolUseContext(2); // 3 assistant turns
-    const out3 = await transform(afterTurn3);
-    expect(hasMetaInLast(out3)).toBe(false);
+  it("transformContext suppresses nudges when session limit is reached", async () => {
+    const REMINDER = "Stay focused on the quest.";
+    const ctx = createAgentSessionForInvocation({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "system",
+      tools: [],
+      authStorage: AuthStorage.inMemory(),
+      modelAdapter: defaultModelAdapter,
+      sessionLimits: { maxTokens: 5000, maxCostUsd: 10 },
+      metaReminder: REMINDER,
+    });
 
-    // iteration-limit steer still happens via subscriber (not via transform)
-    const agent = ctx.agent as any;
-    expect(agent.steer).not.toHaveBeenCalled();
+    const session = mockState.sessions[0];
+    const transform = await getTransform(ctx);
+
+    // Simulate usage accumulation via turn_end that exceeds the token limit
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "t1", name: "web_search", arguments: {} }],
+        stopReason: "toolUse",
+        usage: mockUsage(6000),
+      },
+      toolResults: [],
+    });
+
+    // Now transformContext should suppress nudges since limit is reached
+    const afterTurn = toolUseContext();
+    const out = await transform(afterTurn);
+    expect(hasMetaInLast(out)).toBe(false);
   });
 
   it("transformContext does NOT inject on first turn when no metaReminder is set", async () => {
@@ -368,11 +465,8 @@ describe("createAgentSessionForInvocation", () => {
       systemPrompt: "system",
       tools: [],
       authStorage: AuthStorage.inMemory(),
-      modelAdapter: { resolve: vi.fn(() => ({
-        spec: { provider: "openai", modelId: "gpt-4o-mini" },
-        model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
-      })) } as any,
-      maxIterations: 10,
+      modelAdapter: defaultModelAdapter,
+      sessionLimits: { maxTokens: 500_000, maxCostUsd: 10 },
       // no metaReminder
     });
 
@@ -390,11 +484,8 @@ describe("createAgentSessionForInvocation", () => {
       systemPrompt: "system",
       tools: [progressTool as any],
       authStorage: AuthStorage.inMemory(),
-      modelAdapter: { resolve: vi.fn(() => ({
-        spec: { provider: "openai", modelId: "gpt-4o-mini" },
-        model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
-      })) } as any,
-      maxIterations: 10,
+      modelAdapter: defaultModelAdapter,
+      sessionLimits: { maxTokens: 500_000, maxCostUsd: 10 },
       metaReminder: "Stay focused.",
       progressThresholdSeconds: 0, // always triggers
       progressMinIntervalSeconds: 0,
@@ -409,20 +500,13 @@ describe("createAgentSessionForInvocation", () => {
   });
 
   it("transformContext nudges are ephemeral: each call is independent and does not accumulate", async () => {
-    // The queue-guard (hasQueuedMessages) is gone. The race-safety guarantee now comes from
-    // transformContext being called inside the agent loop's LLM call boundary — the nudge is
-    // never enqueued. This test verifies that calling transform twice on the same base context
-    // does not produce two <meta> messages (no accumulation from previous calls).
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
       authStorage: AuthStorage.inMemory(),
-      modelAdapter: { resolve: vi.fn(() => ({
-        spec: { provider: "openai", modelId: "gpt-4o-mini" },
-        model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
-      })) } as any,
-      maxIterations: 10,
+      modelAdapter: defaultModelAdapter,
+      sessionLimits: { maxTokens: 500_000, maxCostUsd: 10 },
       metaReminder: "Stay focused.",
       progressThresholdSeconds: 0,
       progressMinIntervalSeconds: 0,
@@ -451,22 +535,19 @@ describe("createAgentSessionForInvocation", () => {
 
   it("does not inject progress nudge after a non-tool assistant turn", () => {
     const progressTool = { name: "progress_report", lastSentAt: 0 };
-    const ctx = createAgentSessionForInvocation({
+    createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [progressTool as any],
       authStorage: AuthStorage.inMemory(),
-      modelAdapter: { resolve: vi.fn(() => ({
-        spec: { provider: "openai", modelId: "gpt-4o-mini" },
-        model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
-      })) } as any,
-      maxIterations: 10,
+      modelAdapter: defaultModelAdapter,
+      sessionLimits: { maxTokens: 500_000, maxCostUsd: 10 },
       progressThresholdSeconds: 0,
       progressMinIntervalSeconds: 0,
     });
 
     const session = mockState.sessions[0];
-    const agent = ctx.agent as any;
+    const agent = (session as any).agent;
 
     session.emit({
       type: "turn_end",
@@ -474,6 +555,7 @@ describe("createAgentSessionForInvocation", () => {
         role: "assistant",
         content: [{ type: "text", text: "done" }],
         stopReason: "stop",
+        usage: mockUsage(),
       },
       toolResults: [{ role: "toolResult" }],
     });
@@ -488,11 +570,8 @@ describe("createAgentSessionForInvocation", () => {
       systemPrompt: "system",
       tools: [progressTool as any],
       authStorage: AuthStorage.inMemory(),
-      modelAdapter: { resolve: vi.fn(() => ({
-        spec: { provider: "openai", modelId: "gpt-4o-mini" },
-        model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
-      })) } as any,
-      maxIterations: 10,
+      modelAdapter: defaultModelAdapter,
+      sessionLimits: { maxTokens: 500_000, maxCostUsd: 10 },
       progressThresholdSeconds: 9999, // won't trigger by elapsed time alone
       progressMinIntervalSeconds: 0,
       thinkingLevel: "high",
@@ -513,38 +592,41 @@ describe("createAgentSessionForInvocation", () => {
     expect(out2).toHaveLength(afterTurn2.length);
   });
 
-  it("does not inject progress nudge near iteration limit", () => {
+  it("suppresses progress nudge near session limit (80% of token budget)", async () => {
     const progressTool = { name: "progress_report", lastSentAt: 0 };
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [progressTool as any],
       authStorage: AuthStorage.inMemory(),
-      modelAdapter: { resolve: vi.fn(() => ({
-        spec: { provider: "openai", modelId: "gpt-4o-mini" },
-        model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
-      })) } as any,
-      maxIterations: 3,
+      modelAdapter: defaultModelAdapter,
+      sessionLimits: { maxTokens: 10_000, maxCostUsd: 10 },
       progressThresholdSeconds: 0,
       progressMinIntervalSeconds: 0,
       thinkingLevel: "high",
     });
 
     const session = mockState.sessions[0];
-    const agent = ctx.agent as any;
 
-    // Turn 1: maxIterations=3, turnCount=1, limit-2=1 → turnCount < maxIterations-2 is false
+    // Emit a turn_end with 8500 tokens → 85% of 10k limit → near limit
     session.emit({
       type: "turn_end",
       message: {
         role: "assistant",
         content: [{ type: "toolCall", id: "t1", name: "web_search", arguments: {} }],
         stopReason: "toolUse",
+        usage: mockUsage(8500),
       },
-      toolResults: [{ role: "toolResult" }],
+      toolResults: [],
     });
-    // Should NOT have progress nudge since turnCount(1) >= maxIterations-2(1)
-    expect(agent.steer).not.toHaveBeenCalled();
+
+    const transform = await getTransform(ctx);
+    // After 1 assistant turn in context, threshold=0 would normally trigger, but nearLimit suppresses
+    const afterTurn = toolUseContext();
+    const out = await transform(afterTurn);
+    // Should only have metaReminder-less nudge (no progress nudge since near limit)
+    // With no metaReminder set, no nudge at all
+    expect(hasMetaInLast(out)).toBe(false);
   });
 
   it("transformContext injects progress nudge even without progress_report tool in tools array", async () => {
@@ -553,11 +635,8 @@ describe("createAgentSessionForInvocation", () => {
       systemPrompt: "system",
       tools: [],
       authStorage: AuthStorage.inMemory(),
-      modelAdapter: { resolve: vi.fn(() => ({
-        spec: { provider: "openai", modelId: "gpt-4o-mini" },
-        model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
-      })) } as any,
-      maxIterations: 10,
+      modelAdapter: defaultModelAdapter,
+      sessionLimits: { maxTokens: 500_000, maxCostUsd: 10 },
       progressThresholdSeconds: 0,
       progressMinIntervalSeconds: 0,
     });
@@ -570,22 +649,19 @@ describe("createAgentSessionForInvocation", () => {
 
   it("resets progress nudge debounce when progress_report tool is used", () => {
     const progressTool = { name: "progress_report", lastSentAt: 0 };
-    const ctx = createAgentSessionForInvocation({
+    createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [progressTool as any],
       authStorage: AuthStorage.inMemory(),
-      modelAdapter: { resolve: vi.fn(() => ({
-        spec: { provider: "openai", modelId: "gpt-4o-mini" },
-        model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
-      })) } as any,
-      maxIterations: 10,
+      modelAdapter: defaultModelAdapter,
+      sessionLimits: { maxTokens: 500_000, maxCostUsd: 10 },
       progressThresholdSeconds: 1, // 1 second threshold
       progressMinIntervalSeconds: 0,
     });
 
     const session = mockState.sessions[0];
-    const agent = ctx.agent as any;
+    const agent = (session as any).agent;
 
     // Simulate the tool having been used (lastSentAt set to now)
     progressTool.lastSentAt = Date.now();
@@ -597,6 +673,7 @@ describe("createAgentSessionForInvocation", () => {
         role: "assistant",
         content: [{ type: "toolCall", id: "t1", name: "web_search", arguments: {} }],
         stopReason: "toolUse",
+        usage: mockUsage(),
       },
       toolResults: [{ role: "toolResult" }],
     });
@@ -610,11 +687,7 @@ describe("createAgentSessionForInvocation", () => {
       systemPrompt: "system",
       tools: [],
       authStorage: AuthStorage.inMemory(),
-      modelAdapter: { resolve: vi.fn(() => ({
-        spec: { provider: "openai", modelId: "gpt-4o-mini" },
-        model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
-      })) } as any,
-      maxIterations: 5,
+      modelAdapter: defaultModelAdapter,
       logger,
     });
 
@@ -630,6 +703,7 @@ describe("createAgentSessionForInvocation", () => {
           { type: "toolCall", id: "t1", name: "web_search", arguments: {} },
         ],
         stopReason: "toolUse",
+        usage: mockUsage(),
       },
       toolResults: [{ role: "toolResult" }],
     });
@@ -648,6 +722,7 @@ describe("createAgentSessionForInvocation", () => {
           { type: "toolCall", id: "t2", name: "web_search", arguments: {} },
         ],
         stopReason: "toolUse",
+        usage: mockUsage(),
       },
       toolResults: [{ role: "toolResult" }],
     });
@@ -655,20 +730,16 @@ describe("createAgentSessionForInvocation", () => {
   });
 
   it("does not inject metaReminder when not configured", () => {
-    const ctx = createAgentSessionForInvocation({
+    createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
       authStorage: AuthStorage.inMemory(),
-      modelAdapter: { resolve: vi.fn(() => ({
-        spec: { provider: "openai", modelId: "gpt-4o-mini" },
-        model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
-      })) } as any,
-      maxIterations: 5,
+      modelAdapter: defaultModelAdapter,
     });
 
     const session = mockState.sessions[0];
-    const agent = ctx.agent as any;
+    const agent = (session as any).agent;
 
     session.emit({
       type: "turn_end",
@@ -676,9 +747,113 @@ describe("createAgentSessionForInvocation", () => {
         role: "assistant",
         content: [{ type: "toolCall", id: "t1", name: "web_search", arguments: {} }],
         stopReason: "toolUse",
+        usage: mockUsage(),
       },
       toolResults: [{ role: "toolResult" }],
     });
     expect(agent.steer).not.toHaveBeenCalled();
+  });
+
+  it("bumpSessionLimits increases both token and cost limits", () => {
+    const ctx = createAgentSessionForInvocation({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "system",
+      tools: [],
+      authStorage: AuthStorage.inMemory(),
+      modelAdapter: defaultModelAdapter,
+      sessionLimits: { maxTokens: 5000, maxCostUsd: 0.05 },
+    });
+
+    const session = mockState.sessions[0];
+    const agent = ctx.agent as any;
+
+    // Emit usage that exceeds initial limit
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "t1", name: "web_search", arguments: {} }],
+        stopReason: "toolUse",
+        usage: mockUsage(6000, 0, 0, 0.03),
+      },
+      toolResults: [],
+    });
+    expect(agent.steer).toHaveBeenCalledTimes(1);
+
+    // Bump limits
+    ctx.bumpSessionLimits(10_000, 0.10);
+
+    // Next turn: even though cumulative is 12000, the bumped limit is 15000 → no new steer
+    agent.steer.mockClear();
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "t2", name: "web_search", arguments: {} }],
+        stopReason: "toolUse",
+        usage: mockUsage(6000, 0, 0, 0.03),
+      },
+      toolResults: [],
+    });
+    expect(agent.steer).not.toHaveBeenCalled();
+  });
+
+  it("bumpSessionLimits floors at 10% of initial configured limit", () => {
+    // maxTokens=100000, maxCostUsd=1.0 → floor is 10000 tokens, $0.10
+    const ctx = createAgentSessionForInvocation({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "system",
+      tools: [],
+      authStorage: AuthStorage.inMemory(),
+      modelAdapter: defaultModelAdapter,
+      sessionLimits: { maxTokens: 100_000, maxCostUsd: 1.0 },
+    });
+
+    const session = mockState.sessions[0];
+    const agent = ctx.agent as any;
+
+    // Use up 95k tokens / $0.95 — just under the limit
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "t1", name: "web_search", arguments: {} }],
+        stopReason: "toolUse",
+        usage: mockUsage(95_000, 0, 0, 0.95),
+      },
+      toolResults: [],
+    });
+
+    // Bump with tiny values (e.g. 10% of small consumption) — should be floored to 10% of limit
+    ctx.bumpSessionLimits(100, 0.001);
+    // After bump: maxTokens should be 100000 + max(100, 10000) = 110000
+    // After bump: maxCostUsd should be 1.0 + max(0.001, 0.1) = 1.1
+
+    // Next turn: cumulative = 95000 + 10000 = 105000, limit = 110000 → no steer
+    agent.steer.mockClear();
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "t2", name: "web_search", arguments: {} }],
+        stopReason: "toolUse",
+        usage: mockUsage(10_000, 0, 0, 0.10),
+      },
+      toolResults: [],
+    });
+    expect(agent.steer).not.toHaveBeenCalled();
+
+    // One more turn pushing past 110k → steer
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "t3", name: "web_search", arguments: {} }],
+        stopReason: "toolUse",
+        usage: mockUsage(10_000, 0, 0, 0.10),
+      },
+      toolResults: [],
+    });
+    expect(agent.steer).toHaveBeenCalledTimes(1);
   });
 });

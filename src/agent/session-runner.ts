@@ -14,6 +14,7 @@ import {
 import { compactJson, emptyUsage, safeJson, truncateForDebug } from "./debug-utils.js";
 import type { ToolSet } from "./tools/types.js";
 import type { ProgressReportTool } from "./tools/control.js";
+import type { SessionLimitsConfig } from "../config/muaddib-config.js";
 
 const DEFAULT_EMPTY_COMPLETION_RETRY_PROMPT =
   "<meta>No valid text or tool use found in response. Please try again.</meta>";
@@ -29,7 +30,7 @@ export interface SessionRunnerOptions {
   toolSet?: ToolSet;
   modelAdapter: PiAiModelAdapter;
   authStorage: AuthStorage;
-  maxIterations?: number;
+  sessionLimits?: SessionLimitsConfig;
   emptyCompletionRetryPrompt?: string;
   /**
    * Unified response callback — fired for every non-empty assistant text
@@ -68,8 +69,8 @@ export interface PromptResult {
   refusalFallbackActivated?: boolean;
   refusalFallbackModel?: string;
   session?: AgentSession;
-  /** Increase the session's max iteration limit (e.g. before a follow-up prompt). */
-  bumpMaxIterations?: (n: number) => void;
+  /** Increase the session's token/cost limits (e.g. before a follow-up prompt). */
+  bumpSessionLimits?: (tokens: number, costUsd: number) => void;
   /** Stop firing onResponse for subsequent session.prompt() calls (e.g. memory update). */
   muteResponses?: () => void;
 }
@@ -109,7 +110,7 @@ export class SessionRunner {
       authStorage: this.options.authStorage,
       contextMessages: options.contextMessages,
       thinkingLevel: options.thinkingLevel,
-      maxIterations: this.options.maxIterations,
+      sessionLimits: this.options.sessionLimits,
       visionFallbackModel: options.visionFallbackModel,
       llmDebugMaxChars: this.llmDebugMaxChars,
       metaReminder: this.options.metaReminder,
@@ -258,7 +259,7 @@ export class SessionRunner {
           ? options.refusalFallbackModel
           : undefined,
         session,
-        bumpMaxIterations: sessionCtx.bumpMaxIterations,
+        bumpSessionLimits: sessionCtx.bumpSessionLimits,
         muteResponses: () => {
           responseMuted = true;
           const prTool = this.tools.find((t) => t.name === "progress_report") as ProgressReportTool | undefined;
