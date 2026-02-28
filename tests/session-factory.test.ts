@@ -658,55 +658,6 @@ describe("createAgentSessionForInvocation", () => {
     expect(hasMetaInLast(out)).toBe(false);
   });
 
-  it("warns when assistant produces text alongside tool_use", () => {
-    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-    createAgentSessionForInvocation({
-      model: "openai:gpt-4o-mini",
-      systemPrompt: "system",
-      tools: [],
-      authStorage: AuthStorage.inMemory(),
-      modelAdapter: defaultModelAdapter,
-      logger,
-    });
-
-    const session = mockState.sessions[0];
-
-    // Turn with both text and toolCall content blocks
-    session.emit({
-      type: "turn_end",
-      message: {
-        role: "assistant",
-        content: [
-          { type: "text", text: "Let me search for that." },
-          { type: "toolCall", id: "t1", name: "web_search", arguments: {} },
-        ],
-        stopReason: "toolUse",
-        usage: mockUsage(),
-      },
-      toolResults: [{ role: "toolResult" }],
-    });
-    expect(logger.warn).toHaveBeenCalledWith(
-      "Turn 1: assistant produced text output alongside tool_use: Let me search for that.",
-    );
-
-    // Whitespace-only text alongside tool_use should NOT trigger the warning
-    (logger.warn as ReturnType<typeof vi.fn>).mockClear();
-    session.emit({
-      type: "turn_end",
-      message: {
-        role: "assistant",
-        content: [
-          { type: "text", text: "  \n " },
-          { type: "toolCall", id: "t2", name: "web_search", arguments: {} },
-        ],
-        stopReason: "toolUse",
-        usage: mockUsage(),
-      },
-      toolResults: [{ role: "toolResult" }],
-    });
-    expect(logger.warn).not.toHaveBeenCalled();
-  });
-
   it("does not inject metaReminder when not configured", () => {
     createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",

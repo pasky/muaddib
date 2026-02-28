@@ -1,6 +1,6 @@
 import { Agent, type AgentMessage, type AgentTool, type StreamFn, type ThinkingLevel } from "@mariozechner/pi-agent-core";
 import { streamSimple, type Message } from "@mariozechner/pi-ai";
-import { isAssistantMessage, isTextContent, isToolCall } from "./message.js";
+import { isAssistantMessage } from "./message.js";
 import {
   AgentSession,
   AuthStorage,
@@ -263,10 +263,8 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
     resolvedModel.spec.modelId,
   );
 
-  let turnCount = 0;
   const unsubscribe = session.subscribe((event) => {
     if (event.type === "turn_end") {
-      turnCount += 1;
       // Accumulate usage from this assistant turn.
       const msg = event.message as { usage?: { input: number; cacheRead: number; cacheWrite: number; cost: { total: number } }; stopReason?: string };
       if (msg.usage) {
@@ -300,20 +298,6 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
       if (limitReached && limitState.turnsSinceSoftLimit >= 10) { // purely a safety vent
         logger.warn("Exceeding session limits, aborting session prompt loop.");
         void session.abort();
-      }
-
-      // Warn when assistant produces text alongside tool calls — may indicate confused output
-      if (stopReason === "toolUse" && isAssistantMessage(event.message)) {
-        const { content } = event.message;
-        if (content.some(isTextContent) && content.some(isToolCall)) {
-          const textSnippet = content
-            .filter(isTextContent)
-            .map((b) => b.text)
-            .join(" | ");
-          if (textSnippet.trim()) {
-            logger.warn(`Turn ${turnCount}: assistant produced text output alongside tool_use: ${textSnippet}`);
-          }
-        }
       }
 
       // Internal reminder and progress nudges are injected ephemerally via
