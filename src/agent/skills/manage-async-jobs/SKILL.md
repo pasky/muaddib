@@ -1,6 +1,6 @@
 ---
 name: manage-async-jobs
-description: Using `/events/` to schedule one-shot or periodic (cron) jobs that fire asynchronously
+description: Using the /events/ directory to schedule one-shot (at) or periodic (cron) jobs that fire asynchronously
 ---
 
 # Events

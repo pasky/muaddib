@@ -34,7 +34,6 @@ import {
 import type { ArcEventsWatcher } from "../../events/watcher.js";
 
 import {
-  getArcChronicleDir,
   getArcChatHistoryDir,
   loadArcMemoryFile,
   createVmReadOps,
@@ -112,21 +111,19 @@ function buildSystemPromptSuffix(
   sessionDir: string,
   toolsConfig?: ToolsConfig,
 ): string {
-  const skills = loadBundledSkills();
-  const workspaceSkills = loadWorkspaceSkills(arc);
-  const allSkills = [...skills, ...workspaceSkills];
-  const skillsSection = formatSkillsForVmPrompt(allSkills);
+  const chatHistorySuffix = existsSync(getArcChatHistoryDir(arc))
+    ? " Complete daily chat logs are in the /chat_history/ directory (read-only)."
+    : "";
 
   const artifactsUrl = toolsConfig?.artifacts?.url;
   const artifactsSuffix = artifactsUrl
     ? ` Artifacts: your previously produced output attachments - any URLs that start with ${artifactsUrl}, read with download_artifact skill.`
     : "";
-  const chronicleSuffix = existsSync(getArcChronicleDir(arc))
-    ? " Chronicle: you chapters and paragraphs chronicling your experiences, plans, thoughts and observations,.forming the backbone of your consciousness, are at /chronicle/ (read-only)."
-    : "";
-  const chatHistorySuffix = existsSync(getArcChatHistoryDir(arc))
-    ? " Chat history: raw JSONL logs at /chat_history/ (read-only)."
-    : "";
+
+  const skills = loadBundledSkills();
+  const workspaceSkills = loadWorkspaceSkills(arc);
+  const allSkills = [...skills, ...workspaceSkills];
+  const skillsSection = formatSkillsForVmPrompt(allSkills);
 
   const memoryContent = loadArcMemoryFile(arc);
   const memorySuffix = memoryContent.trim()
@@ -134,9 +131,8 @@ function buildSystemPromptSuffix(
     : "";
 
   return (
-    `Filesystem: /workspace persists across sessions; ${sessionDir} is your session working directory (last 8 session dirs in /tmp/session-* are kept).` +
+    `Filesystem: /workspace persists across sessions; ${sessionDir} is your ephemeral working directory (last 8 session dirs in /tmp/session-* are kept).` +
     " Environment: Alpine Linux, uv venv is active." +
-    chronicleSuffix +
     chatHistorySuffix +
     artifactsSuffix +
     skillsSection +

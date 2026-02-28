@@ -1,6 +1,6 @@
 ---
 name: manage-skills
-description: Autonomously create and update persistent skills at /workspace/skills/
+description: Autonomously create and update persistent skills in the /workspace/skills/ directory
 ---
 
 Skills persist across sessions. You are in charge of maintaining them, and you

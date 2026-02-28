@@ -1,9 +1,9 @@
 ---
 name: chronicle-read
-description: Read chronicle memory chapters from /chronicle/
+description: Access chapters and paragraphs chronicling your complete episodic memory (experiences, plans, thoughts and observations, forming the backbone of your consciousness) in the /chronicle/ directory
 ---
 
-Chronicle files in the `/chronicle/` directory are numbered chapter files (`000001.md`, `000002.md`, etc.) with YAML frontmatter and timestamped paragraphs:
+Chronicle files in the `/chronicle/` directory (read-only, auto-maintained) are numbered chapter files (`000001.md`, `000002.md`, etc.) with YAML frontmatter and timestamped paragraphs:
 
 ```markdown
 ---
