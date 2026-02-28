@@ -61,9 +61,9 @@
   },
   "dependencies": {
     "@earendil-works/gondolin": "^0.5.0",
-    "@mariozechner/pi-agent-core": "^0.53.0",
-    "@mariozechner/pi-ai": "^0.53.0",
-    "@mariozechner/pi-coding-agent": "^0.53.0",
+    "@mariozechner/pi-agent-core": "^0.55.3",
+    "@mariozechner/pi-ai": "^0.55.3",
+    "@mariozechner/pi-coding-agent": "^0.55.3",
     "@sinclair/typebox": "^0.34.48",
     "@slack/bolt": "^4.6.0",
     "croner": "^10.0.1",
