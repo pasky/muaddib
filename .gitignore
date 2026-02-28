@@ -1,17 +1,13 @@
 .*.sw?
 .claude
-chat_history.db
-chronicle.db
+.pi
+
 auth.json
 config.json
-*_analysis.csv
-debug.log
+arcs/
 logs/
-irssi-data
-artifacts
-gondolin-image/
-checkpoints/
-workspaces/
+artifacts/
+irssi-data/
 
 node_modules/
 dist/
