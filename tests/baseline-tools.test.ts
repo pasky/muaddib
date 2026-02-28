@@ -104,7 +104,7 @@ describe("baseline agent tools", () => {
 
     const result = await tool.execute("call-3", { url: "https://example.com/image.png" }, undefined, undefined);
 
-    expect(visitWebpage).toHaveBeenCalledWith("https://example.com/image.png");
+    expect(visitWebpage).toHaveBeenCalledWith("https://example.com/image.png", undefined);
     expect(result.content[0]).toEqual({
       type: "image",
       data: "base64-image",

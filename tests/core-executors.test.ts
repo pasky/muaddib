@@ -626,6 +626,117 @@ describe("core tool executors visit_webpage newline cleanup", () => {
   });
 });
 
+describe("core tool executors visit_webpage LLM transcription", () => {
+  it("visit_webpage post-processes content through LLM when deepResearch.model is configured", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "HEAD") {
+        return new Response("", { status: 200, headers: { "content-type": "text/html" } });
+      }
+      return new Response("Nav menu\n\nActual content\n\nCookie banner", { status: 200 });
+    });
+
+    const modelAdapter = {
+      completeSimple: vi.fn(async () => ({
+        content: [{ type: "text", text: "Actual content" }],
+      })),
+    };
+
+    const executors = createDefaultToolExecutorsRaw({
+      modelAdapter: modelAdapter as any,
+      authStorage: AuthStorage.inMemory(),
+      arc: "test-arc",
+      toolsConfig: { visitWebpage: { model: "anthropic:claude-haiku" } },
+    });
+
+    const result = await executors.visitWebpage("https://example.com/page") as string;
+    expect(result).toContain("## Content from https://example.com/page");
+    expect(result).toContain("Actual content");
+    expect(result).not.toContain("Nav menu");
+    expect(result).not.toContain("Cookie banner");
+
+    expect(modelAdapter.completeSimple).toHaveBeenCalledOnce();
+    const [modelSpec, context, options] = modelAdapter.completeSimple.mock.calls[0] as any[];
+    expect(modelSpec).toBe("anthropic:claude-haiku");
+    expect(context.systemPrompt).toContain("web content transcriber");
+    expect(context.messages[0].content).toContain("Actual content");
+    expect(options.callType).toBe("webTranscript");
+  });
+
+  it("visit_webpage appends query to system prompt when provided", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "HEAD") {
+        return new Response("", { status: 200, headers: { "content-type": "text/html" } });
+      }
+      return new Response("Product page content", { status: 200 });
+    });
+
+    const modelAdapter = {
+      completeSimple: vi.fn(async () => ({
+        content: [{ type: "text", text: "Price: 94 Kč" }],
+      })),
+    };
+
+    const executors = createDefaultToolExecutorsRaw({
+      modelAdapter: modelAdapter as any,
+      authStorage: AuthStorage.inMemory(),
+      arc: "test-arc",
+      toolsConfig: { visitWebpage: { model: "anthropic:claude-haiku" } },
+    });
+
+    const result = await executors.visitWebpage("https://example.com/product", "what is the price?") as string;
+    expect(result).toContain("Price: 94 Kč");
+
+    const [, context] = modelAdapter.completeSimple.mock.calls[0] as any[];
+    expect(context.systemPrompt).toContain("what is the price?");
+  });
+
+  it("visit_webpage falls back to raw content when LLM transcription fails", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "HEAD") {
+        return new Response("", { status: 200, headers: { "content-type": "text/html" } });
+      }
+      return new Response("Raw content here", { status: 200 });
+    });
+
+    const modelAdapter = {
+      completeSimple: vi.fn(async () => { throw new Error("LLM unavailable"); }),
+    };
+
+    const executors = createDefaultToolExecutorsRaw({
+      modelAdapter: modelAdapter as any,
+      authStorage: AuthStorage.inMemory(),
+      arc: "test-arc",
+      toolsConfig: { visitWebpage: { model: "anthropic:claude-haiku" } },
+    });
+
+    const result = await executors.visitWebpage("https://example.com/page") as string;
+    expect(result).toContain("Raw content here");
+  });
+
+  it("visit_webpage skips LLM transcription when deepResearch.model is not configured", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "HEAD") {
+        return new Response("", { status: 200, headers: { "content-type": "text/html" } });
+      }
+      return new Response("Raw content", { status: 200 });
+    });
+
+    const modelAdapter = {
+      completeSimple: vi.fn(async () => { throw new Error("should not be called"); }),
+    };
+
+    const executors = createDefaultToolExecutorsRaw({
+      modelAdapter: modelAdapter as any,
+      authStorage: AuthStorage.inMemory(),
+      arc: "test-arc",
+    });
+
+    const result = await executors.visitWebpage("https://example.com/page") as string;
+    expect(result).toContain("Raw content");
+    expect(modelAdapter.completeSimple).not.toHaveBeenCalled();
+  });
+});
+
 describe("core tool executors visit_webpage local artifact support", () => {
   it("visit_webpage reads local text artifact directly from disk", async () => {
     const { artifactsPath } = await makeArtifactsDir();

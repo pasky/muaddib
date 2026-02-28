@@ -5,6 +5,8 @@ import { Type } from "@sinclair/typebox";
 
 import type { ToolContext, MuaddibTool } from "./types.js";
 import { extractLocalArtifactPath } from "./url-utils.js";
+import { responseText } from "../message.js";
+import { toConfiguredString } from "../../utils/index.js";
 
 export interface VisitWebpageImageResult {
   kind: "image";
@@ -15,7 +17,7 @@ export interface VisitWebpageImageResult {
 export type VisitWebpageResult = string | VisitWebpageImageResult;
 
 export type WebSearchExecutor = (query: string) => Promise<string>;
-export type VisitWebpageExecutor = (url: string) => Promise<VisitWebpageResult>;
+export type VisitWebpageExecutor = (url: string, query?: string) => Promise<VisitWebpageResult>;
 
 const DEFAULT_WEB_CONTENT_LIMIT = 40_000;
 const DEFAULT_IMAGE_LIMIT = 3_500_000;
@@ -88,9 +90,13 @@ export function createVisitWebpageTool(
         format: "uri",
         description: "The URL to visit.",
       }),
+      query: Type.Optional(Type.String({
+        description: "Optional: describe what information to extract from the page. " +
+          "When provided, the content transcript will focus on this query.",
+      })),
     }),
     execute: async (_toolCallId, params) => {
-      const output = await executors.visitWebpage(params.url);
+      const output = await executors.visitWebpage(params.url, params.query);
       return toolResultFromVisitWebpageOutput(params.url, output);
     },
   };
@@ -176,7 +182,7 @@ export function createDefaultVisitWebpageExecutor(
   const maxWebContentLength = options.toolsConfig?.jina?.maxWebContentLength ?? DEFAULT_WEB_CONTENT_LIMIT;
   const maxImageBytes = options.toolsConfig?.jina?.maxImageBytes ?? DEFAULT_IMAGE_LIMIT;
 
-  return async (url: string): Promise<VisitWebpageResult> => {
+  return async (url: string, query?: string): Promise<VisitWebpageResult> => {
     const parsedUrl = new URL(url);
     if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
       throw new Error("Invalid URL. Must start with http:// or https://");
@@ -270,7 +276,7 @@ export function createDefaultVisitWebpageExecutor(
         return `## Content from ${url}\n\n(Empty response)`;
       }
 
-      return formatTextContent(url, body, maxWebContentLength);
+      return transcribeWebContent(body, url, query, options, maxWebContentLength);
     }
 
     // Use Jina reader with retry/backoff.
@@ -281,7 +287,7 @@ export function createDefaultVisitWebpageExecutor(
       return `## Content from ${url}\n\n(Empty response)`;
     }
 
-    return formatTextContent(url, body, maxWebContentLength);
+    return transcribeWebContent(body, url, query, options, maxWebContentLength);
   };
 }
 
@@ -361,6 +367,79 @@ async function fetchJinaWithRetry(
 
   // Unreachable.
   throw new Error("Jina retry loop exhausted");
+}
+
+const WEB_TRANSCRIPT_SYSTEM_PROMPT =
+  "You are a web content transcriber. Produce a clean, parsimonious transcript of the webpage content below.\n" +
+  "Rules:\n" +
+  "- Preserve all substantive content verbatim — exact wording, tone, and nuance\n" +
+  "- Preserve all meaningful URLs/links inline in markdown format\n" +
+  "- Remove: navigation menus, cookie banners/consent dialogs, login/signup forms, " +
+  "site-wide footer links, sidebar widgets, ads, breadcrumbs, \"related products\", " +
+  "shopping carts, social sharing buttons, and other non-content boilerplate\n" +
+  "- Keep document structure (headings, lists, tables) intact\n" +
+  "- Do NOT summarize or paraphrase — transcribe the actual content literally\n" +
+  "- Do NOT add commentary or explanations\n" +
+  "- Be thorough with the actual content but ruthless with boilerplate";
+
+/**
+ * Post-process fetched web content through an LLM to strip boilerplate,
+ * falling back to basic formatting when no model is configured.
+ */
+async function transcribeWebContent(
+  body: string,
+  url: string,
+  query: string | undefined,
+  options: ToolContext,
+  maxLength: number,
+): Promise<string> {
+  const modelSpec = toConfiguredString(options.toolsConfig?.visitWebpage?.model);
+  if (!modelSpec) {
+    return formatTextContent(url, body, maxLength);
+  }
+
+  // Pre-clean and truncate before sending to LLM.
+  let cleaned = body.replace(/\n{3,}/g, "\n\n");
+  if (cleaned.length > maxLength) {
+    cleaned = cleaned.slice(0, maxLength) + "\n\n..._Content truncated_...";
+  }
+
+  const systemPrompt = query
+    ? `${WEB_TRANSCRIPT_SYSTEM_PROMPT}\n\nFocus especially on information relevant to: ${query}`
+    : WEB_TRANSCRIPT_SYSTEM_PROMPT;
+
+  try {
+    const response = await options.modelAdapter.completeSimple(
+      modelSpec,
+      {
+        messages: [
+          {
+            role: "user",
+            content: cleaned,
+            timestamp: Date.now(),
+          },
+        ],
+        systemPrompt,
+      },
+      {
+        callType: "webTranscript",
+        logger: options.logger,
+        streamOptions: { reasoning: "low" },
+      },
+    );
+
+    const text = responseText(response);
+    if (text) {
+      return `## Content from ${url}\n\n${text}`;
+    }
+  } catch (error) {
+    options.logger?.error?.(
+      "Web content transcription failed, returning raw content",
+      error,
+    );
+  }
+
+  return formatTextContent(url, body, maxLength);
 }
 
 /**

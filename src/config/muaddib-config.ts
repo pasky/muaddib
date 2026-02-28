@@ -32,6 +32,10 @@ export interface JinaConfig {
   maxImageBytes?: number;
 }
 
+export interface VisitWebpageConfig {
+  model?: string;
+}
+
 export interface GondolinConfig {
   /**
    * IP CIDR ranges to block (both IPv4 and IPv6).
@@ -90,6 +94,7 @@ export interface ToolsConfig {
   deepResearch?: DeepResearchConfig;
   imageGen?: ImageGenConfig;
   jina?: JinaConfig;
+  visitWebpage?: VisitWebpageConfig;
   gondolin?: GondolinConfig;
   memory?: MemoryConfig;
   skills?: SkillsConfig;

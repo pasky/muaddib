@@ -28,6 +28,9 @@
       "deepResearch": {
         "model": "openrouter:google/gemini-3-flash-preview"
       },
+      "visitWebpage": {
+        "model": "openrouter:google/gemini-3-flash-preview"
+      },
       "memory": {
         "charLimit": 2200
       },
