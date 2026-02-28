@@ -47,7 +47,11 @@ export async function runMuaddibMain(argv: string[] = process.argv.slice(2)): Pr
   });
 
   const gateway = new RoomGateway();
-  const eventsWatcher = new ArcEventsWatcher(gateway, logger);
+  const eventsConfig = runtime.config.getEventsConfig();
+  const eventsWatcher = new ArcEventsWatcher(gateway, logger, {
+    heartbeatIntervalMs: eventsConfig.heartbeatIntervalMinutes * 60 * 1000,
+    minPeriodMs: eventsConfig.minPeriodMinutes * 60 * 1000,
+  });
 
   try {
     const monitors = await createMonitors(runtime, gateway, eventsWatcher);

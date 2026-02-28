@@ -47,6 +47,11 @@
     "paragraphsPerChapter": 5
   },
 
+  "events": {
+    "heartbeatIntervalMinutes": 60,
+    "minPeriodMinutes": 30
+  },
+
   "rooms": {
     "common": {
       "promptVars": {

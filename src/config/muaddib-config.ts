@@ -105,6 +105,13 @@ export interface AgentConfig {
   tools?: ToolsConfig;
 }
 
+export interface EventsConfig {
+  /** Heartbeat check interval in minutes. 0 disables. */
+  heartbeatIntervalMinutes: number;
+  /** Minimum period between periodic event fires in minutes. */
+  minPeriodMinutes: number;
+}
+
 interface ChroniclerConfig {
   model?: string;
   paragraphsPerChapter?: number;
@@ -199,6 +206,7 @@ export interface RoomConfig {
 interface MuaddibSettings {
   agent?: AgentConfig;
   chronicler?: ChroniclerConfig;
+  events?: Partial<EventsConfig>;
   rooms?: Record<string, RoomConfig>;
 }
 
@@ -324,6 +332,14 @@ export class MuaddibConfig {
           path: resolvedArtifactsPath,
         },
       },
+    };
+  }
+
+  getEventsConfig(): EventsConfig {
+    const raw = this.data.events ?? {};
+    return {
+      heartbeatIntervalMinutes: raw.heartbeatIntervalMinutes ?? 60,
+      minPeriodMinutes: raw.minPeriodMinutes ?? 30,
     };
   }
 

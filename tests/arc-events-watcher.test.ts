@@ -5,8 +5,10 @@ import { join } from "node:path";
 
 import {
   ArcEventsWatcher,
+  type ArcEventsWatcherOptions,
   _parseEventFile,
   _buildEventMessage,
+  _isHeartbeatContentEmpty,
   getArcEventsDir,
 } from "../src/events/watcher.js";
 import type { RoomGateway } from "../src/rooms/room-gateway.js";
@@ -22,6 +24,9 @@ function createTempHome(): string {
   const dir = mkdtempSync(join(tmpdir(), "muaddib-events-test-"));
   return dir;
 }
+
+/** Default options: 30min min period, heartbeat disabled. */
+const defaultOpts: ArcEventsWatcherOptions = { minPeriodMs: 30 * 60 * 1000, heartbeatIntervalMs: 0 };
 
 function createMockGateway(): RoomGateway & { injected: Array<{ arc: string; content: string }> } {
   const injected: Array<{ arc: string; content: string }> = [];
@@ -106,7 +111,7 @@ describe("parseEventFile", () => {
 
 describe("buildEventMessage", () => {
   it("builds one-shot message with correct format", () => {
-    const msg = _buildEventMessage("remind.json", {
+    const msg = _buildEventMessage("/events/remind.json", {
       type: "one-shot",
       text: "Remind me",
       at: "2026-03-01T09:00:00+01:00",
@@ -118,7 +123,7 @@ describe("buildEventMessage", () => {
   });
 
   it("builds periodic message with NULL guidance", () => {
-    const msg = _buildEventMessage("check.json", {
+    const msg = _buildEventMessage("/events/check.json", {
       type: "periodic",
       text: "Check inbox",
       schedule: "0 9 * * 1-5",
@@ -132,7 +137,7 @@ describe("buildEventMessage", () => {
 describe("ArcEventsWatcher", () => {
   it("fires a one-shot event after timeout", async () => {
     const gateway = createMockGateway();
-    const watcher = new ArcEventsWatcher(gateway);
+    const watcher = new ArcEventsWatcher(gateway, undefined, defaultOpts);
 
     const arc = "test-arc";
     const eventsDir = getArcEventsDir(arc);
@@ -169,7 +174,7 @@ describe("ArcEventsWatcher", () => {
 
   it("discards stale one-shot events on startup", () => {
     const gateway = createMockGateway();
-    const watcher = new ArcEventsWatcher(gateway);
+    const watcher = new ArcEventsWatcher(gateway, undefined, defaultOpts);
 
     const arc = "test-arc";
     const eventsDir = getArcEventsDir(arc);
@@ -195,7 +200,7 @@ describe("ArcEventsWatcher", () => {
 
   it("cancels a job when the file is deleted", () => {
     const gateway = createMockGateway();
-    const watcher = new ArcEventsWatcher(gateway);
+    const watcher = new ArcEventsWatcher(gateway, undefined, defaultOpts);
 
     const arc = "test-arc";
     const eventsDir = getArcEventsDir(arc);
@@ -222,7 +227,7 @@ describe("ArcEventsWatcher", () => {
 
   it("re-schedules when a file is overwritten", async () => {
     const gateway = createMockGateway();
-    const watcher = new ArcEventsWatcher(gateway);
+    const watcher = new ArcEventsWatcher(gateway, undefined, defaultOpts);
 
     const arc = "test-arc";
     const eventsDir = getArcEventsDir(arc);
@@ -264,7 +269,7 @@ describe("ArcEventsWatcher", () => {
 
   it("scans all arcs on start()", () => {
     const gateway = createMockGateway();
-    const watcher = new ArcEventsWatcher(gateway);
+    const watcher = new ArcEventsWatcher(gateway, undefined, defaultOpts);
 
     // Create two arcs with events
     for (const arcName of ["arc1", "arc2"]) {
@@ -285,7 +290,7 @@ describe("ArcEventsWatcher", () => {
 
   it("ignores non-json files", () => {
     const gateway = createMockGateway();
-    const watcher = new ArcEventsWatcher(gateway);
+    const watcher = new ArcEventsWatcher(gateway, undefined, defaultOpts);
 
     // This should not throw or schedule anything
     watcher.onFileWritten("arc", "readme.txt");
@@ -296,7 +301,7 @@ describe("ArcEventsWatcher", () => {
 
   it("handles malformed event files gracefully", () => {
     const gateway = createMockGateway();
-    const watcher = new ArcEventsWatcher(gateway);
+    const watcher = new ArcEventsWatcher(gateway, undefined, defaultOpts);
 
     const arc = "test-arc";
     const eventsDir = getArcEventsDir(arc);
@@ -306,6 +311,209 @@ describe("ArcEventsWatcher", () => {
 
     // Should not throw
     watcher.onFileWritten(arc, "bad.json");
+    expect(gateway.injected.length).toBe(0);
+
+    watcher.stop();
+  });
+
+  it("uses configurable minPeriodMs for rate limiting", async () => {
+    const gateway = createMockGateway();
+    // Use a 3-second min period with a cron that fires every second
+    const watcher = new ArcEventsWatcher(gateway, undefined, { minPeriodMs: 3000, heartbeatIntervalMs: 0 });
+
+    const arc = "test-arc";
+    const eventsDir = getArcEventsDir(arc);
+    mkdirSync(eventsDir, { recursive: true });
+
+    writeFileSync(join(eventsDir, "periodic.json"), JSON.stringify({
+      type: "periodic",
+      text: "Check stuff",
+      schedule: "* * * * * *", // every second
+    }));
+
+    watcher.onFileWritten(arc, "periodic.json");
+
+    // First tick fires at t=1s
+    vi.advanceTimersByTime(1000);
+    await vi.waitFor(() => {
+      expect(gateway.injected.length).toBe(1);
+    });
+
+    // t=2s: rate-limited (2s - 1s = 1s < 3s)
+    vi.advanceTimersByTime(1000);
+    await Promise.resolve();
+    expect(gateway.injected.length).toBe(1);
+
+    // t=5s: fires again (5s - 1s = 4s >= 3s)
+    vi.advanceTimersByTime(3000);
+    await vi.waitFor(() => {
+      expect(gateway.injected.length).toBe(2);
+    });
+
+    watcher.stop();
+  });
+});
+
+describe("isHeartbeatContentEmpty", () => {
+  it("returns true for empty string", () => {
+    expect(_isHeartbeatContentEmpty("")).toBe(true);
+  });
+
+  it("returns true for whitespace-only", () => {
+    expect(_isHeartbeatContentEmpty("  \n\t\n  ")).toBe(true);
+  });
+
+  it("returns true for headers-only", () => {
+    expect(_isHeartbeatContentEmpty("# Heartbeat\n## Section\n")).toBe(true);
+  });
+
+  it("returns true for HTML comments only", () => {
+    expect(_isHeartbeatContentEmpty("<!-- placeholder -->\n<!-- another -->")).toBe(true);
+  });
+
+  it("returns true for empty checklist items only", () => {
+    expect(_isHeartbeatContentEmpty("- [ ]\n- [ ]\n")).toBe(true);
+  });
+
+  it("returns true for headers + comments + empty checklists combined", () => {
+    expect(_isHeartbeatContentEmpty("# Heartbeat\n<!-- note -->\n- [ ]\n")).toBe(true);
+  });
+
+  it("returns false for real content", () => {
+    expect(_isHeartbeatContentEmpty("Check email inbox")).toBe(false);
+  });
+
+  it("returns false for checked checklist items", () => {
+    expect(_isHeartbeatContentEmpty("- [x] Done task")).toBe(false);
+  });
+
+  it("returns false for content mixed with headers", () => {
+    expect(_isHeartbeatContentEmpty("# Heartbeat\nCheck email")).toBe(false);
+  });
+});
+
+describe("ArcEventsWatcher heartbeat", () => {
+  it("fires heartbeat for arc with non-empty HEARTBEAT.md", async () => {
+    const gateway = createMockGateway();
+    const watcher = new ArcEventsWatcher(gateway, undefined, {
+      heartbeatIntervalMs: 5000,
+      minPeriodMs: 1000,
+    });
+
+    // Create arc with HEARTBEAT.md
+    const workspaceDir = join(muaddibHome, "arcs", "test-arc", "workspace");
+    mkdirSync(workspaceDir, { recursive: true });
+    writeFileSync(join(workspaceDir, "HEARTBEAT.md"), "Check email inbox");
+
+    watcher.start();
+
+    // Advance past the heartbeat interval
+    vi.advanceTimersByTime(5000);
+
+    await vi.waitFor(() => {
+      expect(gateway.injected.length).toBe(1);
+    });
+
+    expect(gateway.injected[0]!.arc).toBe("test-arc");
+    expect(gateway.injected[0]!.content).toContain("[EVENT:/workspace/HEARTBEAT.md:periodic:");
+    expect(gateway.injected[0]!.content).toContain("/workspace/HEARTBEAT.md:\nCheck email inbox");
+
+    watcher.stop();
+  });
+
+  it("skips arcs without HEARTBEAT.md", async () => {
+    const gateway = createMockGateway();
+    const watcher = new ArcEventsWatcher(gateway, undefined, {
+      heartbeatIntervalMs: 5000,
+      minPeriodMs: 1000,
+    });
+
+    // Create arc without HEARTBEAT.md
+    const workspaceDir = join(muaddibHome, "arcs", "test-arc", "workspace");
+    mkdirSync(workspaceDir, { recursive: true });
+
+    watcher.start();
+    vi.advanceTimersByTime(5000);
+
+    // Give async a chance to settle
+    await Promise.resolve();
+    expect(gateway.injected.length).toBe(0);
+
+    watcher.stop();
+  });
+
+  it("skips arcs with empty/header-only HEARTBEAT.md", async () => {
+    const gateway = createMockGateway();
+    const watcher = new ArcEventsWatcher(gateway, undefined, {
+      heartbeatIntervalMs: 5000,
+      minPeriodMs: 1000,
+    });
+
+    const workspaceDir = join(muaddibHome, "arcs", "test-arc", "workspace");
+    mkdirSync(workspaceDir, { recursive: true });
+    writeFileSync(join(workspaceDir, "HEARTBEAT.md"), "# Heartbeat\n<!-- empty -->\n");
+
+    watcher.start();
+    vi.advanceTimersByTime(5000);
+
+    await Promise.resolve();
+    expect(gateway.injected.length).toBe(0);
+
+    watcher.stop();
+  });
+
+  it("heartbeat respects rate limiting", async () => {
+    const gateway = createMockGateway();
+    const watcher = new ArcEventsWatcher(gateway, undefined, {
+      heartbeatIntervalMs: 2000,
+      minPeriodMs: 5000,
+    });
+
+    const workspaceDir = join(muaddibHome, "arcs", "test-arc", "workspace");
+    mkdirSync(workspaceDir, { recursive: true });
+    writeFileSync(join(workspaceDir, "HEARTBEAT.md"), "Check stuff");
+
+    watcher.start();
+
+    // First heartbeat fires at t=2s
+    vi.advanceTimersByTime(2000);
+    await vi.waitFor(() => {
+      expect(gateway.injected.length).toBe(1);
+    });
+
+    // Second heartbeat at t=4s is rate-limited (4s - 2s = 2s < 5s minPeriod)
+    vi.advanceTimersByTime(2000);
+    await Promise.resolve();
+    expect(gateway.injected.length).toBe(1);
+
+    // Third heartbeat at t=6s is still rate-limited (6s - 2s = 4s < 5s minPeriod)
+    vi.advanceTimersByTime(2000);
+    await Promise.resolve();
+    expect(gateway.injected.length).toBe(1);
+
+    // Fourth heartbeat at t=8s fires (8s - 2s = 6s >= 5s minPeriod)
+    vi.advanceTimersByTime(2000);
+    await vi.waitFor(() => {
+      expect(gateway.injected.length).toBe(2);
+    });
+
+    watcher.stop();
+  });
+
+  it("heartbeatIntervalMs: 0 disables heartbeat", () => {
+    const gateway = createMockGateway();
+    const watcher = new ArcEventsWatcher(gateway, undefined, {
+      heartbeatIntervalMs: 0,
+      minPeriodMs: 1000,
+    });
+
+    const workspaceDir = join(muaddibHome, "arcs", "test-arc", "workspace");
+    mkdirSync(workspaceDir, { recursive: true });
+    writeFileSync(join(workspaceDir, "HEARTBEAT.md"), "Check stuff");
+
+    watcher.start();
+    vi.advanceTimersByTime(60000);
+
     expect(gateway.injected.length).toBe(0);
 
     watcher.stop();

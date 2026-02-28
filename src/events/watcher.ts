@@ -37,8 +37,14 @@ interface PeriodicEvent {
 
 type ParsedEvent = OneShotEvent | PeriodicEvent;
 
-/** Minimum interval for periodic events: 30 minutes. */
-const MIN_PERIOD_MS = 30 * 60 * 1000;
+// ── Watcher options ──────────────────────────────────────────────────────
+
+export interface ArcEventsWatcherOptions {
+  /** Minimum period between periodic event fires in ms. */
+  minPeriodMs: number;
+  /** Heartbeat check interval in ms. 0 disables. */
+  heartbeatIntervalMs: number;
+}
 
 /**
  * Detach a callback from the current AsyncLocalStorage context.
@@ -53,7 +59,7 @@ const detach = AsyncLocalStorage.snapshot();
 
 // ── Synthetic message format ────────────────────────────────────────────
 
-function buildEventMessage(filename: string, event: ParsedEvent): string {
+function buildEventMessage(path: string, event: ParsedEvent): string {
   const separator = "----------";
   if (event.type === "periodic") {
     const meta =
@@ -62,14 +68,14 @@ function buildEventMessage(filename: string, event: ParsedEvent): string {
       `seen outside as 'out of the blue' so keep your chatter to only relevant notices it's important to share - ` +
       `likely, you will not say anything at all, unlikely it was explicitly asked for below. ` +
       `Finish with string NULL once done if no notification needs to be sent.</meta>`;
-    return `${separator}\n${meta}\n[EVENT:/events/${filename}:periodic:${event.schedule}] ${event.text}`;
+    return `${separator}\n${meta}\n[EVENT:${path}:periodic:${event.schedule}] ${event.text}`;
   }
   // one-shot
   const meta =
     `<meta>The above was current conversation context, which may or may not be relevant at all to the task at hand - ` +
     `you have just been launched asynchronously to handle a pre-scheduled instruction. Anything you write will be ` +
     `seen outside as 'out of the blue', speak accordingly.</meta>`;
-  return `${separator}\n${meta}\n[EVENT:/events/${filename}:one-shot:${event.at}] ${event.text}`;
+  return `${separator}\n${meta}\n[EVENT:${path}:one-shot:${event.at}] ${event.text}`;
 }
 
 // ── Job tracking ────────────────────────────────────────────────────────
@@ -97,11 +103,18 @@ export class ArcEventsWatcher {
   private readonly jobs = new Map<string, ScheduledJob>();
   /** Track last fire time per job key for rate limiting. */
   private readonly lastFireTime = new Map<string, number>();
+  private readonly minPeriodMs: number;
+  private readonly heartbeatIntervalMs: number;
+  private heartbeatTimer?: ReturnType<typeof setInterval>;
 
   constructor(
     private readonly gateway: RoomGateway,
-    private readonly logger?: Logger,
-  ) {}
+    private readonly logger: Logger | undefined,
+    private readonly options: ArcEventsWatcherOptions,
+  ) {
+    this.minPeriodMs = options.minPeriodMs;
+    this.heartbeatIntervalMs = options.heartbeatIntervalMs;
+  }
 
   // ── NotifyingProvider callbacks ──────────────────────────────────────
 
@@ -193,15 +206,82 @@ export class ArcEventsWatcher {
     }
 
     this.logger?.info(`Events: started, ${this.jobs.size} job(s) scheduled`);
+    this.startHeartbeat();
   }
 
   stop(): void {
+    this.stopHeartbeat();
     for (const job of this.jobs.values()) {
       cancelJob(job);
     }
     this.jobs.clear();
     this.lastFireTime.clear();
     this.logger?.info("Events: stopped");
+  }
+
+  // ── Heartbeat ──────────────────────────────────────────────────────
+
+  private startHeartbeat(): void {
+    if (this.heartbeatIntervalMs <= 0) return;
+    this.heartbeatTimer = setInterval(
+      () => detach(() => this.scanHeartbeats()),
+      this.heartbeatIntervalMs,
+    );
+    this.heartbeatTimer.unref();
+    this.logger?.info(`Events: heartbeat enabled, interval ${this.heartbeatIntervalMs}ms`);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = undefined;
+    }
+  }
+
+  private scanHeartbeats(): void {
+    const arcsDir = join(getMuaddibHome(), "arcs");
+    if (!existsSync(arcsDir)) return;
+
+    let arcDirs: string[];
+    try {
+      arcDirs = readdirSync(arcsDir);
+    } catch {
+      return;
+    }
+
+    for (const arc of arcDirs) {
+      const heartbeatPath = join(arcsDir, arc, "workspace", "HEARTBEAT.md");
+      let content: string;
+      try {
+        if (!existsSync(heartbeatPath)) continue;
+        content = readFileSync(heartbeatPath, "utf8");
+      } catch {
+        continue;
+      }
+
+      if (isHeartbeatContentEmpty(content)) continue;
+
+      // Rate-limit per arc using the same lastFireTime map.
+      const key = `${arc}/HEARTBEAT.md`;
+      const now = Date.now();
+      const last = this.lastFireTime.get(key);
+      if (last !== undefined && now - last < this.minPeriodMs) {
+        this.logger?.debug(`Events: rate-limited heartbeat for ${arc}`);
+        continue;
+      }
+      this.lastFireTime.set(key, now);
+
+      const event: PeriodicEvent = {
+        type: "periodic",
+        text: `/workspace/HEARTBEAT.md:\n${content.trim()}`,
+        schedule: `${Math.round(this.heartbeatIntervalMs / 60000)}m`,
+      };
+      const message = buildEventMessage("/workspace/HEARTBEAT.md", event);
+      this.logger?.info(`Events: firing heartbeat for ${arc}`);
+      this.gateway.inject(arc, message).catch((err) => {
+        this.logger?.error(`Events: failed to inject heartbeat for ${arc}`, String(err));
+      });
+    }
   }
 
   // ── Internal scheduling ─────────────────────────────────────────────
@@ -237,7 +317,7 @@ export class ArcEventsWatcher {
         // Rate-limit: enforce minimum 30-minute gap between fires.
         const now = Date.now();
         const last = this.lastFireTime.get(key);
-        if (last !== undefined && now - last < MIN_PERIOD_MS) {
+        if (last !== undefined && now - last < this.minPeriodMs) {
           this.logger?.debug(`Events: rate-limited periodic ${key}`);
           return;
         }
@@ -251,7 +331,7 @@ export class ArcEventsWatcher {
   }
 
   private fire(arc: string, filename: string, event: ParsedEvent): void {
-    const content = buildEventMessage(filename, event);
+    const content = buildEventMessage(`/events/${filename}`, event);
     this.logger?.info(`Events: firing ${event.type} ${arc}/${filename}`);
     this.gateway.inject(arc, content).catch((err) => {
       this.logger?.error(`Events: failed to inject event ${arc}/${filename}`, String(err));
@@ -319,6 +399,21 @@ function parseEventFile(raw: string, filename: string): ParsedEvent {
   throw new Error(`${filename}: unknown event type "${type}" (expected "one-shot" or "periodic")`);
 }
 
+// ── Heartbeat content check ──────────────────────────────────────────────
+
+/**
+ * Returns true if the heartbeat content is effectively empty:
+ * only whitespace, markdown headers, HTML comments, or empty checklist items.
+ */
+function isHeartbeatContentEmpty(content: string): boolean {
+  const stripped = content
+    .replace(/<!--[\s\S]*?-->/g, "")  // remove HTML comments
+    .replace(/^#+\s*.*$/gm, "")       // remove markdown headers
+    .replace(/^-\s*\[\s*\]\s*$/gm, "") // remove empty checklist items
+    .trim();
+  return stripped.length === 0;
+}
+
 // Exported for testing
-export { parseEventFile as _parseEventFile, buildEventMessage as _buildEventMessage };
+export { parseEventFile as _parseEventFile, buildEventMessage as _buildEventMessage, isHeartbeatContentEmpty as _isHeartbeatContentEmpty };
 export type { ParsedEvent, OneShotEvent, PeriodicEvent };
