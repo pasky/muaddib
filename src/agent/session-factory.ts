@@ -257,13 +257,13 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
             {
               type: "text",
               text:
-                "<meta>You have reached your iteration limit. Provide your final text response now. Do not use any more tools.</meta>",
+                "<meta>You have reached your session limit - time to provide your final text response.</meta>",
             },
           ],
           timestamp: Date.now(),
         });
       }
-      if (turnCount >= maxIterations + 2) {
+      if (turnCount >= maxIterations + 10) { // purely a safety vent
         logger.warn("Exceeding max iterations, aborting session prompt loop.");
         void session.abort();
       }
