@@ -5,6 +5,7 @@ import {
   createBaselineAgentTools,
   createGenerateImageTool,
   createOracleTool,
+  createDeepResearchTool,
   ORACLE_EXCLUDED_TOOLS,
   createMakePlanTool,
   createProgressReportTool,
@@ -38,6 +39,7 @@ describe("baseline agent tools", () => {
         visitWebpage: async () => "",
         generateImage: async () => ({ summaryText: "", images: [] }),
         oracle: async () => "",
+        deepResearch: async () => "",
       },
     });
 
@@ -47,6 +49,7 @@ describe("baseline agent tools", () => {
       "visit_webpage",
       "generate_image",
       "oracle",
+      "deep_research",
       "read",
       "write",
       "edit",
@@ -64,6 +67,7 @@ describe("baseline agent tools", () => {
         visitWebpage: async () => "",
         generateImage: async () => ({ summaryText: "", images: [] }),
         oracle: async () => "",
+        deepResearch: async () => "",
       },
     });
 
@@ -248,9 +252,41 @@ describe("baseline agent tools", () => {
 
   it("ORACLE_EXCLUDED_TOOLS prevents recursion and irrelevant nested tools", () => {
     expect(ORACLE_EXCLUDED_TOOLS).toContain("oracle");
+    expect(ORACLE_EXCLUDED_TOOLS).toContain("deep_research");
     expect(ORACLE_EXCLUDED_TOOLS).toContain("progress_report");
     // Useful tools should NOT be excluded
     expect(ORACLE_EXCLUDED_TOOLS).not.toContain("web_search");
+  });
+
+  it("deep_research tool delegates to configured executor", async () => {
+    const deepResearch = vi.fn(async () => "Research findings");
+    const tool = createDeepResearchTool({ deepResearch });
+
+    const params = {
+      query: "What are the latest developments in quantum computing?",
+    };
+
+    const result = await tool.execute("call-9", params, undefined, undefined);
+
+    expect(deepResearch).toHaveBeenCalledWith(params);
+    expect(result.content[0]).toEqual({ type: "text", text: "Research findings" });
+  });
+
+  it("deep_research tool description mentions web tools and advisory nature", () => {
+    const tool = createDeepResearchTool({ deepResearch: async () => "" });
+    expect(tool.description).toContain("web_search");
+    expect(tool.description).toContain("may require an additional validation");
+  });
+
+  it("deep_research tool description includes configured model ID", () => {
+    const tool = createDeepResearchTool({ deepResearch: async () => "" }, "openrouter:google/gemini-3-flash");
+    expect(tool.description).toContain("openrouter:google/gemini-3-flash");
+  });
+
+  it("deep_research tool description omits model clause when no model ID given", () => {
+    const tool = createDeepResearchTool({ deepResearch: async () => "" });
+    expect(tool.description).not.toContain("using");
+    expect(tool.description).toMatch(/^Launch a web researcher\s+-/);
   });
 
 });

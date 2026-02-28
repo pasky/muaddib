@@ -16,6 +16,12 @@ export interface OracleConfig {
   maxIterations?: number;
 }
 
+export interface DeepResearchConfig {
+  model?: string;
+  prompt?: string;
+  maxIterations?: number;
+}
+
 export interface ImageGenConfig {
   model?: string;
   timeoutMs?: number;
@@ -81,6 +87,7 @@ export interface SkillsConfig {
 export interface ToolsConfig {
   artifacts?: ArtifactsConfig;
   oracle?: OracleConfig;
+  deepResearch?: DeepResearchConfig;
   imageGen?: ImageGenConfig;
   jina?: JinaConfig;
   gondolin?: GondolinConfig;

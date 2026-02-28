@@ -860,6 +860,9 @@ export class CommandExecutor {
         toolOptions: invocationToolOptions,
         buildTools: createBaselineAgentTools,
       },
+      deepResearchInvocation: {
+        conversationContext: conversationContext ?? [],
+      },
     });
 
     if (!allowedTools) {

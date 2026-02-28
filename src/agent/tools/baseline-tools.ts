@@ -11,6 +11,11 @@ import {
   type OracleInvocationContext,
 } from "./oracle.js";
 import {
+  createDefaultDeepResearchExecutor,
+  createDeepResearchTool,
+  type DeepResearchInvocationContext,
+} from "./deep-research.js";
+import {
   createDefaultVisitWebpageExecutor,
   createDefaultWebSearchExecutor,
   createVisitWebpageTool,
@@ -20,6 +25,7 @@ import { createGondolinTools } from "./gondolin-tools.js";
 import type { ArcEventsWatcher } from "../../events/watcher.js";
 import type { GenerateImageExecutor } from "./image.js";
 import type { OracleExecutor } from "./oracle.js";
+import type { DeepResearchExecutor } from "./deep-research.js";
 import type { WebSearchExecutor, VisitWebpageExecutor } from "./web.js";
 import type { ToolContext, MuaddibTool, ToolPersistType, ToolSet } from "./types.js";
 
@@ -27,6 +33,7 @@ export interface BaselineToolExecutors {
   webSearch: WebSearchExecutor;
   visitWebpage: VisitWebpageExecutor;
   oracle: OracleExecutor;
+  deepResearch: DeepResearchExecutor;
   generateImage: GenerateImageExecutor;
 }
 
@@ -34,12 +41,14 @@ export type { ToolContext, MuaddibTool, ToolPersistType, ToolSet };
 export type { ShareArtifactInput, ShareArtifactExecutor } from "./artifact.js";
 export type { GenerateImageInput, GenerateImageResult, GeneratedImageResultItem, GenerateImageExecutor } from "./image.js";
 export type { OracleInput, OracleExecutor } from "./oracle.js";
+export type { DeepResearchInput, DeepResearchExecutor } from "./deep-research.js";
 export type { VisitWebpageImageResult, VisitWebpageResult, WebSearchExecutor, VisitWebpageExecutor } from "./web.js";
 
 export {
   createGenerateImageTool,
   createMakePlanTool,
   createOracleTool,
+  createDeepResearchTool,
   createProgressReportTool,
   createVisitWebpageTool,
   createWebSearchTool,
@@ -58,6 +67,12 @@ export interface BaselineToolOptions extends ToolContext {
    */
   oracleInvocation?: OracleInvocationContext;
 
+  /**
+   * Per-invocation deep research context (conversation context, thinking level).
+   * When set, the deep research executor gets web-only tools and conversation context.
+   */
+  deepResearchInvocation?: DeepResearchInvocationContext;
+
   /** Arc events watcher for Gondolin /events/ mount notifications. */
   eventsWatcher?: ArcEventsWatcher;
 }
@@ -69,17 +84,20 @@ const BASELINE_TOOL_FACTORIES: ReadonlyArray<ExecutorBackedToolFactory> = [
   createVisitWebpageTool,
   (executors, options) => createGenerateImageTool(executors, toConfiguredString(options.toolsConfig?.imageGen?.model)),
   (executors, options) => createOracleTool(executors, toConfiguredString(options.toolsConfig?.oracle?.model)),
+  (executors, options) => createDeepResearchTool(executors, toConfiguredString(options.toolsConfig?.deepResearch?.model)),
 ];
 
 export function createDefaultToolExecutors(
   options: ToolContext,
   oracleInvocation?: OracleInvocationContext,
+  deepResearchInvocation?: DeepResearchInvocationContext,
 ): BaselineToolExecutors {
   return {
     webSearch: createDefaultWebSearchExecutor(options),
     visitWebpage: createDefaultVisitWebpageExecutor(options),
     generateImage: createDefaultGenerateImageExecutor(options),
     oracle: createDefaultOracleExecutor(options, oracleInvocation),
+    deepResearch: createDefaultDeepResearchExecutor(options, deepResearchInvocation),
   };
 }
 
@@ -92,7 +110,7 @@ export function createDefaultToolExecutors(
 export function createBaselineAgentTools(options: BaselineToolOptions): ToolSet {
   const gondolinConfig = options.toolsConfig?.gondolin ?? {};
 
-  const defaultExecutors = createDefaultToolExecutors(options, options.oracleInvocation);
+  const defaultExecutors = createDefaultToolExecutors(options, options.oracleInvocation, options.deepResearchInvocation);
   const overrides = options.executors ?? {};
   const executors: BaselineToolExecutors = {
     ...defaultExecutors,
