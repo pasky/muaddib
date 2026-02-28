@@ -668,6 +668,50 @@ describe("SessionRunner", () => {
     expect(result.refusalFallbackActivated).toBe(true);
   });
 
+  it("recovers text from earlier message when last assistant message is aborted/empty", async () => {
+    const session = {
+      messages: [
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "the real answer" }],
+          usage: makeUsage(),
+          stopReason: "stop",
+        },
+        {
+          role: "user",
+          content: [{ type: "text", text: "<meta>iteration limit</meta>" }],
+        },
+        {
+          role: "assistant",
+          content: [],
+          usage: makeUsage(),
+          stopReason: "aborted",
+          errorMessage: "Request was aborted.",
+        },
+      ] as any[],
+      subscribe: vi.fn(() => vi.fn()),
+      prompt: vi.fn(async () => {}),
+    };
+
+    mockCreateAgentSessionForInvocation.mockReturnValue({
+      session,
+      agent: { setModel: vi.fn() },
+      ensureProviderKey: vi.fn(async () => {}),
+      getVisionFallbackActivated: () => false,
+    });
+
+    const runner = new SessionRunner({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "sys",
+      authStorage: AuthStorage.inMemory(),
+      logger: minimalLogger,
+      modelAdapter: minimalModelAdapter,
+    });
+
+    const result = await runner.prompt("hello");
+    expect(result.text).toBe("the real answer");
+  });
+
   it("throws when completion remains empty after retries", async () => {
     vi.useFakeTimers();
     try {

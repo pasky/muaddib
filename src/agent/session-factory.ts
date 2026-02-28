@@ -244,7 +244,13 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
   const unsubscribe = session.subscribe((event) => {
     if (event.type === "turn_end") {
       turnCount += 1;
-      if (turnCount >= maxIterations) {
+      const stopReason = (event.message as { stopReason?: string }).stopReason;
+
+      // Inject iteration-limit steer when at or past maxIterations, but only
+      // if the agent is still calling tools.  When the agent already stopped
+      // (stopReason !== "toolUse"), re-injecting a steer would queue a user
+      // message that forces pi-agent-core to continue the loop despite "stop".
+      if (turnCount >= maxIterations && stopReason === "toolUse") {
         agent.steer({
           role: "user",
           content: [
@@ -261,8 +267,6 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
         logger.warn("Exceeding max iterations, aborting session prompt loop.");
         void session.abort();
       }
-
-      const stopReason = (event.message as { stopReason?: string }).stopReason;
 
       // Warn when assistant produces text alongside tool calls — may indicate confused output
       if (stopReason === "toolUse" && isAssistantMessage(event.message)) {

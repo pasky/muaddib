@@ -319,24 +319,27 @@ export class SessionRunner {
   }
 }
 
+/**
+ * Return the text of the last non-aborted assistant message.
+ * This is intentionally the *last* message — callers must see what the LLM
+ * actually produced last, not an earlier message with "better" content.
+ * Aborted turns (empty content from session.abort()) are the only exception.
+ */
 function extractLastAssistantText(messages: readonly AgentMessage[]): string {
   const assistant = findLastAssistantMessage(messages);
-  if (!assistant) {
-    return "";
-  }
-
-  return responseText(assistant);
+  return assistant ? responseText(assistant) : "";
 }
 
 function findLastAssistantMessage(messages: readonly AgentMessage[]): AssistantMessage | null {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const msg = messages[i];
-    if (isAssistantMessage(msg)) {
+    if (isAssistantMessage(msg) && msg.stopReason !== "aborted") {
       return msg;
     }
   }
   return null;
 }
+
 
 function sumAssistantUsage(messages: readonly AgentMessage[]): { usage: Usage; peakTurnInput: number } {
   const total = emptyUsage();

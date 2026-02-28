@@ -225,46 +225,69 @@ describe("createAgentSessionForInvocation", () => {
     expect(mockState.streamSimpleMock).toHaveBeenCalledTimes(1);
     expect(mockState.streamSimpleMock.mock.calls[0][0]).toBe(visionModel);
 
+    // Turn 1 (toolUse): turnCount=1, below maxIterations=2 → no steer
     session.emit({
       type: "turn_end",
       message: {
         role: "assistant",
-        content: [{ type: "text", text: "done" }],
-        stopReason: "stop",
+        content: [{ type: "toolCall", id: "t1", name: "web_search", arguments: {} }],
+        stopReason: "toolUse",
       },
       toolResults: [],
     });
-    session.emit({
-      type: "turn_end",
-      message: {
-        role: "assistant",
-        content: [{ type: "text", text: "done" }],
-        stopReason: "stop",
-      },
-      toolResults: [],
-    });
-    session.emit({
-      type: "turn_end",
-      message: {
-        role: "assistant",
-        content: [{ type: "text", text: "done" }],
-        stopReason: "stop",
-      },
-      toolResults: [],
-    });
-    session.emit({
-      type: "turn_end",
-      message: {
-        role: "assistant",
-        content: [{ type: "text", text: "done" }],
-        stopReason: "stop",
-      },
-      toolResults: [],
-    });
+    expect(agent.steer).not.toHaveBeenCalled();
 
-    expect(agent.steer).toHaveBeenCalled();
+    // Turn 2 (toolUse): turnCount=2 >= maxIterations=2 → steer injected
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "t2", name: "web_search", arguments: {} }],
+        stopReason: "toolUse",
+      },
+      toolResults: [],
+    });
+    expect(agent.steer).toHaveBeenCalledTimes(1);
+
+    // Turn 3 (toolUse): agent ignored the steer, still doing tool calls → steer re-injected
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "t3", name: "web_search", arguments: {} }],
+        stopReason: "toolUse",
+      },
+      toolResults: [],
+    });
+    expect(agent.steer).toHaveBeenCalledTimes(2);
+    expect(session.abort).not.toHaveBeenCalled();
+
+    // Turn 4 (toolUse): turnCount=4 >= maxIterations+2=4 → abort
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "t4", name: "web_search", arguments: {} }],
+        stopReason: "toolUse",
+      },
+      toolResults: [],
+    });
+    expect(agent.steer).toHaveBeenCalledTimes(3);
     expect(session.abort).toHaveBeenCalledTimes(1);
     expect(logger.warn).toHaveBeenCalledWith("Exceeding max iterations, aborting session prompt loop.");
+
+    // Turn 5 (stop): agent finally stops → no steer (stopReason is not toolUse)
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "done" }],
+        stopReason: "stop",
+      },
+      toolResults: [],
+    });
+    // Steer count unchanged — stop turns don't re-inject
+    expect(agent.steer).toHaveBeenCalledTimes(3);
   });
 
   it("streamFn uses original model when vision fallback is not activated", () => {
