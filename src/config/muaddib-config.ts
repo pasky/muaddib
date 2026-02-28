@@ -100,20 +100,20 @@ export interface ToolsConfig {
  * Lives under `agent` in config.json.
  */
 export interface SessionLimitsConfig {
-  /** Max cumulative input tokens (input + cacheRead + cacheWrite) across all turns. Default: 100000. */
-  maxTokens?: number;
+  /** Max context length in tokens (input + cacheRead + cacheWrite) for any single turn. Default: 100000. */
+  maxContextLength?: number;
   /** Max cumulative cost in USD across all turns. Default: 1.0. */
   maxCostUsd?: number;
 }
 
 /**
  * Convert a legacy maxIterations count to session limits.
- * Heuristic: ~10k input tokens and ~$0.04 per iteration.
+ * Heuristic: ~10k context length and ~$0.04 cost per iteration.
  */
 export function iterationsToSessionLimits(maxIterations?: number): SessionLimitsConfig | undefined {
   if (maxIterations == null) return undefined;
   return {
-    maxTokens: maxIterations * 10_000,
+    maxContextLength: maxIterations * 10_000,
     maxCostUsd: maxIterations * 0.04,
   };
 }

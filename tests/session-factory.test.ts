@@ -222,7 +222,7 @@ describe("createAgentSessionForInvocation", () => {
       authStorage: AuthStorage.inMemory(),
       modelAdapter: { resolve } as any,
       visionFallbackModel: "anthropic:claude-sonnet-4",
-      sessionLimits: { maxTokens: 5000, maxCostUsd: 10 },
+      sessionLimits: { maxContextLength: 5000, maxCostUsd: 10 },
       logger,
     });
 
@@ -241,7 +241,7 @@ describe("createAgentSessionForInvocation", () => {
     expect(mockState.streamSimpleMock).toHaveBeenCalledTimes(1);
     expect(mockState.streamSimpleMock.mock.calls[0][0]).toBe(visionModel);
 
-    // Turn 1 (toolUse, 3000 tokens): cumulative=3000 < maxTokens=5000 → no steer
+    // Turn 1 (toolUse, 3000 context tokens): peak=3000 < maxContextLength=5000 → no limit
     session.emit({
       type: "turn_end",
       message: {
@@ -254,21 +254,23 @@ describe("createAgentSessionForInvocation", () => {
     });
     expect(agent.steer).not.toHaveBeenCalled();
 
-    // Turn 2 (toolUse, 3000 tokens): cumulative=6000 >= maxTokens=5000 → steer injected
+    // Turn 2 (toolUse, 6000 context tokens): peak=6000 >= maxContextLength=5000 → limit reached
+    // Session-limit nudge is now injected via transformContext, not agent.steer()
     session.emit({
       type: "turn_end",
       message: {
         role: "assistant",
         content: [{ type: "toolCall", id: "t2", name: "web_search", arguments: {} }],
         stopReason: "toolUse",
-        usage: mockUsage(3000),
+        usage: mockUsage(6000),
       },
       toolResults: [],
     });
-    expect(agent.steer).toHaveBeenCalledTimes(1);
+    // No steer — limit nudge is ephemeral via transformContext
+    expect(agent.steer).not.toHaveBeenCalled();
     expect(session.abort).not.toHaveBeenCalled();
 
-    // Turns 3–10 (toolUse): all over limit → steer each time, no abort yet (turnsSinceSoftLimit < 10)
+    // Turns 3–10 (toolUse): all over limit → turnsSinceSoftLimit increments, no abort yet
     for (let turn = 3; turn <= 10; turn++) {
       session.emit({
         type: "turn_end",
@@ -276,11 +278,11 @@ describe("createAgentSessionForInvocation", () => {
           role: "assistant",
           content: [{ type: "toolCall", id: `t${turn}`, name: "web_search", arguments: {} }],
           stopReason: "toolUse",
-          usage: mockUsage(100),
+          usage: mockUsage(6000),
         },
         toolResults: [],
       });
-      expect(agent.steer).toHaveBeenCalledTimes(turn - 1);
+      expect(agent.steer).not.toHaveBeenCalled();
       expect(session.abort).not.toHaveBeenCalled();
     }
 
@@ -291,15 +293,15 @@ describe("createAgentSessionForInvocation", () => {
         role: "assistant",
         content: [{ type: "toolCall", id: "t11", name: "web_search", arguments: {} }],
         stopReason: "toolUse",
-        usage: mockUsage(100),
+        usage: mockUsage(6000),
       },
       toolResults: [],
     });
-    expect(agent.steer).toHaveBeenCalledTimes(10);
+    expect(agent.steer).not.toHaveBeenCalled();
     expect(session.abort).toHaveBeenCalledTimes(1);
     expect(logger.warn).toHaveBeenCalledWith("Exceeding session limits, aborting session prompt loop.");
 
-    // Turn 12 (stop): agent finally stops → no steer (stopReason is not toolUse)
+    // Turn 12 (stop): agent finally stops
     session.emit({
       type: "turn_end",
       message: {
@@ -310,11 +312,10 @@ describe("createAgentSessionForInvocation", () => {
       },
       toolResults: [],
     });
-    // Steer count unchanged — stop turns don't re-inject
-    expect(agent.steer).toHaveBeenCalledTimes(10);
+    expect(agent.steer).not.toHaveBeenCalled();
   });
 
-  it("triggers soft limit on cost threshold", () => {
+  it("triggers soft limit on cost threshold via transformContext", async () => {
     const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
@@ -322,12 +323,13 @@ describe("createAgentSessionForInvocation", () => {
       tools: [],
       authStorage: AuthStorage.inMemory(),
       modelAdapter: defaultModelAdapter,
-      sessionLimits: { maxTokens: 1_000_000, maxCostUsd: 0.05 },
+      sessionLimits: { maxContextLength: 1_000_000, maxCostUsd: 0.05 },
       logger,
     });
 
     const session = mockState.sessions[0];
     const agent = ctx.agent as any;
+    const transform = await getTransform(ctx);
 
     // Turn 1: $0.03 → no limit yet
     session.emit({
@@ -342,7 +344,11 @@ describe("createAgentSessionForInvocation", () => {
     });
     expect(agent.steer).not.toHaveBeenCalled();
 
-    // Turn 2: $0.03 more → cumulative $0.06 >= $0.05 → steer
+    // After turn 1: no limit nudge in transformContext (no metaReminder either)
+    const out1 = await transform(toolUseContext());
+    expect(hasMetaInLast(out1)).toBe(false);
+
+    // Turn 2: $0.03 more → cumulative $0.06 >= $0.05 → limit reached
     session.emit({
       type: "turn_end",
       message: {
@@ -353,7 +359,13 @@ describe("createAgentSessionForInvocation", () => {
       },
       toolResults: [],
     });
-    expect(agent.steer).toHaveBeenCalledTimes(1);
+    // No steer — limit nudge is ephemeral via transformContext
+    expect(agent.steer).not.toHaveBeenCalled();
+
+    // transformContext now injects session-limit message
+    const out2 = await transform(toolUseContext());
+    expect(hasMetaInLast(out2)).toBe(true);
+    expect((out2.at(-1) as any).content[0].text).toContain("session limit");
   });
 
   it("streamFn uses original model when vision fallback is not activated", () => {
@@ -388,7 +400,7 @@ describe("createAgentSessionForInvocation", () => {
       tools: [],
       authStorage: AuthStorage.inMemory(),
       modelAdapter: defaultModelAdapter,
-      sessionLimits: { maxTokens: 500_000, maxCostUsd: 10 },
+      sessionLimits: { maxContextLength: 500_000, maxCostUsd: 10 },
       metaReminder: REMINDER,
     });
 
@@ -426,7 +438,7 @@ describe("createAgentSessionForInvocation", () => {
     expect(hasMetaInLast(out2)).toBe(true);
   });
 
-  it("transformContext suppresses nudges when session limit is reached", async () => {
+  it("transformContext replaces regular nudges with session-limit message when limit is reached", async () => {
     const REMINDER = "Stay focused on the quest.";
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
@@ -434,14 +446,14 @@ describe("createAgentSessionForInvocation", () => {
       tools: [],
       authStorage: AuthStorage.inMemory(),
       modelAdapter: defaultModelAdapter,
-      sessionLimits: { maxTokens: 5000, maxCostUsd: 10 },
+      sessionLimits: { maxContextLength: 5000, maxCostUsd: 10 },
       metaReminder: REMINDER,
     });
 
     const session = mockState.sessions[0];
     const transform = await getTransform(ctx);
 
-    // Simulate usage accumulation via turn_end that exceeds the token limit
+    // Simulate peak context exceeding the limit
     session.emit({
       type: "turn_end",
       message: {
@@ -453,10 +465,13 @@ describe("createAgentSessionForInvocation", () => {
       toolResults: [],
     });
 
-    // Now transformContext should suppress nudges since limit is reached
+    // transformContext injects session-limit message instead of regular reminder
     const afterTurn = toolUseContext();
     const out = await transform(afterTurn);
-    expect(hasMetaInLast(out)).toBe(false);
+    expect(hasMetaInLast(out)).toBe(true);
+    const text = (out.at(-1) as any).content[0].text;
+    expect(text).toContain("session limit");
+    expect(text).not.toContain(REMINDER);
   });
 
   it("transformContext does NOT inject on first turn when no metaReminder is set", async () => {
@@ -466,7 +481,7 @@ describe("createAgentSessionForInvocation", () => {
       tools: [],
       authStorage: AuthStorage.inMemory(),
       modelAdapter: defaultModelAdapter,
-      sessionLimits: { maxTokens: 500_000, maxCostUsd: 10 },
+      sessionLimits: { maxContextLength: 500_000, maxCostUsd: 10 },
       // no metaReminder
     });
 
@@ -484,7 +499,7 @@ describe("createAgentSessionForInvocation", () => {
       tools: [],
       authStorage: AuthStorage.inMemory(),
       modelAdapter: defaultModelAdapter,
-      sessionLimits: { maxTokens: 500_000, maxCostUsd: 10 },
+      sessionLimits: { maxContextLength: 500_000, maxCostUsd: 10 },
       metaReminder: "Stay focused.",
       progressThresholdSeconds: 0, // always triggers
     });
@@ -504,7 +519,7 @@ describe("createAgentSessionForInvocation", () => {
       tools: [],
       authStorage: AuthStorage.inMemory(),
       modelAdapter: defaultModelAdapter,
-      sessionLimits: { maxTokens: 500_000, maxCostUsd: 10 },
+      sessionLimits: { maxContextLength: 500_000, maxCostUsd: 10 },
       metaReminder: "Stay focused.",
       progressThresholdSeconds: 0,
     });
@@ -537,7 +552,7 @@ describe("createAgentSessionForInvocation", () => {
       tools: [],
       authStorage: AuthStorage.inMemory(),
       modelAdapter: defaultModelAdapter,
-      sessionLimits: { maxTokens: 500_000, maxCostUsd: 10 },
+      sessionLimits: { maxContextLength: 500_000, maxCostUsd: 10 },
       progressThresholdSeconds: 0,
     });
 
@@ -565,7 +580,7 @@ describe("createAgentSessionForInvocation", () => {
       tools: [],
       authStorage: AuthStorage.inMemory(),
       modelAdapter: defaultModelAdapter,
-      sessionLimits: { maxTokens: 500_000, maxCostUsd: 10 },
+      sessionLimits: { maxContextLength: 500_000, maxCostUsd: 10 },
       progressThresholdSeconds: 9999, // won't trigger by elapsed time alone
       thinkingLevel: "high",
     });
@@ -592,14 +607,14 @@ describe("createAgentSessionForInvocation", () => {
       tools: [],
       authStorage: AuthStorage.inMemory(),
       modelAdapter: defaultModelAdapter,
-      sessionLimits: { maxTokens: 10_000, maxCostUsd: 10 },
+      sessionLimits: { maxContextLength: 10_000, maxCostUsd: 10 },
       progressThresholdSeconds: 0,
       thinkingLevel: "high",
     });
 
     const session = mockState.sessions[0];
 
-    // Emit a turn_end with 8500 tokens → 85% of 10k limit → near limit
+    // Emit a turn_end with 8500 context tokens → 85% of 10k limit → near limit
     session.emit({
       type: "turn_end",
       message: {
@@ -627,7 +642,7 @@ describe("createAgentSessionForInvocation", () => {
       tools: [],
       authStorage: AuthStorage.inMemory(),
       modelAdapter: defaultModelAdapter,
-      sessionLimits: { maxTokens: 500_000, maxCostUsd: 10 },
+      sessionLimits: { maxContextLength: 500_000, maxCostUsd: 10 },
       progressThresholdSeconds: 0,
     });
 
@@ -644,7 +659,7 @@ describe("createAgentSessionForInvocation", () => {
       tools: [],
       authStorage: AuthStorage.inMemory(),
       modelAdapter: defaultModelAdapter,
-      sessionLimits: { maxTokens: 500_000, maxCostUsd: 10 },
+      sessionLimits: { maxContextLength: 500_000, maxCostUsd: 10 },
       progressThresholdSeconds: 1, // 1 second threshold
     });
 
@@ -683,20 +698,21 @@ describe("createAgentSessionForInvocation", () => {
     expect(agent.steer).not.toHaveBeenCalled();
   });
 
-  it("bumpSessionLimits increases both token and cost limits", () => {
+  it("bumpSessionLimits increases both token and cost limits", async () => {
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
       authStorage: AuthStorage.inMemory(),
       modelAdapter: defaultModelAdapter,
-      sessionLimits: { maxTokens: 5000, maxCostUsd: 0.05 },
+      sessionLimits: { maxContextLength: 5000, maxCostUsd: 0.05 },
     });
 
     const session = mockState.sessions[0];
-    const agent = ctx.agent as any;
 
-    // Emit usage that exceeds initial limit
+    const transform = await getTransform(ctx);
+
+    // Emit usage that exceeds initial context limit (peak=6000 >= maxContextLength=5000)
     session.emit({
       type: "turn_end",
       message: {
@@ -707,41 +723,34 @@ describe("createAgentSessionForInvocation", () => {
       },
       toolResults: [],
     });
-    expect(agent.steer).toHaveBeenCalledTimes(1);
+    // Limit reached → transformContext injects session-limit nudge
+    const out1 = await transform(toolUseContext());
+    expect(hasMetaInLast(out1)).toBe(true);
+    expect((out1.at(-1) as any).content[0].text).toContain("session limit");
 
     // Bump limits
     ctx.bumpSessionLimits(10_000, 0.10);
 
-    // Next turn: even though cumulative is 12000, the bumped limit is 15000 → no new steer
-    agent.steer.mockClear();
-    session.emit({
-      type: "turn_end",
-      message: {
-        role: "assistant",
-        content: [{ type: "toolCall", id: "t2", name: "web_search", arguments: {} }],
-        stopReason: "toolUse",
-        usage: mockUsage(6000, 0, 0, 0.03),
-      },
-      toolResults: [],
-    });
-    expect(agent.steer).not.toHaveBeenCalled();
+    // After bump: maxContextLength=5000+10000=15000 > peak=6000 → no limit nudge
+    const out2 = await transform(toolUseContext());
+    expect(hasMetaInLast(out2)).toBe(false);
   });
 
-  it("bumpSessionLimits floors at 10% of initial configured limit", () => {
-    // maxTokens=100000, maxCostUsd=1.0 → floor is 10000 tokens, $0.10
+  it("bumpSessionLimits floors at 10% of initial configured limit", async () => {
+    // maxContextLength=100000, maxCostUsd=1.0 → floor is 10000 tokens, $0.10
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
       authStorage: AuthStorage.inMemory(),
       modelAdapter: defaultModelAdapter,
-      sessionLimits: { maxTokens: 100_000, maxCostUsd: 1.0 },
+      sessionLimits: { maxContextLength: 100_000, maxCostUsd: 1.0 },
     });
 
     const session = mockState.sessions[0];
-    const agent = ctx.agent as any;
+    const transform = await getTransform(ctx);
 
-    // Use up 95k tokens / $0.95 — just under the limit
+    // Peak context = 95k — just under the limit
     session.emit({
       type: "turn_end",
       message: {
@@ -753,36 +762,34 @@ describe("createAgentSessionForInvocation", () => {
       toolResults: [],
     });
 
-    // Bump with tiny values (e.g. 10% of small consumption) — should be floored to 10% of limit
-    ctx.bumpSessionLimits(100, 0.001);
-    // After bump: maxTokens should be 100000 + max(100, 10000) = 110000
-    // After bump: maxCostUsd should be 1.0 + max(0.001, 0.1) = 1.1
+    // Limit reached (95k >= 100k? No, 95k < 100k) — actually not reached yet
+    const outBefore = await transform(toolUseContext());
+    expect(hasMetaInLast(outBefore)).toBe(false);
 
-    // Next turn: cumulative = 95000 + 10000 = 105000, limit = 110000 → no steer
-    agent.steer.mockClear();
+    // Now push peak to 105k → exceeds 100k limit
     session.emit({
       type: "turn_end",
       message: {
         role: "assistant",
         content: [{ type: "toolCall", id: "t2", name: "web_search", arguments: {} }],
         stopReason: "toolUse",
-        usage: mockUsage(10_000, 0, 0, 0.10),
+        usage: mockUsage(105_000, 0, 0, 0.10),
       },
       toolResults: [],
     });
-    expect(agent.steer).not.toHaveBeenCalled();
 
-    // One more turn pushing past 110k → steer
-    session.emit({
-      type: "turn_end",
-      message: {
-        role: "assistant",
-        content: [{ type: "toolCall", id: "t3", name: "web_search", arguments: {} }],
-        stopReason: "toolUse",
-        usage: mockUsage(10_000, 0, 0, 0.10),
-      },
-      toolResults: [],
-    });
-    expect(agent.steer).toHaveBeenCalledTimes(1);
+    // Limit reached → transformContext injects session-limit nudge
+    const outAfter = await transform(toolUseContext());
+    expect(hasMetaInLast(outAfter)).toBe(true);
+    expect((outAfter.at(-1) as any).content[0].text).toContain("session limit");
+
+    // Bump with tiny values — should be floored to 10% of limit
+    ctx.bumpSessionLimits(100, 0.001);
+    // After bump: maxContextLength should be 100000 + max(100, 10000) = 110000
+    // After bump: maxCostUsd should be 1.0 + max(0.001, 0.1) = 1.1
+
+    // Peak is still 105k < 110k → no limit nudge
+    const outBumped = await transform(toolUseContext());
+    expect(hasMetaInLast(outBumped)).toBe(false);
   });
 });

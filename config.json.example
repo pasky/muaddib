@@ -4,7 +4,7 @@
   "agent": {
     "refusalFallbackModel": "deepseek:deepseek-reasoner",
     "sessionLimits": {
-      "maxTokens": 100000,
+      "maxContextLength": 100000,
       "maxCostUsd": 1.0
     },
     "progress": {
