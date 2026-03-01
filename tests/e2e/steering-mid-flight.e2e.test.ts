@@ -81,6 +81,7 @@ describe("E2E: Steering mid-flight", () => {
     // Script 3 sequential streamSimple calls:
     // 1. Agent → web_search tool call
     // 2. Agent → final text (after web_search result + steering message)
+    // 3. Agent → in-session tool summary follow-up
     //
     // During the fetch for web_search, we inject the second IRC message.
     // The steering provider drains it at the turn boundary (after tool completes).
@@ -97,6 +98,8 @@ describe("E2E: Steering mid-flight", () => {
       textStream(
         "The weather is sunny and 25°C. And yes, alice, I can also recommend sunscreen!",
       ),
+      // 3. Agent writes internal tool summary
+      textStream("Used web_search for weather data and incorporated the steered sunscreen follow-up."),
     ];
 
     // During the Jina fetch, inject a second IRC message from the same user.
@@ -154,8 +157,8 @@ describe("E2E: Steering mid-flight", () => {
       message: "muaddib: !s what's the weather today?",
     });
 
-    // ── Verify all 2 streamSimple calls happened ──
-    expect(mockState.calls).toHaveLength(2);
+    // ── Verify all 3 streamSimple calls happened ──
+    expect(mockState.calls).toHaveLength(3);
 
     // ── Verify the second streamSimple call received the steering message ──
     // The context for call #2 should contain the steered user message.

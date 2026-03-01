@@ -90,11 +90,12 @@ describe("E2E: Oracle with nested web_search", () => {
   });
 
   it("oracle consults nested agent which uses web_search, then returns result to outer agent", async () => {
-    // Script 4 sequential streamSimple calls:
+    // Script 5 sequential streamSimple calls:
     // 1. Outer agent → oracle tool call
     // 2. Inner oracle agent → web_search tool call
     // 3. Inner oracle agent → final text (after receiving search results)
     // 4. Outer agent → final IRC response (after receiving oracle result)
+    // 5. Outer agent → in-session tool summary follow-up
     mockState.responses = [
       // 1. Outer agent decides to consult the oracle
       toolCallStream({
@@ -114,6 +115,8 @@ describe("E2E: Oracle with nested web_search", () => {
       textStream("Dune is a 1965 epic science fiction novel by Frank Herbert, set on the desert planet Arrakis."),
       // 4. Outer agent produces final IRC response
       textStream("According to the oracle: Dune is a 1965 sci-fi novel by Frank Herbert about the desert planet Arrakis."),
+      // 5. Outer agent writes internal tool summary
+      textStream("Called oracle, which used web_search for Dune references and returned a concise answer."),
     ];
 
     const runtime = buildRuntime(ctx, e2eConfig());
@@ -139,8 +142,8 @@ describe("E2E: Oracle with nested web_search", () => {
       "X-Respond-With": "no-content",
     });
 
-    // ── Verify all 4 streamSimple calls happened ──
-    expect(mockState.calls).toHaveLength(4);
+    // ── Verify all 5 streamSimple calls happened ──
+    expect(mockState.calls).toHaveLength(5);
 
     const modelProvider = (i: number) => (mockState.calls[i].model as any).provider;
 
@@ -152,6 +155,8 @@ describe("E2E: Oracle with nested web_search", () => {
     expect(modelProvider(2)).toBe("anthropic");
     // Call 3: outer agent again (after oracle result)
     expect(modelProvider(3)).toBe("openai");
+    // Call 4: outer agent summary follow-up
+    expect(modelProvider(4)).toBe("openai");
 
     // ── Verify FakeSender got the final response ──
     expect(ctx.sender.sent.length).toBeGreaterThanOrEqual(1);
