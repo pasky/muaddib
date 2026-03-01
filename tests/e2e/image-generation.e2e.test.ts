@@ -115,6 +115,7 @@ describe("E2E: Image generation pipeline", () => {
     // Script LLM responses:
     // 1. Tool call: generate_image
     // 2. Final text response with artifact URL placeholder (agent sees actual URL from tool result)
+    // 3. In-session tool summary follow-up (internal monologue)
     mockState.responses = [
       toolCallStream({
         type: "toolCall",
@@ -123,6 +124,7 @@ describe("E2E: Image generation pipeline", () => {
         arguments: { prompt: "a red pixel" },
       }),
       textStream(`Here is your image: ${artifactsUrl}/?generated.png`),
+      textStream("Used generate_image to create a red pixel and stored the artifact URL."),
     ];
 
     const config = e2eConfig();
@@ -169,7 +171,7 @@ describe("E2E: Image generation pipeline", () => {
     expect(mainResponse.server).toBe("libera");
     expect(mainResponse.message).toContain(artifactsUrl);
 
-    // ── Verify streamSimple was called twice (tool call + final response) ──
-    expect(mockState.calls).toHaveLength(2);
+    // ── Verify streamSimple was called three times (tool call + final response + summary) ──
+    expect(mockState.calls).toHaveLength(3);
   }, 30_000);
 });

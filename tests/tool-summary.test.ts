@@ -2,25 +2,39 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   buildToolSummaryFollowUpPrompt,
-  collectPersistentToolCalls,
   extractAssistantText,
   generateToolSummaryFromSession,
 } from "../src/rooms/command/tool-summary.js";
 
-describe("generateToolSummaryFromSession", () => {
-  it("returns a summary for summary tools", async () => {
-    const modelAdapter = {
-      completeSimple: vi.fn(async () => ({
-        content: [{ type: "text", text: "ran tool and produced artifact" }],
-      })),
-    } as any;
+function makeLogger() {
+  return {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  };
+}
 
-    const logger = {
-      debug: vi.fn(),
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-    };
+describe("generateToolSummaryFromSession", () => {
+  it("returns null when session is missing", async () => {
+    const logger = makeLogger();
+
+    const summary = await generateToolSummaryFromSession({
+      result: {
+        text: "ok",
+        stopReason: "stop",
+        usage: {} as any,
+      } as any,
+      tools: [{ name: "web_search", persistType: "summary" }] as any,
+      logger,
+    });
+
+    expect(summary).toBeNull();
+  });
+
+  it("returns null when no summary tool results were produced", async () => {
+    const logger = makeLogger();
+    const promptSpy = vi.fn();
 
     const summary = await generateToolSummaryFromSession({
       result: {
@@ -28,163 +42,103 @@ describe("generateToolSummaryFromSession", () => {
         stopReason: "stop",
         usage: {} as any,
         session: {
+          prompt: promptSpy,
           messages: [
             {
               role: "assistant",
               content: [
-                { type: "toolCall", id: "call_1", name: "web_search", arguments: { query: "pi docs" } },
+                { type: "toolCall", id: "call_1", name: "read", arguments: { path: "/tmp/test" } },
               ],
             },
             {
               role: "toolResult",
               toolCallId: "call_1",
-              toolName: "web_search",
-              details: {
-                query: "pi docs",
-              },
+              toolName: "read",
+              details: {},
             },
           ],
         },
       } as any,
-      tools: [{ name: "web_search", persistType: "summary" }] as any,
-      persistenceSummaryModel: "openai:gpt-4o-mini",
-      modelAdapter,
+      tools: [{ name: "read", persistType: "none" }] as any,
+      logger,
+    });
+
+    expect(summary).toBeNull();
+    expect(promptSpy).not.toHaveBeenCalled();
+  });
+
+  it("generates an in-session follow-up summary", async () => {
+    const logger = makeLogger();
+    const sessionMessages: any[] = [
+      {
+        role: "assistant",
+        content: [
+          { type: "toolCall", id: "call_1", name: "web_search", arguments: { query: "pi docs" } },
+        ],
+      },
+      {
+        role: "toolResult",
+        toolCallId: "call_1",
+        toolName: "web_search",
+        details: { query: "pi docs" },
+      },
+    ];
+
+    const promptSpy = vi.fn(async () => {
+      sessionMessages.push({
+        role: "assistant",
+        content: [{ type: "text", text: "ran tool and produced artifact" }],
+      });
+    });
+
+    const bumpSessionLimits = vi.fn();
+
+    const summary = await generateToolSummaryFromSession({
+      result: {
+        text: "ok",
+        stopReason: "stop",
+        usage: {
+          input: 120,
+          output: 20,
+          cacheRead: 30,
+          cacheWrite: 10,
+          totalTokens: 180,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.5 },
+        },
+        bumpSessionLimits,
+        session: {
+          prompt: promptSpy,
+          messages: sessionMessages,
+        },
+      } as any,
+      tools: [
+        { name: "web_search", persistType: "summary" },
+        { name: "read", persistType: "none" },
+      ] as any,
       logger,
     });
 
     expect(summary).toBe("ran tool and produced artifact");
-    expect(modelAdapter.completeSimple).toHaveBeenCalledOnce();
+    expect(promptSpy).toHaveBeenCalledOnce();
+    expect(promptSpy).toHaveBeenCalledWith(
+      buildToolSummaryFollowUpPrompt(["web_search"]),
+    );
+    expect(bumpSessionLimits).toHaveBeenCalledWith(16, 0.05);
     expect(logger.error).not.toHaveBeenCalled();
-
-    // The prompt payload must include the real query arguments, not "undefined".
-    const payload = modelAdapter.completeSimple.mock.calls[0][1];
-    const userContent: string = payload.messages[0].content;
-    expect(userContent).toContain("pi docs");
-    expect(userContent).not.toContain('"input": undefined');
-    expect(userContent).not.toMatch(/\bInput:\s*\nundefined/);
   });
 
-  it("strips base64 image data from visit_webpage output before summarizing", async () => {
-    const modelAdapter = {
-      completeSimple: vi.fn(async () => ({
-        content: [{ type: "text", text: "visited an image page" }],
-      })),
-    } as any;
+  it("returns null when in-session follow-up prompt fails", async () => {
+    const logger = makeLogger();
 
-    const logger = {
-      debug: vi.fn(),
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-    };
-
-    const fakeBase64 = "iVBORw0KGgoAAAANSUh" + "A".repeat(500);
-
-    await generateToolSummaryFromSession({
+    const summary = await generateToolSummaryFromSession({
       result: {
         text: "ok",
         stopReason: "stop",
         usage: {} as any,
         session: {
-          messages: [
-            {
-              role: "assistant",
-              content: [
-                { type: "toolCall", id: "call_img", name: "visit_webpage", arguments: { url: "https://example.test/photo.jpg" } },
-              ],
-            },
-            {
-              role: "toolResult",
-              toolCallId: "call_img",
-              toolName: "visit_webpage",
-              content: [
-                { type: "image", data: fakeBase64, mimeType: "image/jpeg" },
-              ],
-              details: { url: "https://example.test/photo.jpg", kind: "image", mimeType: "image/jpeg" },
-            },
-          ],
-        },
-      } as any,
-      tools: [{ name: "visit_webpage", persistType: "summary" }] as any,
-      persistenceSummaryModel: "openai:gpt-4o-mini",
-      modelAdapter,
-      logger,
-    });
-
-    const payload = modelAdapter.completeSimple.mock.calls[0][1];
-    const userContent: string = payload.messages[0].content;
-    // The full base64 blob must NOT appear in the prompt
-    expect(userContent).not.toContain(fakeBase64);
-    // But we should still mention it was an image with a preview
-    expect(userContent).toContain("[binary image data, image/jpeg]");
-    // First 512 chars of the base64 should appear as preview
-    expect(userContent).toContain(fakeBase64.slice(0, 512));
-    expect(userContent).toContain("https://example.test/photo.jpg");
-  });
-
-  it("renders (unavailable) when toolCallId is absent from assistant messages", async () => {
-    const modelAdapter = {
-      completeSimple: vi.fn(async () => ({
-        content: [{ type: "text", text: "searched something" }],
-      })),
-    } as any;
-
-    const logger = {
-      debug: vi.fn(),
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-    };
-
-    await generateToolSummaryFromSession({
-      result: {
-        text: "ok",
-        stopReason: "stop",
-        usage: {} as any,
-        session: {
-          messages: [
-            // No assistant message with matching toolCallId
-            {
-              role: "toolResult",
-              toolCallId: "missing_call",
-              toolName: "web_search",
-              details: { query: "orphaned" },
-            },
-          ],
-        },
-      } as any,
-      tools: [{ name: "web_search", persistType: "summary" }] as any,
-      persistenceSummaryModel: "openai:gpt-4o-mini",
-      modelAdapter,
-      logger,
-    });
-
-    const payload = modelAdapter.completeSimple.mock.calls[0][1];
-    const userContent: string = payload.messages[0].content;
-    expect(userContent).toContain("(unavailable)");
-    expect(userContent).not.toMatch(/\bInput:\s*\nundefined/);
-  });
-
-  it("includes memoryUpdateText in the summary input when provided", async () => {
-    const modelAdapter = {
-      completeSimple: vi.fn(async () => ({
-        content: [{ type: "text", text: "summary with memory" }],
-      })),
-    } as any;
-
-    const logger = {
-      debug: vi.fn(),
-      info: vi.fn(),
-      warn: vi.fn(),
-      error: vi.fn(),
-    };
-
-    await generateToolSummaryFromSession({
-      result: {
-        text: "ok",
-        stopReason: "stop",
-        usage: {} as any,
-        session: {
+          prompt: vi.fn(async () => {
+            throw new Error("boom");
+          }),
           messages: [
             {
               role: "assistant",
@@ -202,73 +156,22 @@ describe("generateToolSummaryFromSession", () => {
         },
       } as any,
       tools: [{ name: "bash", persistType: "summary" }] as any,
-      persistenceSummaryModel: "openai:gpt-4o-mini",
-      modelAdapter,
       logger,
-      memoryUpdateText: "Updated MEMORY.md with new project preferences",
     });
 
-    const payload = modelAdapter.completeSimple.mock.calls[0][1];
-    const userContent: string = payload.messages[0].content;
-    expect(userContent).toContain("Post-session memory update reasoning");
-    expect(userContent).toContain("Updated MEMORY.md with new project preferences");
+    expect(summary).toBeNull();
+    expect(logger.error).toHaveBeenCalledWith("In-session tool summary failed", expect.any(Error));
   });
 });
 
 describe("buildToolSummaryFollowUpPrompt", () => {
-  it("lists only summary-type tool names in the prompt", () => {
-    const tools = [
-      { name: "web_search", persistType: "summary" },
-      { name: "bash", persistType: "summary" },
-      { name: "read", persistType: "none" },
-    ] as any[];
-
-    const prompt = buildToolSummaryFollowUpPrompt(tools);
+  it("includes provided summary tool names in the prompt", () => {
+    const prompt = buildToolSummaryFollowUpPrompt(["web_search", "bash"]);
 
     expect(prompt).toContain("<meta>Session complete. DO NOT RESPOND ANYMORE.");
     expect(prompt).toContain("web_search, bash");
-    expect(prompt).not.toContain("read");
     expect(prompt).toContain("Do NOT use any tools");
     expect(prompt).toContain("</meta>");
-  });
-});
-
-describe("collectPersistentToolCalls", () => {
-  it("collects only summary-type tool results", () => {
-    const messages = [
-      {
-        role: "assistant",
-        content: [
-          { type: "toolCall", id: "c1", name: "web_search", arguments: { query: "test" } },
-          { type: "toolCall", id: "c2", name: "read", arguments: { path: "/tmp" } },
-        ],
-      },
-      { role: "toolResult", toolCallId: "c1", toolName: "web_search", details: {} },
-      { role: "toolResult", toolCallId: "c2", toolName: "read", details: {} },
-    ] as any[];
-
-    const tools = [
-      { name: "web_search", persistType: "summary" },
-      { name: "read", persistType: "none" },
-    ] as any[];
-
-    const calls = collectPersistentToolCalls(messages, tools);
-    expect(calls).toHaveLength(1);
-    expect(calls[0].toolName).toBe("web_search");
-    expect(calls[0].input).toEqual({ query: "test" });
-  });
-
-  it("skips error tool results", () => {
-    const messages = [
-      {
-        role: "assistant",
-        content: [{ type: "toolCall", id: "c1", name: "bash", arguments: { cmd: "fail" } }],
-      },
-      { role: "toolResult", toolCallId: "c1", toolName: "bash", isError: true, details: {} },
-    ] as any[];
-
-    const tools = [{ name: "bash", persistType: "summary" }] as any[];
-    expect(collectPersistentToolCalls(messages, tools)).toHaveLength(0);
   });
 });
 
