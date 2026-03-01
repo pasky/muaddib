@@ -483,6 +483,7 @@ export class CommandExecutor {
 
     // Proactive delivery: prefix with model tag, send + persist.
     const deliver = async (text: string): Promise<void> => {
+      logger.info("Delivering response", `arc=${message.arc}`, `response=${text}`);
       const sr = await sendResponse(text);
       await this.persistBotResponse(message.arc, message, text, sr ?? undefined, {
         mode: classifiedTrigger,
