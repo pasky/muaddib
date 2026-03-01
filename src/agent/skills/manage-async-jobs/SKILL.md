@@ -30,6 +30,7 @@ Prefix with a trigger such as !s/!a/!u to force a particular command mode.
 
 ## Guidelines
 
+- Cron vs. heartbeat: Use cron for specific jobs with clear frequency. Use heartbeat for jobs to be done generally "frequently / continuously".
 - Consolidate related checks into a single periodic event rather than many separate ones.
 - Explicitly instruct cron jobs when & how should they say something - the job's agent will be advised to stay silent by default.
 - Keep number and frequency of events reasonable - each firing is a full agent invocation.

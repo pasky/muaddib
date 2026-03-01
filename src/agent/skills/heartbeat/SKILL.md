@@ -6,13 +6,17 @@ description: Using /workspace/HEARTBEAT.md for periodic self-directed background
 # Heartbeat
 
 Write a `/workspace/HEARTBEAT.md` file to schedule recurring background work.
-The system checks this file periodically (default: every 60 minutes).
-If it exists and has content, you'll be invoked with that content as a periodic event.
+This file is checked frequently (hourly or so; may vary) and you will get
+opportunity to get that work done every heartbeat.
 
 Keep the file small to limit token burn. Use it for:
-- Rotating checks (email, calendar, notifications)
+- Rotating checks (systems, sites, updates, events, notifications)
 - Proactive background work (memory maintenance, project status)
 - Short checklists of things to monitor
 
-If nothing needs attention, respond NULL (standard periodic event behavior).
+Explicitly instruct heartbeat jobs when & how should they say something - the
+job's agent will be advised to stay silent by default.
+
 Delete or empty the file to stop heartbeat invocations.
+
+Cron vs. heartbeat: Use cron for specific jobs with clear frequency. Use heartbeat for jobs to be done generally "frequently / continuously".
