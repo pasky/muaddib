@@ -806,6 +806,7 @@ describe("RoomMessageHandler", () => {
     expect(promptCallCount).toBe(1);
     expect(steerCalls).toHaveLength(1);
     expect(steerCalls[0].content[0].text).toContain("second line");
+    expect(steerCalls[0].content[0].text).toContain("<thinking>");
 
     await history.close();
   });
@@ -2016,6 +2017,7 @@ describe("RoomMessageHandler", () => {
 
     for (const msg of steeredMessages) {
       expect(msg).toContain("Background channel message");
+      expect(msg).toContain("<thinking>");
       // Steered messages must include a [HH:MM] UTC timestamp before the nick
       expect(msg).toMatch(/\[\d{2}:\d{2}\] </);
     }

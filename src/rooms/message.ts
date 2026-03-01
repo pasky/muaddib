@@ -23,7 +23,7 @@ export function buildArc(serverTag: string, channelName: string): string {
   return raw.replaceAll("%", "%25").replaceAll("/", "%2F");
 }
 
-/** Prefix for steered passive messages so the agent doesn't derail from its current task. */
-export const STEER_PREFIX =
-  "[Background channel message — DO NOT derail from your current task. " +
-  "Acknowledge only if directly relevant, otherwise ignore by continuing work or responding NULL.]\n";
+/** Wrap the steered message payload in steering instructions. */
+export function wrapSteeredMessage(message: string): string {
+  return `<meta>Background channel message — DO NOT derail from your current task. Acknowledge only if directly relevant, otherwise ignore by continuing work or responding NULL.</meta>\n\n${message}\n\n<meta>Before reacting in any way, consider in <thinking> whether to adjust course in any way or continue in your current trajectory.</meta>`;
+}

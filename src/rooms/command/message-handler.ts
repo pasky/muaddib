@@ -18,7 +18,7 @@ import {
   type SendResponse,
 } from "./command-executor.js";
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
-import { type RoomMessage, STEER_PREFIX } from "../message.js";
+import { type RoomMessage, wrapSteeredMessage } from "../message.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import { formatUtcTime } from "../../utils/index.js";
 
@@ -200,7 +200,7 @@ export class RoomMessageHandler {
 
   private steerAgent(agent: Agent, message: RoomMessage): void {
     const ts = formatUtcTime().slice(-5);
-    const content = `${STEER_PREFIX}[${ts}] <${message.nick}> ${message.content}`;
+    const content = wrapSteeredMessage(`[${ts}] <${message.nick}> ${message.content}`);
     agent.steer({
       role: "user",
       content: [{ type: "text", text: content }],

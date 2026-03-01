@@ -24,7 +24,7 @@ import type {
   SendResponse,
 } from "./command-executor.js";
 import { pickModeModel } from "./command-executor.js";
-import { type RoomMessage, STEER_PREFIX } from "../message.js";
+import { type RoomMessage, wrapSteeredMessage } from "../message.js";
 import { sleep } from "../../utils/index.js";
 
 // ── ProactiveConfig (resolved, all fields required) ──
@@ -168,7 +168,7 @@ export class ProactiveRunner {
     const existing = this.activeAgents.get(channelKey);
     if (existing) {
       const ts = formatUtcTime().slice(-5);
-      const content = `${STEER_PREFIX}[${ts}] <${message.nick}> ${message.content}`;
+      const content = wrapSteeredMessage(`[${ts}] <${message.nick}> ${message.content}`);
       existing.steer({
         role: "user",
         content: [{ type: "text", text: content }],
