@@ -116,7 +116,7 @@ function buildSystemPromptSuffix(
   channelName?: string,
 ): string {
   const chatHistorySuffix = existsSync(getArcChatHistoryDir(arc))
-    ? " Complete daily chat logs are in the /chat_history/ directory (read-only)."
+    ? " Need exact quotes or fine-grained chronology beyond the current context? Inspect daily JSONL logs in /chat_history/ (read-only), e.g. /chat_history/YYYY-MM-DD.jsonl."
     : "";
 
   const artifactsUrl = toolsConfig?.artifacts?.url;

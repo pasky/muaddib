@@ -1,6 +1,6 @@
 ---
 name: chronicle-read
-description: Reconstruct past conversations (decisions, promises, exact quotes, timelines) by reading /chronicle chapter summaries and drilling into /chat_history logs when continuity matters
+description: Reconstruct prior context (decisions, commitments, timelines) from /chronicle chapter summaries and timestamped paragraphs when long-term continuity matters
 ---
 
 Chronicle files in the `/chronicle/` directory (read-only, auto-maintained) are numbered chapter files (`000001.md`, `000002.md`, etc.) with YAML frontmatter and timestamped paragraphs:

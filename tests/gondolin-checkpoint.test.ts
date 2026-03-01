@@ -958,7 +958,7 @@ describe("gondolin — chronicle/chat_history ReadonlyProvider mounts", () => {
 });
 
 describe("gondolin — chat history in systemPromptSuffix", () => {
-  it("includes chat_history hint when chat_history dir exists on host", () => {
+  it("includes actionable chat_history hint when chat_history dir exists on host", () => {
     mkdirSync(getArcChatHistoryDir("history-arc"), { recursive: true });
 
     const { systemPromptSuffix } = createGondolinTools({
@@ -966,6 +966,8 @@ describe("gondolin — chat history in systemPromptSuffix", () => {
       config: gondolinConfig,
     });
     expect(systemPromptSuffix).toContain("/chat_history/");
+    expect(systemPromptSuffix).toContain("exact quotes");
+    expect(systemPromptSuffix).toContain("YYYY-MM-DD.jsonl");
   });
 
   it("omits chat_history hint when chat_history dir does not exist", () => {
@@ -1053,8 +1055,9 @@ describe("loadBundledSkills", () => {
 
     const chronicleRead = skills.find((s) => s.name === "chronicle-read");
     expect(chronicleRead).toBeDefined();
-    expect(chronicleRead!.description).toContain("/chat_history");
-    expect(chronicleRead!.description).toContain("exact quotes");
+    expect(chronicleRead!.description).toContain("/chronicle");
+    expect(chronicleRead!.description).toContain("decisions");
+    expect(chronicleRead!.description).not.toContain("/chat_history");
     expect(chronicleRead!.content).toContain("/chronicle/");
   });
 });
