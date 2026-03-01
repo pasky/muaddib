@@ -1077,6 +1077,71 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("keeps original newlines in artifact body when IRC transport flattens outbound text", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const incoming = makeMessage("!s make it multiline");
+    const multilineResponse = [
+      "Line 1: first paragraph.",
+      "Line 2: second paragraph.",
+      "Line 3: third paragraph.",
+      "Line 4: fourth paragraph.",
+      "Line 5: fifth paragraph.",
+      "Line 6: sixth paragraph.",
+      "Line 7: seventh paragraph.",
+      "Line 8: eighth paragraph.",
+      "Line 9: ninth paragraph.",
+      "Line 10: tenth paragraph.",
+    ].join("\n");
+    const artifactsPath = await mkdtemp(join(tmpdir(), "muaddib-artifacts-"));
+    const sent: string[] = [];
+
+    const handler = createHandler({
+      roomConfig: {
+        ...roomConfig,
+        command: {
+          ...roomConfig.command,
+          responseMaxBytes: 120,
+        },
+      } as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      configData: {
+        agent: {
+          tools: {
+            artifacts: {
+              path: artifactsPath,
+              url: "https://example.com/artifacts",
+            },
+          },
+        },
+      },
+      runnerFactory: makeRunner(multilineResponse),
+    });
+
+    await handler.handleIncomingMessage(incoming, {
+      isDirect: true,
+      // IRC transport behavior: flatten newlines right before sending.
+      sendResponse: async (text) => {
+        sent.push(text.replace(/\n+/g, "; ").trim());
+      },
+    });
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("full response: https://example.com/artifacts/?");
+    expect(sent[0]).not.toContain("\n");
+
+    const artifactUrl = sent[0].split("full response: ")[1]!.trim();
+    const artifactFilename = decodeURIComponent(new URL(artifactUrl).search.slice(1));
+    const artifactBody = await readFile(join(artifactsPath, artifactFilename), "utf-8");
+
+    expect(artifactBody).toBe(multilineResponse);
+    expect(artifactBody).toContain("\n");
+
+    await history.close();
+  });
+
   it("does not convert response into artifact when responseMaxBytes is not exceeded", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();

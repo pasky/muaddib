@@ -7,8 +7,11 @@ import { describe, expect, it, vi } from "vitest";
 import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { RuntimeLogWriter } from "../src/app/logging.js";
 import type { ChatHistoryStore } from "../src/history/chat-history-store.js";
+import { RoomMessageHandler } from "../src/rooms/command/message-handler.js";
 import { IrcRoomMonitor } from "../src/rooms/irc/monitor.js";
+import { VarlinkSender } from "../src/rooms/irc/varlink.js";
 import { buildArc } from "../src/rooms/message.js";
+import { RoomGateway } from "../src/rooms/room-gateway.js";
 import type { MuaddibRuntime } from "../src/runtime.js";
 import { FakeEventsClient, FakeSender, baseCommandConfig } from "./e2e/helpers.js";
 import { createTempHistoryStore } from "./test-helpers.js";
@@ -90,6 +93,55 @@ describe("IrcRoomMonitor", () => {
 
     expect(monitors).toHaveLength(1);
     await history.close();
+  });
+
+  it("uses the same IRC cleaner for gateway send and inject responses", async () => {
+    const history = createTempHistoryStore(20);
+    await history.initialize();
+
+    const sendSpy = vi.spyOn(VarlinkSender.prototype, "sendMessage").mockResolvedValue(true);
+    const nickSpy = vi.spyOn(VarlinkSender.prototype, "getServerNick").mockResolvedValue("muaddib");
+    const handleIncomingSpy = vi.spyOn(RoomMessageHandler.prototype, "handleIncomingMessage").mockImplementation(
+      async (_message, options) => {
+        await options.sendResponse?.("lineA\n\nlineB");
+      },
+    );
+
+    try {
+      const gateway = new RoomGateway();
+      const monitors = IrcRoomMonitor.fromRuntime(buildRuntime({
+        rooms: {
+          common: {
+            command: baseCommandConfig(),
+          },
+          irc: {
+            varlink: {
+              socketPath: "/tmp/muaddib-varlink.sock",
+            },
+          },
+        },
+      }, history), {
+        gateway,
+      });
+
+      expect(monitors).toHaveLength(1);
+
+      // Gateway send/inject await monitor.ready; simulate a successful ready state.
+      (monitors[0] as any).readyResolve?.();
+
+      await gateway.send("libera##test", "first\n\nsecond");
+      await gateway.inject("libera##test", "synthetic event");
+
+      expect(sendSpy).toHaveBeenNthCalledWith(1, "#test", "first; second", "libera");
+      expect(sendSpy).toHaveBeenNthCalledWith(2, "#test", "lineA; lineB", "libera");
+      expect(nickSpy).toHaveBeenCalledWith("libera");
+      expect(handleIncomingSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      handleIncomingSpy.mockRestore();
+      nickSpy.mockRestore();
+      sendSpy.mockRestore();
+      await history.close();
+    }
   });
 
   it("routes direct message events into command handler and sender", async () => {

@@ -82,7 +82,6 @@ export class IrcRoomMonitor {
     );
 
     const commandHandler = new RoomMessageHandler(runtime, "irc", {
-      responseCleaner: (text) => text.replace(/\n+/g, "; ").trim(),
       eventsWatcher: options?.eventsWatcher,
     });
 
@@ -125,7 +124,7 @@ export class IrcRoomMonitor {
             await commandHandler.handleIncomingMessage(message, {
               isDirect: true,
               sendResponse: async (text) => {
-                const responseText = text.replace(/\n+/g, "; ").trim();
+                const responseText = monitor.responseCleaner(text, message.nick);
                 await varlinkSender.sendMessage(channelName, responseText, serverTag);
               },
             });
@@ -134,7 +133,7 @@ export class IrcRoomMonitor {
         },
         send: async (serverTag, channelName, text) => {
           await monitor.ready;
-          const responseText = text.replace(/\n+/g, "; ").trim();
+          const responseText = monitor.responseCleaner(text, "event");
           await varlinkSender.sendMessage(channelName, responseText, serverTag);
         },
       });
