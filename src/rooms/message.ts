@@ -25,5 +25,5 @@ export function buildArc(serverTag: string, channelName: string): string {
 
 /** Wrap the steered message payload in steering instructions. */
 export function wrapSteeredMessage(message: string): string {
-  return `<meta>Background channel message — DO NOT derail from your current task. Acknowledge only if directly relevant, otherwise ignore by continuing work or responding NULL.</meta>\n\n${message}\n\n<meta>Before reacting in any way, consider in <thinking> whether to adjust course in any way or continue in your current trajectory.</meta>`;
+  return `<meta>Background channel message — DO NOT derail from your current task and continue work / responding. Acknowledge only if directly relevant. If you just sent a final response, respond NULL unless this message should provoke a direct followup.</meta>\n\n${message}\n\n<meta>Before reacting in any way, consider in <thinking> whether to adjust course in any way or continue in your current trajectory.</meta>`;
 }
