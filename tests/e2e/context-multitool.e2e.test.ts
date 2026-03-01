@@ -3,11 +3,11 @@
  *
  * Exercises: 10 seeded history messages → context reduction via completeSimple →
  * agent calls web_search (fetch mock) → final text response →
- * tool summary via completeSimple persisted as internal monologue.
+ * in-session tool summary persisted as internal monologue.
  *
  * Mock boundaries:
  *   - `streamSimple` from `@mariozechner/pi-ai` (scripted LLM responses)
- *   - `completeSimple` from `@mariozechner/pi-ai` (context reducer + tool summary)
+ *   - `completeSimple` from `@mariozechner/pi-ai` (context reducer)
  *   - global `fetch` (for Jina web search API)
  */
 
@@ -95,7 +95,6 @@ function scenario2Config(): Record<string, unknown> {
             model: "openai:gpt-4o-mini",
             prompt: "Condense the conversation history into a brief summary.",
           },
-          toolSummary: { model: "openai:gpt-4o-mini" },
         },
       },
       irc: {
@@ -164,10 +163,6 @@ describe("E2E: Context reduction + multi-tool + tool summary", () => {
         "[USER]: Alice asked several questions about various topics.\n[ASSISTANT]: Bot provided answers to each topic.",
       ),
     );
-    // Call 2: tool summary (persistence)
-    completeSimpleResponses.push(() =>
-      makeAssistantMessage(TOOL_SUMMARY_TEXT),
-    );
 
     // ── Script streamSimple responses ──
     // Call 1: agent decides to web_search
@@ -180,6 +175,8 @@ describe("E2E: Context reduction + multi-tool + tool summary", () => {
       }),
       // Call 2: final text response
       textStream("Here's what I found about TypeScript: it's a typed superset of JavaScript developed by Microsoft."),
+      // Call 3: in-session tool summary follow-up
+      textStream(TOOL_SUMMARY_TEXT),
     ];
 
     const runtime = buildRuntime(ctx, scenario2Config());
@@ -204,8 +201,8 @@ describe("E2E: Context reduction + multi-tool + tool summary", () => {
     expect(fetchCalls).toHaveLength(1);
     expect(fetchCalls[0].url).toContain("TypeScript");
 
-    // ── Verify all 2 streamSimple calls happened ──
-    expect(mockState.calls).toHaveLength(2);
+    // ── Verify all 3 streamSimple calls happened ──
+    expect(mockState.calls).toHaveLength(3);
 
     // ── Verify context was reduced (first streamSimple call should have reduced context) ──
     // The reduced context should contain the summary, not all 10 original messages
@@ -224,10 +221,8 @@ describe("E2E: Context reduction + multi-tool + tool summary", () => {
     expect(mainResponse!.message).toContain("TypeScript");
 
     // ── Verify tool summary was generated and persisted ──
-    expect(completeSimpleCalls.length).toBe(2);
-    // The tool summary completeSimple call
-    const summaryCall = completeSimpleCalls[1];
-    expect((summaryCall.model as any).provider).toBe("openai");
+    // completeSimple is only used by the context reducer now.
+    expect(completeSimpleCalls.length).toBe(1);
 
     // Verify internal monologue was stored in history
     const historyMessages = await ctx.history.getContextForMessage(

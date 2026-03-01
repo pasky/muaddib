@@ -188,11 +188,6 @@ export interface CommandConfig {
    * Both `model` and `prompt` must be set to enable reduction.
    */
   contextReducer?: { model?: string; prompt?: string };
-  /**
-   * Tool summary: model used to generate a persistent internal-monologue summary
-   * of tool calls for history recall.
-   */
-  toolSummary?: { model?: string };
 }
 
 // ── Room config ────────────────────────────────────────────────────────

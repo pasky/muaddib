@@ -50,8 +50,6 @@ export interface PromptOptions {
   thinkingLevel?: ThinkingLevel;
   visionFallbackModel?: string;
   refusalFallbackModel?: string;
-  persistenceSummaryModel?: string;
-  onPersistenceSummary?: (text: string) => void | Promise<void>;
 }
 
 export interface PromptResult {

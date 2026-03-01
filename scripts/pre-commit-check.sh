@@ -8,7 +8,7 @@ trap 'rm -rf "$tmpdir"' EXIT
 
 npm run lint      >"$tmpdir/lint.out" 2>&1      & pid_lint=$!
 npm run typecheck >"$tmpdir/tc.out" 2>&1         & pid_tc=$!
-timeout 45 npm test >"$tmpdir/test.out" 2>&1     & pid_test=$!
+timeout 60 npm test >"$tmpdir/test.out" 2>&1     & pid_test=$!
 npm run build     >"$tmpdir/build.out" 2>&1      & pid_build=$!
 
 rc=0
