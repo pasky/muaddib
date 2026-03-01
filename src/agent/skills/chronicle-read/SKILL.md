@@ -1,6 +1,6 @@
 ---
 name: chronicle-read
-description: Access chapters and paragraphs chronicling your complete episodic memory (experiences, plans, thoughts and observations, forming the backbone of your consciousness) in the /chronicle/ directory
+description: Reconstruct past conversations (decisions, promises, exact quotes, timelines) by reading /chronicle chapter summaries and drilling into /chat_history logs when continuity matters
 ---
 
 Chronicle files in the `/chronicle/` directory (read-only, auto-maintained) are numbered chapter files (`000001.md`, `000002.md`, etc.) with YAML frontmatter and timestamped paragraphs:

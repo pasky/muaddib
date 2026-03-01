@@ -1043,13 +1043,19 @@ describe("gondolin — arc info in systemPromptSuffix", () => {
 // ── Skill loader unit tests ────────────────────────────────────────────────
 
 describe("loadBundledSkills", () => {
-  it("loads the download-artifact skill with content", () => {
+  it("loads bundled skills with actionable descriptions and content", () => {
     const skills = loadBundledSkills();
+
     const downloadArtifact = skills.find((s) => s.name === "download-artifact");
     expect(downloadArtifact).toBeDefined();
     expect(downloadArtifact!.description).toContain("artifact");
     expect(downloadArtifact!.content).toContain("curl");
-    expect(downloadArtifact!.content).toContain("curl");
+
+    const chronicleRead = skills.find((s) => s.name === "chronicle-read");
+    expect(chronicleRead).toBeDefined();
+    expect(chronicleRead!.description).toContain("/chat_history");
+    expect(chronicleRead!.description).toContain("exact quotes");
+    expect(chronicleRead!.content).toContain("/chronicle/");
   });
 });
 
