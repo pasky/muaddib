@@ -185,10 +185,12 @@ export class ProactiveRunner {
 
     // No active agent — start debounce + eval if not already debouncing
     if (!this.activeDebounces.has(channelKey)) {
-      this.runSession(message, sendResponse, hasActiveCommandSession)
-        .catch((error) => {
-          this.logger.error("Proactive session failed", error);
-        });
+      this.runtime.logger.withMessageContext(
+        { arc: message.arc, nick: "proactive", message: message.content },
+        () => this.runSession(message, sendResponse, hasActiveCommandSession),
+      ).catch((error) => {
+        this.logger.error("Proactive session failed", error);
+      });
     }
 
     return false;
