@@ -36,7 +36,8 @@ export function createOracleTool(executors: { oracle: OracleExecutor }, modelId?
     label: "Oracle",
     description:
       `Consult the oracle${modelClause} - a more powerful reasoning model that may be consulted for complex analysis and creative work. ` +
-      "Invoke it whenever it would be helpful to get deep advice on complex problems or produce a high quality creative piece.",
+      "Invoke it whenever it would be helpful to get deep advice on complex problems or produce a high quality creative piece. " +
+      "If you are going to call this tool, also send the user a very short one-line note at the same moment.",
     parameters: Type.Object({
       query: Type.String({
         description:

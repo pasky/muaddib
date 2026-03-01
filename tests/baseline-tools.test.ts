@@ -180,6 +180,7 @@ describe("baseline agent tools", () => {
     const tool = createOracleTool({ oracle: async () => "" });
     expect(tool.description).toContain("complex analysis");
     expect(tool.description).toContain("creative work");
+    expect(tool.description).toContain("very short one-line note");
   });
 
   it("oracle tool description includes configured model ID", () => {
