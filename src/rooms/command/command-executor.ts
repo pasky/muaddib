@@ -848,6 +848,8 @@ export class CommandExecutor {
     const invocationToolOptions: BaselineToolOptions = {
       ...this.buildToolOptions(),
       arc: message.arc,
+      serverTag: message.serverTag,
+      channelName: message.channelName,
       secrets: message.secrets,
     };
 
