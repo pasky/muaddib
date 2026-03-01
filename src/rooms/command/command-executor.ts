@@ -375,9 +375,11 @@ export class CommandExecutor {
 
     // Agent response callback: cleans text + applies length policy, then delivers.
     // Used for all agent text (intermediate + final) and progress reports.
+    // NULL sentinels from steered background messages are suppressed.
     const onResponse = async (text: string): Promise<void> => {
       let cleaned = this.cleanResponseText(text, message.nick);
       cleaned = await this.applyResponseLengthPolicy(cleaned, message.arc);
+      if (!cleaned || isNullSentinel(cleaned)) return;
       await deliver(cleaned, { mode: resolved.selectedTrigger ?? undefined });
     };
 

@@ -1711,6 +1711,44 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("drops NULL sentinel responses in direct command sessions", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const sent: string[] = [];
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: (input) => ({
+        prompt: async () => {
+          await input.onResponse("NULL");
+          const result = makeRunnerResult("done");
+          await input.onResponse(result.text);
+          return result;
+        },
+      }),
+    });
+
+    await handler.handleIncomingMessage(makeMessage("!s should suppress null"), {
+      isDirect: true,
+      sendResponse: async (text) => { sent.push(text); },
+    });
+
+    expect(sent).toEqual(["done"]);
+
+    const rows = await history.getFullHistory("libera##test");
+    const assistantMessages = rows
+      .filter((row) => row.role === "assistant")
+      .map((row) => row.message);
+    expect(assistantMessages).toHaveLength(1);
+    expect(assistantMessages[0]).toContain("done");
+    expect(assistantMessages.some((msg) => msg.trim().toUpperCase() === "NULL")).toBe(false);
+
+    await history.close();
+  });
+
   it("drops proactive NULL sentinel responses instead of sending them", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();
