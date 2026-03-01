@@ -26,4 +26,4 @@ export function buildArc(serverTag: string, channelName: string): string {
 /** Prefix for steered passive messages so the agent doesn't derail from its current task. */
 export const STEER_PREFIX =
   "[Background channel message — DO NOT derail from your current task. " +
-  "Acknowledge only if directly relevant, otherwise ignore.]\n";
+  "Acknowledge only if directly relevant, otherwise ignore by continuing work or responding NULL.]\n";
