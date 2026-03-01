@@ -48,6 +48,8 @@ import {
 
 export interface GondolinToolsOptions {
   arc: string;
+  serverTag?: string;
+  channelName?: string;
   config: GondolinConfig;
   toolsConfig?: ToolsConfig;
   logger?: Logger;
@@ -65,7 +67,7 @@ export interface GondolinToolsOptions {
  * The last 8 session dirs are kept across checkpoints so the agent can revisit them.
  */
 export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
-  const { arc, config, toolsConfig, logger, eventsWatcher } = options;
+  const { arc, serverTag, channelName, config, toolsConfig, logger, eventsWatcher } = options;
 
   const bashTimeoutSeconds = config.bashTimeoutSeconds ?? 270;
   const vmOpTimeoutMs = bashTimeoutSeconds * 1000;
@@ -97,7 +99,7 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
     shareArtifactTool,
   ];
 
-  const systemPromptSuffix = buildSystemPromptSuffix(arc, sessionDir, toolsConfig);
+  const systemPromptSuffix = buildSystemPromptSuffix(arc, sessionDir, toolsConfig, serverTag, channelName);
 
   const dispose = () => checkpointGondolinArc(arc, logger);
 
@@ -110,6 +112,8 @@ function buildSystemPromptSuffix(
   arc: string,
   sessionDir: string,
   toolsConfig?: ToolsConfig,
+  serverTag?: string,
+  channelName?: string,
 ): string {
   const chatHistorySuffix = existsSync(getArcChatHistoryDir(arc))
     ? " Complete daily chat logs are in the /chat_history/ directory (read-only)."
@@ -130,9 +134,15 @@ function buildSystemPromptSuffix(
     ? `\n<memory file="/workspace/MEMORY.md">\n${memoryContent}\n</memory>`
     : "";
 
+  const arcSuffix =
+    serverTag && channelName
+      ? ` Arc: server="${serverTag}", channel="${channelName}".`
+      : "";
+
   return (
     `Filesystem: /workspace persists across sessions; ${sessionDir} is your ephemeral working directory (last 8 session dirs in /tmp/session-* are kept).` +
     " Environment: Alpine Linux, uv venv is active." +
+    arcSuffix +
     chatHistorySuffix +
     artifactsSuffix +
     skillsSection +
