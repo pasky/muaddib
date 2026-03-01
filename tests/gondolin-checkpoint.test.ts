@@ -1016,6 +1016,30 @@ describe("gondolin — MEMORY.md in systemPromptSuffix", () => {
   });
 });
 
+// ── Arc info in system prompt suffix ──────────────────────────────────────
+
+describe("gondolin — arc info in systemPromptSuffix", () => {
+  it("includes server and channel when both are provided", () => {
+    const { systemPromptSuffix } = createGondolinTools({
+      arc: "libera%23test",
+      serverTag: "libera",
+      channelName: "#test",
+      config: gondolinConfig,
+    });
+    expect(systemPromptSuffix).toContain('server="libera"');
+    expect(systemPromptSuffix).toContain('channel="#test"');
+  });
+
+  it("omits arc info when serverTag and channelName are not provided", () => {
+    const { systemPromptSuffix } = createGondolinTools({
+      arc: "libera%23test",
+      config: gondolinConfig,
+    });
+    expect(systemPromptSuffix).not.toContain("server=");
+    expect(systemPromptSuffix).not.toContain("channel=");
+  });
+});
+
 // ── Skill loader unit tests ────────────────────────────────────────────────
 
 describe("loadBundledSkills", () => {
