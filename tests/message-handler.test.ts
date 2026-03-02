@@ -1013,8 +1013,9 @@ describe("RoomMessageHandler", () => {
     expect(rows[2].message).toContain("this message used 2 tool calls");
     expect(rows[3].message).toContain("already cost $1.2500 today");
 
-    // Verify run field on all JSONL lines: trigger, response, and cost followups share the same run ID
-    // Line 0 is the logLlmCost entry (no nick/role), lines 1-4 are the actual message flow.
+    // Verify run linkage and structured cost persistence.
+    // Line 0 is the seed logLlmCost entry; this run adds trigger/response,
+    // one structured logLlmCost row, then cost followup + milestone messages.
     const arcsBase = (history as any).arcsBasePath;
     const today = new Date().toISOString().slice(0, 10);
     const jsonlRaw = await readFile(join(arcsBase, "libera##test", "chat_history", `${today}.jsonl`), "utf-8");
@@ -1022,8 +1023,64 @@ describe("RoomMessageHandler", () => {
     const triggerTs = jsonlLines[1].ts;
     expect(jsonlLines[1].run).toBe(triggerTs); // trigger: self-referencing run
     expect(jsonlLines[2].run).toBe(triggerTs); // primary response
-    expect(jsonlLines[3].run).toBe(triggerTs); // cost followup
-    expect(jsonlLines[4].run).toBe(triggerTs); // daily milestone
+
+    expect(jsonlLines[3].call).toBe("agent_run");
+    expect(jsonlLines[3].model).toBe("openai:gpt-4o-mini");
+    expect(jsonlLines[3].run).toBe(triggerTs);
+    expect(jsonlLines[3].inTok).toBe(123);
+    expect(jsonlLines[3].outTok).toBe(45);
+    expect(jsonlLines[3].cost).toBe(0.35);
+
+    expect(jsonlLines[4].run).toBe(triggerTs); // cost followup
+    expect(jsonlLines[5].run).toBe(triggerTs); // daily milestone
+
+    await history.close();
+  });
+
+  it("persists structured per-run cost even when followup threshold is not crossed", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const incoming = makeMessage("!s cheap response");
+    const sent: string[] = [];
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: makeRunner("primary response", {
+        inputTokens: 20,
+        outputTokens: 10,
+        totalCost: 0.05,
+        toolCallsCount: 1,
+      }),
+    });
+
+    await handler.handleIncomingMessage(incoming, {
+      isDirect: true,
+      sendResponse: async (text) => {
+        sent.push(text);
+      },
+    });
+
+    // No cost followup/milestone at this cost level.
+    expect(sent).toEqual(["primary response"]);
+
+    const rows = await history.getFullHistory("libera##test");
+    expect(rows).toHaveLength(2);
+
+    const arcsBase = (history as any).arcsBasePath;
+    const today = new Date().toISOString().slice(0, 10);
+    const jsonlRaw = await readFile(join(arcsBase, "libera##test", "chat_history", `${today}.jsonl`), "utf-8");
+    const jsonlLines = jsonlRaw.trim().split("\n").map((l: string) => JSON.parse(l));
+    const triggerTs = jsonlLines[0].ts;
+
+    expect(jsonlLines[2].call).toBe("agent_run");
+    expect(jsonlLines[2].model).toBe("openai:gpt-4o-mini");
+    expect(jsonlLines[2].run).toBe(triggerTs);
+    expect(jsonlLines[2].inTok).toBe(20);
+    expect(jsonlLines[2].outTok).toBe(10);
+    expect(jsonlLines[2].cost).toBe(0.05);
 
     await history.close();
   });

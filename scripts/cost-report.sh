@@ -28,7 +28,7 @@ echo "=== Cost Report: last $DAYS days ($FROM_DATE → $TODAY) ==="
 echo
 
 # Collect JSONL lines tagged with arc name.
-# Emits cost records (cost != null) and user trigger records (r == "u" with run set).
+# Emits cost records (cost != null) and user trigger records (r in ["u", "user"] with run set).
 collect_lines() {
   for arc_dir in "$ARCS_DIR"/*/chat_history; do
     [[ -d "$arc_dir" ]] || continue
@@ -39,7 +39,7 @@ collect_lines() {
       fname=$(basename "$f" .jsonl)
       [[ "$fname" > "$FROM_DATE" || "$fname" == "$FROM_DATE" ]] || continue
       jq -c --arg arc "$arc" \
-        'select((.cost != null and .ts != null) or (.r == "u" and .run != null)) | . + {arc: $arc}' \
+        'select((.cost != null and .ts != null) or (((.r == "u") or (.r == "user")) and .run != null)) | . + {arc: $arc}' \
         "$f" 2>/dev/null || true
     done
   done
@@ -53,7 +53,7 @@ trap 'rm -f "$ALLFILE" "$TMPFILE" "$TRIGFILE"' EXIT
 
 collect_lines | jq -c --arg cutoff "$CUTOFF" 'select(.ts >= $cutoff)' > "$ALLFILE"
 jq -c 'select(.cost != null)' "$ALLFILE" > "$TMPFILE"
-jq -c 'select(.r == "u" and .run != null)' "$ALLFILE" > "$TRIGFILE"
+jq -c 'select(((.r == "u") or (.r == "user")) and .run != null)' "$ALLFILE" > "$TRIGFILE"
 
 if [[ ! -s "$TMPFILE" ]]; then
   echo "(no cost data found for the last $DAYS days)"
@@ -166,16 +166,31 @@ jq -s --argjson threshold "$COST_THRESHOLD" --slurpfile triggers "$TRIGFILE" '
   arc_dir="$LOGS_DIR/$dt/$arc_safe"
   logfile="(no log found)"
   if [[ -d "$arc_dir" ]]; then
-    # Log filenames start with HH-MM-SS; try exact match first
-    match=$(find "$arc_dir" -maxdepth 1 -name "${tm}-${nick}-*.log" -printf '%f\n' 2>/dev/null | head -1)
+    # Log filenames start with HH-MM-SS; try exact match first.
+    # Use find -quit instead of piping to head to avoid SIGPIPE under set -o pipefail.
+    match=$(find "$arc_dir" -maxdepth 1 -name "${tm}-${nick}-*.log" -printf '%f\n' -quit 2>/dev/null || true)
+
+    # Collect all logs by this nick once, sorted by filename/time.
+    nick_matches=()
+    while IFS= read -r candidate; do
+      nick_matches+=("$candidate")
+    done < <(find "$arc_dir" -maxdepth 1 -name "*-${nick}-*.log" -printf '%f\n' 2>/dev/null | sort)
+
     if [[ -z "$match" ]]; then
-      # Find closest log by this nick at or after the trigger time
-      match=$(find "$arc_dir" -maxdepth 1 -name "*-${nick}-*.log" -printf '%f\n' 2>/dev/null | sort | awk -v t="$tm" '$0 >= t { print; exit }')
+      # Find closest log by this nick at or after the trigger time.
+      for candidate in "${nick_matches[@]}"; do
+        if [[ "$candidate" > "$tm" || "$candidate" == "$tm"* ]]; then
+          match="$candidate"
+          break
+        fi
+      done
     fi
-    if [[ -z "$match" ]]; then
-      # Last resort: closest log by this nick before the trigger time
-      match=$(find "$arc_dir" -maxdepth 1 -name "*-${nick}-*.log" -printf '%f\n' 2>/dev/null | sort -r | head -1)
+
+    if [[ -z "$match" && ${#nick_matches[@]} -gt 0 ]]; then
+      # Last resort: latest log by this nick before the trigger time.
+      match="${nick_matches[$((${#nick_matches[@]} - 1))]}"
     fi
+
     if [[ -n "$match" ]]; then
       logfile="logs/$dt/$arc_safe/$match"
     fi

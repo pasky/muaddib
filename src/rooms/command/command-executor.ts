@@ -223,7 +223,10 @@ export class CommandExecutor {
     );
 
     // ── Unified delivery: send + persist (used for all responses) ──
-    const deliver = async (text: string, persistOptions?: { cost?: number; mode?: string }): Promise<void> => {
+    const deliver = async (
+      text: string,
+      persistOptions?: { mode?: string },
+    ): Promise<void> => {
       logger.info("Delivering response", `arc=${message.arc}`, `response=${text}`);
       const sr = await sendResponse(text);
       await this.persistBotResponse(message.arc, message, text, sr ?? undefined, {
@@ -427,8 +430,17 @@ export class CommandExecutor {
     // steering before the potentially long background work begins.
     onResponseDelivered?.();
 
-    // Cost followups, background work, and chronicle run after the response is delivered.
-    if (usage) {
+    // Persist structured cost row for every run (including low-cost ones), then
+    // send optional human-readable followups for expensive runs/milestones.
+    if (usage && usage.cost.total > 0) {
+      await this.history.logLlmCost(message.arc, {
+        run: triggerTs,
+        call: "agent_run",
+        model: modelSpec,
+        inTok: usage.input + usage.cacheRead + usage.cacheWrite,
+        outTok: usage.output,
+        cost: usage.cost.total,
+      });
       await this.emitCostFollowups(message, usage, toolCallsCount, deliver);
     }
 
@@ -608,11 +620,10 @@ export class CommandExecutor {
   // ── Cost followups ──
 
   /**
-   * Emit cost followup and daily milestone messages after an agent run.
+   * Emit optional cost followup and daily milestone messages after an agent run.
    *
-   * The cost is recorded in the JSONL via the cost followup persist (cost > 0.2).
-   * Small costs (≤ 0.2) are not stored individually; they're too small to shift
-   * a whole-dollar milestone boundary on their own.
+   * Structured per-run cost rows are persisted separately via history.logLlmCost();
+   * this method is only for user-visible followup chatter.
    *
    * `deliver` is the same send+persist closure used for all other responses,
    * ensuring cost messages are logged and persisted consistently.
@@ -621,7 +632,7 @@ export class CommandExecutor {
     message: RoomMessage,
     usage: Usage,
     toolCallsCount: number,
-    deliver: (text: string, opts?: { cost?: number }) => Promise<void>,
+    deliver: (text: string) => Promise<void>,
   ): Promise<void> {
     const { history, logger } = this;
     const arcName = message.arc;
@@ -631,19 +642,17 @@ export class CommandExecutor {
     }
 
     if (totalCost > 0.2) {
+      const inTok = usage.input + usage.cacheRead + usage.cacheWrite;
+      const outTok = usage.output;
       const costMessage = `(${[
         `this message used ${toolCallsCount} tool calls`,
-        `${usage.input + usage.cacheRead + usage.cacheWrite} in / ${usage.output} out tokens`,
+        `${inTok} in / ${outTok} out tokens`,
         `and cost $${totalCost.toFixed(4)}`,
       ].join(", ")})`;
 
       logger.info("Sending cost followup", `arc=${arcName}`, `cost=${totalCost.toFixed(4)}`);
-      // Pass cost so getArcCostToday includes it for the milestone check below.
-      await deliver(costMessage, { cost: totalCost });
+      await deliver(costMessage);
     }
-    // Costs ≤ $0.20 are not stored (no followup message sent).
-    // They're too small to trigger a whole-dollar milestone on their own,
-    // so the milestone check below remains accurate in practice.
 
     const totalToday = await history.getArcCostToday(arcName);
     const costBefore = totalToday - totalCost;
