@@ -811,6 +811,78 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("steers highlighted follow-ups into an active session even if channel policy forces a non-steering mode", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const policyRoomConfig = {
+      ...roomConfig,
+      command: {
+        ...roomConfig.command,
+        channelModes: {
+          "libera##test": "!d",
+        },
+      },
+    };
+
+    const firstStarted = createDeferred<void>();
+    const releaseFirst = createDeferred<void>();
+
+    let promptCallCount = 0;
+    const steerCalls: any[] = [];
+    const mockAgent = {
+      steer: (msg: any) => { steerCalls.push(msg); },
+    };
+
+    const handler = createHandler({
+      roomConfig: policyRoomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: (input) => ({
+        prompt: async () => {
+          promptCallCount += 1;
+          if (promptCallCount > 1) {
+            throw new Error("follow-up should have been steered, not started a new session");
+          }
+
+          input.onAgentCreated?.(mockAgent as any);
+          firstStarted.resolve();
+          await releaseFirst.promise;
+          const result = makeRunnerResult("done");
+          await input.onResponse(result.text);
+          return result;
+        },
+      }),
+    });
+
+    const t1 = handler.handleIncomingMessage(makeMessage("!s first"), {
+      isDirect: true,
+      sendResponse: async () => {},
+    });
+
+    await firstStarted.promise;
+
+    await handler.handleIncomingMessage(
+      {
+        ...makeMessage("follow up"),
+        // In real rooms this is set when the bot is explicitly mentioned in-channel.
+        originalContent: "muaddib: follow up",
+      },
+      { isDirect: true, sendResponse: async () => {} },
+    );
+
+    releaseFirst.resolve();
+    await t1;
+
+    expect(promptCallCount).toBe(1);
+    expect(steerCalls).toHaveLength(1);
+    expect(steerCalls[0].content[0].text).toContain("follow up");
+    expect(steerCalls[0].content[0].text).toContain("<alice>");
+    expect(steerCalls[0].content[0].text).not.toContain("<meta>");
+
+    await history.close();
+  });
+
   it("returns help text for !h", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();

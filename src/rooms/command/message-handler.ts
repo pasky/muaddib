@@ -103,11 +103,34 @@ export class RoomMessageHandler {
     // this, the addMessage await creates a gap during which the session can
     // complete and remove itself from activeSteers, causing the later check
     // in handleCommandMessage / handlePassiveMessage to miss it.
-    const canSteer = !options.isDirect || !this.resolver.shouldBypassSteering(message);
-    if (canSteer) {
-      const key = sessionKey(message);
-      const existing = this.activeSteers.get(key);
-      if (existing) {
+    const key = sessionKey(message);
+    const existing = this.activeSteers.get(key);
+
+    if (existing) {
+      // If the bot is explicitly highlighted/mentioned in-channel and there's an
+      // active session already running, treat *plain* highlights as follow-ups
+      // to be steered into the existing session.
+      //
+      // This avoids running channel policy mode selection for follow-ups.
+      // Example: a channel forced to "!d" (non-steering) should not prevent a
+      // plain highlight from being steered into an in-flight "!s" session.
+      const parsed = options.isDirect ? this.resolver.parsePrefix(message.content) : null;
+      const isPlainHighlightFollowup = Boolean(
+        options.isDirect &&
+        message.originalContent &&
+        parsed &&
+        !parsed.error &&
+        !parsed.noContext &&
+        parsed.modeToken === null &&
+        parsed.modelOverride === null,
+      );
+
+      const shouldSteerIntoExisting =
+        !options.isDirect || // passive
+        isPlainHighlightFollowup ||
+        !this.resolver.shouldBypassSteering(message);
+
+      if (shouldSteerIntoExisting) {
         existing(message);
         // Persist to history without blocking the steer path.
         this.history.addMessage(message).catch((err) => {
@@ -200,7 +223,12 @@ export class RoomMessageHandler {
 
   private steerAgent(agent: Agent, message: RoomMessage): void {
     const ts = formatUtcTime().slice(-5);
-    const content = wrapSteeredMessage(`[${ts}] <${message.nick}> ${message.content}`);
+    const baseText = `[${ts}] <${message.nick}> ${message.content}`;
+
+    // Highlighted / mentioned messages are direct user follow-ups, not background
+    // channel noise — steer them in verbatim without the "do not derail" wrapper.
+    const content = message.originalContent ? baseText : wrapSteeredMessage(baseText);
+
     agent.steer({
       role: "user",
       content: [{ type: "text", text: content }],
