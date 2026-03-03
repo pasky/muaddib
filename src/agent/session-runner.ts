@@ -131,6 +131,25 @@ export class SessionRunner {
     // callers can silence delivery before background work (memory update).
     let responseMuted = false;
 
+    // Queue async onResponse deliveries and flush them before prompt() returns.
+    // This guarantees callers don't observe "prompt completed" before room sends
+    // and history persistence have finished.
+    let pendingResponseDelivery: Promise<void> = Promise.resolve();
+    let pendingResponseError: unknown = null;
+    const deliveredAssistantMessages = new WeakSet<object>();
+    const queueResponseDelivery = (text: string): void => {
+      pendingResponseDelivery = pendingResponseDelivery
+        .then(async () => {
+          sessionCtx.responseTimestamp.lastResponseAt = Date.now();
+          await this.onResponse?.(text);
+        })
+        .catch((error) => {
+          if (pendingResponseError === null) {
+            pendingResponseError = error;
+          }
+        });
+    };
+
     const unsubscribe = session.subscribe((event) => {
       if (event.type === "turn_end") {
         iterations += 1;
@@ -147,9 +166,16 @@ export class SessionRunner {
         const message = event.message as { role?: string };
         if (message.role === "assistant") {
           const text = extractAssistantTextFromEvent(event.message).trim();
+          const assistantMessageObj = event.message && typeof event.message === "object"
+            ? event.message as object
+            : null;
           if (text && this.onResponse && !responseMuted) {
-            sessionCtx.responseTimestamp.lastResponseAt = Date.now();
-            this.onResponse(responseSuffix ? `${text} ${responseSuffix}` : text);
+            if (!assistantMessageObj || !deliveredAssistantMessages.has(assistantMessageObj)) {
+              if (assistantMessageObj) {
+                deliveredAssistantMessages.add(assistantMessageObj);
+              }
+              queueResponseDelivery(responseSuffix ? `${text} ${responseSuffix}` : text);
+            }
           } else if (text && responseMuted) {
             this.logger.info("Suppressing post-response text", truncateForDebug(text, 200));
           }
@@ -239,6 +265,22 @@ export class SessionRunner {
       }
 
       const lastAssistant = findLastAssistantMessage(session.messages);
+      const finalResponseText = responseSuffix ? `${text} ${responseSuffix}` : text;
+      const finalAlreadyDelivered =
+        lastAssistant !== null && deliveredAssistantMessages.has(lastAssistant);
+
+      if (this.onResponse && !responseMuted && !finalAlreadyDelivered) {
+        if (lastAssistant) {
+          deliveredAssistantMessages.add(lastAssistant);
+        }
+        queueResponseDelivery(finalResponseText);
+      }
+
+      await pendingResponseDelivery;
+      if (pendingResponseError !== null) {
+        throw pendingResponseError;
+      }
+
       sessionReturned = true;
       return {
         text,

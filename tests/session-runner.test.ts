@@ -501,6 +501,110 @@ describe("SessionRunner", () => {
     expect(result.text).toBe("Here is the final answer.");
   });
 
+  it("delivers final assistant text even if message_end is missing", async () => {
+    const callbacks: Array<(event: any) => void> = [];
+    const deliveredTexts: string[] = [];
+
+    const session = {
+      messages: [] as any[],
+      subscribe: vi.fn((cb: (event: any) => void) => { callbacks.push(cb); return vi.fn(); }),
+      prompt: vi.fn(async () => {
+        session.messages.push({
+          role: "assistant",
+          content: [{ type: "text", text: "Final without message_end." }],
+          usage: makeUsage(),
+          stopReason: "stop",
+        });
+        callbacks.forEach((cb) => cb({ type: "turn_end" }));
+      }),
+    };
+
+    mockCreateAgentSessionForInvocation.mockReturnValue({
+      session,
+      agent: { setModel: vi.fn() },
+      ensureProviderKey: vi.fn(async () => {}),
+      responseTimestamp: { lastResponseAt: 0 },
+      getVisionFallbackActivated: () => false,
+    });
+
+    const runner = new SessionRunner({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "sys",
+      authStorage: AuthStorage.inMemory(),
+      logger: minimalLogger,
+      modelAdapter: minimalModelAdapter,
+      onResponse: (text: string) => { deliveredTexts.push(text); },
+    });
+
+    const result = await runner.prompt("hello");
+
+    expect(result.text).toBe("Final without message_end.");
+    expect(deliveredTexts).toEqual(["Final without message_end."]);
+  });
+
+  it("awaits async onResponse delivery before prompt resolves", async () => {
+    vi.useFakeTimers();
+    try {
+      const callbacks: Array<(event: any) => void> = [];
+      const deliveredTexts: string[] = [];
+
+      const session = {
+        messages: [] as any[],
+        subscribe: vi.fn((cb: (event: any) => void) => { callbacks.push(cb); return vi.fn(); }),
+        prompt: vi.fn(async () => {
+          session.messages.push({
+            role: "assistant",
+            content: [{ type: "text", text: "Delayed response." }],
+            usage: makeUsage(),
+            stopReason: "stop",
+          });
+          callbacks.forEach((cb) => cb({ type: "message_end", message: session.messages.at(-1) }));
+          callbacks.forEach((cb) => cb({ type: "turn_end" }));
+        }),
+      };
+
+      mockCreateAgentSessionForInvocation.mockReturnValue({
+        session,
+        agent: { setModel: vi.fn() },
+        ensureProviderKey: vi.fn(async () => {}),
+        responseTimestamp: { lastResponseAt: 0 },
+        getVisionFallbackActivated: () => false,
+      });
+
+      const runner = new SessionRunner({
+        model: "openai:gpt-4o-mini",
+        systemPrompt: "sys",
+        authStorage: AuthStorage.inMemory(),
+        logger: minimalLogger,
+        modelAdapter: minimalModelAdapter,
+        onResponse: async (text: string) => {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+          deliveredTexts.push(text);
+        },
+      });
+
+      const promptPromise = runner.prompt("hello");
+      await vi.runAllTicks();
+
+      let settled = false;
+      void promptPromise.then(() => {
+        settled = true;
+      });
+
+      await vi.runAllTicks();
+      expect(settled).toBe(false);
+      expect(deliveredTexts).toEqual([]);
+
+      await vi.advanceTimersByTimeAsync(25);
+      const result = await promptPromise;
+
+      expect(result.text).toBe("Delayed response.");
+      expect(deliveredTexts).toEqual(["Delayed response."]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does not fire onResponse for whitespace-only assistant texts", async () => {
     const callbacks: Array<(event: any) => void> = [];
     const deliveredTexts: string[] = [];
