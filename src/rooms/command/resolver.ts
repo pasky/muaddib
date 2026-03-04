@@ -214,6 +214,22 @@ export class CommandResolver {
     return channelModes[key] ?? this.commandConfig.defaultMode ?? "classifier";
   }
 
+  /**
+   * Whether a direct message should break out of an already-active session
+   * rather than being steered into it.  Only explicit session-breaking
+   * signals qualify: !c (no-context), @model override, help, or parse errors.
+   * Regular mode tokens (!s, !d, !a, …) do NOT break — they steer as follow-ups.
+   */
+  shouldBreakActiveSession(message: RoomMessage): boolean {
+    const parsed = this.parsePrefix(message.content);
+    return Boolean(
+      parsed.error ||
+      parsed.noContext ||
+      parsed.modelOverride !== null ||
+      parsed.modeToken === this.helpToken,
+    );
+  }
+
   shouldBypassSteering(message: RoomMessage): boolean {
     const parsed = this.parsePrefix(message.content);
 

@@ -813,7 +813,7 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
-  it("steers highlighted follow-ups into an active session even if channel policy forces a non-steering mode", async () => {
+  it("steers follow-ups into active session regardless of mode token or channel policy", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();
 
@@ -864,12 +864,18 @@ describe("RoomMessageHandler", () => {
 
     await firstStarted.promise;
 
+    // Plain in-channel highlight steers despite channel being forced to !d.
     await handler.handleIncomingMessage(
       {
         ...makeMessage("follow up"),
-        // In real rooms this is set when the bot is explicitly mentioned in-channel.
         originalContent: "muaddib: follow up",
       },
+      { isDirect: true, sendResponse: async () => {} },
+    );
+
+    // Explicit !d follow-up also steers — mode tokens don't break active sessions.
+    await handler.handleIncomingMessage(
+      makeMessage("!d another thought"),
       { isDirect: true, sendResponse: async () => {} },
     );
 
@@ -877,10 +883,13 @@ describe("RoomMessageHandler", () => {
     await t1;
 
     expect(promptCallCount).toBe(1);
-    expect(steerCalls).toHaveLength(1);
+    expect(steerCalls).toHaveLength(2);
+    // First steer: plain highlight, no <meta> wrapper.
     expect(steerCalls[0].content[0].text).toContain("follow up");
-    expect(steerCalls[0].content[0].text).toContain("<alice>");
     expect(steerCalls[0].content[0].text).not.toContain("<meta>");
+    // Second steer: explicit !d follow-up, also direct → no <meta> wrapper.
+    expect(steerCalls[1].content[0].text).toContain("!d another thought");
+    expect(steerCalls[1].content[0].text).not.toContain("<meta>");
 
     await history.close();
   });
