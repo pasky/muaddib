@@ -120,7 +120,7 @@
             "reasoningEffort": "medium",
             "steering": true,
             "autoReduceContext": true,
-            "toolSummary": false,
+            "memoryUpdate": false,
             "triggers": {
               "!u": {}
             }
