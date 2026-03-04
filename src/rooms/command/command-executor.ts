@@ -405,6 +405,7 @@ export class CommandExecutor {
         reasoningEffort: resolved.runtime.reasoningEffort,
         visionModel: resolved.runtime.visionModel ?? undefined,
         memoryUpdate: resolved.runtime.memoryUpdate,
+        toolSummary: resolved.runtime.toolSummary,
       }, triggerTs,
     );
 
@@ -556,7 +557,7 @@ export class CommandExecutor {
     queryText: string,
     contextMessages: Message[],
     tools: MuaddibTool[],
-    opts: { reasoningEffort: string; visionModel?: string; memoryUpdate?: boolean },
+    opts: { reasoningEffort: string; visionModel?: string; memoryUpdate?: boolean; toolSummary?: boolean },
     triggerTs?: string,
   ): Promise<PromptRunResult> {
     const agentResult = await runner.prompt(queryText, {
@@ -589,7 +590,9 @@ export class CommandExecutor {
         }
       }
 
-      await this.persistGeneratedToolSummary(message, agentResult, tools, triggerTs);
+      if (opts.toolSummary !== false) {
+        await this.persistGeneratedToolSummary(message, agentResult, tools, triggerTs);
+      }
 
       agentResult.session?.dispose();
     })();

@@ -162,6 +162,7 @@ export interface ModeConfig {
   prompt?: string;
   promptReminder?: string;
   memoryUpdate?: boolean;
+  toolSummary?: boolean;
   triggers: Record<string, Record<string, unknown>>;
 }
 

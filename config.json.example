@@ -87,6 +87,7 @@
             "reasoningEffort": "minimal",
             "steering": false,
             "memoryUpdate": false,
+            "toolSummary": false,
             "allowedTools": [],
             "triggers": {
               "!d": {},
@@ -119,6 +120,7 @@
             "reasoningEffort": "medium",
             "steering": true,
             "autoReduceContext": true,
+            "toolSummary": false,
             "triggers": {
               "!u": {}
             }

@@ -233,6 +233,43 @@ describe("CommandResolver", () => {
     expect(sarcastic.runtime?.memoryUpdate).toBe(false);
   });
 
+  it("resolves toolSummary from mode config (defaults true, respects false)", async () => {
+    const configWithToolSummary = {
+      ...commandConfig,
+      modes: {
+        ...commandConfig.modes,
+        sarcastic: {
+          ...commandConfig.modes.sarcastic,
+          toolSummary: false,
+        },
+      },
+    };
+
+    const resolver = new CommandResolver(
+      configWithToolSummary as any,
+      async () => "EASY_SERIOUS",
+      "!h",
+      new Set(["!c"]),
+      (model) => String(model),
+    );
+
+    // Serious mode defaults to true
+    const serious = await resolver.resolve({
+      message: { serverTag: "s", channelName: "#c", arc: "s##c", nick: "u", mynick: "b", content: "!s test" },
+      context: [],
+      defaultSize: 40,
+    });
+    expect(serious.runtime?.toolSummary).toBe(true);
+
+    // Sarcastic mode explicitly set to false
+    const sarcastic = await resolver.resolve({
+      message: { serverTag: "s", channelName: "#c", arc: "s##c", nick: "u", mynick: "b", content: "!d test" },
+      context: [],
+      defaultSize: 40,
+    });
+    expect(sarcastic.runtime?.toolSummary).toBe(false);
+  });
+
   it("buildHelpMessage strips provider slug from model names via modelStrCore", () => {
     const configWithSlug = {
       ...commandConfig,

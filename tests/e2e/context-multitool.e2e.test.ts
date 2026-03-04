@@ -235,4 +235,63 @@ describe("E2E: Context reduction + multi-tool + tool summary", () => {
     });
     expect(monologueMessages).toHaveLength(1);
   }, 30_000);
+
+  it("skips tool summary when toolSummary is false", async () => {
+    // ── Seed history ──
+    const arc = { serverTag: "libera", channelName: "#test", arc: "libera##test", mynick: "muaddib" };
+    for (let i = 0; i < 4; i++) {
+      await ctx.history.addMessage({
+        ...arc,
+        nick: i % 2 === 0 ? "alice" : "muaddib",
+        content: `Message ${i}`,
+      });
+    }
+
+    // ── Config with toolSummary: false, no context reduction ──
+    const cfg = scenario2Config();
+    const modes = (cfg.rooms as any).common.command.modes;
+    modes.serious.autoReduceContext = false;
+    modes.serious.toolSummary = false;
+
+    // ── Script streamSimple responses (no tool summary call expected) ──
+    mockState.responses = [
+      toolCallStream({
+        type: "toolCall",
+        id: "tc_ws_1",
+        name: "web_search",
+        arguments: { query: "Rust language" },
+      }),
+      // Call 2: final text response (no call 3 — tool summary skipped)
+      textStream("Rust is a systems programming language focused on safety and performance."),
+    ];
+
+    // ── Script fetch for Jina ──
+    fetchCalls = [];
+
+    const runtime = buildRuntime(ctx, cfg);
+    const monitor = buildIrcMonitor(runtime, ctx.sender);
+
+    await monitor.processMessageEvent({
+      type: "message",
+      subtype: "public",
+      server: "libera",
+      target: "#test",
+      nick: "alice",
+      message: "muaddib: !s tell me about Rust",
+    });
+
+    // ── Only 2 streamSimple calls: tool call + final response, no tool summary ──
+    expect(mockState.calls).toHaveLength(2);
+
+    // ── No internal monologue persisted ──
+    const historyMessages = await ctx.history.getContextForMessage(
+      { ...arc, nick: "alice", content: "check" },
+      50,
+    );
+    const monologueMessages = historyMessages.filter((m) => {
+      const text = messageText(m);
+      return text.includes("[internal monologue]");
+    });
+    expect(monologueMessages).toHaveLength(0);
+  }, 30_000);
 });
