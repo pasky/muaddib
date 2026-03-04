@@ -56,7 +56,7 @@ export class RoomMessageHandler {
   private readonly logger: CommandExecutorLogger;
 
   /** Active steering functions keyed by session key. */
-  private readonly activeSteers = new Map<string, (message: RoomMessage) => void>();
+  private readonly activeSteers = new Map<string, (message: RoomMessage, isDirect: boolean) => void>();
 
   constructor(
     runtime: MuaddibRuntime,
@@ -107,31 +107,27 @@ export class RoomMessageHandler {
     const existing = this.activeSteers.get(key);
 
     if (existing) {
-      // If the bot is explicitly highlighted/mentioned in-channel and there's an
-      // active session already running, treat *plain* highlights as follow-ups
-      // to be steered into the existing session.
+      // When a session is already active, steer follow-up messages into it
+      // unless the message carries an explicit non-steering command.
       //
-      // This avoids running channel policy mode selection for follow-ups.
-      // Example: a channel forced to "!d" (non-steering) should not prevent a
-      // plain highlight from being steered into an in-flight "!s" session.
+      // Plain messages (no mode token, no model override, no errors) always
+      // steer — this overrides channel policy so e.g. a "!d"-forced channel
+      // doesn't block follow-ups to an active "!s" session.  Passive channel
+      // messages (parsed=null) also always steer.
+      //
+      // Messages with explicit commands (mode tokens, model overrides) defer
+      // to shouldBypassSteering() which checks the mode's steering support.
       const parsed = options.isDirect ? this.resolver.parsePrefix(message.content) : null;
-      const isPlainHighlightFollowup = Boolean(
-        options.isDirect &&
-        message.originalContent &&
-        parsed &&
+      const isPlainFollowup = parsed == null || (
         !parsed.error &&
         !parsed.noContext &&
         parsed.modeToken === null &&
-        parsed.modelOverride === null,
+        parsed.modelOverride === null
       );
+      const shouldSteer = isPlainFollowup || !this.resolver.shouldBypassSteering(message);
 
-      const shouldSteerIntoExisting =
-        !options.isDirect || // passive
-        isPlainHighlightFollowup ||
-        !this.resolver.shouldBypassSteering(message);
-
-      if (shouldSteerIntoExisting) {
-        existing(message);
+      if (shouldSteer) {
+        existing(message, options.isDirect);
         // Persist to history without blocking the steer path.
         this.history.addMessage(message).catch((err) => {
           this.logger.error("Failed to persist steered message to history", String(err));
@@ -187,14 +183,14 @@ export class RoomMessageHandler {
     const existing = this.activeSteers.get(key);
 
     if (existing) {
-      existing(message);
+      existing(message, true);
       return;
     }
 
     // Register a buffering steer function immediately so messages arriving
     // before the agent is created are captured and flushed once it's ready.
-    const pending: RoomMessage[] = [];
-    this.activeSteers.set(key, (msg) => { pending.push(msg); });
+    const pending: { message: RoomMessage; isDirect: boolean }[] = [];
+    this.activeSteers.set(key, (msg, isDirect) => { pending.push({ message: msg, isDirect }); });
 
     try {
       await this.executor.execute(
@@ -202,10 +198,10 @@ export class RoomMessageHandler {
         (agent) => {
           // Flush buffered messages, then swap to direct steering.
           for (const buffered of pending) {
-            this.steerAgent(agent, buffered);
+            this.steerAgent(agent, buffered.message, buffered.isDirect);
           }
           pending.length = 0;
-          this.activeSteers.set(key, (msg) => { this.steerAgent(agent, msg); });
+          this.activeSteers.set(key, (msg, isDirect) => { this.steerAgent(agent, msg, isDirect); });
         },
         () => {
           // Deregister steering as soon as the response is delivered, before
@@ -221,13 +217,13 @@ export class RoomMessageHandler {
     }
   }
 
-  private steerAgent(agent: Agent, message: RoomMessage): void {
+  private steerAgent(agent: Agent, message: RoomMessage, isDirect: boolean): void {
     const ts = formatUtcTime().slice(-5);
     const baseText = `[${ts}] <${message.nick}> ${message.content}`;
 
-    // Highlighted / mentioned messages are direct user follow-ups, not background
-    // channel noise — steer them in verbatim without the "do not derail" wrapper.
-    const content = message.originalContent ? baseText : wrapSteeredMessage(baseText);
+    // Direct messages (in-channel mentions, DMs) are user follow-ups — steer
+    // them verbatim. Passive/background messages get the "do not derail" wrapper.
+    const content = isDirect ? baseText : wrapSteeredMessage(baseText);
 
     agent.steer({
       role: "user",
@@ -262,7 +258,7 @@ export class RoomMessageHandler {
     // If there's an active command session for this key, steer into it
     const existing = this.activeSteers.get(key);
     if (existing) {
-      existing(message);
+      existing(message, false);
       return;
     }
 

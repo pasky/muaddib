@@ -806,7 +806,9 @@ describe("RoomMessageHandler", () => {
     expect(promptCallCount).toBe(1);
     expect(steerCalls).toHaveLength(1);
     expect(steerCalls[0].content[0].text).toContain("second line");
-    expect(steerCalls[0].content[0].text).toContain("<meta>");
+    // Direct thread follow-ups are user messages, not background noise —
+    // they should NOT get the "do not derail" <meta> wrapper.
+    expect(steerCalls[0].content[0].text).not.toContain("<meta>");
 
     await history.close();
   });
