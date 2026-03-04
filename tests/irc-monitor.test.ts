@@ -132,8 +132,8 @@ describe("IrcRoomMonitor", () => {
       await gateway.send("libera##test", "first\n\nsecond");
       await gateway.inject("libera##test", "synthetic event");
 
-      expect(sendSpy).toHaveBeenNthCalledWith(1, "#test", "first; second", "libera");
-      expect(sendSpy).toHaveBeenNthCalledWith(2, "#test", "lineA; lineB", "libera");
+      expect(sendSpy).toHaveBeenNthCalledWith(1, "#test", "first ; second", "libera");
+      expect(sendSpy).toHaveBeenNthCalledWith(2, "#test", "lineA ; lineB", "libera");
       expect(nickSpy).toHaveBeenCalledWith("libera");
       expect(handleIncomingSpy).toHaveBeenCalledTimes(1);
     } finally {
@@ -194,7 +194,7 @@ describe("IrcRoomMonitor", () => {
     expect(sender.sent).toHaveLength(1);
     expect(sender.sent[0]).toEqual({
       target: "#test",
-      message: "line1; line2",
+      message: "line1 ; line2",
       server: "libera",
     });
 

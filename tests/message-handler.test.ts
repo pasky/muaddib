@@ -1124,7 +1124,7 @@ describe("RoomMessageHandler", () => {
       isDirect: true,
       // IRC transport behavior: flatten newlines right before sending.
       sendResponse: async (text) => {
-        sent.push(text.replace(/\n+/g, "; ").trim());
+        sent.push(text.replace(/\n+/g, " ; ").trim());
       },
     });
 

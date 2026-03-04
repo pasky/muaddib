@@ -373,5 +373,5 @@ function normalizeSenderAndMessage(nick: string, message: string): [string, stri
 }
 
 function defaultResponseCleaner(text: string): string {
-  return text.replace(/\n+/g, "; ").trim() || text;
+  return text.replace(/\n+/g, " ; ").trim() || text;
 }
