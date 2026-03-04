@@ -92,34 +92,46 @@ export class RoomMessageHandler {
 
   async handleIncomingMessage(
     message: RoomMessage,
-    options: { isDirect: boolean; sendResponse?: SendResponse },
+    options?: { sendResponse?: SendResponse },
   ): Promise<void> {
-    // Wrap optional sendResponse with a no-op so all internal paths receive a
-    // required SendResponse without needing to guard against undefined.
-    const sendResponse: SendResponse = options.sendResponse ?? (async () => {});
+    const sendResponse: SendResponse = options?.sendResponse ?? (async () => {});
+    const key = sessionKey(message);
 
-    // ── Synchronous steer fast-path ──
+    // ── Active session steering fast-path ──
     // Check for an active session BEFORE the async addMessage call.  Without
     // this, the addMessage await creates a gap during which the session can
-    // complete and remove itself from activeSteers, causing the later check
-    // in handleCommandMessage / handlePassiveMessage to miss it.
-    const canSteer = !options.isDirect || !this.resolver.shouldBypassSteering(message);
-    if (canSteer) {
-      const key = sessionKey(message);
-      const existing = this.activeSteers.get(key);
-      if (existing) {
-        existing(message);
-        // Persist to history without blocking the steer path.
+    // complete and remove itself from activeSteers, causing later routing to
+    // miss it.
+    const existingSteer = this.activeSteers.get(key);
+    let breakingActiveSession = false;
+
+    if (existingSteer) {
+      if (!message.isDirect || !this.resolver.shouldBreakActiveSession(message)) {
+        // Regular follow-up (mode tokens, plain messages, passives) — steer
+        // into the active session without blocking on history persistence.
+        existingSteer(message);
         this.history.addMessage(message).catch((err) => {
           this.logger.error("Failed to persist steered message to history", String(err));
         });
         return;
       }
+
+      // Session-breaking signal (!c, @model, !h, parse error) — execute as
+      // a one-shot command without touching activeSteers.  The old session
+      // keeps its entry and continues receiving steered messages.
+      breakingActiveSession = true;
+      this.logger.debug(
+        "Breaking out of active session",
+        `arc=${message.arc}`,
+        `nick=${message.nick}`,
+      );
     }
 
+    // ── Persist trigger message ──
     const triggerTs = await this.history.addMessage(message, { selfRun: true });
 
-    if (!options.isDirect) {
+    // ── Route: passive vs direct ──
+    if (!message.isDirect) {
       this.logger.debug(
         "Handling passive message",
         `arc=${message.arc}`,
@@ -135,9 +147,12 @@ export class RoomMessageHandler {
       `nick=${message.nick}`,
     );
 
-    // Messages that bypass steering (help, parse errors, no-context, non-steering modes)
     try {
-      if (this.resolver.shouldBypassSteering(message)) {
+      // One-shot execute (no steering registration) for:
+      // - Break-out messages from an active session (!c, @model, !h, parse errors)
+      // - Messages that bypass steering on their own (help, parse errors,
+      //   no-context, non-steering modes/channel policies)
+      if (breakingActiveSession || this.resolver.shouldBypassSteering(message)) {
         await this.executor.execute(message, triggerTs, sendResponse);
         return;
       }
@@ -161,12 +176,6 @@ export class RoomMessageHandler {
     sendResponse: SendResponse,
   ): Promise<void> {
     const key = sessionKey(message);
-    const existing = this.activeSteers.get(key);
-
-    if (existing) {
-      existing(message);
-      return;
-    }
 
     // Register a buffering steer function immediately so messages arriving
     // before the agent is created are captured and flushed once it's ready.
@@ -200,7 +209,12 @@ export class RoomMessageHandler {
 
   private steerAgent(agent: Agent, message: RoomMessage): void {
     const ts = formatUtcTime().slice(-5);
-    const content = wrapSteeredMessage(`[${ts}] <${message.nick}> ${message.content}`);
+    const baseText = `[${ts}] <${message.nick}> ${message.content}`;
+
+    // Direct messages (in-channel mentions, DMs) are user follow-ups — steer
+    // them verbatim. Passive/background messages get the "do not derail" wrapper.
+    const content = message.isDirect ? baseText : wrapSteeredMessage(baseText);
+
     agent.steer({
       role: "user",
       content: [{ type: "text", text: content }],
@@ -229,14 +243,9 @@ export class RoomMessageHandler {
     message: RoomMessage,
     sendResponse: SendResponse,
   ): Promise<void> {
-    const key = sessionKey(message);
-
-    // If there's an active command session for this key, steer into it
-    const existing = this.activeSteers.get(key);
-    if (existing) {
-      existing(message);
-      return;
-    }
+    // Passive messages with an active command session for this key are already
+    // caught by the synchronous fast-path in handleIncomingMessage — they never
+    // reach here.  This method only handles passives with no active command session.
 
     // Try proactive: steer into running proactive agent, or start new session.
     // Check ANY active command session in the same channel (not just same nick)

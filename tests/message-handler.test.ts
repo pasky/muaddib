@@ -106,7 +106,7 @@ function createHandler(options: {
   });
 }
 
-function makeMessage(content: string): RoomMessage {
+function makeMessage(content: string, overrides?: Partial<RoomMessage>): RoomMessage {
   return {
     serverTag: "libera",
     channelName: "#test",
@@ -114,6 +114,7 @@ function makeMessage(content: string): RoomMessage {
     nick: "alice",
     mynick: "muaddib",
     content,
+    ...overrides,
   };
 }
 
@@ -222,7 +223,8 @@ describe("RoomMessageHandler", () => {
       },
     });
 
-    await handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async (text) => { sent.push(text); } });
+    incoming.isDirect = true;
+    await handler.handleIncomingMessage(incoming, { sendResponse: async (text) => { sent.push(text); } });
 
     expect(sent[0]).toBe("done");
     expect(runnerModel).toBe("openai:gpt-4o-mini");
@@ -248,7 +250,8 @@ describe("RoomMessageHandler", () => {
     });
 
     const sent: string[] = [];
-    await handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async (text) => { sent.push(text); } });
+    incoming.isDirect = true;
+    await handler.handleIncomingMessage(incoming, { sendResponse: async (text) => { sent.push(text); } });
 
     expect(sent[0]).toBe("pasky: Pong! S latenci nizsi nez moje chut.");
 
@@ -269,8 +272,8 @@ describe("RoomMessageHandler", () => {
       runnerFactory: makeRunner("[01:21] <MuaddibLLM> pasky: clean answer here"),
     });
 
+    incoming.isDirect = true;
     await handler.handleIncomingMessage(incoming, {
-      isDirect: true,
       sendResponse: async (text) => { sent.push(text); },
     });
 
@@ -295,7 +298,8 @@ describe("RoomMessageHandler", () => {
     });
 
     const sent: string[] = [];
-    await handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async (text) => { sent.push(text); } });
+    incoming.isDirect = true;
+    await handler.handleIncomingMessage(incoming, { sendResponse: async (text) => { sent.push(text); } });
 
     expect(sent[0]).toBe("Here is the answer.");
 
@@ -322,7 +326,8 @@ describe("RoomMessageHandler", () => {
       runnerFactory: makeRunner("pong"),
     });
 
-    await handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async () => {} });
+    incoming.isDirect = true;
+    await handler.handleIncomingMessage(incoming, { sendResponse: async () => {} });
 
     expect(logger.debug).toHaveBeenCalledWith(
       "Handling direct command",
@@ -362,11 +367,9 @@ describe("RoomMessageHandler", () => {
       }),
     });
 
-    await parseErrorHandler.handleIncomingMessage(makeMessage("!unknown ping"), {
-      isDirect: true,
+    await parseErrorHandler.handleIncomingMessage(makeMessage("!unknown ping", { isDirect: true }), {
     });
-    await parseErrorHandler.handleIncomingMessage(makeMessage("!h"), {
-      isDirect: true,
+    await parseErrorHandler.handleIncomingMessage(makeMessage("!h", { isDirect: true }), {
     });
 
     const rateLimitedHandler = createHandler({
@@ -382,8 +385,7 @@ describe("RoomMessageHandler", () => {
       }),
     });
 
-    await rateLimitedHandler.handleIncomingMessage(makeMessage("!s too-fast"), {
-      isDirect: true,
+    await rateLimitedHandler.handleIncomingMessage(makeMessage("!s too-fast", { isDirect: true }), {
     });
 
     expect(logger.warn).toHaveBeenCalledWith(
@@ -435,8 +437,7 @@ describe("RoomMessageHandler", () => {
     });
 
     const sent: string[] = [];
-    await handler.handleIncomingMessage(makeMessage("!s expensive fallback"), {
-      isDirect: true,
+    await handler.handleIncomingMessage(makeMessage("!s expensive fallback", { isDirect: true }), {
       sendResponse: async (text) => { sent.push(text); },
     });
 
@@ -471,8 +472,7 @@ describe("RoomMessageHandler", () => {
     });
 
     await expect(
-      handler.handleIncomingMessage(makeMessage("!d explode"), {
-        isDirect: true,
+      handler.handleIncomingMessage(makeMessage("!d explode", { isDirect: true }), {
       }),
     ).rejects.toThrow("runner boom");
 
@@ -510,8 +510,7 @@ describe("RoomMessageHandler", () => {
         message: "!s ping",
       },
       async () => {
-        await handler.handleIncomingMessage(makeMessage("!s ping"), {
-          isDirect: true,
+        await handler.handleIncomingMessage(makeMessage("!s ping", { isDirect: true }), {
           sendResponse: async () => {},
         });
       },
@@ -584,7 +583,8 @@ describe("RoomMessageHandler", () => {
       }),
     });
 
-    await handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async () => {} });
+    incoming.isDirect = true;
+    await handler.handleIncomingMessage(incoming, { sendResponse: async () => {} });
 
     expect(contextReducer.reduce).toHaveBeenCalledTimes(1);
     expect(runnerPrompt).toMatch(/^\[\d{2}:\d{2}\] <alice> reduce context please$/);
@@ -634,7 +634,8 @@ describe("RoomMessageHandler", () => {
       }),
     });
 
-    await handlerWithSummary.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async () => {} });
+    incoming.isDirect = true;
+    await handlerWithSummary.handleIncomingMessage(incoming, { sendResponse: async () => {} });
 
     expect(chronicleStore.getChapterContextMessages).toHaveBeenCalledWith("libera##test");
     expect(runnerContextWithSummary[0][0]).toBe("<context_summary>chapter recap</context_summary>");
@@ -659,7 +660,8 @@ describe("RoomMessageHandler", () => {
       runnerFactory: makeRunner("done"),
     });
 
-    await handlerWithoutSummary.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async () => {} });
+    incoming.isDirect = true;
+    await handlerWithoutSummary.handleIncomingMessage(incoming, { sendResponse: async () => {} });
     expect(chronicleStore.getChapterContextMessages).toHaveBeenCalledTimes(1);
 
     await history.close();
@@ -694,7 +696,8 @@ describe("RoomMessageHandler", () => {
       },
     });
 
-    await handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async () => {} });
+    incoming.isDirect = true;
+    await handler.handleIncomingMessage(incoming, { sendResponse: async () => {} });
 
     expect(seenToolNames).toEqual(["web_search", "make_plan"]);
 
@@ -734,7 +737,8 @@ describe("RoomMessageHandler", () => {
       },
     });
 
-    await handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async () => {} });
+    incoming.isDirect = true;
+    await handler.handleIncomingMessage(incoming, { sendResponse: async () => {} });
 
     // Oracle tool should be present in the tool set
     expect(oracleTool).toBeDefined();
@@ -781,8 +785,8 @@ describe("RoomMessageHandler", () => {
     });
 
     const sent: string[] = [];
+    incoming.isDirect = true;
     const resultPromise = handler.handleIncomingMessage(incoming, {
-      isDirect: true,
       sendResponse: async (text) => { sent.push(text); },
     });
 
@@ -793,8 +797,8 @@ describe("RoomMessageHandler", () => {
       threadId: "thread-1",
     };
 
+    followup.isDirect = true;
     const followupPromise = handler.handleIncomingMessage(followup, {
-      isDirect: true,
       sendResponse: async () => {},
     });
 
@@ -806,7 +810,90 @@ describe("RoomMessageHandler", () => {
     expect(promptCallCount).toBe(1);
     expect(steerCalls).toHaveLength(1);
     expect(steerCalls[0].content[0].text).toContain("second line");
-    expect(steerCalls[0].content[0].text).toContain("<meta>");
+    // Direct thread follow-ups are user messages, not background noise —
+    // they should NOT get the "do not derail" <meta> wrapper.
+    expect(steerCalls[0].content[0].text).not.toContain("<meta>");
+
+    await history.close();
+  });
+
+  it("steers follow-ups into active session regardless of mode token or channel policy", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const policyRoomConfig = {
+      ...roomConfig,
+      command: {
+        ...roomConfig.command,
+        channelModes: {
+          "libera##test": "!d",
+        },
+      },
+    };
+
+    const firstStarted = createDeferred<void>();
+    const releaseFirst = createDeferred<void>();
+
+    let promptCallCount = 0;
+    const steerCalls: any[] = [];
+    const mockAgent = {
+      steer: (msg: any) => { steerCalls.push(msg); },
+    };
+
+    const handler = createHandler({
+      roomConfig: policyRoomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: (input) => ({
+        prompt: async () => {
+          promptCallCount += 1;
+          if (promptCallCount > 1) {
+            throw new Error("follow-up should have been steered, not started a new session");
+          }
+
+          input.onAgentCreated?.(mockAgent as any);
+          firstStarted.resolve();
+          await releaseFirst.promise;
+          const result = makeRunnerResult("done");
+          await input.onResponse(result.text);
+          return result;
+        },
+      }),
+    });
+
+    const t1 = handler.handleIncomingMessage(makeMessage("!s first", { isDirect: true }), {
+      sendResponse: async () => {},
+    });
+
+    await firstStarted.promise;
+
+    // Plain in-channel highlight steers despite channel being forced to !d.
+    await handler.handleIncomingMessage(
+      {
+        ...makeMessage("follow up"),
+        originalContent: "muaddib: follow up",
+        isDirect: true,
+      },
+      { sendResponse: async () => {} },
+    );
+
+    // Explicit !d follow-up also steers — mode tokens don't break active sessions.
+    await handler.handleIncomingMessage(
+      makeMessage("!d another thought", { isDirect: true }),
+      { sendResponse: async () => {} },
+    );
+
+    releaseFirst.resolve();
+    await t1;
+
+    expect(promptCallCount).toBe(1);
+    expect(steerCalls).toHaveLength(2);
+    // First steer: plain highlight, no <meta> wrapper.
+    expect(steerCalls[0].content[0].text).toContain("follow up");
+    expect(steerCalls[0].content[0].text).not.toContain("<meta>");
+    // Second steer: explicit !d follow-up, also direct → no <meta> wrapper.
+    expect(steerCalls[1].content[0].text).toContain("!d another thought");
+    expect(steerCalls[1].content[0].text).not.toContain("<meta>");
 
     await history.close();
   });
@@ -828,7 +915,8 @@ describe("RoomMessageHandler", () => {
     });
 
     const sent: string[] = [];
-    await handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async (text) => { sent.push(text); } });
+    incoming.isDirect = true;
+    await handler.handleIncomingMessage(incoming, { sendResponse: async (text) => { sent.push(text); } });
 
     expect(sent[0]).toContain("default is");
 
@@ -854,8 +942,8 @@ describe("RoomMessageHandler", () => {
       },
     });
 
+    incoming.isDirect = true;
     await handler.handleIncomingMessage(incoming, {
-      isDirect: true,
       sendResponse: async (text) => {
         sent.push(text);
       },
@@ -888,8 +976,8 @@ describe("RoomMessageHandler", () => {
       runnerFactory: makeRunner("done"),
     });
 
-    await handler.handleIncomingMessage(makeMessage("!s trigger chronicler"), { isDirect: true, sendResponse: async () => {} });
-    await handler.handleIncomingMessage(makeMessage("ambient channel line"), { isDirect: false });
+    await handler.handleIncomingMessage(makeMessage("!s trigger chronicler", { isDirect: true }), { sendResponse: async () => {} });
+    await handler.handleIncomingMessage(makeMessage("ambient channel line"));
 
     expect(autoChronicler.checkAndChronicle).toHaveBeenCalledTimes(2);
     expect(autoChronicler.checkAndChronicle).toHaveBeenNthCalledWith(
@@ -924,8 +1012,7 @@ describe("RoomMessageHandler", () => {
       },
     });
 
-    await rateLimitedHandler.handleIncomingMessage(makeMessage("!s should skip autochronicler"), {
-      isDirect: true,
+    await rateLimitedHandler.handleIncomingMessage(makeMessage("!s should skip autochronicler", { isDirect: true }), {
     });
 
     expect(rateLimitedAutoChronicler.checkAndChronicle).not.toHaveBeenCalled();
@@ -946,7 +1033,8 @@ describe("RoomMessageHandler", () => {
       runnerFactory: makeRunner("persisted response"),
     });
 
-    await handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async () => {} });
+    incoming.isDirect = true;
+    await handler.handleIncomingMessage(incoming, { sendResponse: async () => {} });
 
     const rows = await history.getFullHistory("libera##test");
     expect(rows).toHaveLength(2);
@@ -995,8 +1083,8 @@ describe("RoomMessageHandler", () => {
       }),
     });
 
+    incoming.isDirect = true;
     await handler.handleIncomingMessage(incoming, {
-      isDirect: true,
       sendResponse: async (text) => {
         sent.push(text);
       },
@@ -1117,8 +1205,8 @@ describe("RoomMessageHandler", () => {
       runnerFactory: makeRunner(longResponse),
     });
 
+    incoming.isDirect = true;
     await handler.handleIncomingMessage(incoming, {
-      isDirect: true,
       sendResponse: async (text) => {
         sent.push(text);
       },
@@ -1177,8 +1265,8 @@ describe("RoomMessageHandler", () => {
       runnerFactory: makeRunner(multilineResponse),
     });
 
+    incoming.isDirect = true;
     await handler.handleIncomingMessage(incoming, {
-      isDirect: true,
       // IRC transport behavior: flatten newlines right before sending.
       sendResponse: async (text) => {
         sent.push(text.replace(/\n+/g, " ; ").trim());
@@ -1219,7 +1307,8 @@ describe("RoomMessageHandler", () => {
     });
 
     const sent: string[] = [];
-    await handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async (text) => { sent.push(text); } });
+    incoming.isDirect = true;
+    await handler.handleIncomingMessage(incoming, { sendResponse: async (text) => { sent.push(text); } });
 
     expect(sent[0]).toBe("short answer");
 
@@ -1250,7 +1339,8 @@ describe("RoomMessageHandler", () => {
     });
 
     const sent: string[] = [];
-    await handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async (text) => { sent.push(text); } });
+    incoming.isDirect = true;
+    await handler.handleIncomingMessage(incoming, { sendResponse: async (text) => { sent.push(text); } });
 
     expect(sent[0]).toContain("The AI refused to respond to this request");
 
@@ -1305,7 +1395,8 @@ describe("RoomMessageHandler", () => {
     });
 
     const sent: string[] = [];
-    await handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async (text) => { sent.push(text); } });
+    incoming.isDirect = true;
+    await handler.handleIncomingMessage(incoming, { sendResponse: async (text) => { sent.push(text); } });
 
     // Refusal fallback suffix is now appended by SessionRunner (not invokeAndPostProcess),
     // so it doesn't appear when using mock runnerFactory.
@@ -1333,8 +1424,9 @@ describe("RoomMessageHandler", () => {
       }),
     });
 
+    incoming.isDirect = true;
     await expect(
-      handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async () => {} }),
+      handler.handleIncomingMessage(incoming, { sendResponse: async () => {} }),
     ).rejects.toThrow(
       "Agent run failed: invalid_prompt blocked for safety reasons.",
     );
@@ -1361,7 +1453,8 @@ describe("RoomMessageHandler", () => {
     });
 
     const sent: string[] = [];
-    await handler.handleIncomingMessage(incoming, { isDirect: true, sendResponse: async (text) => { sent.push(text); } });
+    incoming.isDirect = true;
+    await handler.handleIncomingMessage(incoming, { sendResponse: async (text) => { sent.push(text); } });
 
     expect(sent[0]).toBe("normal answer");
     expect(runnerModels).toEqual(["openai:gpt-4o-mini"]);
@@ -1400,19 +1493,16 @@ describe("RoomMessageHandler", () => {
     });
 
     const sent: string[] = [];
-    const t1 = handler.handleIncomingMessage(makeMessage("!s first"), {
-      isDirect: true,
+    const t1 = handler.handleIncomingMessage(makeMessage("!s first", { isDirect: true }), {
       sendResponse: async (text) => { sent.push(text); },
     });
 
     await firstStarted.promise;
 
-    const t2 = handler.handleIncomingMessage(makeMessage("!s second"), {
-      isDirect: true,
+    const t2 = handler.handleIncomingMessage(makeMessage("!s second", { isDirect: true }), {
       sendResponse: async () => {},
     });
-    const t3 = handler.handleIncomingMessage(makeMessage("!s third"), {
-      isDirect: true,
+    const t3 = handler.handleIncomingMessage(makeMessage("!s third", { isDirect: true }), {
       sendResponse: async () => {},
     });
 
@@ -1461,23 +1551,20 @@ describe("RoomMessageHandler", () => {
     });
 
     // First message triggers session creation (blocks in prompt).
-    const t1 = handler.handleIncomingMessage(makeMessage("!s hello"), {
-      isDirect: true,
+    const t1 = handler.handleIncomingMessage(makeMessage("!s hello", { isDirect: true }), {
       sendResponse: async () => {},
     });
 
     await resolveStarted.promise;
 
     // Second message arrives while agent is NOT yet created (pre-onAgentCreated).
-    const t2 = handler.handleIncomingMessage(makeMessage("!s continuation"), {
-      isDirect: true,
+    const t2 = handler.handleIncomingMessage(makeMessage("!s continuation", { isDirect: true }), {
       sendResponse: async () => {},
     });
 
     // Also a passive message from the same user should be buffered.
     const t3 = handler.handleIncomingMessage(
       makeMessage("passive follow-up"),
-      { isDirect: false },
     );
 
     // Now release — onAgentCreated fires, buffered messages flush.
@@ -1523,20 +1610,20 @@ describe("RoomMessageHandler", () => {
 
     const sent: string[] = [];
     const t1 = handler.handleIncomingMessage(
-      { ...makeMessage("!s first"), threadId: "thread-1" },
-      { isDirect: true, sendResponse: async (text) => { sent.push(text); } },
+      { ...makeMessage("!s first"), threadId: "thread-1", isDirect: true },
+      { sendResponse: async (text) => { sent.push(text); } },
     );
 
     await firstStarted.promise;
 
     const t2 = handler.handleIncomingMessage(
-      { ...makeMessage("!s second"), nick: "bob", threadId: "thread-1" },
-      { isDirect: true, sendResponse: async () => {} },
+      { ...makeMessage("!s second"), nick: "bob", threadId: "thread-1", isDirect: true },
+      { sendResponse: async () => {} },
     );
 
     const t3 = handler.handleIncomingMessage(
-      { ...makeMessage("!s third"), nick: "carol", threadId: "thread-1" },
-      { isDirect: true, sendResponse: async () => {} },
+      { ...makeMessage("!s third"), nick: "carol", threadId: "thread-1", isDirect: true },
+      { sendResponse: async () => {} },
     );
 
     releaseFirst.resolve();
@@ -1581,8 +1668,7 @@ describe("RoomMessageHandler", () => {
       }),
     });
 
-    const t1 = handler.handleIncomingMessage(makeMessage("!s first"), {
-      isDirect: true,
+    const t1 = handler.handleIncomingMessage(makeMessage("!s first", { isDirect: true }), {
       sendResponse: async (text) => { sent.push(text); },
     });
 
@@ -1590,12 +1676,12 @@ describe("RoomMessageHandler", () => {
 
     const p3Persisted = waitForPersistedMessage(history, (message) => message.content === "p3");
 
-    const p1 = handler.handleIncomingMessage(makeMessage("p1"), { isDirect: false });
-    const p2 = handler.handleIncomingMessage(makeMessage("p2"), { isDirect: false });
-    const c2 = handler.handleIncomingMessage(makeMessage("!s second"), {
-      isDirect: true, sendResponse: async (text) => { sent.push(text); },
+    const p1 = handler.handleIncomingMessage(makeMessage("p1"));
+    const p2 = handler.handleIncomingMessage(makeMessage("p2"));
+    const c2 = handler.handleIncomingMessage(makeMessage("!s second", { isDirect: true }), {
+      sendResponse: async (text) => { sent.push(text); },
     });
-    const p3 = handler.handleIncomingMessage(makeMessage("p3"), { isDirect: false });
+    const p3 = handler.handleIncomingMessage(makeMessage("p3"));
 
     await p3Persisted;
     releaseFirst.resolve();
@@ -1625,7 +1711,7 @@ describe("RoomMessageHandler", () => {
       },
     });
 
-    await handler.handleIncomingMessage(makeMessage("!s hello"), { isDirect: true, sendResponse: async () => {} });
+    await handler.handleIncomingMessage(makeMessage("!s hello", { isDirect: true }), { sendResponse: async () => {} });
 
     expect(capturedCallback).toBeDefined();
 
@@ -1661,8 +1747,7 @@ describe("RoomMessageHandler", () => {
       }),
     });
 
-    const t1 = handler.handleIncomingMessage(makeMessage("!s first"), {
-      isDirect: true,
+    const t1 = handler.handleIncomingMessage(makeMessage("!s first", { isDirect: true }), {
       sendResponse: async () => {},
     });
 
@@ -1673,7 +1758,7 @@ describe("RoomMessageHandler", () => {
       history,
       (message) => message.content === "interrupt me",
     );
-    handler.handleIncomingMessage(makeMessage("interrupt me"), { isDirect: false });
+    handler.handleIncomingMessage(makeMessage("interrupt me"));
 
     await interruptPersisted;
 
@@ -1738,8 +1823,7 @@ describe("RoomMessageHandler", () => {
     const sent2: string[] = [];
 
     // Start first command
-    const resultPromise = handler.handleIncomingMessage(makeMessage("!s first"), {
-      isDirect: true,
+    const resultPromise = handler.handleIncomingMessage(makeMessage("!s first", { isDirect: true }), {
       sendResponse: async (text) => { sent1.push(text); },
     });
 
@@ -1756,8 +1840,7 @@ describe("RoomMessageHandler", () => {
     // blocked in triggerAutoChronicler. Since onResponseDelivered already
     // deregistered steering, this should NOT be steered — it should start
     // its own session.
-    const secondResult = handler.handleIncomingMessage(makeMessage("!s second message"), {
-      isDirect: true,
+    const secondResult = handler.handleIncomingMessage(makeMessage("!s second message", { isDirect: true }), {
       sendResponse: async (text) => { sent2.push(text); },
     });
 
@@ -1823,9 +1906,7 @@ describe("RoomMessageHandler", () => {
     });
 
     // Send a passive message — should start proactive session and debounce
-    await handler.handleIncomingMessage(makeMessage("just chatting"), {
-      isDirect: false,
-    });
+    await handler.handleIncomingMessage(makeMessage("just chatting"));
 
     // Runner should NOT be called since score is below threshold
     expect(runnerCalled).toBe(false);
@@ -1853,8 +1934,7 @@ describe("RoomMessageHandler", () => {
       }),
     });
 
-    await handler.handleIncomingMessage(makeMessage("!s should suppress null"), {
-      isDirect: true,
+    await handler.handleIncomingMessage(makeMessage("!s should suppress null", { isDirect: true }), {
       sendResponse: async (text) => { sent.push(text); },
     });
 
@@ -1922,7 +2002,6 @@ describe("RoomMessageHandler", () => {
     await history.addMessage(makeMessage("seed message"));
 
     await handler.handleIncomingMessage(makeMessage("should I jump in?"), {
-      isDirect: false,
       sendResponse: async (text) => { sent.push(text); },
     });
 
@@ -1951,9 +2030,7 @@ describe("RoomMessageHandler", () => {
       }),
     });
 
-    await handler.handleIncomingMessage(makeMessage("just chatting"), {
-      isDirect: false,
-    });
+    await handler.handleIncomingMessage(makeMessage("just chatting"));
 
     // Should complete immediately without starting a proactive session
     await history.close();
@@ -2005,15 +2082,12 @@ describe("RoomMessageHandler", () => {
       history,
       (message) => message.content === "background chatter",
     );
-    const passivePromise = handler.handleIncomingMessage(makeMessage("background chatter"), {
-      isDirect: false,
-    });
+    const passivePromise = handler.handleIncomingMessage(makeMessage("background chatter"));
 
     await passivePersisted;
 
     // Now send a command — should preempt the proactive debounce
-    await handler.handleIncomingMessage(makeMessage("!s direct question"), {
-      isDirect: true,
+    await handler.handleIncomingMessage(makeMessage("!s direct question", { isDirect: true }), {
       sendResponse: async (text) => { sent.push(text); },
     });
 
@@ -2072,17 +2146,14 @@ describe("RoomMessageHandler", () => {
       history,
       (message) => message.content === "background chatter",
     );
-    const passivePromise = handler.handleIncomingMessage(makeMessage("background chatter"), {
-      isDirect: false,
-    });
+    const passivePromise = handler.handleIncomingMessage(makeMessage("background chatter"));
 
     await passivePersisted;
 
     // Command from bob (different nick) — should preempt the proactive debounce
     await handler.handleIncomingMessage(
-      { ...makeMessage("!s direct question"), nick: "bob" },
+      { ...makeMessage("!s direct question"), nick: "bob", isDirect: true },
       {
-        isDirect: true,
         sendResponse: async (text) => { sent.push(text); },
       },
     );
@@ -2158,9 +2229,7 @@ describe("RoomMessageHandler", () => {
     await history.addMessage(makeMessage("seed message"));
 
     // Passive message triggers proactive debounce + eval + agent
-    const passivePromise = handler.handleIncomingMessage(makeMessage("trigger chat"), {
-      isDirect: false,
-    });
+    const passivePromise = handler.handleIncomingMessage(makeMessage("trigger chat"));
 
     // Wait for the proactive agent to start
     await agentStarted.promise;
@@ -2168,11 +2237,9 @@ describe("RoomMessageHandler", () => {
     // Send more passive messages from different nicks — should steer into proactive agent
     await handler.handleIncomingMessage(
       { ...makeMessage("bob says hi"), nick: "bob" },
-      { isDirect: false },
     );
     await handler.handleIncomingMessage(
       { ...makeMessage("carol chimes in"), nick: "carol" },
-      { isDirect: false },
     );
 
     for (const msg of steeredMessages) {
@@ -2194,7 +2261,6 @@ describe("RoomMessageHandler", () => {
     steeredMessages.length = 0;
     await handler.handleIncomingMessage(
       { ...makeMessage("late message"), nick: "dave" },
-      { isDirect: false },
     );
     expect(steeredMessages).toEqual([]);
 
@@ -2261,16 +2327,13 @@ describe("RoomMessageHandler", () => {
     await history.addMessage(makeMessage("seed message"));
 
     // Start proactive session
-    const passivePromise = handler.handleIncomingMessage(makeMessage("trigger chat"), {
-      isDirect: false,
-    });
+    const passivePromise = handler.handleIncomingMessage(makeMessage("trigger chat"));
     await agentStarted.promise;
 
     // Command should still execute independently
     isProactiveCall = false;
     const sent: string[] = [];
-    await handler.handleIncomingMessage(makeMessage("!s direct question"), {
-      isDirect: true,
+    await handler.handleIncomingMessage(makeMessage("!s direct question", { isDirect: true }), {
       sendResponse: async (text) => { sent.push(text); },
     });
 
@@ -2316,8 +2379,7 @@ describe("RoomMessageHandler", () => {
       }),
     });
 
-    const t1 = handler.handleIncomingMessage(makeMessage("!s alice question"), {
-      isDirect: true,
+    const t1 = handler.handleIncomingMessage(makeMessage("!s alice question", { isDirect: true }), {
       sendResponse: async (text) => { sent.push(text); },
     });
 
@@ -2325,9 +2387,8 @@ describe("RoomMessageHandler", () => {
 
     // Bob sends a command while Alice's is running — should get own session
     const t2 = handler.handleIncomingMessage(
-      { ...makeMessage("!s bob question"), nick: "bob" },
+      { ...makeMessage("!s bob question"), nick: "bob", isDirect: true },
       {
-        isDirect: true,
         sendResponse: async (text) => { sent.push(text); },
       },
     );
@@ -2380,15 +2441,15 @@ describe("RoomMessageHandler", () => {
     const sent1: string[] = [];
     const sent2: string[] = [];
     const t1 = handler.handleIncomingMessage(
-      { ...makeMessage("!s first"), channelName: "#foo", arc: "libera##foo" },
-      { isDirect: true, sendResponse: async (text) => { sent1.push(text); } },
+      { ...makeMessage("!s first"), channelName: "#foo", arc: "libera##foo", isDirect: true },
+      { sendResponse: async (text) => { sent1.push(text); } },
     );
 
     await firstStarted.promise;
 
     const t2 = handler.handleIncomingMessage(
-      { ...makeMessage("!s second"), channelName: "#bar", arc: "libera##bar" },
-      { isDirect: true, sendResponse: async (text) => { sent2.push(text); } },
+      { ...makeMessage("!s second"), channelName: "#bar", arc: "libera##bar", isDirect: true },
+      { sendResponse: async (text) => { sent2.push(text); } },
     );
 
     releaseFirst.resolve();
@@ -2432,19 +2493,16 @@ describe("RoomMessageHandler", () => {
       }),
     });
 
-    const t1 = handler.handleIncomingMessage(makeMessage("!s first"), {
-      isDirect: true,
+    const t1 = handler.handleIncomingMessage(makeMessage("!s first", { isDirect: true }), {
       sendResponse: async (text) => { sent.push(text); },
     });
 
     await firstStarted.promise;
 
-    const t2 = handler.handleIncomingMessage(makeMessage("!s second"), {
-      isDirect: true,
+    const t2 = handler.handleIncomingMessage(makeMessage("!s second", { isDirect: true }), {
       sendResponse: async (text) => { sent.push(text); },
     });
-    const t3 = handler.handleIncomingMessage(makeMessage("!s third"), {
-      isDirect: true,
+    const t3 = handler.handleIncomingMessage(makeMessage("!s third", { isDirect: true }), {
       sendResponse: async (text) => { sent.push(text); },
     });
 
@@ -2484,15 +2542,13 @@ describe("RoomMessageHandler", () => {
 
     // First command fails
     await expect(
-      handler.handleIncomingMessage(makeMessage("!s first"), {
-        isDirect: true,
+      handler.handleIncomingMessage(makeMessage("!s first", { isDirect: true }), {
         sendResponse: async (text) => { sent.push(text); },
       }),
     ).rejects.toThrow("runner exploded");
 
     // Second command should start a fresh session (no stale entry in map)
-    await handler.handleIncomingMessage(makeMessage("!s second"), {
-      isDirect: true,
+    await handler.handleIncomingMessage(makeMessage("!s second", { isDirect: true }), {
       sendResponse: async (text) => { sent.push(text); },
     });
 
@@ -2520,12 +2576,8 @@ describe("RoomMessageHandler", () => {
       }),
     });
 
-    await handler.handleIncomingMessage(makeMessage("just chatting"), {
-      isDirect: false,
-    });
-    await handler.handleIncomingMessage(makeMessage("more chat"), {
-      isDirect: false,
-    });
+    await handler.handleIncomingMessage(makeMessage("just chatting"));
+    await handler.handleIncomingMessage(makeMessage("more chat"));
 
     expect(runCount).toBe(0);
 
@@ -2556,8 +2608,8 @@ describe("RoomMessageHandler", () => {
       runnerFactory: makeRunner("bot reply"),
     });
 
+    incoming.isDirect = true;
     await handler.handleIncomingMessage(incoming, {
-      isDirect: true,
       sendResponse: async () => {},
     });
 
@@ -2592,8 +2644,8 @@ describe("RoomMessageHandler", () => {
       runnerFactory: makeRunner("bot reply"),
     });
 
+    incoming.isDirect = true;
     await handler.handleIncomingMessage(incoming, {
-      isDirect: true,
       sendResponse: async () => ({ platformId: "outbound-5555" }),
     });
 
@@ -2633,8 +2685,8 @@ describe("RoomMessageHandler", () => {
       runnerFactory: makeRunner("expensive answer", { totalCost: 0.5, toolCallsCount: 3 }),
     });
 
+    incoming.isDirect = true;
     await handler.handleIncomingMessage(incoming, {
-      isDirect: true,
       sendResponse: async (text) => {
         callCount++;
         if (callCount === 1) {
@@ -2690,8 +2742,8 @@ describe("RoomMessageHandler", () => {
       runnerFactory: makeRunner("bot reply"),
     });
 
+    incoming.isDirect = true;
     await handler.handleIncomingMessage(incoming, {
-      isDirect: true,
       sendResponse: async () => ({ platformId: "outbound-7777" }),
     });
 
