@@ -17,7 +17,7 @@ import type { ArcEventsWatcher } from "../../events/watcher.js";
 interface CommandLike {
   handleIncomingMessage(
     message: RoomMessage,
-    options: { isDirect: boolean; sendResponse?: (text: string) => Promise<{ platformId?: string } | void> },
+    options?: { sendResponse?: (text: string) => Promise<{ platformId?: string } | void> },
   ): Promise<void>;
   cancelProactive?(): void;
 }
@@ -189,10 +189,10 @@ export class SlackRoomMonitor {
             nick: "event",
             mynick: "Muaddib",
             content,
+            isDirect: true,
           };
           const run = async (): Promise<void> => {
             await commandHandler.handleIncomingMessage(message, {
-              isDirect: true,
               sendResponse: async (text) => {
                 await firstTransport.sendMessage(channelId, text);
               },
@@ -341,6 +341,7 @@ export class SlackRoomMonitor {
       nick: event.username,
       mynick: event.mynick,
       content: cleanedContent,
+      isDirect,
       // Preserve the mention context for history and LLM (e.g. "@MuaddibLLM keeppandoraopen.org").
       // Only set for channel mentions (not DMs where there is no mention to preserve).
       originalContent: event.mentionsBot && !event.isDirectMessage
@@ -361,7 +362,6 @@ export class SlackRoomMonitor {
 
     const handleIncoming = async (): Promise<void> => {
       await this.options.commandHandler.handleIncomingMessage(message, {
-        isDirect,
         sendResponse: sender
           ? async (text) => {
               const formattedText = sender.formatOutgoingMentions

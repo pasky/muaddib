@@ -103,7 +103,7 @@ describe("IrcRoomMonitor", () => {
     const nickSpy = vi.spyOn(VarlinkSender.prototype, "getServerNick").mockResolvedValue("muaddib");
     const handleIncomingSpy = vi.spyOn(RoomMessageHandler.prototype, "handleIncomingMessage").mockImplementation(
       async (_message, options) => {
-        await options.sendResponse?.("lineA\n\nlineB");
+        await options?.sendResponse?.("lineA\n\nlineB");
       },
     );
 
@@ -163,8 +163,8 @@ describe("IrcRoomMonitor", () => {
         handleIncomingMessage: async (message, options) => {
           executeCalls.push(message.content);
           originalContentCalls.push(message.originalContent);
-          if (options.isDirect && options.sendResponse) {
-            await options.sendResponse("line1\n\nline2");
+          if (message.isDirect && options?.sendResponse) {
+            await options?.sendResponse("line1\n\nline2");
           }
           await history.addMessage(message);
           await history.addMessage({
@@ -223,8 +223,8 @@ describe("IrcRoomMonitor", () => {
       },
       history,
       commandHandler: {
-        handleIncomingMessage: async (message, options) => {
-          directFlag = options.isDirect;
+        handleIncomingMessage: async (message) => {
+          directFlag = message.isDirect ?? false;
           await history.addMessage(message);
         },
       },
@@ -286,7 +286,7 @@ describe("IrcRoomMonitor", () => {
     ];
 
     let offset = 0;
-    const seen: Array<{ mynick: string; content: string; isDirect: boolean }> = [];
+    const seen: Array<{ mynick: string; content: string; isDirect: boolean | undefined }> = [];
 
     const sender = {
       connectionGeneration: -1,
@@ -310,11 +310,11 @@ describe("IrcRoomMonitor", () => {
       },
       history,
       commandHandler: {
-        handleIncomingMessage: async (message, options) => {
+        handleIncomingMessage: async (message) => {
           seen.push({
             mynick: message.mynick,
             content: message.content,
-            isDirect: options.isDirect,
+            isDirect: message.isDirect,
           });
         },
       },

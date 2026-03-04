@@ -54,6 +54,7 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
       nick: options.nick ?? "testuser",
       mynick: options.mynick ?? "testbot",
       content: options.message,
+      isDirect: true,
     };
 
     const arc = message.arc;
@@ -67,10 +68,7 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
         message: message.content,
       },
       async () =>
-        await commandHandler.handleIncomingMessage(message, {
-          isDirect: true,
-          sendResponse,
-        }),
+        await commandHandler.handleIncomingMessage(message, { sendResponse }),
     );
 
     return {

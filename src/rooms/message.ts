@@ -8,7 +8,7 @@ export interface RoomMessage {
   content: string;
   /** Full original message before the bot-nick prefix was stripped (e.g. "MuaddibLLM: keeppandoraopen.org"). Set only when the bot was explicitly mentioned in a channel message and the mention was removed to produce `content`. Used for history storage and LLM context so the full intent is preserved. */
   originalContent?: string;
-  /** Whether the message is a direct command (mention, DM) vs passive channel noise. Stamped by the message handler from monitor-supplied options. */
+  /** Whether the message is a direct command (mention, DM) vs passive channel noise. Set at construction by the monitor. */
   isDirect?: boolean;
   platformId?: string;
   threadId?: string;

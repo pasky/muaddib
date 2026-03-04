@@ -92,13 +92,9 @@ export class RoomMessageHandler {
 
   async handleIncomingMessage(
     message: RoomMessage,
-    options: { isDirect: boolean; sendResponse?: SendResponse },
+    options?: { sendResponse?: SendResponse },
   ): Promise<void> {
-    // Stamp isDirect onto the message so it flows through steering closures
-    // without needing a separate parameter in steer functions and buffers.
-    message.isDirect = options.isDirect;
-
-    const sendResponse: SendResponse = options.sendResponse ?? (async () => {});
+    const sendResponse: SendResponse = options?.sendResponse ?? (async () => {});
     const key = sessionKey(message);
 
     // ── Active session steering fast-path ──

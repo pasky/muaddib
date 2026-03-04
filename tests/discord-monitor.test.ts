@@ -99,7 +99,7 @@ describe("DiscordRoomMonitor", () => {
     const history = createTempHistoryStore(20);
 
     let seenMessage = "";
-    let isDirect = false;
+    let isDirect: boolean | undefined = false;
     const sent: string[] = [];
 
     const monitor = new DiscordRoomMonitor({
@@ -113,8 +113,8 @@ describe("DiscordRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async (message, options) => {
           seenMessage = message.content;
-          isDirect = options.isDirect;
-          await options.sendResponse?.("ok");
+          isDirect = message.isDirect;
+          await options?.sendResponse?.("ok");
         },
       },
     });
@@ -156,7 +156,7 @@ describe("DiscordRoomMonitor", () => {
       },
       commandHandler: {
         handleIncomingMessage: async (_message, options) => {
-          await options.sendResponse?.("ok");
+          await options?.sendResponse?.("ok");
         },
       },
     });
@@ -352,7 +352,7 @@ describe("DiscordRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async (message, options) => {
           seenThreadId = message.threadId;
-          await options.sendResponse?.("ok");
+          await options?.sendResponse?.("ok");
         },
       },
     });
@@ -406,8 +406,8 @@ describe("DiscordRoomMonitor", () => {
       },
       commandHandler: {
         handleIncomingMessage: async (_message, options) => {
-          await options.sendResponse?.("first");
-          await options.sendResponse?.("second");
+          await options?.sendResponse?.("first");
+          await options?.sendResponse?.("second");
         },
       },
     });
@@ -462,8 +462,8 @@ describe("DiscordRoomMonitor", () => {
       },
       commandHandler: {
         handleIncomingMessage: async (_message, options) => {
-          await options.sendResponse?.("first");
-          await options.sendResponse?.("second");
+          await options?.sendResponse?.("first");
+          await options?.sendResponse?.("second");
         },
       },
     });
@@ -543,15 +543,14 @@ describe("DiscordRoomMonitor", () => {
   it("passes passive messages with isDirect=false", async () => {
     const history = createTempHistoryStore(20);
 
-    let isDirect = true;
+    let isDirect: boolean | undefined = true;
 
     const monitor = new DiscordRoomMonitor({
       roomConfig: { enabled: true },
       history,
       commandHandler: {
-        handleIncomingMessage: async (_message, options) => {
-          isDirect = options.isDirect;
-
+        handleIncomingMessage: async (message) => {
+          isDirect = message.isDirect;
         },
       },
     });
@@ -596,7 +595,7 @@ describe("DiscordRoomMonitor", () => {
       },
       commandHandler: {
         handleIncomingMessage: async (_message, options) => {
-          await options.sendResponse?.("ok");
+          await options?.sendResponse?.("ok");
         },
       },
     });
@@ -637,7 +636,7 @@ describe("DiscordRoomMonitor", () => {
       },
       commandHandler: {
         handleIncomingMessage: async (_message, options) => {
-          await options.sendResponse?.("ok");
+          await options?.sendResponse?.("ok");
         },
       },
     });

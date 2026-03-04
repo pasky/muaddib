@@ -35,7 +35,7 @@ export interface IrcEventsClient {
 interface CommandLike {
   handleIncomingMessage(
     message: RoomMessage,
-    options: { isDirect: boolean; sendResponse?: (text: string) => Promise<void> },
+    options?: { sendResponse?: (text: string) => Promise<void> },
   ): Promise<void>;
   cancelProactive?(): void;
 }
@@ -119,10 +119,10 @@ export class IrcRoomMonitor {
             nick: "event",
             mynick,
             content,
+            isDirect: true,
           };
           const run = async (): Promise<void> => {
             await commandHandler.handleIncomingMessage(message, {
-              isDirect: true,
               sendResponse: async (text) => {
                 const responseText = monitor.responseCleaner(text, message.nick);
                 await varlinkSender.sendMessage(channelName, responseText, serverTag);
@@ -264,6 +264,7 @@ export class IrcRoomMonitor {
       nick: effectiveNick,
       mynick,
       content: isDirect ? cleanedMessage : normalizedMessage,
+      isDirect,
       // Preserve the full channel message (e.g. "MuaddibLLM: keeppandoraopen.org") for history
       // and LLM context; only set when the bot-nick prefix was actually stripped.
       originalContent: inputMatch ? normalizedMessage : undefined,
@@ -271,7 +272,6 @@ export class IrcRoomMonitor {
 
     const handleIncoming = async (): Promise<void> => {
       await this.options.commandHandler.handleIncomingMessage(roomMessage, {
-        isDirect,
         sendResponse: async (text) => {
           const responseText = this.responseCleaner(text, roomMessage.nick);
           await this.varlinkSender.sendMessage(channelName, responseText, server);
