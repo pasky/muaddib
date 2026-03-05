@@ -1129,7 +1129,7 @@ describe("RoomMessageHandler", () => {
     const history = createTempHistoryStore(40);
     await history.initialize();
 
-    const incoming = makeMessage("!s cheap response");
+    const incoming = makeMessage("!s cheap response", { isDirect: true });
     const sent: string[] = [];
 
     const handler = createHandler({
@@ -1145,7 +1145,6 @@ describe("RoomMessageHandler", () => {
     });
 
     await handler.handleIncomingMessage(incoming, {
-      isDirect: true,
       sendResponse: async (text) => {
         sent.push(text);
       },
