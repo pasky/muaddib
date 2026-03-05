@@ -12,7 +12,12 @@ import { readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { formatSkillsForPrompt, loadSkillsFromDir, type Skill } from "@mariozechner/pi-coding-agent";
+import {
+  formatSkillsForPrompt,
+  loadSkillsFromDir,
+  type ResourceDiagnostic,
+  type Skill,
+} from "@mariozechner/pi-coding-agent";
 
 import { getArcWorkspacePath, VM_SKILLS_BASE, VM_WORKSPACE_SKILLS_BASE } from "../gondolin/fs.js";
 
@@ -73,19 +78,31 @@ export function loadBundledSkills(): LoadedSkill[] {
  *
  * Returns `[]` if the directory doesn't exist.
  */
-export function loadWorkspaceSkills(arc: string): LoadedSkill[] {
+export interface WorkspaceSkillsResult {
+  skills: LoadedSkill[];
+  diagnostics: ResourceDiagnostic[];
+}
+
+export function loadWorkspaceSkills(arc: string): WorkspaceSkillsResult {
   const dir = join(getArcWorkspacePath(arc), "skills");
-  if (!existsSync(dir)) return [];
+  if (!existsSync(dir)) return { skills: [], diagnostics: [] };
 
   try {
-    const { skills } = loadSkillsFromDir({ dir, source: "workspace" });
-    return skills.map((skill) => ({
-      ...skill,
-      content: readFileSync(skill.filePath, "utf-8"),
-      filePath: `${VM_WORKSPACE_SKILLS_BASE}/${skill.name}/SKILL.md`,
-    }));
+    const { skills, diagnostics } = loadSkillsFromDir({ dir, source: "workspace" });
+    return {
+      skills: skills.map((skill) => ({
+        ...skill,
+        content: readFileSync(skill.filePath, "utf-8"),
+        filePath: `${VM_WORKSPACE_SKILLS_BASE}/${skill.name}/SKILL.md`,
+      })),
+      // Rewrite host paths to VM paths so the agent knows where to look.
+      diagnostics: diagnostics.map((d) => ({
+        ...d,
+        path: d.path ? `${VM_WORKSPACE_SKILLS_BASE}/${d.path.slice(dir.length + 1)}` : d.path,
+      })),
+    };
   } catch {
-    return [];
+    return { skills: [], diagnostics: [] };
   }
 }
 
@@ -97,6 +114,11 @@ export function loadWorkspaceSkills(arc: string): LoadedSkill[] {
  * each skill's `filePath` to the VM-local path, the `<location>` elements
  * point where the agent can actually read them inside the sandbox.
  */
-export function formatSkillsForVmPrompt(skills: LoadedSkill[]): string {
-  return formatSkillsForPrompt(skills);
+export function formatSkillsForVmPrompt(skills: LoadedSkill[], diagnostics: ResourceDiagnostic[] = []): string {
+  let output = formatSkillsForPrompt(skills);
+  if (diagnostics.length > 0) {
+    const lines = diagnostics.map((d) => `- ${d.path ?? "unknown"}: ${d.message}`);
+    output += "\n\nThe following workspace skills have issues and were not loaded. Consider fixing them when relevant:\n" + lines.join("\n");
+  }
+  return output;
 }

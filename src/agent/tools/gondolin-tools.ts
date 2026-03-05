@@ -125,9 +125,9 @@ function buildSystemPromptSuffix(
     : "";
 
   const skills = loadBundledSkills();
-  const workspaceSkills = loadWorkspaceSkills(arc);
+  const { skills: workspaceSkills, diagnostics: skillDiagnostics } = loadWorkspaceSkills(arc);
   const allSkills = [...skills, ...workspaceSkills];
-  const skillsSection = formatSkillsForVmPrompt(allSkills);
+  const skillsSection = formatSkillsForVmPrompt(allSkills, skillDiagnostics);
 
   const memoryContent = loadArcMemoryFile(arc);
   const memorySuffix = memoryContent.trim()

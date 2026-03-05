@@ -976,9 +976,9 @@ import { loadWorkspaceSkills } from "../src/agent/skills/load-skills.js";
 import { getArcWorkspacePath } from "../src/agent/gondolin/index.js";
 
 describe("loadWorkspaceSkills", () => {
-  it("returns empty array when skills directory does not exist", () => {
+  it("returns empty result when skills directory does not exist", () => {
     const result = loadWorkspaceSkills("nonexistent-ws-skills-arc");
-    expect(result).toEqual([]);
+    expect(result).toEqual({ skills: [], diagnostics: [] });
   });
 
   it("loads valid workspace skills and rewrites filePath", () => {
@@ -991,7 +991,7 @@ describe("loadWorkspaceSkills", () => {
       "---\nname: my-skill\ndescription: A test skill.\n---\nDo the thing.\n",
     );
 
-    const skills = loadWorkspaceSkills(arc);
+    const { skills } = loadWorkspaceSkills(arc);
     expect(skills).toHaveLength(1);
     expect(skills[0].name).toBe("my-skill");
     expect(skills[0].description).toBe("A test skill.");
@@ -999,13 +999,14 @@ describe("loadWorkspaceSkills", () => {
     expect(skills[0].content).toContain("Do the thing.");
   });
 
-  it("returns empty array when skills directory exists but is empty", () => {
+  it("returns empty result when skills directory exists but is empty", () => {
     const arc = "ws-skills-empty-arc";
     const workspacePath = getArcWorkspacePath(arc);
     mkdirSync(join(workspacePath, "skills"), { recursive: true });
 
-    const skills = loadWorkspaceSkills(arc);
+    const { skills, diagnostics } = loadWorkspaceSkills(arc);
     expect(skills).toEqual([]);
+    expect(diagnostics).toEqual([]);
   });
 });
 
