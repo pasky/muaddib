@@ -7,7 +7,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="MIT License"></a>
 </p>
 
-**Muaddib** is an AI assistant that's been built from the ground up *not* as a private single-user assistant (such as the amazing Clawdbot / Moltbot), but as a resilient entity operating in an inherently untrusted public environment (public IRC / Discord / Slack servers).
+**Muaddib** is an AI agent that's been built from the ground up *not* as a private single-user assistant (such as OpenClaw), but as a resilient entity operating in an inherently untrusted public environment (public IRC / Discord / Slack servers).
 
 What does it take to talk to many strangers?
 
@@ -15,9 +15,8 @@ What does it take to talk to many strangers?
 2. It has been optimized for high cost and token efficiency (using a variety of context engineering etc. techniques).
 3. It operates in "lurk" mode by default (rather than replying to everything, Muaddib replies when highlighted, but can also interject proactively when it seems useful).
 
-Other work-in-progress features are also going to be tailored to this scenario (e.g. per-user token usage tracking and limiting / billing, per-channel code secrets, ...).
-
 Of course, this means a tradeoff. Muaddib is not designed to sift through your email and manage your personal calendar!
+
 It is tailored for **public and team environments, where it's useful to have an AI agent as a "virtual teammate"** - both as an AI colleague in chat for public many-to-many collaboration, and allowing personal or per-channel contexts.
 
 ## Quick Demo
