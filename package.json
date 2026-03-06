@@ -24,7 +24,7 @@
     "LICENSE"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=20.6.0"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && cp src/agent/tools/artifact-viewer.html dist/agent/tools/artifact-viewer.html && for d in src/agent/skills/*/; do [ -f \"$d/SKILL.md\" ] && mkdir -p \"dist/agent/skills/$(basename \"$d\")\" && cp \"$d/SKILL.md\" \"dist/agent/skills/$(basename \"$d\")/\"; done && printf '# Overrides dist/.gitignore so npm publish includes dist/\\n*.whl\\n*.tar.gz\\n' > dist/.npmignore",
@@ -61,9 +61,9 @@
   },
   "dependencies": {
     "@earendil-works/gondolin": "^0.5.0",
-    "@mariozechner/pi-agent-core": "^0.55.4",
-    "@mariozechner/pi-ai": "^0.55.4",
-    "@mariozechner/pi-coding-agent": "^0.55.4",
+    "@mariozechner/pi-agent-core": "^0.56.2",
+    "@mariozechner/pi-ai": "^0.56.2",
+    "@mariozechner/pi-coding-agent": "^0.56.2",
     "@sinclair/typebox": "^0.34.48",
     "@slack/bolt": "^4.6.0",
     "croner": "^10.0.1",

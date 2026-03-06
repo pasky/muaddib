@@ -11,13 +11,13 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type {
-  AssistantMessage,
-  AssistantMessageEventStream,
-  ToolCall,
-  Usage,
+import {
+  createAssistantMessageEventStream,
+  type AssistantMessage,
+  type AssistantMessageEventStream,
+  type ToolCall,
+  type Usage,
 } from "@mariozechner/pi-ai";
-import { createAssistantMessageEventStream } from "@mariozechner/pi-ai/dist/utils/event-stream.js";
 
 import { AuthStorage, type ApiKeyCredential } from "@mariozechner/pi-coding-agent";
 import { RuntimeLogWriter } from "../../src/app/logging.js";
