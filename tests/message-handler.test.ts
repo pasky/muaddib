@@ -898,6 +898,84 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("sends user-visible warning when steering an explicit cross-mode command into an active session", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const firstStarted = createDeferred<void>();
+    const releaseFirst = createDeferred<void>();
+
+    const steerCalls: any[] = [];
+    const mockAgent = {
+      steer: (msg: any) => { steerCalls.push(msg); },
+    };
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: (input) => ({
+        prompt: async () => {
+          input.onAgentCreated?.(mockAgent as any);
+          firstStarted.resolve();
+          await releaseFirst.promise;
+          const result = makeRunnerResult("done");
+          await input.onResponse(result.text);
+          return result;
+        },
+      }),
+    });
+
+    const sent: string[] = [];
+
+    // Start a session in serious mode (!s)
+    const t1 = handler.handleIncomingMessage(makeMessage("!s first", { isDirect: true }), {
+      sendResponse: async (text) => { sent.push(text); },
+    });
+
+    await firstStarted.promise;
+
+    const crossModeSent: string[] = [];
+    const sameModeSent: string[] = [];
+    const plainSent: string[] = [];
+
+    // Send a follow-up in a DIFFERENT mode (!d = sarcastic) — should warn
+    await handler.handleIncomingMessage(
+      makeMessage("!d cross-mode thought", { isDirect: true }),
+      { sendResponse: async (text) => { crossModeSent.push(text); } },
+    );
+
+    // Send a follow-up in the SAME mode (!a = serious) — should NOT warn
+    await handler.handleIncomingMessage(
+      makeMessage("!a same-mode thought", { isDirect: true }),
+      { sendResponse: async (text) => { sameModeSent.push(text); } },
+    );
+
+    // Send a follow-up with no mode token — should NOT warn
+    await handler.handleIncomingMessage(
+      makeMessage("plain follow-up", { isDirect: true }),
+      { sendResponse: async (text) => { plainSent.push(text); } },
+    );
+
+    releaseFirst.resolve();
+    await t1;
+
+    // All three follow-ups should have been steered
+    expect(steerCalls).toHaveLength(3);
+
+    // Cross-mode steering sends a user-visible warning via sendResponse
+    expect(crossModeSent).toHaveLength(1);
+    expect(crossModeSent[0]).toContain("!d ignored");
+    expect(crossModeSent[0]).toContain("serious session");
+    expect(crossModeSent[0]).toContain("!c");
+
+    // Same-mode and plain follow-ups produce no warning
+    expect(sameModeSent).toHaveLength(0);
+    expect(plainSent).toHaveLength(0);
+
+    await history.close();
+  });
+
   it("returns help text for !h", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();

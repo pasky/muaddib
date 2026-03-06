@@ -55,8 +55,8 @@ export class RoomMessageHandler {
   private readonly history: ChatHistoryStore;
   private readonly logger: CommandExecutorLogger;
 
-  /** Active steering functions keyed by session key. */
-  private readonly activeSteers = new Map<string, (message: RoomMessage) => void>();
+  /** Active steering functions keyed by session key, with the session's resolved mode. */
+  private readonly activeSteers = new Map<string, { steer: (message: RoomMessage) => void; modeKey: string | null }>();
 
   constructor(
     runtime: MuaddibRuntime,
@@ -102,14 +102,18 @@ export class RoomMessageHandler {
     // this, the addMessage await creates a gap during which the session can
     // complete and remove itself from activeSteers, causing later routing to
     // miss it.
-    const existingSteer = this.activeSteers.get(key);
+    const existingEntry = this.activeSteers.get(key);
     let breakingActiveSession = false;
 
-    if (existingSteer) {
+    if (existingEntry) {
       if (!message.isDirect || !this.resolver.shouldBreakActiveSession(message)) {
+        // Warn when an explicitly !-prefixed command is steered into a session
+        // running in a different mode (the mode token is effectively ignored).
+        this.warnOnModeMismatch(message, existingEntry.modeKey, sendResponse);
+
         // Regular follow-up (mode tokens, plain messages, passives) — steer
         // into the active session without blocking on history persistence.
-        existingSteer(message);
+        existingEntry.steer(message);
         this.history.addMessage(message).catch((err) => {
           this.logger.error("Failed to persist steered message to history", String(err));
         });
@@ -177,10 +181,18 @@ export class RoomMessageHandler {
   ): Promise<void> {
     const key = sessionKey(message);
 
+    // Resolve the mode for this session so we can detect cross-mode steering.
+    const parsed = this.resolver.parsePrefix(message.content);
+    let sessionModeKey: string | null = null;
+    if (parsed.modeToken && !parsed.error && parsed.modeToken !== "!h") {
+      const { modeKey } = this.resolver.runtimeForTrigger(parsed.modeToken);
+      sessionModeKey = modeKey;
+    }
+
     // Register a buffering steer function immediately so messages arriving
     // before the agent is created are captured and flushed once it's ready.
     const pending: RoomMessage[] = [];
-    this.activeSteers.set(key, (msg) => { pending.push(msg); });
+    this.activeSteers.set(key, { steer: (msg) => { pending.push(msg); }, modeKey: sessionModeKey });
 
     try {
       await this.executor.execute(
@@ -191,7 +203,7 @@ export class RoomMessageHandler {
             this.steerAgent(agent, buffered);
           }
           pending.length = 0;
-          this.activeSteers.set(key, (msg) => { this.steerAgent(agent, msg); });
+          this.activeSteers.set(key, { steer: (msg) => { this.steerAgent(agent, msg); }, modeKey: sessionModeKey });
         },
         () => {
           // Deregister steering as soon as the response is delivered, before
@@ -226,6 +238,24 @@ export class RoomMessageHandler {
       `nick=${message.nick}`,
       `content=${message.content}`,
     );
+  }
+
+  /**
+   * Send a user-visible warning when a message with an explicit !-prefixed
+   * mode token is steered into a session running in a different mode.
+   * The mode token is effectively ignored and the user should know.
+   */
+  private warnOnModeMismatch(message: RoomMessage, sessionModeKey: string | null, sendResponse: SendResponse): void {
+    const parsed = this.resolver.parsePrefix(message.content);
+    if (!parsed.modeToken || parsed.error) return;
+
+    const incomingModeKey = this.resolver.runtimeForTrigger(parsed.modeToken).modeKey;
+    if (incomingModeKey === sessionModeKey) return;
+
+    const warning = `${message.nick}: (warning: ${parsed.modeToken} ignored, follow-up steered into active ${sessionModeKey ?? "unknown"} session. !c / @-model would start a new session.)`;
+    sendResponse(warning).catch((err) => {
+      this.logger.error("Failed to send cross-mode steering warning", String(err));
+    });
   }
 
   /** Check if any command session is active for the given channel arc (serverTag#channelName). */
