@@ -93,26 +93,38 @@ All muaddib data lives in `$MUADDIB_HOME` (defaults to `~/.muaddib/`):
 
 ### Installation
 
+Muaddib vendors its Pi SDK source as the `pi/` git submodule, tracking the fork at `git@github.com:pasky/pi-mono.git`.
+After cloning, initialize it before installing dependencies:
+
+```bash
+git submodule update --init --recursive
+```
+
+`npm install` / `npm ci` will then build and relink the local Pi packages automatically, so Muaddib runs against the checked-out fork rather than the published registry packages.
+
 Recommended for Discord:
 1. Follow [Discord setup instructions](docs/discord.md) to create a bot account and obtain a token. Set it in `~/.muaddib/auth.json` as the `discord` key.
-2. Install dependencies: `npm ci`
-3. Build runtime: `npm run build`
-4. Run the service: `npm run start`
+2. Initialize the Pi submodule: `git submodule update --init --recursive`
+3. Install dependencies: `npm ci`
+4. Build runtime: `npm run build`
+5. Run the service: `npm run start`
 
 Recommended for Slack:
 1. Follow [Slack setup instructions](docs/slack.md) to create a Slack app, enable Socket Mode, and obtain tokens.
 2. Set the Slack config block in `~/.muaddib/config.json` and tokens in `~/.muaddib/auth.json`.
-3. Install dependencies: `npm ci`
-4. Build runtime: `npm run build`
-5. Run the service: `npm run start`
+3. Initialize the Pi submodule: `git submodule update --init --recursive`
+4. Install dependencies: `npm ci`
+5. Build runtime: `npm run build`
+6. Run the service: `npm run start`
 
 Recommended for an IRC bot: See [Docker instructions](docs/docker.md) for running a Muaddib service + irssi in tandem in a Docker compose setup.
 
 Manual for IRC ("bring your own irssi"):
 1. Ensure `irssi-varlink` is loaded in your irssi, and your varlink path is set up properly in `~/.muaddib/config.json` IRC section.
-2. Install dependencies: `npm ci`
-3. Build runtime: `npm run build`
-4. Run the service: `npm run start`
+2. Initialize the Pi submodule: `git submodule update --init --recursive`
+3. Install dependencies: `npm ci`
+4. Build runtime: `npm run build`
+5. Run the service: `npm run start`
 
 ### Gondolin Sandbox Image
 
@@ -137,13 +149,19 @@ The 1 GB rootfs gives the agent room to `apk add` or `pip install` further packa
 
 ## Architecture
 
-Muaddib is built on the [`pi-coding-agent`](https://github.com/badlogic/pi-mono) SDK (`@mariozechner/pi-agent-core` and `@mariozechner/pi-ai`) for its agent runtime, but defines its own complete tool set (code execution, web search, artifacts, etc.) — pi's built-in tools are not used.
+Muaddib is built on the [`pi-coding-agent`](https://github.com/badlogic/pi-mono) SDK (`@mariozechner/pi-agent-core` and `@mariozechner/pi-ai`) for its agent runtime, but defines its own complete tool set (code execution, web search, artifacts, etc.) — pi's built-in tools are not used. The SDK source lives in the `pi/` submodule, tracking `git@github.com:pasky/pi-mono.git`, and local installs link Muaddib against that checkout.
 
 ## Development
 
 ```bash
-# Install dependencies
+# Initialize/update the local Pi fork checkout
+git submodule update --init --recursive
+
+# Install dependencies (also builds + links the local pi/ checkout)
 npm ci
+
+# If you change code under pi/, rebuild and relink it into Muaddib
+npm run pi:sync
 
 # Typecheck + tests
 npm run typecheck

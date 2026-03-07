@@ -28,6 +28,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && cp src/agent/tools/artifact-viewer.html dist/agent/tools/artifact-viewer.html && for d in src/agent/skills/*/; do [ -f \"$d/SKILL.md\" ] && mkdir -p \"dist/agent/skills/$(basename \"$d\")\" && cp \"$d/SKILL.md\" \"dist/agent/skills/$(basename \"$d\")/\"; done && printf '# Overrides dist/.gitignore so npm publish includes dist/\\n*.whl\\n*.tar.gz\\n' > dist/.npmignore",
+    "pi:sync": "./scripts/sync-pi-submodule.sh",
+    "postinstall": "./scripts/sync-pi-submodule.sh",
     "prepublishOnly": "npm run build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint \"{src,tests,scripts}/**/*.ts\"",

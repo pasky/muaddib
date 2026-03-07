@@ -1,0 +1,5 @@
+[submodule "pi"]
+	path = pi
+	url = git@github.com:pasky/pi-mono.git
+	branch = main
+	ignore = dirty
