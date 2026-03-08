@@ -243,7 +243,7 @@ describe("oracle executor with invocation context", () => {
     // oracle and deep_research are excluded to prevent recursion
   });
 
-  it("passes conversation context and thinkingLevel high to SessionRunner.prompt", async () => {
+  it("passes conversation context and configured thinkingLevel to SessionRunner.prompt", async () => {
     oracleMock.promptFn.mockResolvedValue({ text: "deep answer", stopReason: "stop", usage: {} });
 
     const context = [
@@ -252,7 +252,7 @@ describe("oracle executor with invocation context", () => {
     ];
 
     const executor = createDefaultOracleExecutor(
-      { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }, logger: { info: vi.fn() } },
+      { toolsConfig: { oracle: { model: "openai:gpt-4o-mini", thinkingLevel: "medium" } }, logger: { info: vi.fn() } },
       {
         conversationContext: context,
         toolOptions: {},
@@ -264,8 +264,23 @@ describe("oracle executor with invocation context", () => {
 
     expect(oracleMock.promptFn).toHaveBeenCalledWith("analyze this", {
       contextMessages: context,
-      thinkingLevel: "high",
+      thinkingLevel: "medium",
     });
+  });
+
+  it("fails fast on invalid configured thinkingLevel", async () => {
+    const executor = createDefaultOracleExecutor(
+      { toolsConfig: { oracle: { model: "openai:gpt-4o-mini", thinkingLevel: "turbo" as any } }, logger: { info: vi.fn() } },
+      {
+        conversationContext: [],
+        toolOptions: {},
+        buildTools: () => ({ tools: [], dispose: undefined }),
+      },
+    );
+
+    await expect(executor({ query: "analyze this" })).rejects.toThrow(
+      "Invalid tools.oracle.thinkingLevel 'turbo'. Valid values: off, minimal, low, medium, high, xhigh",
+    );
   });
 
   it("logs CONSULTING ORACLE on entry and Oracle response on success", async () => {

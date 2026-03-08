@@ -1,12 +1,13 @@
+import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
+import type { Message } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
 
+import { iterationsToSessionLimits } from "../../config/muaddib-config.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
+import { stringifyError, toConfiguredString } from "../../utils/index.js";
+import type { RunnerLogger } from "../session-factory.js";
 import { SessionRunner } from "../session-runner.js";
 import type { MuaddibTool, ToolContext, ToolSet } from "./types.js";
-import type { Message } from "@mariozechner/pi-ai";
-import type { RunnerLogger } from "../session-factory.js";
-import { stringifyError, toConfiguredString } from "../../utils/index.js";
-import { iterationsToSessionLimits } from "../../config/muaddib-config.js";
 
 export interface OracleInput {
   query: string;
@@ -27,6 +28,19 @@ export const ORACLE_EXCLUDED_TOOLS = new Set([
 ]);
 
 const ORACLE_LOG_SEPARATOR = "----------------------------------------------";
+const VALID_ORACLE_THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh"]);
+
+function getOracleThinkingLevel(value: unknown): ThinkingLevel {
+  if (value === undefined) {
+    return "high";
+  }
+  if (typeof value === "string" && VALID_ORACLE_THINKING_LEVELS.has(value as ThinkingLevel)) {
+    return value as ThinkingLevel;
+  }
+  throw new Error(
+    `Invalid tools.oracle.thinkingLevel '${String(value)}'. Valid values: ${[...VALID_ORACLE_THINKING_LEVELS].join(", ")}`,
+  );
+}
 
 export function createOracleTool(executors: { oracle: OracleExecutor }, modelId?: string): MuaddibTool {
   const modelClause = modelId ? ` (${modelId})` : "";
@@ -99,6 +113,7 @@ export function createDefaultOracleExecutor(
     }
 
     const systemPrompt = toConfiguredString(options.toolsConfig?.oracle?.prompt) ?? DEFAULT_ORACLE_SYSTEM_PROMPT;
+    const thinkingLevel = getOracleThinkingLevel(options.toolsConfig?.oracle?.thinkingLevel);
 
     // Build tools independently (like Python's get_tools_for_arc + EXCLUDED_TOOLS filter).
     // The returned ToolSet includes a dispose() that SessionRunner calls on session end,
@@ -126,7 +141,7 @@ export function createDefaultOracleExecutor(
     try {
       const result = await runner.prompt(query, {
         contextMessages: invocation?.conversationContext,
-        thinkingLevel: "high",
+        thinkingLevel,
       });
       logger.info(`${ORACLE_LOG_SEPARATOR} Oracle response: ${result.text.slice(0, 500)}...`);
       return result.text;

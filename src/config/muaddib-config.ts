@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
+
 import { getMuaddibHome, resolveMuaddibPath } from "./paths.js";
 
 // ── Config interfaces (camelCase) ──────────────────────────────────────
@@ -13,6 +15,7 @@ export interface ArtifactsConfig {
 export interface OracleConfig {
   model?: string;
   prompt?: string;
+  thinkingLevel?: ThinkingLevel;
   maxIterations?: number;
 }
 
