@@ -1,0 +1,61 @@
+# Slack App Manifest for Muaddib
+#
+# Usage:
+#   1. Go to https://api.slack.com/apps
+#   2. Click "Create New App" → "From an app manifest"
+#   3. Select your workspace
+#   4. Paste this YAML (or switch to YAML tab and paste)
+#   5. Review and create
+#   6. After creation, enable Socket Mode and generate the App Token (xapp-...)
+#   7. Install to workspace and copy the Bot Token (xoxb-...)
+#
+# Customize display_name / description / long_description as needed.
+
+display_information:
+  name: Muaddib
+  description: Agentic AI chat assistant
+  long_description: |
+    Muaddib is an AI-powered chat assistant that is designed as a virtual
+    team-mate - it maintains persistent isolated workspaces and can browse
+    the web, execute code, etc. ... ...
+  background_color: "#2c2d30"
+
+features:
+  app_home:
+    home_tab_enabled: false
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+  bot_user:
+    display_name: Muaddib
+    always_online: true
+
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - assistant:write
+      - channels:history
+      - channels:read
+      - chat:write
+      - files:read
+      - groups:history
+      - groups:read
+      - im:history
+      - im:read
+      - mpim:history
+      - mpim:read
+      - users:read
+
+settings:
+  event_subscriptions:
+    bot_events:
+      - app_mention
+      - message.channels
+      - message.groups
+      - message.im
+      - message.mpim
+  interactivity:
+    is_enabled: false
+  org_deploy_enabled: false
+  socket_mode_enabled: true
+  token_rotation_enabled: false
