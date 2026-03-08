@@ -25,33 +25,43 @@ This sets up everything in one shot: bot user, OAuth scopes, event subscriptions
 5. Copy the **Bot User OAuth Token** (`xoxb-...`).
 
 ## 3) Configure Muaddib
-Edit `~/.muaddib/config.json` (or `$MUADDIB_HOME/config.json`) and add/enable the Slack block under `rooms`:
+Edit `~/.muaddib/config.json` (or `$MUADDIB_HOME/config.json`) and add/enable the Slack block under `rooms`.
+`config.json` now contains **no Slack secrets**:
 
 ```json
 "slack": {
   "enabled": true,
-  "app_token": "xapp-...",
   "workspaces": {
     "T123": {
-      "name": "AmazingB2BSaaS",
-      "bot_token": "xoxb-..."
+      "name": "AmazingB2BSaaS"
     }
   },
-  "reply_start_thread": {
+  "replyStartThread": {
     "channel": true,
     "dm": false
   },
   "command": {
-    "history_size": 20,
-    "response_max_chars": 1600,
+    "historySize": 40,
+    "responseMaxBytes": 2600,
     "debounce": 3
   }
 }
 ```
 
+Then add the Slack tokens to `~/.muaddib/auth.json` (or `$MUADDIB_HOME/auth.json`):
+
+```json
+{
+  "slack-app": { "type": "api_key", "key": "xapp-..." },
+  "slack-T123": { "type": "api_key", "key": "xoxb-..." }
+}
+```
+
 Notes:
 - `T123` is the Slack **Team ID** for your workspace. If it's not shown in Workspace Settings, you can grab it from the URL when Slack is open in a browser (`https://app.slack.com/client/T123/...`).
-- Slack uses **two tokens**: `xapp-` for Socket Mode connection and `xoxb-` for Web API calls.
+- `slack-app` stores the `xapp-...` app token used for Socket Mode.
+- `slack-T123` stores the `xoxb-...` bot token for workspace `T123`. If you connect multiple workspaces, add one `slack-<workspaceId>` entry per workspace.
+- If you are upgrading from an older Muaddib version, move any `app_token` / `bot_token` values out of `config.json` and into `auth.json` (or run `npx tsx scripts/migrate-auth.ts`).
 - The Slack frontend reuses IRC command prompt/model configuration verbatim.
 
 ## 4) Run Muaddib
@@ -70,4 +80,4 @@ The bot should reply in a thread (by default) or in channel based on configurati
 ## Troubleshooting
 - **No response**: confirm Socket Mode is enabled and the app is running.
 - **Permission errors**: ensure the scopes above are granted and the app is installed.
-- **Token errors**: verify `xapp-` and `xoxb-` tokens and restart the app.
+- **Token errors**: verify `slack-app` and `slack-<workspaceId>` entries in `auth.json`, then restart the app.

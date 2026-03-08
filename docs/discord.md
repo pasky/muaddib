@@ -40,23 +40,33 @@ Muaddib needs message content to detect @mentions.
 5. Select your server and authorize the bot.
 
 ## 6) Configure Muaddib
-Edit `~/.muaddib/config.json` (or `$MUADDIB_HOME/config.json`) and add/enable the Discord block under `rooms`:
+Edit `~/.muaddib/config.json` (or `$MUADDIB_HOME/config.json`) and add/enable the Discord block under `rooms`.
+`config.json` now contains **no Discord secrets**:
 
 ```json
 "discord": {
   "enabled": true,
-  "token": "YOUR_DISCORD_BOT_TOKEN",
+  "replyEditDebounceSeconds": 30.0,
   "command": {
-    "history_size": 40,
-    "rate_limit": 30,
-    "rate_period": 900
+    "historySize": 40,
+    "responseMaxBytes": 1600,
+    "debounce": 3
   }
+}
+```
+
+Then add the bot token to `~/.muaddib/auth.json` (or `$MUADDIB_HOME/auth.json`):
+
+```json
+{
+  "discord": { "type": "api_key", "key": "YOUR_DISCORD_BOT_TOKEN" }
 }
 ```
 
 Notes:
 - The Discord frontend reuses the IRC serious-mode prompt/model configuration.
 - All channels are enabled by default. The bot will only respond to @mentions or DMs.
+- If you are upgrading from an older Muaddib version, move any `rooms.discord.token` value out of `config.json` and into `auth.json` (or run `npx tsx scripts/migrate-auth.ts`).
 
 ## 7) Run Muaddib
 ```bash
@@ -74,4 +84,4 @@ The bot should reply to your message.
 ## Troubleshooting
 - **No response**: confirm the bot is online and Message Content Intent is enabled.
 - **Permission errors**: ensure the bot has the listed permissions in the channel.
-- **Token errors**: verify you pasted the correct token and restarted the app.
+- **Token errors**: verify the `discord` entry in `auth.json`, then restart the app.
