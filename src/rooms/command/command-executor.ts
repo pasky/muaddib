@@ -928,11 +928,15 @@ function resolveConfigModelSpec(
     return undefined;
   }
 
-  if (typeof raw !== "string" || raw.trim().length === 0) {
-    throw new Error(`${configKey} must be a non-empty string fully qualified as provider:model.`);
+  if (typeof raw !== "string") {
+    throw new Error(`${configKey} must be a string fully qualified as provider:model (or "" to disable).`);
   }
 
   const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+
   const spec = parseModelSpec(trimmed);
   return `${spec.provider}:${spec.modelId}`;
 }

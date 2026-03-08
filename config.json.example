@@ -2,6 +2,7 @@
   "_comment": "Configuration (no secrets). API keys go in auth.json — see auth.json.example.",
 
   "agent": {
+    "_comment": "Set refusalFallbackModel to \"\" to disable refusal fallback.",
     "refusalFallbackModel": "deepseek:deepseek-reasoner",
     "sessionLimits": {
       "maxContextLength": 100000,

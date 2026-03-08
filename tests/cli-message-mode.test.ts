@@ -290,6 +290,87 @@ describe("runCliMessageMode", () => {
     );
   });
 
+  it("accepts empty agent.refusalFallbackModel to disable refusal fallback", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "muaddib-cli-"));
+    tempDirs.push(dir);
+
+    const configPath = join(dir, "config.json");
+    const config = {
+      agent: {
+        refusalFallbackModel: "",
+      },
+      rooms: {
+        common: {
+          command: {
+            historySize: 40,
+            defaultMode: "classifier:serious",
+            modes: {
+              serious: {
+                model: "openai:gpt-4o-mini",
+                prompt: "You are {mynick}",
+                triggers: {
+                  "!s": {},
+                },
+              },
+            },
+            modeClassifier: {
+              model: "openai:gpt-4o-mini",
+              labels: {
+                EASY_SERIOUS: "!s",
+              },
+              fallbackLabel: "EASY_SERIOUS",
+            },
+          },
+        },
+      },
+    };
+
+    await writeFile(configPath, JSON.stringify(config), "utf-8");
+
+    const result = await runCliMessageMode({
+      configPath,
+      message: "!s hi",
+      runnerFactory: (input) => ({
+        prompt: async (_prompt, options) => {
+          expect(options?.refusalFallbackModel).toBeUndefined();
+          await input.onResponse("cli ok");
+          return {
+            assistantMessage: {
+              role: "assistant",
+              content: [{ type: "text", text: "cli ok" }],
+              api: "openai-completions",
+              provider: "openai",
+              model: "gpt-4o-mini",
+              usage: {
+                input: 1,
+                output: 1,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 2,
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+              },
+              stopReason: "stop",
+              timestamp: Date.now(),
+            },
+            text: "cli ok",
+            stopReason: "stop",
+            peakTurnInput: 1,
+            usage: {
+              input: 1,
+              output: 1,
+              cacheRead: 0,
+              cacheWrite: 0,
+              totalTokens: 2,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+            },
+          };
+        },
+      }),
+    });
+
+    expect(result.response).toBe("cli ok");
+  });
+
   it("accepts agent.refusalFallbackModel with deepseek provider", async () => {
     const dir = await mkdtemp(join(tmpdir(), "muaddib-cli-"));
     tempDirs.push(dir);

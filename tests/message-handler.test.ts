@@ -1450,6 +1450,38 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("treats empty agent.refusalFallbackModel as disabled", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const incoming = makeMessage("!s no refusal fallback");
+    let promptRefusalFallbackModel: string | undefined;
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      configData: { agent: { refusalFallbackModel: "" } },
+      runnerFactory: (input) => ({
+        prompt: async (_prompt, options) => {
+          promptRefusalFallbackModel = options?.refusalFallbackModel;
+          const result = makeRunnerResult("done");
+          await input.onResponse(result.text);
+          return result;
+        },
+      }),
+    });
+
+    const sent: string[] = [];
+    incoming.isDirect = true;
+    await handler.handleIncomingMessage(incoming, { sendResponse: async (text) => { sent.push(text); } });
+
+    expect(sent[0]).toBe("done");
+    expect(promptRefusalFallbackModel).toBeUndefined();
+
+    await history.close();
+  });
+
   it("retries on explicit refusal text with agent.refusalFallbackModel and persists fallback model usage", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();
