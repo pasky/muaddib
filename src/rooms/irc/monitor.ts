@@ -3,10 +3,11 @@ import type { RoomConfig } from "../../config/muaddib-config.js";
 import { CONSOLE_LOGGER, RuntimeLogWriter, type Logger } from "../../app/logging.js";
 import { escapeRegExp, requireNonEmptyString, sleep } from "../../utils/index.js";
 import type { MuaddibRuntime } from "../../runtime.js";
-import { buildArc, type RoomMessage } from "../message.js";
 import { RoomMessageHandler } from "../command/message-handler.js";
-import { VarlinkClient, VarlinkSender } from "./varlink.js";
+import { InFlightTaskSet } from "../in-flight-task-set.js";
+import { buildArc, type RoomMessage } from "../message.js";
 import type { RoomGateway } from "../room-gateway.js";
+import { VarlinkClient, VarlinkSender } from "./varlink.js";
 import type { ArcEventsWatcher } from "../../events/watcher.js";
 
 export interface IrcEvent {
@@ -162,7 +163,7 @@ export class IrcRoomMonitor {
     this.readyResolve?.();
     this.logger.info("Muaddib started, waiting for IRC events...");
 
-    const inFlightEvents = new Set<Promise<void>>();
+    const inFlightEvents = new InFlightTaskSet();
 
     while (true) {
       const response = await this.varlinkEvents.receiveResponse();
@@ -184,15 +185,11 @@ export class IrcRoomMonitor {
       const parameters = (response.parameters as Record<string, unknown> | undefined) ?? {};
       const event = parameters.event as IrcEvent | undefined;
       if (event) {
-        const task = this.processMessageEvent(event)
-          .catch((error) => {
+        inFlightEvents.add(
+          this.processMessageEvent(event).catch((error) => {
             this.logger.error("IRC monitor failed to process event; continuing", error);
-          })
-          .finally(() => {
-            inFlightEvents.delete(task);
-          });
-
-        inFlightEvents.add(task);
+          }),
+        );
       }
 
       if (response.error) {
@@ -203,9 +200,7 @@ export class IrcRoomMonitor {
 
     this.options.commandHandler.cancelProactive?.();
 
-    if (inFlightEvents.size > 0) {
-      await Promise.allSettled([...inFlightEvents]);
-    }
+    await inFlightEvents.waitForAll();
 
     await this.varlinkEvents.disconnect();
     await this.varlinkSender.disconnect();

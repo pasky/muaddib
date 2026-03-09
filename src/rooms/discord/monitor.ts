@@ -4,14 +4,15 @@ import { CONSOLE_LOGGER, RuntimeLogWriter, type Logger } from "../../app/logging
 import { appendAttachmentBlock, escapeRegExp, nowMonotonicSeconds, requireNonEmptyString, sleep, stripLeadingMention } from "../../utils/index.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import { RoomMessageHandler } from "../command/message-handler.js";
+import { InFlightTaskSet } from "../in-flight-task-set.js";
 import { type RoomMessage, buildArc } from "../message.js";
+import type { RoomGateway } from "../room-gateway.js";
 import {
   sendWithRetryResult,
   type SendRetryEvent,
   createSendRetryEventLogger,
 } from "../send-retry.js";
 import { DiscordGatewayTransport } from "./transport.js";
-import type { RoomGateway } from "../room-gateway.js";
 import type { ArcEventsWatcher } from "../../events/watcher.js";
 
 interface CommandLike {
@@ -208,6 +209,7 @@ export class DiscordRoomMonitor {
       while (true) {
         let eventSourceConnected = false;
         let senderConnected = false;
+        const inFlightEvents = new InFlightTaskSet();
 
         try {
           if (this.options.eventSource.connect) {
@@ -229,15 +231,14 @@ export class DiscordRoomMonitor {
               return;
             }
 
-            try {
-              if (isDiscordMessageEditEvent(event)) {
-                await this.processMessageEditEvent(event);
-              } else {
-                await this.processMessageEvent(event);
-              }
-            } catch (error) {
-              this.logger.error("Discord monitor failed to process event; continuing", error);
-            }
+            inFlightEvents.add(
+              (isDiscordMessageEditEvent(event)
+                ? this.processMessageEditEvent(event)
+                : this.processMessageEvent(event)
+              ).catch((error) => {
+                this.logger.error("Discord monitor failed to process event; continuing", error);
+              }),
+            );
           }
         } catch (error) {
           if (!(reconnect?.enabled ?? false)) {
@@ -256,6 +257,8 @@ export class DiscordRoomMonitor {
             error,
           );
         } finally {
+          await inFlightEvents.waitForAll();
+
           if (this.options.sender && !senderIsEventSource && senderConnected && this.options.sender.disconnect) {
             await this.options.sender.disconnect();
           }

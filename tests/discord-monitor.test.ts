@@ -10,7 +10,7 @@ import { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { DiscordRoomMonitor } from "../src/rooms/discord/monitor.js";
 import { DiscordGatewayTransport } from "../src/rooms/discord/transport.js";
 import { buildArc } from "../src/rooms/message.js";
-import { createTempHistoryStore } from "./test-helpers.js";
+import { createDeferred, createTempHistoryStore } from "./test-helpers.js";
 import { createTestRuntime } from "./test-runtime.js";
 
 function baseCommandConfig() {
@@ -926,6 +926,74 @@ describe("DiscordRoomMonitor", () => {
     expect(processed).toEqual(["first", "second"]);
     expect(connectCalls).toBe(1);
     expect(disconnectCalls).toBe(1);
+
+    await history.close();
+  });
+
+  it("dequeues later Discord events before earlier handlers finish and waits for in-flight work on shutdown", async () => {
+    const history = createTempHistoryStore(20);
+
+    const allowFirstMessageToFinish = createDeferred<void>();
+    const firstMessageStarted = createDeferred<void>();
+    const startedMessages: string[] = [];
+    let receiveEventCalls = 0;
+    let runFinished = false;
+
+    const monitor = new DiscordRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      eventSource: {
+        receiveEvent: async () => {
+          receiveEventCalls += 1;
+          if (receiveEventCalls === 1) {
+            return {
+              channelId: "chan-1",
+              username: "alice",
+              content: "muaddib: first",
+              mynick: "muaddib",
+              mentionsBot: true,
+            };
+          }
+
+          if (receiveEventCalls === 2) {
+            return {
+              channelId: "chan-1",
+              username: "alice",
+              content: "muaddib: second",
+              mynick: "muaddib",
+              mentionsBot: true,
+            };
+          }
+
+          return null;
+        },
+      },
+      commandHandler: {
+        handleIncomingMessage: async (message) => {
+          startedMessages.push(message.content);
+          if (message.content === "first") {
+            firstMessageStarted.resolve();
+            await allowFirstMessageToFinish.promise;
+          }
+        },
+      },
+    });
+
+    const runPromise = monitor.run().then(() => {
+      runFinished = true;
+    });
+
+    await firstMessageStarted.promise;
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(startedMessages).toEqual(["first", "second"]);
+    expect(receiveEventCalls).toBe(3);
+    expect(runFinished).toBe(false);
+
+    allowFirstMessageToFinish.resolve();
+    await runPromise;
+    expect(runFinished).toBe(true);
 
     await history.close();
   });
