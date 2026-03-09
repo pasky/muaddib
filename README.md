@@ -93,30 +93,31 @@ All muaddib data lives in `$MUADDIB_HOME` (defaults to `~/.muaddib/`):
 
 ### Installation
 
-Before using Muaddib's sandboxed read/write/edit/bash tools, install QEMU on the host:
+First, Muaddib runs agent code in isolated QEMU micro-VMs (Gondolin) - to set it up:
 
 ```bash
-# Debian/Ubuntu
-sudo apt install qemu-system qemu-utils
-
-# macOS
-brew install qemu
+sudo apt install qemu-system qemu-utils lz4
+./scripts/build-gondolin-image.sh
 ```
 
-If you see `spawnSync qemu-img ENOENT`, it means the `qemu-img` helper is missing - on Debian/Ubuntu that usually means `qemu-utils` is not installed.
+Next, combine one or more of the following:
 
-Recommended for Discord:
+#### Discord
+
 1. Follow [Discord setup instructions](docs/discord.md) to create a bot account and obtain a token. Set it in `~/.muaddib/auth.json` as the `discord` key.
 2. Install dependencies: `npm ci`
 3. Build runtime: `npm run build`
 4. Run the service: `npm run start`
 
-Recommended for Slack:
+#### Slack
+
 1. Follow [Slack setup instructions](docs/slack.md) to create a Slack app, enable Socket Mode, and obtain tokens.
 2. Set the Slack config block in `~/.muaddib/config.json` and tokens in `~/.muaddib/auth.json`.
 3. Install dependencies: `npm ci`
 4. Build runtime: `npm run build`
 5. Run the service: `npm run start`
+
+#### IRC
 
 Recommended for an IRC bot: See [Docker instructions](docs/docker.md) for running a Muaddib service + irssi in tandem in a Docker compose setup.
 
@@ -125,22 +126,6 @@ Manual for IRC ("bring your own irssi"):
 2. Install dependencies: `npm ci`
 3. Build runtime: `npm run build`
 4. Run the service: `npm run start`
-
-### Gondolin Sandbox Image
-
-Muaddib runs agent code in isolated QEMU micro-VMs (Gondolin).
-The default image downloaded by gondolin is a minimal Alpine Linux with basic utilities.
-For a more capable environment (Python 3 with pip/numpy/matplotlib, Node.js 24, npm, uv, 1 GB rootfs), build a custom image:
-
-```bash
-# Requires e2fsprogs (for mke2fs + debugfs) and either lz4 or python3-lz4:
-#   Debian/Ubuntu: sudo apt install e2fsprogs lz4
-#                  (python3-lz4 can substitute if lz4 CLI is unavailable)
-./scripts/build-gondolin-image.sh
-```
-
-The image is written to `$MUADDIB_HOME/gondolin-image/` and picked up automatically on next start.
-The 1 GB rootfs gives the agent room to `apk add` or `pip install` further packages; those changes persist across checkpoints within an arc.
 
 ### Commands
 
