@@ -762,6 +762,31 @@ describe("gondolin — maxConcurrentVms semaphore", () => {
     expect(getVmSlotState().active).toBe(0);
     expect(getVmSlotState().waiters).toBe(0);
   });
+
+  it("rewrites missing qemu-img errors with an installation hint", async () => {
+    const gondolin = await import("@earendil-works/gondolin");
+    const missingQemuImg = Object.assign(new Error("spawnSync qemu-img ENOENT"), {
+      code: "ENOENT",
+      path: "qemu-img",
+      syscall: "spawnSync qemu-img",
+    });
+    // @ts-expect-error test-only: make the next VM.create call fail
+    gondolin.VM.create.mockRejectedValueOnce(missingQemuImg);
+
+    const { tools } = createGondolinTools({
+      arc: "missing-qemu-img-arc",
+      config: { ...gondolinConfig, maxConcurrentVms: 1 },
+    });
+    const bash = tools.find((t) => t.name === "bash")!;
+
+    const result = bash.execute("id", { command: "echo hi" }, new AbortController().signal, () => {});
+
+    await expect(result).rejects.toThrow("Missing host dependency 'qemu-img'");
+    await expect(result).rejects.toThrow("qemu-utils");
+
+    expect(getVmSlotState().active).toBe(0);
+    expect(getVmSlotState().waiters).toBe(0);
+  });
 });
 
 // ── Bundled skills ─────────────────────────────────────────────────────────

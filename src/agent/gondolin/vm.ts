@@ -122,6 +122,25 @@ export function shQuote(value: string): string {
   return "'" + value.replace(/'/g, "'\\''") + "'";
 }
 
+function rewriteMissingQemuBinaryError(error: unknown): Error | null {
+  const code = typeof (error as { code?: unknown })?.code === "string"
+    ? (error as { code: string }).code
+    : undefined;
+  if (code !== "ENOENT") return null;
+
+  const path = typeof (error as { path?: unknown })?.path === "string"
+    ? (error as { path: string }).path
+    : undefined;
+  const message = error instanceof Error ? error.message : String(error);
+  const binary = path?.includes("qemu") ? path : message.match(/\b(qemu[\w.-]*)\b/)?.[1];
+  if (!binary) return null;
+
+  return new Error(
+    `Missing host dependency '${binary}' required by Muaddib's Gondolin sandbox. Install QEMU on the host (Debian/Ubuntu: sudo apt install qemu-system qemu-utils; macOS: brew install qemu) and ensure '${binary}' is on PATH.`,
+    { cause: error },
+  );
+}
+
 // ── VM creation ────────────────────────────────────────────────────────────
 
 async function ensureVm(
@@ -217,6 +236,10 @@ async function ensureVm(
       vmCache.set(arc, vm);
       slotAcquired = false; // slot is now owned by the VM lifetime, released on checkpoint/close
       return vm;
+    } catch (err) {
+      const rewrittenError = rewriteMissingQemuBinaryError(err);
+      if (rewrittenError) throw rewrittenError;
+      throw err;
     } finally {
       if (slotAcquired) {
         releaseVmSlot();

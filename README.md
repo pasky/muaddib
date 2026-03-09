@@ -93,6 +93,18 @@ All muaddib data lives in `$MUADDIB_HOME` (defaults to `~/.muaddib/`):
 
 ### Installation
 
+Before using Muaddib's sandboxed read/write/edit/bash tools, install QEMU on the host:
+
+```bash
+# Debian/Ubuntu
+sudo apt install qemu-system qemu-utils
+
+# macOS
+brew install qemu
+```
+
+If you see `spawnSync qemu-img ENOENT`, it means the `qemu-img` helper is missing - on Debian/Ubuntu that usually means `qemu-utils` is not installed.
+
 Recommended for Discord:
 1. Follow [Discord setup instructions](docs/discord.md) to create a bot account and obtain a token. Set it in `~/.muaddib/auth.json` as the `discord` key.
 2. Install dependencies: `npm ci`
