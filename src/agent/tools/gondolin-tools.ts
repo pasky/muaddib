@@ -141,7 +141,7 @@ function buildSystemPromptSuffix(
 
   return (
     `Filesystem: /workspace persists across sessions; ${sessionDir} is your ephemeral working directory (last 8 session dirs in /tmp/session-* are kept).` +
-    " Environment: Alpine Linux, uv venv is active." +
+    " Environment: Alpine Linux, uv venv is active (use `uv pip install` + `uv run`)." +
     arcSuffix +
     chatHistorySuffix +
     artifactsSuffix +

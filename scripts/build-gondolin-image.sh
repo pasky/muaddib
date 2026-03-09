@@ -4,7 +4,7 @@ set -euo pipefail
 # Build a custom Gondolin guest image for Muaddib.
 #
 # The image includes Python 3 (pip, numpy, matplotlib), Node.js, npm, uv,
-# Chromium, poppler-utils, jq, git, imagemagick, a uv venv (created on first boot),
+# Chromium, poppler-utils, jq, git, imagemagick, a uv venv with pip (created on first boot),
 # and a 4 GB rootfs so the agent has room to install additional packages at runtime.
 #
 # Alpine 3.23 ships Node.js 24 in its main repo, so no version manager is needed.
@@ -119,7 +119,7 @@ ARCH=$(node -e "console.log(process.arch === 'arm64' ? 'aarch64' : 'x86_64')")
 
 INIT_EXTRA=$(mktemp /tmp/gondolin-init-extra-XXXXXX.sh)
 cat > "$INIT_EXTRA" << 'INITEOF'
-[ -d /opt/venv ] || uv venv --system-site-packages /opt/venv
+[ -d /opt/venv ] || uv venv --system-site-packages --seed /opt/venv
 INITEOF
 
 BUILD_CONFIG=$(mktemp /tmp/gondolin-build-XXXXXX.json)
