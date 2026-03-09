@@ -306,6 +306,28 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("strips bare leading timestamp without angle-bracket nick (Slack/Discord echo)", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const incoming = makeMessage("!s hi o/");
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: makeRunner("[01:36] hey pasky, o/ what's up?"),
+    });
+
+    const sent: string[] = [];
+    incoming.isDirect = true;
+    await handler.handleIncomingMessage(incoming, { sendResponse: async (text) => { sent.push(text); } });
+
+    expect(sent[0]).toBe("hey pasky, o/ what's up?");
+
+    await history.close();
+  });
+
   it("logs direct command lifecycle to injected logger", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();

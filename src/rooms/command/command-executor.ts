@@ -957,9 +957,19 @@ const LEADING_IRC_CONTEXT_ECHO_PREFIX_RE = /^(?:\s*(?:\[[^\]]+\]\s*)?(?:![A-Za-z
  */
 const BARE_COMMAND_PREFIX_RE = /^![A-Za-z]\s+\S+[,:]\s*/u;
 
+/**
+ * Matches a bare leading timestamp the LLM may parrot from chat context, e.g. "[01:36] hey".
+ * In Slack/Discord contexts there are no `<nick>` angle brackets so the main regex won't
+ * consume the timestamp — this catches the standalone case.
+ */
+const BARE_LEADING_TIMESTAMP_RE = /^\[?\d{1,2}:\d{2}\]?\s+/u;
+
 /** Strip leading IRC context echo prefixes that LLMs sometimes parrot from conversation history. */
 function stripLeadingIrcContextEchoPrefixes(text: string): string {
-  return text.replace(LEADING_IRC_CONTEXT_ECHO_PREFIX_RE, "").replace(BARE_COMMAND_PREFIX_RE, "");
+  return text
+    .replace(LEADING_IRC_CONTEXT_ECHO_PREFIX_RE, "")
+    .replace(BARE_COMMAND_PREFIX_RE, "")
+    .replace(BARE_LEADING_TIMESTAMP_RE, "");
 }
 
 function isNullSentinel(text: string): boolean {
