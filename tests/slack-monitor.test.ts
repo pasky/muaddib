@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import type { ChatHistoryStore } from "../src/history/chat-history-store.js";
@@ -1130,6 +1130,72 @@ describe("SlackRoomMonitor", () => {
     expect(runFinished).toBe(true);
 
     await history.close();
+  });
+});
+
+describe("SlackSocketTransport debug logging", () => {
+  it("logs rich Slack payloads that would be dropped because they have no text/files", async () => {
+    const { SlackSocketTransport } = await import("../src/rooms/slack/transport.js");
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const transport = new SlackSocketTransport({
+      appToken: "xapp-test",
+      botToken: "xoxb-test",
+      workspaceId: "T123",
+      logger,
+    });
+
+    const result = await (transport as any).mapEvent({
+      channel: "C123",
+      user: "U123",
+      attachments: [{ text: "Forwarded message preview" }],
+      blocks: [{ type: "rich_text" }],
+    });
+
+    expect(result).toBeNull();
+    expect(logger.debug).toHaveBeenCalledWith(
+      "Slack message event contains rich payload but no mapped text/files; current mapper will drop it",
+      expect.objectContaining({
+        channelId: "C123",
+        userId: "U123",
+        hasText: false,
+        fileCount: 0,
+        attachmentCount: 1,
+        blockCount: 1,
+      }),
+    );
+  });
+
+  it("logs unsupported Slack message subtypes with the raw payload", async () => {
+    const { SlackSocketTransport } = await import("../src/rooms/slack/transport.js");
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const transport = new SlackSocketTransport({
+      appToken: "xapp-test",
+      botToken: "xoxb-test",
+      workspaceId: "T123",
+      logger,
+    });
+
+    const result = await (transport as any).mapEvent({
+      subtype: "thread_broadcast",
+      channel: "C123",
+      ts: "1700000000.1234",
+      user: "U123",
+      text: "Broadcast reply",
+    });
+
+    expect(result).toBeNull();
+    expect(logger.debug).toHaveBeenCalledWith(
+      "Skipping unsupported Slack message subtype",
+      expect.objectContaining({
+        subtype: "thread_broadcast",
+        channelId: "C123",
+        messageTs: "1700000000.1234",
+        event: expect.objectContaining({
+          subtype: "thread_broadcast",
+          text: "Broadcast reply",
+        }),
+      }),
+    );
   });
 });
 

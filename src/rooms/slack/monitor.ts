@@ -176,6 +176,7 @@ export class SlackRoomMonitor {
         workspaceId,
         workspaceName: workspaceConfig.name,
         botNameFallback: workspaceConfig.name,
+        logger: runtime.logger.getLogger(`muaddib.rooms.slack.transport.${workspaceId}`),
       });
 
       return { monitor: new SlackRoomMonitor({

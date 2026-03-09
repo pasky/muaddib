@@ -1,5 +1,6 @@
 import { App } from "@slack/bolt";
 
+import { NOOP_LOGGER, type Logger } from "../../app/logging.js";
 import { AsyncQueue } from "../../utils/async-queue.js";
 import { asRecord, escapeRegExp, normalizeName, stringifyError } from "../../utils/index.js";
 import type {
@@ -25,6 +26,7 @@ export interface SlackSocketTransportOptions {
   workspaceId: string;
   workspaceName?: string;
   botNameFallback?: string;
+  logger?: Logger;
 }
 
 const TYPING_LOADING_MESSAGES = [
@@ -39,6 +41,7 @@ const TYPING_LOADING_MESSAGES = [
  */
 export class SlackSocketTransport implements SlackEventSource, SlackSender {
   private readonly queue = new AsyncQueue<SlackIncomingEvent | SlackTransportSignal | null>();
+  private readonly logger: Logger;
   private app: App | null = null;
   private connected = false;
   private botUserId: string | null = null;
@@ -47,7 +50,9 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
   private readonly userIdByDisplayNameCache = new Map<string, string>();
   private readonly channelNameCache = new Map<string, string>();
 
-  constructor(private readonly options: SlackSocketTransportOptions) {}
+  constructor(private readonly options: SlackSocketTransportOptions) {
+    this.logger = options.logger ?? NOOP_LOGGER;
+  }
 
   private getApp(): App {
     if (!this.app) {
@@ -275,6 +280,12 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
     }
 
     if (subtype && subtype !== "file_share" && subtype !== "me_message") {
+      this.logger.debug("Skipping unsupported Slack message subtype", {
+        subtype,
+        channelId: typeof event.channel === "string" ? event.channel : undefined,
+        messageTs: typeof event.ts === "string" ? event.ts : undefined,
+        event,
+      });
       return null;
     }
 
@@ -286,6 +297,26 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
     const channelId = typeof event.channel === "string" ? event.channel : "";
     const userId = typeof event.user === "string" ? event.user : "";
     const files = mapSlackFiles(event.files);
+    const attachmentCount = Array.isArray(event.attachments) ? event.attachments.length : 0;
+    const blockCount = Array.isArray(event.blocks) ? event.blocks.length : 0;
+
+    if (attachmentCount > 0 || blockCount > 0) {
+      this.logger.debug(
+        rawText || files.length > 0
+          ? "Slack message event contains rich payload beyond text/files"
+          : "Slack message event contains rich payload but no mapped text/files; current mapper will drop it",
+        {
+          subtype: typeof event.subtype === "string" ? event.subtype : undefined,
+          channelId,
+          userId,
+          hasText: rawText.length > 0,
+          fileCount: files.length,
+          attachmentCount,
+          blockCount,
+          event,
+        },
+      );
+    }
 
     if (!channelId || !userId || (!rawText && files.length === 0)) {
       return null;
