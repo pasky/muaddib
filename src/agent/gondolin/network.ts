@@ -126,9 +126,15 @@ function isIPv4InPrefix(ip: string, prefix: string, length: number): boolean {
 
 // ── HTTP hooks factory ─────────────────────────────────────────────────────
 
+export interface VmSecretDefinition {
+  hosts: string[];
+  value: string;
+}
+
 export interface CreateVmHttpHooksOptions {
   blockedCidrs: string[];
   artifactsUrl?: string;
+  secrets?: Record<string, VmSecretDefinition>;
   logger?: Logger;
 }
 
@@ -142,8 +148,16 @@ export async function createVmHttpHooks(opts: CreateVmHttpHooksOptions) {
   const { createHttpHooks } = await import("@earendil-works/gondolin");
 
   const artifactHostname = resolveArtifactHostname(opts.artifactsUrl, opts.logger);
+  const allowedHosts = opts.secrets && Object.keys(opts.secrets).length > 0
+    // Without this, Gondolin derives the global host allowlist from secret.hosts,
+    // which would accidentally block unrelated outbound HTTP whenever any
+    // secret-backed env var is configured.
+    ? ["*"]
+    : undefined;
 
-  const { httpHooks } = createHttpHooks({
+  const { httpHooks, env = {} } = createHttpHooks({
+    allowedHosts,
+    secrets: opts.secrets,
     blockInternalRanges: false,
     isIpAllowed: (info) => {
       const isArtifact =
@@ -158,7 +172,7 @@ export async function createVmHttpHooks(opts: CreateVmHttpHooksOptions) {
     },
   });
 
-  return httpHooks;
+  return { httpHooks, env };
 }
 
 function resolveArtifactHostname(artifactsUrl: string | undefined, logger?: Logger): string | undefined {

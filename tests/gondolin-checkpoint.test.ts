@@ -6,6 +6,8 @@
  */
 
 import { mkdirSync, writeFileSync } from "node:fs";
+
+import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ── pull the internals we need ─────────────────────────────────────────────
@@ -27,6 +29,7 @@ import {
   loadBundledSkills,
   formatSkillsForVmPrompt,
 } from "../src/agent/skills/load-skills.js";
+import { buildArc } from "../src/rooms/message.js";
 
 // We reach into the module's Maps via the exported reset helper and a small
 // test-only shim: we import the Maps indirectly by calling createGondolinTools
@@ -165,7 +168,12 @@ vi.mock("@earendil-works/gondolin", async (importOriginal) => {
         this._instance.readOnly = true;
       }
     },
-    createHttpHooks: vi.fn(() => ({ httpHooks: {} })),
+    createHttpHooks: vi.fn((options?: { secrets?: Record<string, { value: string; hosts: string[] }> }) => ({
+      httpHooks: {},
+      env: Object.fromEntries(
+        Object.keys(options?.secrets ?? {}).map((name, index) => [name, `GONDOLIN_SECRET_${index}_${name}`]),
+      ),
+    })),
   };
 });
 
@@ -174,6 +182,25 @@ async function registerFakeVm(vm: FakeVm) {
   const gondolin = await import("@earendil-works/gondolin");
   // @ts-expect-error test-only
   gondolin.__fakeVms.set("__next", vm);
+}
+
+async function getLastVmOptions<T = { env?: Record<string, string> }>() {
+  const gondolin = await import("@earendil-works/gondolin");
+  // @ts-expect-error test-only
+  return gondolin.__lastVmOptions.value as T;
+}
+
+async function getLastCreateHttpHooksOptions<T = unknown>() {
+  const gondolin = await import("@earendil-works/gondolin");
+  return (gondolin.createHttpHooks as unknown as { mock: { calls: unknown[][] } }).mock.calls.at(-1)?.[0] as T;
+}
+
+async function warmVm(tools: Array<{ name: string; execute: (...args: any[]) => Promise<unknown> }>) {
+  const bashTool = tools.find((tool) => tool.name === "bash");
+  if (!bashTool) {
+    throw new Error("bash tool not found");
+  }
+  await bashTool.execute("warm-vm", { command: "echo hi" }, new AbortController().signal, () => {});
 }
 
 const ARC = "test-arc";
@@ -193,10 +220,13 @@ function makeLogger() {
   };
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   resetGondolinVmCache();
   memoryProviderInstances.length = 0;
   vi.clearAllMocks();
+  const gondolin = await import("@earendil-works/gondolin");
+  // @ts-expect-error test-only
+  gondolin.__lastVmOptions.value = null;
 });
 
 // ── Tests ──────────────────────────────────────────────────────────────────
@@ -567,6 +597,182 @@ describe("gondolin bash tool — env isolation", () => {
 
     const execOptions = bashCall![1];
     expect(execOptions).not.toHaveProperty("env");
+
+    const vmOptions = await getLastVmOptions<{ env?: Record<string, string> }>();
+    expect(vmOptions.env ?? {}).not.toHaveProperty("__MUADDIB_ENV_LEAK_TEST");
+  });
+});
+
+describe("gondolin per-arc env injection", () => {
+  it("matches human arc globs and applies fragments from broad to specific", async () => {
+    const serverTag = "slack:Corp/EMEA";
+    const channelName = "#release";
+    const fakeVm = makeFakeVm();
+    await registerFakeVm(fakeVm);
+
+    const { tools } = createGondolinTools({
+      arc: buildArc(serverTag, channelName),
+      serverTag,
+      channelName,
+      authStorage: AuthStorage.inMemory(),
+      config: {
+        ...gondolinConfig,
+        profiles: {
+          workspaceDefaults: {
+            env: {
+              FROM_PROFILE: "workspace-profile",
+              ORDER: "workspace-profile",
+            },
+          },
+          releaseDefaults: {
+            env: {
+              ORDER: "release-profile",
+              PROFILE_ONLY: "1",
+            },
+          },
+        },
+        arcs: {
+          "*": {
+            env: {
+              GLOBAL: "1",
+              ORDER: "global",
+            },
+          },
+          "slack:*#*": {
+            env: {
+              ORDER: "slack-any",
+            },
+          },
+          "slack:Corp/EMEA#*": {
+            use: ["workspaceDefaults"],
+            env: {
+              ORDER: "workspace-inline",
+              WORKSPACE: "1",
+            },
+          },
+          "slack:Corp/EMEA##release": {
+            use: ["releaseDefaults"],
+            env: {
+              CHANNEL: "1",
+              HUMAN_MATCH: "1",
+              ORDER: "release-inline",
+            },
+          },
+        },
+      },
+    });
+
+    await warmVm(tools);
+
+    const vmOptions = await getLastVmOptions<{ env?: Record<string, string> }>();
+    expect(vmOptions.env).toMatchObject({
+      GLOBAL: "1",
+      FROM_PROFILE: "workspace-profile",
+      WORKSPACE: "1",
+      PROFILE_ONLY: "1",
+      CHANNEL: "1",
+      HUMAN_MATCH: "1",
+      ORDER: "release-inline",
+    });
+  });
+
+  it("passes resolved secrets to createHttpHooks and injects only placeholders into VM env", async () => {
+    const serverTag = "slack:Corp";
+    const channelName = "#release";
+    const fakeVm = makeFakeVm();
+    await registerFakeVm(fakeVm);
+
+    const { tools } = createGondolinTools({
+      arc: buildArc(serverTag, channelName),
+      serverTag,
+      channelName,
+      authStorage: AuthStorage.inMemory({
+        "gitlab-corp": { type: "api_key", key: "glpat-secret" },
+        "atlassian-corp": { type: "api_key", key: "atl-secret" },
+      }),
+      config: {
+        ...gondolinConfig,
+        profiles: {
+          corp: {
+            env: {
+              CONFLUENCE_EMAIL: "muaddib@example.com",
+              CONFLUENCE_API_TOKEN: {
+                provider: "atlassian-corp",
+                hosts: ["api.atlassian.com"],
+              },
+              GITLAB_TOKEN: {
+                provider: "gitlab-corp",
+                hosts: ["gitlab.com"],
+              },
+            },
+          },
+        },
+        arcs: {
+          "slack:Corp##release": {
+            use: ["corp"],
+          },
+        },
+      },
+    });
+
+    await warmVm(tools);
+
+    const createHttpHooksOptions = await getLastCreateHttpHooksOptions<{
+      allowedHosts: string[];
+      secrets?: Record<string, { value: string; hosts: string[] }>;
+    }>();
+    expect(createHttpHooksOptions.allowedHosts).toEqual(["*"]);
+    expect(createHttpHooksOptions.secrets).toEqual({
+      CONFLUENCE_API_TOKEN: {
+        value: "atl-secret",
+        hosts: ["api.atlassian.com"],
+      },
+      GITLAB_TOKEN: {
+        value: "glpat-secret",
+        hosts: ["gitlab.com"],
+      },
+    });
+
+    const vmOptions = await getLastVmOptions<{ env?: Record<string, string> }>();
+    expect(vmOptions.env?.CONFLUENCE_EMAIL).toBe("muaddib@example.com");
+    expect(vmOptions.env?.CONFLUENCE_API_TOKEN).toMatch(/^GONDOLIN_SECRET_/);
+    expect(vmOptions.env?.GITLAB_TOKEN).toMatch(/^GONDOLIN_SECRET_/);
+    expect(vmOptions.env?.CONFLUENCE_API_TOKEN).not.toBe("atl-secret");
+    expect(vmOptions.env?.GITLAB_TOKEN).not.toBe("glpat-secret");
+    expect(Object.values(vmOptions.env ?? {})).not.toContain("atl-secret");
+    expect(Object.values(vmOptions.env ?? {})).not.toContain("glpat-secret");
+  });
+
+  it("throws a clear error when a configured auth provider is missing", async () => {
+    const serverTag = "slack:Corp";
+    const channelName = "#release";
+    const { tools } = createGondolinTools({
+      arc: buildArc(serverTag, channelName),
+      serverTag,
+      channelName,
+      authStorage: AuthStorage.inMemory(),
+      config: {
+        ...gondolinConfig,
+        arcs: {
+          "*": {
+            env: {
+              GITLAB_TOKEN: {
+                provider: "gitlab-corp",
+                hosts: ["gitlab.com"],
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const bashTool = tools.find((tool) => tool.name === "bash")!;
+    await expect(
+      bashTool.execute("missing-auth", { command: "echo hi" }, new AbortController().signal, () => {}),
+    ).rejects.toThrow("Gondolin env var GITLAB_TOKEN references auth provider 'gitlab-corp'");
+    await expect(
+      bashTool.execute("missing-auth", { command: "echo hi" }, new AbortController().signal, () => {}),
+    ).rejects.toThrow("auth.json");
   });
 });
 

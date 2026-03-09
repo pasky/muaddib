@@ -41,11 +41,47 @@
       },
       "gondolin": {
         "_comment": "dnsMode supports 'synthetic' (default; gondolin intercepts DNS and returns synthetic IPs, forcing all HTTP/HTTPS through the MITM layer) and 'open' (real DNS). blockedCidrs applies to HTTP/HTTPS traffic via the MITM layer (IP-level check after DNS resolution; all non-HTTP traffic blocked a priori, RFC-1918/loopback are always blocked). RFC-1918/loopback are blocked by default, except the hostname from tools.artifacts.url so the sandbox can fetch shared artifacts hosted on private IPs. bashTimeoutSeconds caps individual bash command execution AND non-bash VM operations (read/write/edit/access) as a deadlock detector (default 270, just under Claude's 5-minute token-cache expiry). maxConcurrentVms limits how many arc QEMU processes may run simultaneously; new arc invocations block until a slot is free.",
+        "_comment_env": "profiles/arcs can inject plain env vars or auth-backed secret placeholders into Gondolin. Arc globs match the human arc string ${serverTag}#${channelName}; '*' is the global baseline.",
         "dnsMode": "synthetic",
         "blockedCidrs": ["203.0.113.0/24", "2001:db8:1::/48"],
         "bashTimeoutSeconds": 270,
         "maxConcurrentVms": 8,
-        "workspaceSizeMb": 4096
+        "workspaceSizeMb": 4096,
+        "profiles": {
+          "corp-confluence": {
+            "env": {
+              "CONFLUENCE_DOMAIN": "api.atlassian.com",
+              "CONFLUENCE_AUTH_TYPE": "basic",
+              "CONFLUENCE_EMAIL": "muaddib@example.com",
+              "CONFLUENCE_API_TOKEN": {
+                "provider": "atlassian-corp",
+                "hosts": ["api.atlassian.com"]
+              }
+            }
+          },
+          "corp-glab": {
+            "env": {
+              "GITLAB_TOKEN": {
+                "provider": "gitlab-corp",
+                "hosts": ["gitlab.com"]
+              }
+            }
+          }
+        },
+        "arcs": {
+          "*": {
+            "env": {
+              "NO_COLOR": "1",
+              "PAGER": "cat"
+            }
+          },
+          "slack:AmazingB2BSaaS#*": {
+            "use": ["corp-confluence", "corp-glab"]
+          },
+          "libera##ops": {
+            "use": ["corp-glab"]
+          }
+        }
       }
     }
   },

@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, posix } from "node:path";
 
 import type {
+  AuthStorage,
   BashOperations,
   EditOperations,
   ReadOperations,
@@ -19,9 +20,10 @@ import type { VM } from "@earendil-works/gondolin";
 import type { GondolinConfig } from "../../config/muaddib-config.js";
 import type { Logger } from "../../app/logging.js";
 import type { ArcEventsWatcher } from "../../events/watcher.js";
-import { loadBundledSkills, type LoadedSkill } from "../skills/load-skills.js";
+import { loadBundledSkills } from "../skills/load-skills.js";
 import { getArcWorkspacePath, getArcCheckpointPath, createVmMounts } from "./fs.js";
 import { createVmHttpHooks } from "./network.js";
+import { resolveGondolinEnv } from "./env.js";
 import { getMuaddibHome } from "../../config/paths.js";
 
 // ── VM cache: one VM per arc ───────────────────────────────────────────────
@@ -143,15 +145,11 @@ function rewriteMissingQemuBinaryError(error: unknown): Error | null {
 
 // ── VM creation ────────────────────────────────────────────────────────────
 
-async function ensureVm(
-  arc: string,
-  config: GondolinConfig,
-  dnsMode: SupportedDnsMode,
-  skills: LoadedSkill[],
-  artifactsUrl: string | undefined,
-  logger?: Logger,
-  eventsWatcher?: ArcEventsWatcher,
-): Promise<VM> {
+async function ensureVm(opts: VmSessionOptions): Promise<VM> {
+  const { arc, serverTag, channelName, config, authStorage, logger, eventsWatcher } = opts;
+  const dnsMode = resolveDnsMode(config.dnsMode);
+  const skills = loadBundledSkills();
+  const artifactsUrl = opts.artifactsUrl;
   // If a checkpoint is in progress for this arc, wait for it to complete before
   // creating or returning a VM.
   const pendingCheckpoint = vmCheckpointInProgress.get(arc);
@@ -182,9 +180,17 @@ async function ensureVm(
 
       const workspacePath = getArcWorkspacePath(arc);
 
-      const httpHooks = await createVmHttpHooks({
+      const { plainEnv, secretEnv } = await resolveGondolinEnv({
+        config,
+        serverTag,
+        channelName,
+        authStorage,
+      });
+
+      const { httpHooks, env: placeholderEnv } = await createVmHttpHooks({
         blockedCidrs: config.blockedCidrs ?? [],
         artifactsUrl,
+        secrets: secretEnv,
         logger,
       });
 
@@ -203,9 +209,15 @@ async function ensureVm(
         logger?.debug(`Gondolin VM [${arc}] ${component}: ${message}`);
       };
 
+      const combinedEnv = {
+        ...plainEnv,
+        ...placeholderEnv,
+      };
+
       const vmOptions: import("@earendil-works/gondolin").VMOptions = {
         vfs: { mounts },
         httpHooks,
+        ...(Object.keys(combinedEnv).length > 0 ? { env: combinedEnv } : {}),
         dns: { mode: dnsMode },
         sandbox: { debug: ["protocol"] },
         debugLog,
@@ -528,7 +540,10 @@ export function resetGondolinVmCache(): void {
 
 export interface VmSessionOptions {
   arc: string;
+  serverTag?: string;
+  channelName?: string;
   config: GondolinConfig;
+  authStorage?: AuthStorage;
   artifactsUrl?: string;
   vmOpTimeoutMs: number;
   logger?: Logger;
@@ -549,8 +564,11 @@ export interface VmSession {
  * directory inside the guest.
  */
 export function createVmSession(opts: VmSessionOptions): VmSession {
-  const { arc, config, vmOpTimeoutMs, logger, eventsWatcher } = opts;
-  const dnsMode = resolveDnsMode(config.dnsMode);
+  const { arc, vmOpTimeoutMs, logger } = opts;
+
+  // Validate dnsMode eagerly so invalid config is caught at session creation,
+  // not deferred to the first VM operation.
+  resolveDnsMode(opts.config.dnsMode);
 
   // Ensure the workspace directory exists and stamp the arc name into it so
   // external tools (e.g. scripts/gondolin-shell.sh) can identify which arc
@@ -569,7 +587,7 @@ export function createVmSession(opts: VmSessionOptions): VmSession {
 
   function getVm(): Promise<VM> {
     if (!vmReady) {
-      vmReady = ensureVm(arc, config, dnsMode, loadBundledSkills(), opts.artifactsUrl, logger, eventsWatcher).then(
+      vmReady = ensureVm(opts).then(
         async (vm) => {
           await vm.exec(["/bin/mkdir", "-p", sessionDir], { signal: AbortSignal.timeout(vmOpTimeoutMs) });
           logger?.info(`Gondolin session dir: ${sessionDir} (arc: ${arc})`);

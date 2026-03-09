@@ -129,6 +129,7 @@ export function createBaselineAgentTools(options: BaselineToolOptions): ToolSet 
     serverTag: options.serverTag,
     channelName: options.channelName,
     config: gondolinConfig,
+    authStorage: options.authStorage,
     toolsConfig: options.toolsConfig,
     logger: options.logger,
     eventsWatcher: options.eventsWatcher,

@@ -39,6 +39,21 @@ export interface VisitWebpageConfig {
   model?: string;
 }
 
+export interface GondolinSecretEnvConfig {
+  provider: string;
+  hosts: string[];
+}
+
+export type GondolinEnvValue = string | GondolinSecretEnvConfig;
+
+export interface GondolinProfileConfig {
+  env?: Record<string, GondolinEnvValue>;
+}
+
+export interface GondolinArcConfig extends GondolinProfileConfig {
+  use?: string[];
+}
+
 export interface GondolinConfig {
   /**
    * IP CIDR ranges to block (both IPv4 and IPv6).
@@ -77,6 +92,15 @@ export interface GondolinConfig {
    * Default: 4096 (4 GB).
    */
   workspaceSizeMb?: number;
+  /**
+   * Reusable named Gondolin config fragments.
+   */
+  profiles?: Record<string, GondolinProfileConfig>;
+  /**
+   * Per-arc Gondolin config fragments keyed by simple `*` globs over the raw
+   * human arc string `${serverTag}#${channelName}`. `"*"` is the global baseline.
+   */
+  arcs?: Record<string, GondolinArcConfig>;
 }
 
 /**

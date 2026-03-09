@@ -7,6 +7,8 @@
   "openrouter": { "type": "api_key", "key": "your-openrouter-api-key-here" },
 
   "jina": { "type": "api_key", "key": "your-jina-api-key-here" },
+  "atlassian-corp": { "type": "api_key", "key": "your-atlassian-api-token-for-confluence-here" },
+  "gitlab-corp": { "type": "api_key", "key": "your-gitlab-token-for-glab-here" },
 
   "discord": { "type": "api_key", "key": "your-discord-bot-token-here" },
   "slack-app": { "type": "api_key", "key": "xapp-your-slack-app-token-here" },

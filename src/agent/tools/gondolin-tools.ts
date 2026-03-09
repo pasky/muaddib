@@ -14,6 +14,7 @@ import {
   createEditTool,
   createReadTool,
   createWriteTool,
+  type AuthStorage,
 } from "@mariozechner/pi-coding-agent";
 
 import type { GondolinConfig } from "../../config/muaddib-config.js";
@@ -51,6 +52,7 @@ export interface GondolinToolsOptions {
   serverTag?: string;
   channelName?: string;
   config: GondolinConfig;
+  authStorage?: AuthStorage;
   toolsConfig?: ToolsConfig;
   logger?: Logger;
   eventsWatcher?: ArcEventsWatcher;
@@ -67,13 +69,21 @@ export interface GondolinToolsOptions {
  * The last 8 session dirs are kept across checkpoints so the agent can revisit them.
  */
 export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
-  const { arc, serverTag, channelName, config, toolsConfig, logger, eventsWatcher } = options;
+  const { arc, serverTag, channelName, config, authStorage, toolsConfig, logger, eventsWatcher } = options;
 
   const bashTimeoutSeconds = config.bashTimeoutSeconds ?? 270;
   const vmOpTimeoutMs = bashTimeoutSeconds * 1000;
 
   const { getVm, sessionDir } = createVmSession({
-    arc, config, artifactsUrl: toolsConfig?.artifacts?.url, vmOpTimeoutMs, logger, eventsWatcher,
+    arc,
+    serverTag,
+    channelName,
+    config,
+    authStorage,
+    artifactsUrl: toolsConfig?.artifacts?.url,
+    vmOpTimeoutMs,
+    logger,
+    eventsWatcher,
   });
 
   const piReadTool = createReadTool(sessionDir, { operations: createVmReadOps(getVm, vmOpTimeoutMs, logger) });
