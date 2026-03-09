@@ -1,9 +1,13 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import type { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { buildArc } from "../src/rooms/message.js";
-import { SlackRoomMonitor } from "../src/rooms/slack/monitor.js";
+import { SlackRoomMonitor, findArtifactUrls, replaceArtifactUrlsWithUploads } from "../src/rooms/slack/monitor.js";
 import { createDeferred, createTempHistoryStore } from "./test-helpers.js";
 import { createTestRuntime } from "./test-runtime.js";
 
@@ -1154,5 +1158,226 @@ describe("SlackSocketTransport.resolveChannelId", () => {
 
     const result = await transport.resolveChannelId("unknown-channel");
     expect(result).toBe("unknown-channel");
+  });
+});
+
+describe("findArtifactUrls", () => {
+  it("finds artifact viewer URLs in text", () => {
+    const text = "Here is your report: https://example.com/artifacts/?aBcD1234.txt and also https://example.com/artifacts/?XyZ789.png";
+    const matches = findArtifactUrls(text, "https://example.com/artifacts");
+    expect(matches).toEqual([
+      { url: "https://example.com/artifacts/?aBcD1234.txt", filename: "aBcD1234.txt" },
+      { url: "https://example.com/artifacts/?XyZ789.png", filename: "XyZ789.png" },
+    ]);
+  });
+
+  it("handles trailing slash in base URL", () => {
+    const text = "See: https://example.com/artifacts/?file.md";
+    const matches = findArtifactUrls(text, "https://example.com/artifacts/");
+    expect(matches).toEqual([
+      { url: "https://example.com/artifacts/?file.md", filename: "file.md" },
+    ]);
+  });
+
+  it("returns empty array when no artifact URLs present", () => {
+    const text = "No artifacts here, just https://example.com/other";
+    const matches = findArtifactUrls(text, "https://example.com/artifacts");
+    expect(matches).toEqual([]);
+  });
+
+  it("decodes percent-encoded filenames", () => {
+    const text = "See: https://example.com/artifacts/?my%20file.txt";
+    const matches = findArtifactUrls(text, "https://example.com/artifacts");
+    expect(matches).toEqual([
+      { url: "https://example.com/artifacts/?my%20file.txt", filename: "my file.txt" },
+    ]);
+  });
+});
+
+describe("replaceArtifactUrlsWithUploads", () => {
+  function makeTempArtifactsDir(): string {
+    const dir = join(tmpdir(), `slack-artifact-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  it("replaces artifact URLs with [attachment N] labels and uploads files with snippet_type", async () => {
+    const dir = makeTempArtifactsDir();
+    writeFileSync(join(dir, "report.txt"), "full report content");
+    writeFileSync(join(dir, "script.py"), "print('hello')");
+    writeFileSync(join(dir, "image.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+
+    const uploaded: Array<{ channelId: string; content: string | Buffer; options: any }> = [];
+    const sender = {
+      sendMessage: async () => {},
+      uploadFile: async (channelId: string, content: string | Buffer, options: any) => {
+        uploaded.push({ channelId, content, options });
+      },
+    };
+
+    const result = await replaceArtifactUrlsWithUploads(
+      "Here: https://art.example.com/?report.txt and https://art.example.com/?script.py and https://art.example.com/?image.png done",
+      "C123",
+      "1700000000.2000",
+      { path: dir, url: "https://art.example.com" },
+      sender,
+    );
+
+    expect(result).toBe("Here: [attachment 1: report.txt] and [attachment 2: script.py] and [attachment 3: image.png] done");
+    expect(uploaded).toHaveLength(3);
+
+    // Text file uploaded as string — .txt has no snippet_type mapping
+    expect(uploaded[0].channelId).toBe("C123");
+    expect(uploaded[0].content).toBe("full report content");
+    expect(uploaded[0].options).toEqual({
+      filename: "report.txt",
+      title: "report.txt",
+      threadTs: "1700000000.2000",
+      snippetType: undefined,
+    });
+
+    // Python file uploaded as string with snippet_type
+    expect(uploaded[1].content).toBe("print('hello')");
+    expect(uploaded[1].options).toEqual({
+      filename: "script.py",
+      title: "script.py",
+      threadTs: "1700000000.2000",
+      snippetType: "python",
+    });
+
+    // Binary file uploaded as Buffer — no snippet_type
+    expect(uploaded[2].content).toBeInstanceOf(Buffer);
+    expect(uploaded[2].options.filename).toBe("image.png");
+    expect(uploaded[2].options.snippetType).toBeUndefined();
+  });
+
+  it("leaves URL as-is when file does not exist on disk", async () => {
+    const dir = makeTempArtifactsDir();
+    // No file written
+
+    const sender = {
+      sendMessage: async () => {},
+      uploadFile: async () => {},
+    };
+
+    const result = await replaceArtifactUrlsWithUploads(
+      "See: https://art.example.com/?missing.txt",
+      "C123",
+      undefined,
+      { path: dir, url: "https://art.example.com" },
+      sender,
+    );
+
+    expect(result).toBe("See: https://art.example.com/?missing.txt");
+  });
+
+  it("leaves URL as-is when upload fails", async () => {
+    const dir = makeTempArtifactsDir();
+    writeFileSync(join(dir, "report.txt"), "content");
+
+    const sender = {
+      sendMessage: async () => {},
+      uploadFile: async () => {
+        throw new Error("upload failed");
+      },
+    };
+
+    const result = await replaceArtifactUrlsWithUploads(
+      "See: https://art.example.com/?report.txt",
+      "C123",
+      undefined,
+      { path: dir, url: "https://art.example.com" },
+      sender,
+    );
+
+    expect(result).toBe("See: https://art.example.com/?report.txt");
+  });
+
+  it("returns text unchanged when no artifacts config URL", async () => {
+    const sender = {
+      sendMessage: async () => {},
+      uploadFile: async () => {},
+    };
+
+    const result = await replaceArtifactUrlsWithUploads(
+      "See: https://art.example.com/?report.txt",
+      "C123",
+      undefined,
+      { path: "/tmp" },
+      sender,
+    );
+
+    expect(result).toBe("See: https://art.example.com/?report.txt");
+  });
+
+  it("returns text unchanged when sender has no uploadFile", async () => {
+    const sender = {
+      sendMessage: async () => {},
+    };
+
+    const result = await replaceArtifactUrlsWithUploads(
+      "See: https://art.example.com/?report.txt",
+      "C123",
+      undefined,
+      { path: "/tmp", url: "https://art.example.com" },
+      sender,
+    );
+
+    expect(result).toBe("See: https://art.example.com/?report.txt");
+  });
+});
+
+describe("SlackRoomMonitor artifact URL replacement integration", () => {
+  it("replaces artifact URLs in outgoing messages with file uploads", async () => {
+    const history = createTempHistoryStore(20);
+    const dir = join(tmpdir(), `slack-artifact-integ-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "aBcD1234.txt"), "full response text here");
+
+    const uploaded: Array<{ filename: string; content: string | Buffer }> = [];
+    const sent: string[] = [];
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      artifactsConfig: { path: dir, url: "https://art.example.com" },
+      sender: {
+        sendMessage: async (_channelId, text) => {
+          sent.push(text);
+          return { messageTs: "1700000000.3000" };
+        },
+        uploadFile: async (_channelId, content, options) => {
+          uploaded.push({ filename: options.filename, content });
+        },
+      },
+      commandHandler: {
+        handleIncomingMessage: async (_message, options) => {
+          await options?.sendResponse?.(
+            "Here is your report... full response: https://art.example.com/?aBcD1234.txt",
+          );
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      workspaceId: "T123",
+      channelId: "C123",
+      channelName: "#general",
+      username: "alice",
+      text: "muaddib: generate report",
+      mynick: "muaddib",
+      messageTs: "1700000000.2000",
+      channelType: "channel",
+      mentionsBot: true,
+    });
+
+    expect(sent).toEqual([
+      "Here is your report... full response: [attachment 1: aBcD1234.txt]",
+    ]);
+    expect(uploaded).toHaveLength(1);
+    expect(uploaded[0].filename).toBe("aBcD1234.txt");
+    expect(uploaded[0].content).toBe("full response text here");
+
+    await history.close();
   });
 });

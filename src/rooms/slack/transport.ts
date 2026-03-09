@@ -154,6 +154,29 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
     };
   }
 
+  async uploadFile(
+    channelId: string,
+    content: Buffer | string,
+    options: { filename: string; title?: string; threadTs?: string; snippetType?: string },
+  ): Promise<void> {
+    const uploadOptions: Record<string, unknown> = {
+      channel_id: channelId,
+      filename: options.filename,
+      title: options.title ?? options.filename,
+      token: this.options.botToken,
+      ...(options.threadTs ? { thread_ts: options.threadTs } : {}),
+      ...(options.snippetType ? { snippet_type: options.snippetType } : {}),
+    };
+
+    if (typeof content === "string") {
+      (uploadOptions as any).content = content;
+    } else {
+      (uploadOptions as any).file = content;
+    }
+
+    await this.getApp().client.filesUploadV2(uploadOptions as any);
+  }
+
   async resolveChannelId(channelName: string): Promise<string> {
     // Reverse-search the name→id cache first.
     for (const [id, name] of this.channelNameCache.entries()) {

@@ -1,5 +1,8 @@
+import { readFile } from "node:fs/promises";
+import { join, extname } from "node:path";
+
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
-import type { RoomConfig } from "../../config/muaddib-config.js";
+import type { RoomConfig, ArtifactsConfig } from "../../config/muaddib-config.js";
 import { CONSOLE_LOGGER, RuntimeLogWriter, type Logger } from "../../app/logging.js";
 import { appendAttachmentBlock, normalizeName, nowMonotonicSeconds, requireNonEmptyString, sleep, stripLeadingMention } from "../../utils/index.js";
 import type { MuaddibRuntime } from "../../runtime.js";
@@ -85,6 +88,13 @@ export interface SlackSendResult {
   text?: string;
 }
 
+export interface SlackUploadFileOptions {
+  filename: string;
+  title?: string;
+  threadTs?: string;
+  snippetType?: string;
+}
+
 export interface SlackSender {
   connect?(): Promise<void>;
   disconnect?(): Promise<void>;
@@ -99,6 +109,11 @@ export interface SlackSender {
     messageTs: string,
     message: string,
   ): Promise<SlackSendResult | void>;
+  uploadFile?(
+    channelId: string,
+    content: Buffer | string,
+    options: SlackUploadFileOptions,
+  ): Promise<void>;
   formatOutgoingMentions?(message: string): Promise<string>;
   setTypingIndicator?(channelId: string, threadTs: string): Promise<boolean>;
   clearTypingIndicator?(channelId: string, threadTs: string): Promise<void>;
@@ -114,6 +129,8 @@ export interface SlackRoomMonitorOptions {
   onSendRetryEvent?: (event: SendRetryEvent) => void;
   logger?: Logger;
   logWriter?: RuntimeLogWriter;
+  /** Artifacts config for replacing artifact URLs with Slack file uploads. */
+  artifactsConfig?: ArtifactsConfig;
 }
 
 export class SlackRoomMonitor {
@@ -144,6 +161,9 @@ export class SlackRoomMonitor {
       eventsWatcher: options?.eventsWatcher,
     });
 
+    const agentConfig = runtime.config.getAgentConfig();
+    const artifactsConfig = agentConfig.tools?.artifacts;
+
     const monitors = await Promise.all(workspaceEntries.map(async ([workspaceId, workspaceConfig]) => {
       const botToken = requireNonEmptyString(
         await runtime.authStorage.getApiKey(`slack-${workspaceId}`),
@@ -170,6 +190,7 @@ export class SlackRoomMonitor {
         ),
         logger: runtime.logger.getLogger(`muaddib.rooms.slack.monitor.${workspaceId}`),
         logWriter: runtime.logger,
+        artifactsConfig,
       }), transport, channelName: workspaceConfig.name ?? workspaceId };
     }));
 
@@ -363,13 +384,28 @@ export class SlackRoomMonitor {
     let lastReplyAtSeconds: number | undefined;
     let typingIndicatorThreadTs: string | undefined;
 
+    const artifactsConfig = this.options.artifactsConfig;
+
     const handleIncoming = async (): Promise<void> => {
       await this.options.commandHandler.handleIncomingMessage(message, {
         sendResponse: sender
           ? async (text) => {
-              const formattedText = sender.formatOutgoingMentions
+              let formattedText = sender.formatOutgoingMentions
                 ? await sender.formatOutgoingMentions(text)
                 : text;
+
+              // Replace artifact URLs with Slack file uploads.
+              if (artifactsConfig) {
+                formattedText = await replaceArtifactUrlsWithUploads(
+                  formattedText,
+                  event.channelId,
+                  responseThreadId,
+                  artifactsConfig,
+                  sender,
+                  this.logger,
+                );
+              }
+
               const nowSeconds = nowMonotonicSeconds();
 
               if (
@@ -559,4 +595,113 @@ function resolveSlackChannelName(
 
 function normalizeDirectContent(content: string, mynick: string, botUserId?: string): string {
   return stripLeadingMention(content, mynick, botUserId);
+}
+
+// ── Artifact URL → Slack file upload post-processing ──
+
+/** Text-based MIME types that should be uploaded as string content (Slack renders these as snippets). */
+const TEXT_EXTENSIONS = new Set([
+  ".txt", ".md", ".json", ".csv", ".xml", ".html", ".htm",
+  ".js", ".ts", ".py", ".sh", ".bash", ".rb", ".rs", ".go",
+  ".c", ".cpp", ".h", ".java", ".css", ".scss", ".yaml", ".yml",
+  ".toml", ".ini", ".cfg", ".conf", ".log", ".sql", ".diff",
+  ".patch", ".svg",
+]);
+
+/** Map file extensions to Slack snippet_type for syntax highlighting. */
+const SNIPPET_TYPE_BY_EXT: Record<string, string> = {
+  ".js": "javascript", ".ts": "javascript", ".py": "python",
+  ".rb": "ruby", ".rs": "rust", ".go": "go", ".java": "java",
+  ".c": "c", ".cpp": "cpp", ".h": "c", ".cs": "csharp",
+  ".sh": "shell", ".bash": "shell",
+  ".html": "html", ".htm": "html", ".css": "css", ".scss": "scss",
+  ".json": "json", ".yaml": "yaml", ".yml": "yaml", ".xml": "xml",
+  ".sql": "sql", ".md": "markdown", ".diff": "diff", ".patch": "diff",
+  ".svg": "xml", ".csv": "csv",
+};
+
+interface ArtifactMatch {
+  /** Full URL as it appears in the text. */
+  url: string;
+  /** Decoded filename extracted from the URL query string. */
+  filename: string;
+}
+
+/**
+ * Find all artifact viewer URLs in `text` that match the configured base URL.
+ * Artifact URLs look like: `https://example.com/artifacts/?FILENAME.ext`
+ */
+export function findArtifactUrls(text: string, artifactsBaseUrl: string): ArtifactMatch[] {
+  const normalizedBase = artifactsBaseUrl.replace(/\/+$/, "");
+  // Match the base URL followed by /? and a filename (URL-safe chars)
+  const pattern = new RegExp(
+    escapeRegExpLocal(normalizedBase) + `/\\?([A-Za-z0-9_.%+-]+)`,
+    "g",
+  );
+
+  const matches: ArtifactMatch[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = pattern.exec(text)) !== null) {
+    matches.push({
+      url: m[0],
+      filename: decodeURIComponent(m[1]),
+    });
+  }
+  return matches;
+}
+
+function escapeRegExpLocal(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Replace artifact URLs in outgoing text with `[attachment N]` labels and
+ * upload the corresponding files as Slack attachments.
+ *
+ * Returns the rewritten text. On any per-file error, that URL is left as-is.
+ */
+export async function replaceArtifactUrlsWithUploads(
+  text: string,
+  channelId: string,
+  threadTs: string | undefined,
+  artifactsConfig: ArtifactsConfig,
+  sender: SlackSender,
+  logger?: Logger,
+): Promise<string> {
+  if (!artifactsConfig.url || !artifactsConfig.path || !sender.uploadFile) {
+    return text;
+  }
+
+  const matches = findArtifactUrls(text, artifactsConfig.url);
+  if (matches.length === 0) {
+    return text;
+  }
+
+  let result = text;
+  let attachmentIndex = 0;
+
+  for (const match of matches) {
+    const filePath = join(artifactsConfig.path, match.filename);
+    try {
+      const ext = extname(match.filename).toLowerCase();
+      const isText = TEXT_EXTENSIONS.has(ext);
+      const fileContent = await readFile(filePath, isText ? "utf-8" : undefined);
+
+      attachmentIndex += 1;
+      const label = `[attachment ${attachmentIndex}: ${match.filename}]`;
+
+      await sender.uploadFile(channelId, fileContent as string | Buffer, {
+        filename: match.filename,
+        title: match.filename,
+        threadTs,
+        snippetType: isText ? SNIPPET_TYPE_BY_EXT[ext] : undefined,
+      });
+
+      result = result.replace(match.url, label);
+    } catch (err) {
+      logger?.warn("Failed to upload artifact as Slack file, keeping URL", match.filename, String(err));
+    }
+  }
+
+  return result;
 }
