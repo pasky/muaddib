@@ -514,6 +514,24 @@ describe("createVmHttpHooks network trust policy", () => {
     ).toBe(true);
   });
 
+  it("auto-approves sandbox HTTP requests matching configured regexes", async () => {
+    const { httpHooks } = await createVmHttpHooks({
+      arc: "sandbox-allow-arc",
+      blockedCidrs: [],
+      autoApproveRegexes: [/^https:\/\/example\.com\/allowed$/u],
+    });
+
+    expect(
+      await Promise.resolve(httpHooks.isRequestAllowed?.({
+        method: "GET",
+        url: "https://Example.com/allowed?token=1",
+        headers: {},
+        body: null,
+      })),
+    ).toBe(true);
+    expect(await isUrlTrustedInArc("sandbox-allow-arc", "https://example.com/allowed?x=2")).toBe(true);
+  });
+
   it("auto-trusts redirect targets for sandbox direct network", async () => {
     await trustUrl("https://source.example.com/start?token=1", "redirect-arc");
 

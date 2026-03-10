@@ -9,7 +9,7 @@ import type { VMOptions } from "@earendil-works/gondolin";
 
 import type { Logger } from "../../app/logging.js";
 import {
-  isUrlTrustedInArc,
+  checkAndAutoApproveUrlInArc,
   recordRedirectTrustEvent,
 } from "../network-boundary.js";
 
@@ -145,6 +145,7 @@ export interface CreateVmHttpHooksOptions {
   arc: string;
   blockedCidrs: string[];
   artifactsUrl?: string;
+  autoApproveRegexes?: RegExp[];
   secrets?: Record<string, VmSecretDefinition>;
   logger?: Logger;
   fetchImpl?: VmNetworkFetch;
@@ -177,7 +178,12 @@ export async function createVmHttpHooks(opts: CreateVmHttpHooksOptions): Promise
     allowedHosts,
     secrets: opts.secrets,
     blockInternalRanges: false,
-    isRequestAllowed: async (request) => isUrlTrustedInArc(opts.arc, request.url),
+    isRequestAllowed: async (request) => {
+      const trust = await checkAndAutoApproveUrlInArc(opts.arc, request.url, {
+        autoApproveRegexes: opts.autoApproveRegexes,
+      });
+      return trust.trusted;
+    },
     isIpAllowed: (info) => {
       const isArtifact =
         artifactHostname !== undefined && info.hostname.toLowerCase() === artifactHostname;

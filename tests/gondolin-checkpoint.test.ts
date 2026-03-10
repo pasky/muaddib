@@ -27,6 +27,7 @@ import {
   closeAllVms,
   getVmSlotState,
 } from "../src/agent/gondolin/vm.js";
+import { resolveGondolinUrlAllowRegexes } from "../src/agent/gondolin/env.js";
 
 import {
   loadBundledSkills,
@@ -858,6 +859,35 @@ describe("gondolin per-arc env injection", () => {
     });
   });
 
+  it("resolves urlAllowRegexes from gondolin profiles and arc fragments", () => {
+    const regexes = resolveGondolinUrlAllowRegexes({
+      config: {
+        ...gondolinConfig,
+        profiles: {
+          corp: {
+            urlAllowRegexes: ["^https://corp\\.example/.*$"],
+          },
+        },
+        arcs: {
+          "*": {
+            urlAllowRegexes: ["^https://global\\.example/.*$"],
+          },
+          "slack:Corp##release": {
+            use: ["corp"],
+            urlAllowRegexes: ["^https://release\\.example/.*$"],
+          },
+        },
+      },
+      serverTag: "slack:Corp",
+      channelName: "#release",
+    });
+
+    expect(regexes.some((regex) => regex.test("https://global.example/docs"))).toBe(true);
+    expect(regexes.some((regex) => regex.test("https://corp.example/api"))).toBe(true);
+    expect(regexes.some((regex) => regex.test("https://release.example/runbook"))).toBe(true);
+    expect(regexes.some((regex) => regex.test("https://blocked.example/"))).toBe(false);
+  });
+
   it("passes resolved secrets to createHttpHooks and injects only placeholders into VM env", async () => {
     const serverTag = "slack:Corp";
     const channelName = "#release";
@@ -955,6 +985,20 @@ describe("gondolin per-arc env injection", () => {
     await expect(
       bashTool.execute("missing-auth", { command: "echo hi" }, new AbortController().signal, () => {}),
     ).rejects.toThrow("auth.json");
+  });
+
+  it("config.json.example defaults arc '*' to allowing all canonical URLs", () => {
+    const example = JSON.parse(readFileSync(join(process.cwd(), "config.json.example"), "utf-8")) as {
+      agent?: {
+        tools?: {
+          gondolin?: {
+            arcs?: Record<string, { urlAllowRegexes?: string[] }>;
+          };
+        };
+      };
+    };
+
+    expect(example.agent?.tools?.gondolin?.arcs?.["*"]?.urlAllowRegexes).toEqual([".*"]);
   });
 });
 

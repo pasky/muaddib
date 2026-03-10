@@ -20,6 +20,11 @@ import {
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { type RoomMessage, wrapSteeredMessage } from "../message.js";
 import type { MuaddibRuntime } from "../../runtime.js";
+import type {
+  NetworkAccessApprover,
+  NetworkAccessApprovalRequest,
+  NetworkAccessApprovalResult,
+} from "../../agent/network-boundary.js";
 import { formatUtcTime } from "../../utils/index.js";
 import { parseSetKeyArgs } from "../../cost/user-key-store.js";
 
@@ -42,6 +47,39 @@ function sessionKey(message: RoomMessage): string {
   return `${arc}\0${message.nick.toLowerCase()}\0`;
 }
 
+type ApprovalCommandAction = "approve" | "deny";
+
+interface PendingNetworkApproval {
+  id: string;
+  arc: string;
+  threadId?: string;
+  canonicalUrl: string;
+  resolve: (result: NetworkAccessApprovalResult) => void;
+}
+
+function parseApprovalCommand(content: string):
+  | { action: ApprovalCommandAction; id: string }
+  | { action: ApprovalCommandAction; error: string }
+  | null {
+  const trimmed = content.trim();
+  const match = trimmed.match(/^!(approve|deny)\b/iu);
+  if (!match) {
+    return null;
+  }
+
+  const action = match[1].toLowerCase() as ApprovalCommandAction;
+  const parts = trimmed.split(/\s+/u);
+  if (parts.length !== 2 || parts[1].length === 0) {
+    return { action, error: `Usage: !${action} <id>` };
+  }
+
+  return { action, id: parts[1] };
+}
+
+function isSameApprovalScope(pending: PendingNetworkApproval, message: RoomMessage): boolean {
+  return pending.arc === message.arc && (pending.threadId ?? null) === (message.threadId ?? null);
+}
+
 /**
  * Shared room message handling path with proactive interjection support.
  *
@@ -55,9 +93,12 @@ export class RoomMessageHandler {
   private readonly proactiveRunner: ProactiveRunner | null;
   private readonly history: ChatHistoryStore;
   private readonly logger: CommandExecutorLogger;
+  private readonly fallbackNetworkAccessApprover?: NetworkAccessApprover;
 
   /** Active steering functions keyed by session key, with the session's resolved mode. */
   private readonly activeSteers = new Map<string, { steer: (message: RoomMessage) => void; modeKey: string | null }>();
+  private readonly pendingNetworkApprovals = new Map<string, PendingNetworkApproval>();
+  private nextNetworkApprovalId = 1;
 
   constructor(
     runtime: MuaddibRuntime,
@@ -68,6 +109,7 @@ export class RoomMessageHandler {
     this.resolver = this.executor.resolver;
     this.history = runtime.history;
     this.logger = runtime.logger.getLogger(`muaddib.rooms.command.${roomName}`);
+    this.fallbackNetworkAccessApprover = runtime.networkAccessApprover;
 
     // Proactive interjection setup
     const roomConfig = runtime.config.getRoomConfig(roomName);
@@ -105,6 +147,10 @@ export class RoomMessageHandler {
   ): Promise<void> {
     message = this.sanitizeSensitiveCommandMessage(message);
     const sendResponse: SendResponse = options?.sendResponse ?? (async () => {});
+    if (await this.tryHandleApprovalCommand(message, sendResponse)) {
+      return;
+    }
+
     const key = sessionKey(message);
 
     // ── Active session steering fast-path ──
@@ -170,12 +216,16 @@ export class RoomMessageHandler {
       // - Break-out messages from an active session (!c, @model, !h, parse errors)
       // - Messages that bypass steering on their own (help, parse errors,
       //   no-context, non-steering modes/channel policies)
+      const networkAccessApprover = this.createNetworkAccessApprover(message, sendResponse);
+
       if (breakingActiveSession || this.resolver.shouldBypassSteering(message)) {
-        await this.executor.execute(message, triggerTs, sendResponse);
+        await this.executor.execute(message, triggerTs, sendResponse, {
+          networkAccessApprover,
+        });
         return;
       }
 
-      await this.handleCommandMessage(message, triggerTs, sendResponse);
+      await this.handleCommandMessage(message, triggerTs, sendResponse, networkAccessApprover);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       this.logger.error("Agent execution failed", `nick=${message.nick}`, `error=${errorMsg}`);
@@ -192,6 +242,7 @@ export class RoomMessageHandler {
     message: RoomMessage,
     triggerTs: string,
     sendResponse: SendResponse,
+    networkAccessApprover: NetworkAccessApprover,
   ): Promise<void> {
     const key = sessionKey(message);
 
@@ -209,9 +260,9 @@ export class RoomMessageHandler {
     this.activeSteers.set(key, { steer: (msg) => { pending.push(msg); }, modeKey: sessionModeKey });
 
     try {
-      await this.executor.execute(
-        message, triggerTs, sendResponse,
-        (agent) => {
+      await this.executor.execute(message, triggerTs, sendResponse, {
+        networkAccessApprover,
+        onAgentCreated: (agent) => {
           // Flush buffered messages, then swap to direct steering.
           for (const buffered of pending) {
             this.steerAgent(agent, buffered);
@@ -219,13 +270,13 @@ export class RoomMessageHandler {
           pending.length = 0;
           this.activeSteers.set(key, { steer: (msg) => { this.steerAgent(agent, msg); }, modeKey: sessionModeKey });
         },
-        () => {
+        onResponseDelivered: () => {
           // Deregister steering as soon as the response is delivered, before
           // background work (memory update, tool summary) begins — prevents
           // new messages from being steered into the session during that window.
           this.activeSteers.delete(key);
         },
-      );
+      });
     } finally {
       // Safety fallback: ensure cleanup even if execute() throws before
       // invoking the onResponseDelivered callback.
@@ -303,6 +354,83 @@ export class RoomMessageHandler {
         setkeyKey: parsedArgs.key,
       },
     };
+  }
+
+  private createNetworkAccessApprover(
+    message: RoomMessage,
+    sendResponse: SendResponse,
+  ): NetworkAccessApprover {
+    return async (request) => {
+      if (this.fallbackNetworkAccessApprover) {
+        return await this.fallbackNetworkAccessApprover(request);
+      }
+
+      const id = String(this.nextNetworkApprovalId++);
+      const approval = new Promise<NetworkAccessApprovalResult>((resolve) => {
+        this.pendingNetworkApprovals.set(id, {
+          id,
+          arc: request.arc,
+          threadId: message.threadId,
+          canonicalUrl: request.canonicalUrl,
+          resolve,
+        });
+      });
+
+      try {
+        await sendResponse(this.buildApprovalRequestMessage(id, request));
+      } catch (error) {
+        this.pendingNetworkApprovals.delete(id);
+        throw error;
+      }
+
+      return await approval;
+    };
+  }
+
+  private async tryHandleApprovalCommand(
+    message: RoomMessage,
+    sendResponse: SendResponse,
+  ): Promise<boolean> {
+    const parsed = parseApprovalCommand(message.content);
+    if (!parsed) {
+      return false;
+    }
+
+    if ("error" in parsed) {
+      await sendResponse(`${message.nick}: ${parsed.error}`);
+      return true;
+    }
+
+    const pending = this.pendingNetworkApprovals.get(parsed.id);
+    if (!pending) {
+      await sendResponse(`${message.nick}: No pending network access request ${parsed.id}.`);
+      return true;
+    }
+
+    if (!isSameApprovalScope(pending, message)) {
+      await sendResponse(`${message.nick}: Network access request ${parsed.id} is pending in a different room or thread.`);
+      return true;
+    }
+
+    const approved = parsed.action === "approve";
+    this.pendingNetworkApprovals.delete(parsed.id);
+    await sendResponse(
+      `${message.nick}: ${approved ? "approved" : "denied"} network access request ${parsed.id} for ${pending.canonicalUrl}.`,
+    ).catch((error) => {
+      this.logger.error("Failed to send network approval resolution", String(error));
+    });
+    pending.resolve({
+      approved,
+      message: approved
+        ? `Network access approved for ${pending.canonicalUrl}.`
+        : `Network access denied for ${pending.canonicalUrl}.`,
+    });
+    return true;
+  }
+
+  private buildApprovalRequestMessage(id: string, request: NetworkAccessApprovalRequest): string {
+    const reasonSuffix = request.reason ? ` Reason: ${request.reason}` : "";
+    return `Network access request ${id} for ${request.canonicalUrl}.${reasonSuffix} Reply !approve ${id} or !deny ${id}.`;
   }
 
   /** Check if any command session is active for the given channel arc (serverTag#channelName). */

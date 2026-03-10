@@ -374,7 +374,7 @@ async function ensureVm(opts: VmSessionOptions): Promise<VM> {
 
       const workspacePath = getArcWorkspacePath(arc);
 
-      const { plainEnv, secretEnv } = await resolveGondolinEnv({
+      const { plainEnv, secretEnv, urlAllowRegexes } = await resolveGondolinEnv({
         config,
         serverTag,
         channelName,
@@ -385,6 +385,7 @@ async function ensureVm(opts: VmSessionOptions): Promise<VM> {
         arc,
         blockedCidrs: config.blockedCidrs ?? [],
         artifactsUrl,
+        autoApproveRegexes: urlAllowRegexes,
         secrets: secretEnv,
         logger,
       });

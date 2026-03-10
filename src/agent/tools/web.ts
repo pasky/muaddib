@@ -6,12 +6,12 @@ import { Type } from "@sinclair/typebox";
 import type { ToolContext, MuaddibTool } from "./types.js";
 import { resolveLocalArtifactFilePath } from "./url-utils.js";
 import {
-  isUrlTrustedInArc,
+  checkAndAutoApproveUrlInArc,
   recordNetworkTrustEvent,
   recordNetworkTrustEvents,
   recordRedirectTrustEvent,
-  canonicalizeNetworkTrustUrl,
 } from "../network-boundary.js";
+import { resolveGondolinUrlAllowRegexes } from "../gondolin/env.js";
 import { responseText } from "../message.js";
 import { toConfiguredString } from "../../utils/index.js";
 
@@ -174,13 +174,19 @@ function sanitizeExtractedUrlCandidate(value: string): string {
 }
 
 async function ensureVisitUrlTrusted(options: ToolContext, url: string): Promise<void> {
-  if (await isUrlTrustedInArc(options.arc, url)) {
+  const trust = await checkAndAutoApproveUrlInArc(options.arc, url, {
+    autoApproveRegexes: resolveGondolinUrlAllowRegexes({
+      config: options.toolsConfig?.gondolin ?? {},
+      serverTag: options.serverTag,
+      channelName: options.channelName,
+    }),
+  });
+  if (trust.trusted) {
     return;
   }
 
-  const canonicalUrl = canonicalizeNetworkTrustUrl(url);
   throw new Error(
-    `Network access denied for ${canonicalUrl}. Use web_search or request_network_access first.`,
+    `Network access denied for ${trust.canonicalUrl}. Use web_search or request_network_access first.`,
   );
 }
 

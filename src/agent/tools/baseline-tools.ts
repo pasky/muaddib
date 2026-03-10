@@ -63,11 +63,6 @@ export {
 };
 
 export interface BaselineToolOptions extends ToolContext {
-  /** Server tag for the current arc (e.g. "libera"). */
-  serverTag?: string;
-  /** Channel name for the current arc (e.g. "#test"). */
-  channelName?: string;
-
   executors?: Partial<BaselineToolExecutors>;
 
   /**

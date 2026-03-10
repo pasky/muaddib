@@ -49,6 +49,12 @@ export type GondolinEnvValue = string | GondolinSecretEnvConfig;
 
 export interface GondolinProfileConfig {
   env?: Record<string, GondolinEnvValue>;
+  /**
+   * JavaScript regular-expression sources matched against canonical outbound URLs
+   * (scheme + lowercase hostname + pathname, with query/fragment stripped).
+   * Matching URLs are auto-approved for the arc and recorded into the trust ledger.
+   */
+  urlAllowRegexes?: string[];
 }
 
 export interface GondolinArcConfig extends GondolinProfileConfig {

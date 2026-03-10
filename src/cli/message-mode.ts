@@ -40,7 +40,11 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
     muaddibHome,
     arcsPath: options.arcsPath,
     logger: runtimeLogger,
-    networkAccessApprover: options.networkAccessApprover,
+    networkAccessApprover: options.networkAccessApprover ?? (async () => {
+      throw new Error(
+        "request_network_access in CLI mode requires a harness-provided networkAccessApprover or a matching agent.tools.gondolin urlAllowRegexes rule.",
+      );
+    }),
   });
 
   try {

@@ -1,11 +1,11 @@
 import { Type } from "@sinclair/typebox";
 
 import {
-  canonicalizeNetworkTrustUrl,
-  isUrlTrustedInArc,
+  checkAndAutoApproveUrlInArc,
   type NetworkAccessApprovalResult,
   recordNetworkTrustEvent,
 } from "../network-boundary.js";
+import { resolveGondolinUrlAllowRegexes } from "../gondolin/env.js";
 import type { MuaddibTool, ToolContext } from "./types.js";
 
 export interface RequestNetworkAccessInput {
@@ -23,7 +23,7 @@ export function createRequestNetworkAccessTool(
     persistType: "summary",
     label: "Request Network Access",
     description:
-      "Request approval to trust a URL for outbound HTTP if access has been denied. Access is allowed for URLs from websearch, URLs from other trusted URLs, or URLs allowed previously.",
+      "Request approval to trust a URL for outbound HTTP if access has been denied. Access is allowed for URLs from websearch, configured allow rules, URLs from other trusted URLs, or URLs allowed previously.",
     parameters: Type.Object({
       url: Type.String({
         format: "uri",
@@ -49,10 +49,20 @@ export function createRequestNetworkAccessTool(
 export function createDefaultRequestNetworkAccessExecutor(
   options: ToolContext,
 ): RequestNetworkAccessExecutor {
+  const autoApproveRegexes = resolveGondolinUrlAllowRegexes({
+    config: options.toolsConfig?.gondolin ?? {},
+    serverTag: options.serverTag,
+    channelName: options.channelName,
+  });
+
   return async (input: RequestNetworkAccessInput): Promise<string> => {
-    const canonicalUrl = canonicalizeNetworkTrustUrl(input.url);
-    if (await isUrlTrustedInArc(options.arc, input.url)) {
-      return `Network access already trusted for ${canonicalUrl}.`;
+    const trust = await checkAndAutoApproveUrlInArc(options.arc, input.url, {
+      autoApproveRegexes,
+    });
+    if (trust.trusted) {
+      return trust.autoApproved
+        ? `Network access auto-approved by config for ${trust.canonicalUrl}.`
+        : `Network access already trusted for ${trust.canonicalUrl}.`;
     }
 
     const approver = options.networkAccessApprover;
@@ -63,12 +73,12 @@ export function createDefaultRequestNetworkAccessExecutor(
     const approval = normalizeApprovalResult(await approver({
       arc: options.arc,
       url: input.url,
-      canonicalUrl,
+      canonicalUrl: trust.canonicalUrl,
       reason: input.reason,
     }));
 
     if (!approval.approved) {
-      return approval.message ?? `Network access denied for ${canonicalUrl}.`;
+      return approval.message ?? `Network access denied for ${trust.canonicalUrl}.`;
     }
 
     await recordNetworkTrustEvent(options.arc, {
@@ -76,7 +86,7 @@ export function createDefaultRequestNetworkAccessExecutor(
       rawUrl: input.url,
     });
 
-    return approval.message ?? `Network access approved for ${canonicalUrl}.`;
+    return approval.message ?? `Network access approved for ${trust.canonicalUrl}.`;
   };
 }
 

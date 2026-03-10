@@ -46,6 +46,7 @@ import { UserCostLedger } from "../../cost/user-cost-ledger.js";
 import { ContextReducerTs, type ContextReducer } from "./context-reducer.js";
 import type { RoomMessage } from "../message.js";
 import type { MuaddibRuntime } from "../../runtime.js";
+import type { NetworkAccessApprover } from "../../agent/network-boundary.js";
 import { createModeClassifier } from "./classifier.js";
 import { RateLimiter } from "./rate-limiter.js";
 import {
@@ -235,13 +236,13 @@ export class CommandExecutor {
     this.userCostLedger = new UserCostLedger(runtime.muaddibHome);
   }
 
-  private buildToolOptions(authStorage: AuthStorage = this.runtime.authStorage): Omit<BaselineToolOptions, "arc"> {
+  private buildToolOptions(authStorage: AuthStorage = this.runtime.authStorage, networkAccessApprover?: NetworkAccessApprover): Omit<BaselineToolOptions, "arc"> {
     return {
       toolsConfig: this.agentConfig.tools,
       authStorage,
       modelAdapter: this.modelAdapter,
       logger: this.logger,
-      networkAccessApprover: this.runtime.networkAccessApprover,
+      networkAccessApprover: networkAccessApprover ?? this.runtime.networkAccessApprover,
       eventsWatcher: this.eventsWatcher,
     };
   }
@@ -492,9 +493,15 @@ export class CommandExecutor {
     message: RoomMessage,
     triggerTs: string,
     sendResponse: SendResponse,
-    onAgentCreated?: (agent: Agent) => void,
-    onResponseDelivered?: () => void,
+    options?: {
+      onAgentCreated?: (agent: Agent) => void;
+      onResponseDelivered?: () => void;
+      networkAccessApprover?: NetworkAccessApprover;
+    },
   ): Promise<void> {
+    const onAgentCreated = options?.onAgentCreated;
+    const onResponseDelivered = options?.onResponseDelivered;
+    const networkAccessApprover = options?.networkAccessApprover;
     const { logger } = this;
 
     // ── Unified delivery: send + persist (used for all responses) ──
@@ -618,6 +625,7 @@ export class CommandExecutor {
       resolvedRuntime.toolsOverrides,
       resolved.noContext,
       effectiveAuthStorage,
+      networkAccessApprover,
     );
 
     const progressConfig = this.agentConfig.progress;
@@ -1100,8 +1108,9 @@ export class CommandExecutor {
     toolsOverrides?: Record<string, unknown> | null,
     skipMemory?: boolean,
     authStorage?: AuthStorage,
+    networkAccessApprover?: NetworkAccessApprover,
   ): ToolSet {
-    const baseOptions = this.buildToolOptions(authStorage);
+    const baseOptions = this.buildToolOptions(authStorage, networkAccessApprover);
     const invocationToolOptions: BaselineToolOptions = {
       ...baseOptions,
       toolsConfig: toolsOverrides

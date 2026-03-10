@@ -508,6 +508,30 @@ describe("core tool executors request_network_access support", () => {
     expect(await isUrlTrustedInArc(TEST_ARC, "https://example.com/docs?section=2")).toBe(true);
   });
 
+  it("auto-approves matching URLs from gondolin arc regex config", async () => {
+    const executors = createDefaultToolExecutors({
+      serverTag: "slack:Corp",
+      channelName: "#release",
+      toolsConfig: {
+        gondolin: {
+          arcs: {
+            "slack:Corp##release": {
+              urlAllowRegexes: ["^https://example\\.com/.*$"],
+            },
+          },
+        },
+      },
+    });
+
+    const result = await executors.requestNetworkAccess({
+      url: "https://Example.com/docs?page=1",
+      reason: "Need docs",
+    });
+
+    expect(result).toBe("Network access auto-approved by config for https://example.com/docs.");
+    expect(await isUrlTrustedInArc(TEST_ARC, "https://example.com/docs?section=2")).toBe(true);
+  });
+
   it("errors when no harness approver is provided", async () => {
     const executors = createDefaultToolExecutors({});
     await expect(

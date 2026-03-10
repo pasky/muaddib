@@ -37,6 +37,12 @@ export interface NetworkAccessApprovalResult {
   message?: string;
 }
 
+export interface NetworkTrustCheckResult {
+  canonicalUrl: string;
+  trusted: boolean;
+  autoApproved: boolean;
+}
+
 export type NetworkAccessApprover = (
   request: NetworkAccessApprovalRequest,
 ) => Promise<NetworkAccessApprovalResult | boolean> | NetworkAccessApprovalResult | boolean;
@@ -106,6 +112,30 @@ export async function isUrlTrustedInArc(
   now = new Date(),
 ): Promise<boolean> {
   return isCanonicalUrlTrustedInArc(arc, canonicalizeNetworkTrustUrl(rawUrl), now);
+}
+
+export async function checkAndAutoApproveUrlInArc(
+  arc: string,
+  rawUrl: string,
+  options?: { autoApproveRegexes?: ReadonlyArray<RegExp>; now?: Date },
+): Promise<NetworkTrustCheckResult> {
+  const now = options?.now ?? new Date();
+  const canonicalUrl = canonicalizeNetworkTrustUrl(rawUrl);
+  if (await isCanonicalUrlTrustedInArc(arc, canonicalUrl, now)) {
+    return { canonicalUrl, trusted: true, autoApproved: false };
+  }
+
+  const autoApproveRegexes = options?.autoApproveRegexes ?? [];
+  if (!autoApproveRegexes.some((regex) => regex.test(canonicalUrl))) {
+    return { canonicalUrl, trusted: false, autoApproved: false };
+  }
+
+  await recordNetworkTrustEvent(arc, {
+    source: "approval",
+    rawUrl,
+  }, now);
+
+  return { canonicalUrl, trusted: true, autoApproved: true };
 }
 
 export async function recordNetworkTrustEvent(

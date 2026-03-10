@@ -58,6 +58,9 @@ export interface ToolContext extends ArtifactContext {
   // ── Per-invocation context ──
   /** Arc identifier (e.g. "libera##test"), used for Gondolin VM isolation and chronicle scoping. */
   arc: string;
+  /** Raw room identifiers used for human-arc Gondolin config matching (`${serverTag}#${channelName}`). */
+  serverTag?: string;
+  channelName?: string;
   /** HTTP header secrets for authenticated web requests. */
   secrets?: Record<string, unknown>;
   /** Harness-provided approval callback for request_network_access. */

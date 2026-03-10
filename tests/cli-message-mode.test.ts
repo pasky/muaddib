@@ -228,6 +228,70 @@ describe("runCliMessageMode", () => {
     expect(await isUrlTrustedInArc("testserver##testchannel", "https://example.com/docs?section=2")).toBe(true);
   });
 
+  it("fails fast when CLI mode hits request_network_access without an injected approver or matching config rule", async () => {
+    const dir = await createTempHome();
+
+    const configPath = join(dir, "config.json");
+    const config = {
+      rooms: {
+        common: {
+          command: {
+            historySize: 40,
+            defaultMode: "classifier:serious",
+            modes: {
+              serious: {
+                model: "openai:gpt-4o-mini",
+                prompt: "You are {mynick}",
+                triggers: {
+                  "!s": {},
+                },
+              },
+            },
+            modeClassifier: {
+              model: "openai:gpt-4o-mini",
+              labels: {
+                EASY_SERIOUS: "!s",
+              },
+              fallbackLabel: "EASY_SERIOUS",
+            },
+          },
+        },
+        irc: {
+          command: {
+            historySize: 40,
+          },
+        },
+      },
+    };
+
+    await writeFile(configPath, JSON.stringify(config), "utf-8");
+
+    await expect(
+      runCliMessageMode({
+        configPath,
+        message: "!s ask for access",
+        runnerFactory: (input) => {
+          const requestTool = input.toolSet.tools.find((tool) => tool.name === "request_network_access");
+          expect(requestTool).toBeDefined();
+
+          return {
+            prompt: async () => {
+              await requestTool!.execute(
+                "call-1",
+                { url: "https://example.com/docs?page=1", reason: "Need docs" },
+                undefined,
+                undefined,
+              );
+              throw new Error("request tool unexpectedly resolved");
+            },
+          };
+        },
+      }),
+    ).rejects.toThrow(
+      "request_network_access in CLI mode requires a harness-provided networkAccessApprover or a matching agent.tools.gondolin urlAllowRegexes rule.",
+    );
+  });
+
   it("accepts proactive config knobs (no longer deferred)", async () => {
     const dir = await createTempHome();
 

@@ -2,7 +2,7 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { RuntimeLogWriter } from "../src/app/logging.js";
@@ -18,6 +18,22 @@ import type { RoomMessage } from "../src/rooms/message.js";
 import { buildArc } from "../src/rooms/message.js";
 import { createDeferred, createTempHistoryStore, waitForPersistedMessage } from "./test-helpers.js";
 import { createTestRuntime } from "./test-runtime.js";
+
+const tempMuaddibHomes: string[] = [];
+const originalMuaddibHome = process.env.MUADDIB_HOME;
+
+beforeEach(async () => {
+  const dir = await mkdtemp(join(tmpdir(), "muaddib-message-handler-"));
+  tempMuaddibHomes.push(dir);
+  process.env.MUADDIB_HOME = dir;
+});
+
+afterEach(async () => {
+  process.env.MUADDIB_HOME = originalMuaddibHome;
+  for (const dir of tempMuaddibHomes.splice(0, tempMuaddibHomes.length)) {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 
 const roomConfig = {
   command: {
@@ -840,6 +856,170 @@ describe("RoomMessageHandler", () => {
     // Direct thread follow-ups are user messages, not background noise —
     // they should NOT get the "do not derail" <meta> wrapper.
     expect(steerCalls[0].content[0].text).not.toContain("<meta>");
+
+    await history.close();
+  });
+
+  it("intercepts !approve and resumes pending network access in the same thread only", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const requestStarted = createDeferred<void>();
+    const requestPrompted = createDeferred<void>();
+    let runCompleted = false;
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: (input) => {
+        const requestTool = input.toolSet.tools.find((tool) => tool.name === "request_network_access");
+        expect(requestTool).toBeDefined();
+
+        return {
+          prompt: async () => {
+            requestStarted.resolve();
+            const toolResult = await requestTool!.execute(
+              "call-1",
+              { url: "https://Example.com/docs?page=1", reason: "Need docs" },
+              undefined,
+              undefined,
+            );
+            const textBlock = toolResult.content.find((block) => block.type === "text");
+            const text = textBlock?.type === "text" ? textBlock.text : "missing tool result";
+            await input.onResponse(text);
+            return makeRunnerResult(text);
+          },
+        };
+      },
+    });
+
+    const sent: string[] = [];
+    const runPromise = handler.handleIncomingMessage(
+      makeMessage("!s request access", { isDirect: true, threadId: "thread-1" }),
+      {
+        sendResponse: async (text) => {
+          sent.push(text);
+          if (text.includes("Network access request")) {
+            requestPrompted.resolve();
+          }
+        },
+      },
+    ).finally(() => {
+      runCompleted = true;
+    });
+
+    await requestStarted.promise;
+    await requestPrompted.promise;
+
+    expect(sent[0]).toContain("Network access request");
+    expect(sent[0]).toContain("Reply !approve");
+    const requestId = sent[0].match(/request\s+(\S+)\s+for/u)?.[1];
+    expect(requestId).toBeTruthy();
+
+    const wrongThreadReplies: string[] = [];
+    await handler.handleIncomingMessage(
+      makeMessage(`!approve ${requestId}`, { isDirect: false, threadId: "thread-2", nick: "bob" }),
+      {
+        sendResponse: async (text) => {
+          wrongThreadReplies.push(text);
+        },
+      },
+    );
+
+    expect(wrongThreadReplies).toEqual([
+      `bob: Network access request ${requestId} is pending in a different room or thread.`,
+    ]);
+    expect(runCompleted).toBe(false);
+
+    const approvalReplies: string[] = [];
+    await handler.handleIncomingMessage(
+      makeMessage(`!approve ${requestId}`, { isDirect: false, threadId: "thread-1", nick: "bob" }),
+      {
+        sendResponse: async (text) => {
+          approvalReplies.push(text);
+        },
+      },
+    );
+
+    await runPromise;
+
+    expect(approvalReplies).toEqual([
+      `bob: approved network access request ${requestId} for https://example.com/docs.`,
+    ]);
+    expect(sent[sent.length - 1]).toBe("Network access approved for https://example.com/docs.");
+
+    await history.close();
+  });
+
+  it("intercepts !deny and returns a denied tool result", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const requestStarted = createDeferred<void>();
+    const requestPrompted = createDeferred<void>();
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: (input) => {
+        const requestTool = input.toolSet.tools.find((tool) => tool.name === "request_network_access");
+        expect(requestTool).toBeDefined();
+
+        return {
+          prompt: async () => {
+            requestStarted.resolve();
+            const toolResult = await requestTool!.execute(
+              "call-1",
+              { url: "https://example.com/private?token=1" },
+              undefined,
+              undefined,
+            );
+            const textBlock = toolResult.content.find((block) => block.type === "text");
+            const text = textBlock?.type === "text" ? textBlock.text : "missing tool result";
+            await input.onResponse(text);
+            return makeRunnerResult(text);
+          },
+        };
+      },
+    });
+
+    const sent: string[] = [];
+    const runPromise = handler.handleIncomingMessage(
+      makeMessage("!s request private access", { isDirect: true, threadId: "thread-9" }),
+      {
+        sendResponse: async (text) => {
+          sent.push(text);
+          if (text.includes("Network access request")) {
+            requestPrompted.resolve();
+          }
+        },
+      },
+    );
+
+    await requestStarted.promise;
+    await requestPrompted.promise;
+
+    const requestId = sent[0].match(/request\s+(\S+)\s+for/u)?.[1];
+    expect(requestId).toBeTruthy();
+
+    const denyReplies: string[] = [];
+    await handler.handleIncomingMessage(
+      makeMessage(`!deny ${requestId}`, { isDirect: false, threadId: "thread-9", nick: "bob" }),
+      {
+        sendResponse: async (text) => {
+          denyReplies.push(text);
+        },
+      },
+    );
+
+    await runPromise;
+
+    expect(denyReplies).toEqual([
+      `bob: denied network access request ${requestId} for https://example.com/private.`,
+    ]);
+    expect(sent[sent.length - 1]).toBe("Network access denied for https://example.com/private.");
 
     await history.close();
   });

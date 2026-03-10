@@ -12,16 +12,64 @@ export interface ResolvedGondolinEnv {
   humanArc: string | null;
   plainEnv: Record<string, string>;
   secretEnv: Record<string, VmSecretDefinition>;
+  urlAllowRegexes: RegExp[];
 }
 
-interface ResolveGondolinEnvOptions {
+interface ResolveGondolinArcOptions {
   config: GondolinConfig;
   serverTag?: string;
   channelName?: string;
+}
+
+interface ResolveGondolinEnvOptions extends ResolveGondolinArcOptions {
   authStorage?: AuthStorage;
 }
 
+interface ResolvedGondolinArcFragments {
+  humanArc: string | null;
+  env: Record<string, GondolinEnvValue>;
+  urlAllowRegexes: RegExp[];
+}
+
+export function resolveGondolinUrlAllowRegexes(options: ResolveGondolinArcOptions): RegExp[] {
+  return resolveGondolinArcFragments(options).urlAllowRegexes;
+}
+
 export async function resolveGondolinEnv(options: ResolveGondolinEnvOptions): Promise<ResolvedGondolinEnv> {
+  const { humanArc, env, urlAllowRegexes } = resolveGondolinArcFragments(options);
+
+  const plainEnv: Record<string, string> = {};
+  const secretEnv: Record<string, VmSecretDefinition> = {};
+
+  for (const [name, value] of Object.entries(env)) {
+    if (typeof value === "string") {
+      plainEnv[name] = value;
+      continue;
+    }
+
+    if (!options.authStorage) {
+      throw new Error(
+        `Gondolin env var ${name} references auth provider '${value.provider}', but authStorage is unavailable.`,
+      );
+    }
+
+    const apiKey = await options.authStorage.getApiKey(value.provider);
+    if (!apiKey) {
+      throw new Error(
+        `Gondolin env var ${name} references auth provider '${value.provider}', but no API key is configured in auth.json.`,
+      );
+    }
+
+    secretEnv[name] = {
+      hosts: [...value.hosts],
+      value: apiKey,
+    };
+  }
+
+  return { humanArc, plainEnv, secretEnv, urlAllowRegexes };
+}
+
+function resolveGondolinArcFragments(options: ResolveGondolinArcOptions): ResolvedGondolinArcFragments {
   const humanArc =
     typeof options.serverTag === "string" && typeof options.channelName === "string"
       ? `${options.serverTag}#${options.channelName}`
@@ -35,6 +83,8 @@ export async function resolveGondolinEnv(options: ResolveGondolinEnvOptions): Pr
     : asRecord(options.config.arcs) ?? fail("agent.tools.gondolin.arcs must be an object");
 
   const env: Record<string, GondolinEnvValue> = {};
+  const urlAllowRegexes: RegExp[] = [];
+
   const matchingArcs = Object.entries(arcs)
     .filter(([pattern]) => !pattern.startsWith("_comment"))
     .filter(([pattern]) => {
@@ -68,40 +118,14 @@ export async function resolveGondolinEnv(options: ResolveGondolinEnvOptions): Pr
         throw new Error(`${profilePath}.use is not supported; Gondolin profiles cannot inherit from other profiles`);
       }
       Object.assign(env, readEnv(profile.env, `${profilePath}.env`));
+      urlAllowRegexes.push(...readUrlAllowRegexes(profile.urlAllowRegexes, `${profilePath}.urlAllowRegexes`));
     }
 
     Object.assign(env, readEnv(arc.env, `${arcPath}.env`));
+    urlAllowRegexes.push(...readUrlAllowRegexes(arc.urlAllowRegexes, `${arcPath}.urlAllowRegexes`));
   }
 
-  const plainEnv: Record<string, string> = {};
-  const secretEnv: Record<string, VmSecretDefinition> = {};
-
-  for (const [name, value] of Object.entries(env)) {
-    if (typeof value === "string") {
-      plainEnv[name] = value;
-      continue;
-    }
-
-    if (!options.authStorage) {
-      throw new Error(
-        `Gondolin env var ${name} references auth provider '${value.provider}', but authStorage is unavailable.`,
-      );
-    }
-
-    const apiKey = await options.authStorage.getApiKey(value.provider);
-    if (!apiKey) {
-      throw new Error(
-        `Gondolin env var ${name} references auth provider '${value.provider}', but no API key is configured in auth.json.`,
-      );
-    }
-
-    secretEnv[name] = {
-      hosts: [...value.hosts],
-      value: apiKey,
-    };
-  }
-
-  return { humanArc, plainEnv, secretEnv };
+  return { humanArc, env, urlAllowRegexes };
 }
 
 function readEnv(value: unknown, path: string): Record<string, GondolinEnvValue> {
@@ -119,6 +143,33 @@ function readEnv(value: unknown, path: string): Record<string, GondolinEnvValue>
       .filter(([key]) => !key.startsWith("_comment"))
       .map(([name, envValue]) => [name, readEnvValue(envValue, `${path}.${name}`)]),
   );
+}
+
+function readUrlAllowRegexes(value: unknown, path: string): RegExp[] {
+  if (value === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    throw new Error(`${path} must be an array of non-empty regex strings`);
+  }
+
+  return value.map((entry, index) => compileUrlAllowRegex(entry, `${path}[${index}]`));
+}
+
+function compileUrlAllowRegex(value: unknown, path: string): RegExp {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`${path} must be a non-empty regex string`);
+  }
+
+  try {
+    return new RegExp(value, "u");
+  } catch (error) {
+    throw new Error(
+      `${path} must be a valid JavaScript regular expression source: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
 }
 
 function readEnvValue(value: unknown, path: string): GondolinEnvValue {
