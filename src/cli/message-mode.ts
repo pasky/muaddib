@@ -6,6 +6,7 @@ import {
 } from "../rooms/command/message-handler.js";
 import { type RoomMessage, buildArc } from "../rooms/message.js";
 import { createMuaddibRuntime, shutdownRuntime } from "../runtime.js";
+import type { NetworkAccessApprover } from "../agent/network-boundary.js";
 
 export interface CliMessageModeOptions {
   message: string;
@@ -17,6 +18,7 @@ export interface CliMessageModeOptions {
   mynick?: string;
   arcsPath?: string;
   runnerFactory?: CommandRunnerFactory;
+  networkAccessApprover?: NetworkAccessApprover;
 }
 
 export interface CliMessageModeResult {
@@ -38,6 +40,7 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
     muaddibHome,
     arcsPath: options.arcsPath,
     logger: runtimeLogger,
+    networkAccessApprover: options.networkAccessApprover,
   });
 
   try {

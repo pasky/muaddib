@@ -1,4 +1,9 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFile, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { AuthStorage } from "@mariozechner/pi-coding-agent";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PiAiModelAdapter } from "../src/models/pi-ai-model-adapter.js";
 import {
@@ -8,6 +13,7 @@ import {
   createDeepResearchTool,
   ORACLE_EXCLUDED_TOOLS,
   createMakePlanTool,
+  createRequestNetworkAccessTool,
   createVisitWebpageTool,
   createWebSearchTool,
 } from "../src/agent/tools/baseline-tools.js";
@@ -18,17 +24,49 @@ import {
   getArcWorkspacePath,
 } from "../src/agent/gondolin/index.js";
 import { getArcCheckpointPath } from "../src/agent/gondolin/fs.js";
-import { isIpInCidr } from "../src/agent/gondolin/network.js";
+import { createVmHttpHooks, isIpInCidr } from "../src/agent/gondolin/network.js";
 import { resetGondolinVmCache } from "../src/agent/gondolin/vm.js";
+import {
+  NETWORK_TRUST_TTL_MS,
+  canonicalizeNetworkTrustUrl,
+  getArcNetworkTrustLedgerPath,
+  isUrlTrustedInArc,
+  recordNetworkTrustEvent,
+} from "../src/agent/network-boundary.js";
 import { buildArc } from "../src/rooms/message.js";
+
+const tempDirs: string[] = [];
+const originalMuaddibHome = process.env.MUADDIB_HOME;
 
 function createTools(options: Record<string, unknown>) {
   return createBaselineAgentTools({
     modelAdapter: new PiAiModelAdapter(),
+    authStorage: AuthStorage.inMemory(),
     arc: "test-arc",
     ...(options as any),
   }).tools;
 }
+
+async function trustUrl(url: string, arc = "test-arc", now = new Date()): Promise<void> {
+  await recordNetworkTrustEvent(arc, {
+    source: "approval",
+    rawUrl: url,
+  }, now);
+}
+
+beforeEach(async () => {
+  const muaddibHome = await mkdtemp(join(tmpdir(), "muaddib-baseline-tools-"));
+  tempDirs.push(muaddibHome);
+  process.env.MUADDIB_HOME = muaddibHome;
+});
+
+afterEach(async () => {
+  process.env.MUADDIB_HOME = originalMuaddibHome;
+  resetGondolinVmCache();
+  for (const dir of tempDirs.splice(0, tempDirs.length)) {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 
 describe("baseline agent tools", () => {
   it("creates expected baseline tool names", () => {
@@ -46,6 +84,7 @@ describe("baseline agent tools", () => {
     expect(tools.map((tool) => tool.name)).toEqual([
       "web_search",
       "visit_webpage",
+      "request_network_access",
       "generate_image",
       "oracle",
       "deep_research",
@@ -110,6 +149,24 @@ describe("baseline agent tools", () => {
       data: "base64-image",
       mimeType: "image/png",
     });
+  });
+
+  it("request_network_access tool delegates to configured executor", async () => {
+    const requestNetworkAccess = vi.fn(async (input: { url: string; reason?: string }) => `approved:${input.url}`);
+    const tool = createRequestNetworkAccessTool({ requestNetworkAccess });
+
+    const result = await tool.execute(
+      "call-4",
+      { url: "https://example.com/docs?page=1", reason: "Need documentation" },
+      undefined,
+      undefined,
+    );
+
+    expect(requestNetworkAccess).toHaveBeenCalledWith({
+      url: "https://example.com/docs?page=1",
+      reason: "Need documentation",
+    });
+    expect(result.content[0]).toEqual({ type: "text", text: "approved:https://example.com/docs?page=1" });
   });
 
   it("share_artifact tool delegates to configured executor with file_path", async () => {
@@ -259,6 +316,7 @@ describe("baseline tools with Gondolin", () => {
     const names = tools.map((t) => t.name);
     expect(names).toContain("web_search");
     expect(names).toContain("visit_webpage");
+    expect(names).toContain("request_network_access");
     expect(names).toContain("generate_image");
     expect(names).toContain("oracle");
     expect(names).toContain("make_plan");
@@ -336,6 +394,48 @@ describe("getArcCheckpointPath", () => {
   });
 });
 
+// ── Shared network boundary module ────────────────────────────────────────
+
+describe("network boundary shared module", () => {
+  it("canonicalizes URLs per the design doc", () => {
+    expect(canonicalizeNetworkTrustUrl("https://Example.com/foo?a=1#x")).toBe("https://example.com/foo");
+    expect(canonicalizeNetworkTrustUrl("https://example.com/foo?a=2")).toBe("https://example.com/foo");
+    expect(canonicalizeNetworkTrustUrl("https://example.com")).toBe("https://example.com/");
+    expect(canonicalizeNetworkTrustUrl("https://example.com:443/docs")).toBe("https://example.com/docs");
+    expect(canonicalizeNetworkTrustUrl("http://Example.com:8080")).toBe("http://example.com:8080/");
+  });
+
+  it("stores trust per arc and expires entries after 30 days", async () => {
+    const now = new Date("2026-03-09T12:00:00.000Z");
+
+    await recordNetworkTrustEvent("arc-one", {
+      source: "approval",
+      rawUrl: "https://example.com/path?token=x",
+    }, now);
+
+    expect(await isUrlTrustedInArc("arc-one", "https://example.com/path?other=1", now)).toBe(true);
+    expect(await isUrlTrustedInArc("arc-two", "https://example.com/path", now)).toBe(false);
+    expect(
+      await isUrlTrustedInArc(
+        "arc-one",
+        "https://example.com/path",
+        new Date(now.getTime() + NETWORK_TRUST_TTL_MS - 1_000),
+      ),
+    ).toBe(true);
+    expect(
+      await isUrlTrustedInArc(
+        "arc-one",
+        "https://example.com/path",
+        new Date(now.getTime() + NETWORK_TRUST_TTL_MS + 1_000),
+      ),
+    ).toBe(false);
+
+    const ledger = await readFile(getArcNetworkTrustLedgerPath("arc-one"), "utf-8");
+    expect(ledger).toContain('"source":"approval"');
+    expect(ledger).toContain('"canonicalUrl":"https://example.com/path"');
+  });
+});
+
 // ── Gondolin network filtering helpers ────────────────────────────────────
 
 describe("isIpInCidr", () => {
@@ -385,6 +485,67 @@ describe("isIpInCidr", () => {
 });
 
 // ── Gondolin session ref-counting ──────────────────────────────────────────
+
+describe("createVmHttpHooks network trust policy", () => {
+  it("allows only trusted canonical URLs for sandbox HTTP requests", async () => {
+    const { httpHooks } = await createVmHttpHooks({
+      arc: "sandbox-arc",
+      blockedCidrs: [],
+    });
+
+    expect(
+      await Promise.resolve(httpHooks.isRequestAllowed?.({
+        method: "GET",
+        url: "https://example.com/path?x=1",
+        headers: {},
+        body: null,
+      })),
+    ).toBe(false);
+
+    await trustUrl("https://example.com/path?seed=1", "sandbox-arc");
+
+    expect(
+      await Promise.resolve(httpHooks.isRequestAllowed?.({
+        method: "POST",
+        url: "https://example.com/path?x=2",
+        headers: { "content-type": "application/json" },
+        body: null,
+      })),
+    ).toBe(true);
+  });
+
+  it("auto-trusts redirect targets for sandbox direct network", async () => {
+    await trustUrl("https://source.example.com/start?token=1", "redirect-arc");
+
+    const upstreamFetch = vi.fn(async () => new Response("", {
+      status: 302,
+      headers: {
+        location: "https://cdn.example.com/final?download=1",
+      },
+    }));
+
+    const { fetch: trustAwareFetch, httpHooks } = await createVmHttpHooks({
+      arc: "redirect-arc",
+      blockedCidrs: [],
+      fetchImpl: upstreamFetch as any,
+    });
+
+    await trustAwareFetch("https://source.example.com/start?token=1", {
+      method: "GET",
+      redirect: "manual",
+    });
+
+    expect(await isUrlTrustedInArc("redirect-arc", "https://cdn.example.com/final?other=1")).toBe(true);
+    expect(
+      await Promise.resolve(httpHooks.isRequestAllowed?.({
+        method: "GET",
+        url: "https://cdn.example.com/final?other=2",
+        headers: {},
+        body: null,
+      })),
+    ).toBe(true);
+  });
+});
 
 describe("gondolin session ref-counting", () => {
   const gondolinConfig = {};

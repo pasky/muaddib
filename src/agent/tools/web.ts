@@ -5,6 +5,13 @@ import { Type } from "@sinclair/typebox";
 
 import type { ToolContext, MuaddibTool } from "./types.js";
 import { resolveLocalArtifactFilePath } from "./url-utils.js";
+import {
+  isUrlTrustedInArc,
+  recordNetworkTrustEvent,
+  recordNetworkTrustEvents,
+  recordRedirectTrustEvent,
+  canonicalizeNetworkTrustUrl,
+} from "../network-boundary.js";
 import { responseText } from "../message.js";
 import { toConfiguredString } from "../../utils/index.js";
 
@@ -138,6 +145,99 @@ export function resetWebRateLimiters(): void {
   visitRateLimiter.reset();
 }
 
+const MAX_VISIT_REDIRECTS = 10;
+const SEARCH_RESULT_URL_RE = /\bhttps?:\/\/[^\s<>"')\]]+/giu;
+
+function extractSearchResultUrls(body: string): string[] {
+  const seen = new Set<string>();
+  const urls: string[] = [];
+
+  for (const match of body.matchAll(SEARCH_RESULT_URL_RE)) {
+    const candidate = sanitizeExtractedUrlCandidate(match[0]);
+    try {
+      const normalized = new URL(candidate).toString();
+      if (seen.has(normalized)) {
+        continue;
+      }
+      seen.add(normalized);
+      urls.push(normalized);
+    } catch {
+      // Ignore malformed URL-like substrings from search snippets.
+    }
+  }
+
+  return urls;
+}
+
+function sanitizeExtractedUrlCandidate(value: string): string {
+  return value.replace(/[),.;:]+$/u, "");
+}
+
+async function ensureVisitUrlTrusted(options: ToolContext, url: string): Promise<void> {
+  if (await isUrlTrustedInArc(options.arc, url)) {
+    return;
+  }
+
+  const canonicalUrl = canonicalizeNetworkTrustUrl(url);
+  throw new Error(
+    `Network access denied for ${canonicalUrl}. Use web_search or request_network_access first.`,
+  );
+}
+
+function isRedirectStatus(status: number): boolean {
+  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
+}
+
+function getRedirectTarget(response: Response, currentUrl: string): string | null {
+  const location = response.headers.get("location");
+  if (!location || !isRedirectStatus(response.status)) {
+    return null;
+  }
+
+  const redirectUrl = new URL(location, currentUrl);
+  if (redirectUrl.protocol !== "http:" && redirectUrl.protocol !== "https:") {
+    return null;
+  }
+
+  return redirectUrl.toString();
+}
+
+async function fetchVisitResponseWithRedirects(
+  options: ToolContext,
+  startUrl: string,
+  init: Omit<RequestInit, "headers" | "redirect"> & { headers?: Record<string, string> },
+): Promise<Response> {
+  let currentUrl = startUrl;
+
+  for (let redirectCount = 0; redirectCount <= MAX_VISIT_REDIRECTS; redirectCount += 1) {
+    const response = await diagnosticFetch(currentUrl, {
+      ...init,
+      headers: buildVisitHeaders(options, currentUrl, init.headers),
+      redirect: "manual",
+    });
+
+    const redirectTarget = getRedirectTarget(response, currentUrl);
+    if (!redirectTarget) {
+      return response;
+    }
+
+    if (response.body) {
+      try {
+        await response.body.cancel();
+      } catch {
+        // ignore cancellation failures on redirect hops
+      }
+    }
+    await recordRedirectTrustEvent(options.arc, {
+      fromUrl: currentUrl,
+      rawUrl: redirectTarget,
+    });
+    currentUrl = redirectTarget;
+  }
+
+  throw new Error(`visit_webpage failed: too many redirects for ${startUrl}`);
+}
+
 export function createDefaultWebSearchExecutor(
   options: ToolContext,
 ): WebSearchExecutor {
@@ -171,6 +271,12 @@ export function createDefaultWebSearchExecutor(
       return "No search results found. Try a different query.";
     }
 
+    const resultUrls = extractSearchResultUrls(body);
+    await recordNetworkTrustEvents(
+      options.arc,
+      resultUrls.map((rawUrl) => ({ source: "web_search" as const, rawUrl })),
+    );
+
     return `## Search Results\n\n${body}`;
   };
 }
@@ -194,21 +300,30 @@ export function createDefaultVisitWebpageExecutor(
       return localResult;
     }
 
+    await ensureVisitUrlTrusted(options, url);
     await visitRateLimiter.waitIfNeeded();
 
-    const requestHeaders = buildVisitHeaders(options, url, {
+    const baseRequestHeaders = {
       "User-Agent": "muaddib/1.0",
-    });
+    };
+    const initialRequestHeaders = buildVisitHeaders(options, url, baseRequestHeaders);
 
     let contentType = "";
     try {
-      const headResponse = await diagnosticFetch(url, {
+      const headResponse = await fetchVisitResponseWithRedirects(options, url, {
         method: "HEAD",
-        headers: requestHeaders,
+        headers: baseRequestHeaders,
       });
       options.logger?.debug(`HEAD ${url} → ${headResponse.status} content-type=${headResponse.headers.get("content-type") ?? "(none)"}`);
       if (headResponse.ok) {
         contentType = (headResponse.headers.get("content-type") ?? "").toLowerCase();
+      }
+      if (headResponse.body) {
+        try {
+          await headResponse.body.cancel();
+        } catch {
+          // ignore cancellation failures for HEAD probes
+        }
       }
     } catch (err) {
       // Recovery strategy: some sites disallow HEAD; continue with reader fallback.
@@ -216,8 +331,8 @@ export function createDefaultVisitWebpageExecutor(
     }
 
     if (contentType.startsWith("image/") && !contentType.includes("svg")) {
-      const imageResponse = await diagnosticFetch(url, {
-        headers: requestHeaders,
+      const imageResponse = await fetchVisitResponseWithRedirects(options, url, {
+        headers: baseRequestHeaders,
       });
       if (!imageResponse.ok) {
         throw new Error(`Failed to download image: HTTP ${imageResponse.status}`);
@@ -234,6 +349,11 @@ export function createDefaultVisitWebpageExecutor(
         );
       }
 
+      await recordNetworkTrustEvent(options.arc, {
+        source: "visit_webpage",
+        rawUrl: url,
+      });
+
       return {
         kind: "image",
         data: imageBytes.toString("base64"),
@@ -241,13 +361,13 @@ export function createDefaultVisitWebpageExecutor(
       };
     }
 
-    const hasAuthHeaders = Object.entries(requestHeaders).some(
+    const hasAuthHeaders = Object.entries(initialRequestHeaders).some(
       ([key, value]) => key.toLowerCase() !== "user-agent" && String(value).trim().length > 0,
     );
 
     if (hasAuthHeaders) {
-      const response = await diagnosticFetch(url, {
-        headers: requestHeaders,
+      const response = await fetchVisitResponseWithRedirects(options, url, {
+        headers: baseRequestHeaders,
       });
 
       if (!response.ok) {
@@ -269,10 +389,18 @@ export function createDefaultVisitWebpageExecutor(
         const slice = truncated ? data.subarray(0, maxWebContentLength) : data;
         const b64 = slice.toString("base64");
         const suffix = truncated ? " (truncated)" : "";
+        await recordNetworkTrustEvent(options.arc, {
+          source: "visit_webpage",
+          rawUrl: url,
+        });
         return `## Binary content from ${url} (content-type: ${rawContentType})\n\nBase64${suffix}: ${b64}`;
       }
 
       const body = (await response.text()).trim();
+      await recordNetworkTrustEvent(options.arc, {
+        source: "visit_webpage",
+        rawUrl: url,
+      });
 
       if (!body) {
         return `## Content from ${url}\n\n(Empty response)`;
@@ -284,6 +412,10 @@ export function createDefaultVisitWebpageExecutor(
     // Use Jina reader with retry/backoff.
     const readerUrl = `https://r.jina.ai/${url}`;
     const body = await fetchJinaWithRetry(readerUrl, await options.authStorage.getApiKey("jina"), options.logger);
+    await recordNetworkTrustEvent(options.arc, {
+      source: "visit_webpage",
+      rawUrl: url,
+    });
 
     if (!body) {
       return `## Content from ${url}\n\n(Empty response)`;

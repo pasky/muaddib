@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runCliMessageMode } from "../src/cli/message-mode.js";
+import { isUrlTrustedInArc } from "../src/agent/network-boundary.js";
 
 const tempDirs: string[] = [];
 
@@ -113,6 +114,118 @@ describe("runCliMessageMode", () => {
     const arcLogDir = join(dir, "logs", date, "testserver##testchannel");
     const arcLogs = await readdir(arcLogDir);
     expect(arcLogs.length).toBeGreaterThan(0);
+  });
+
+  it("wires request_network_access through runtime and command execution", async () => {
+    const dir = await createTempHome();
+
+    const configPath = join(dir, "config.json");
+    const config = {
+      rooms: {
+        common: {
+          command: {
+            historySize: 40,
+            defaultMode: "classifier:serious",
+            modes: {
+              serious: {
+                model: "openai:gpt-4o-mini",
+                prompt: "You are {mynick}",
+                triggers: {
+                  "!s": {},
+                },
+              },
+            },
+            modeClassifier: {
+              model: "openai:gpt-4o-mini",
+              labels: {
+                EASY_SERIOUS: "!s",
+              },
+              fallbackLabel: "EASY_SERIOUS",
+            },
+          },
+        },
+        irc: {
+          command: {
+            historySize: 40,
+          },
+        },
+      },
+    };
+
+    await writeFile(configPath, JSON.stringify(config), "utf-8");
+
+    const networkAccessApprover = vi.fn(async (request: {
+      arc: string;
+      url: string;
+      canonicalUrl: string;
+      reason?: string;
+    }) => ({
+      approved: true,
+      message: `approved ${request.canonicalUrl}`,
+    }));
+
+    const result = await runCliMessageMode({
+      configPath,
+      message: "!s ask for access",
+      networkAccessApprover,
+      runnerFactory: (input) => {
+        const requestTool = input.toolSet.tools.find((tool) => tool.name === "request_network_access");
+        expect(requestTool).toBeDefined();
+
+        return {
+          prompt: async () => {
+            const toolResult = await requestTool!.execute(
+              "call-1",
+              { url: "https://Example.com/docs?page=1", reason: "Need docs" },
+              undefined,
+              undefined,
+            );
+            const textBlock = toolResult.content.find((block) => block.type === "text");
+            const text = textBlock?.type === "text" ? textBlock.text : "missing tool result";
+            await input.onResponse(text);
+            return {
+              assistantMessage: {
+                role: "assistant",
+                content: [{ type: "text", text }],
+                api: "openai-completions",
+                provider: "openai",
+                model: "gpt-4o-mini",
+                usage: {
+                  input: 1,
+                  output: 1,
+                  cacheRead: 0,
+                  cacheWrite: 0,
+                  totalTokens: 2,
+                  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+                },
+                stopReason: "stop",
+                timestamp: Date.now(),
+              },
+              text,
+              stopReason: "stop",
+              peakTurnInput: 1,
+              usage: {
+                input: 1,
+                output: 1,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 2,
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+              },
+            };
+          },
+        };
+      },
+    });
+
+    expect(result.response).toBe("approved https://example.com/docs");
+    expect(networkAccessApprover).toHaveBeenCalledWith({
+      arc: "testserver##testchannel",
+      url: "https://Example.com/docs?page=1",
+      canonicalUrl: "https://example.com/docs",
+      reason: "Need docs",
+    });
+    expect(await isUrlTrustedInArc("testserver##testchannel", "https://example.com/docs?section=2")).toBe(true);
   });
 
   it("accepts proactive config knobs (no longer deferred)", async () => {

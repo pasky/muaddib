@@ -8,6 +8,7 @@ import { createChronicleSubsystem, type ChronicleSubsystem } from "./chronicle/c
 import { ChatHistoryStore } from "./history/chat-history-store.js";
 import { PiAiModelAdapter } from "./models/pi-ai-model-adapter.js";
 import { MuaddibConfig } from "./config/muaddib-config.js";
+import type { NetworkAccessApprover } from "./agent/network-boundary.js";
 
 export interface MuaddibRuntime {
   muaddibHome: string;
@@ -17,6 +18,7 @@ export interface MuaddibRuntime {
   authStorage: AuthStorage;
   logger: RuntimeLogWriter;
   chronicle?: ChronicleSubsystem;
+  networkAccessApprover?: NetworkAccessApprover;
 }
 
 interface CreateMuaddibRuntimeOptions {
@@ -25,6 +27,7 @@ interface CreateMuaddibRuntimeOptions {
   arcsPath?: string;
   /** Override logger (for tests). */
   logger?: RuntimeLogWriter;
+  networkAccessApprover?: NetworkAccessApprover;
 }
 
 export async function createMuaddibRuntime(
@@ -72,6 +75,7 @@ export async function createMuaddibRuntime(
     authStorage,
     logger: runtimeLogger,
     chronicle,
+    networkAccessApprover: options.networkAccessApprover,
   };
 }
 

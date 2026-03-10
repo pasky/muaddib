@@ -280,9 +280,8 @@ async function checkpointVmWithOverwriteWorkaround(
 function createVmFetch(
   artifactsPath: string | undefined,
   artifactsUrl: string | undefined,
-): HttpFetch | undefined {
-  if (!artifactsPath || !artifactsUrl) return undefined;
-
+  upstreamFetch: HttpFetch,
+): HttpFetch {
   return async (input, init) => {
     const url = typeof input === "string"
       ? input
@@ -293,7 +292,7 @@ function createVmFetch(
     try {
       const filePath = resolveLocalArtifactFilePath(url, artifactsUrl, artifactsPath);
       if (!filePath) {
-        return (globalThis.fetch as any)(input, init);
+        return upstreamFetch(input, init);
       }
 
       const requestMethod = init?.method ?? (
@@ -382,7 +381,8 @@ async function ensureVm(opts: VmSessionOptions): Promise<VM> {
         authStorage,
       });
 
-      const { httpHooks, env: placeholderEnv } = await createVmHttpHooks({
+      const { httpHooks, env: placeholderEnv, fetch: networkFetch } = await createVmHttpHooks({
+        arc,
         blockedCidrs: config.blockedCidrs ?? [],
         artifactsUrl,
         secrets: secretEnv,
@@ -420,7 +420,7 @@ async function ensureVm(opts: VmSessionOptions): Promise<VM> {
 
       const vmOptions: import("@earendil-works/gondolin").VMOptions = {
         vfs: { mounts },
-        fetch: createVmFetch(artifactsPath, artifactsUrl),
+        fetch: createVmFetch(artifactsPath, artifactsUrl, networkFetch),
         httpHooks,
         ...(Object.keys(combinedEnv).length > 0 ? { env: combinedEnv } : {}),
         dns: { mode: dnsMode },

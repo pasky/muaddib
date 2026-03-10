@@ -5,7 +5,13 @@
  * httpHooks option that gates outbound HTTP from the sandbox.
  */
 
+import type { VMOptions } from "@earendil-works/gondolin";
+
 import type { Logger } from "../../app/logging.js";
+import {
+  isUrlTrustedInArc,
+  recordRedirectTrustEvent,
+} from "../network-boundary.js";
 
 // ── CIDR / IP math ─────────────────────────────────────────────────────────
 
@@ -126,16 +132,28 @@ function isIPv4InPrefix(ip: string, prefix: string, length: number): boolean {
 
 // ── HTTP hooks factory ─────────────────────────────────────────────────────
 
+export type VmNetworkFetch = NonNullable<VMOptions["fetch"]>;
+type VmNetworkFetchInput = Parameters<VmNetworkFetch>[0];
+type VmNetworkFetchResponse = Awaited<ReturnType<VmNetworkFetch>>;
+
 export interface VmSecretDefinition {
   hosts: string[];
   value: string;
 }
 
 export interface CreateVmHttpHooksOptions {
+  arc: string;
   blockedCidrs: string[];
   artifactsUrl?: string;
   secrets?: Record<string, VmSecretDefinition>;
   logger?: Logger;
+  fetchImpl?: VmNetworkFetch;
+}
+
+export interface VmHttpHooksResult {
+  httpHooks: NonNullable<VMOptions["httpHooks"]>;
+  env: Record<string, string>;
+  fetch: VmNetworkFetch;
 }
 
 /**
@@ -144,7 +162,7 @@ export interface CreateVmHttpHooksOptions {
  * Dynamically imports `createHttpHooks` from Gondolin so callers don't need
  * a static dependency on the package at import time.
  */
-export async function createVmHttpHooks(opts: CreateVmHttpHooksOptions) {
+export async function createVmHttpHooks(opts: CreateVmHttpHooksOptions): Promise<VmHttpHooksResult> {
   const { createHttpHooks } = await import("@earendil-works/gondolin");
 
   const artifactHostname = resolveArtifactHostname(opts.artifactsUrl, opts.logger);
@@ -159,6 +177,7 @@ export async function createVmHttpHooks(opts: CreateVmHttpHooksOptions) {
     allowedHosts,
     secrets: opts.secrets,
     blockInternalRanges: false,
+    isRequestAllowed: async (request) => isUrlTrustedInArc(opts.arc, request.url),
     isIpAllowed: (info) => {
       const isArtifact =
         artifactHostname !== undefined && info.hostname.toLowerCase() === artifactHostname;
@@ -172,7 +191,46 @@ export async function createVmHttpHooks(opts: CreateVmHttpHooksOptions) {
     },
   });
 
-  return { httpHooks, env };
+  const fetchImpl = opts.fetchImpl ?? (globalThis.fetch as unknown as VmNetworkFetch);
+  const trustAwareFetch: VmNetworkFetch = async (input, init) => {
+    const response = await fetchImpl(input, init);
+    const requestUrl = getFetchInputUrl(input);
+    const redirectTarget = resolveRedirectTarget(response, requestUrl);
+    if (redirectTarget) {
+      await recordRedirectTrustEvent(opts.arc, {
+        fromUrl: requestUrl,
+        rawUrl: redirectTarget,
+      });
+    }
+    return response;
+  };
+
+  return { httpHooks, env, fetch: trustAwareFetch };
+}
+
+function getFetchInputUrl(input: VmNetworkFetchInput): string {
+  if (typeof input === "string") {
+    return input;
+  }
+  if (input instanceof URL) {
+    return input.toString();
+  }
+  return (input as { url: string }).url;
+}
+
+function resolveRedirectTarget(response: VmNetworkFetchResponse, requestUrl: string): string | null {
+  const location = response.headers.get("location");
+  if (!location) {
+    return null;
+  }
+  if (![301, 302, 303, 307, 308].includes(response.status)) {
+    return null;
+  }
+  const redirectUrl = new URL(location, requestUrl);
+  if (redirectUrl.protocol !== "http:" && redirectUrl.protocol !== "https:") {
+    return null;
+  }
+  return redirectUrl.toString();
 }
 
 function resolveArtifactHostname(artifactsUrl: string | undefined, logger?: Logger): string | undefined {

@@ -21,17 +21,23 @@ import {
   createVisitWebpageTool,
   createWebSearchTool,
 } from "./web.js";
+import {
+  createDefaultRequestNetworkAccessExecutor,
+  createRequestNetworkAccessTool,
+} from "./request-network-access.js";
 import { createGondolinTools } from "./gondolin-tools.js";
 import type { ArcEventsWatcher } from "../../events/watcher.js";
 import type { GenerateImageExecutor } from "./image.js";
 import type { OracleExecutor } from "./oracle.js";
 import type { DeepResearchExecutor } from "./deep-research.js";
 import type { WebSearchExecutor, VisitWebpageExecutor } from "./web.js";
+import type { RequestNetworkAccessExecutor } from "./request-network-access.js";
 import type { ToolContext, MuaddibTool, ToolPersistType, ToolSet } from "./types.js";
 
 export interface BaselineToolExecutors {
   webSearch: WebSearchExecutor;
   visitWebpage: VisitWebpageExecutor;
+  requestNetworkAccess: RequestNetworkAccessExecutor;
   oracle: OracleExecutor;
   deepResearch: DeepResearchExecutor;
   generateImage: GenerateImageExecutor;
@@ -43,12 +49,14 @@ export type { GenerateImageInput, GenerateImageResult, GeneratedImageResultItem,
 export type { OracleInput, OracleExecutor } from "./oracle.js";
 export type { DeepResearchInput, DeepResearchExecutor } from "./deep-research.js";
 export type { VisitWebpageImageResult, VisitWebpageResult, WebSearchExecutor, VisitWebpageExecutor } from "./web.js";
+export type { RequestNetworkAccessInput, RequestNetworkAccessExecutor } from "./request-network-access.js";
 
 export {
   createGenerateImageTool,
   createMakePlanTool,
   createOracleTool,
   createDeepResearchTool,
+  createRequestNetworkAccessTool,
   createVisitWebpageTool,
   createWebSearchTool,
   ORACLE_EXCLUDED_TOOLS,
@@ -91,6 +99,7 @@ type ExecutorBackedToolFactory = (executors: BaselineToolExecutors, options: Bas
 const BASELINE_TOOL_FACTORIES: ReadonlyArray<ExecutorBackedToolFactory> = [
   createWebSearchTool,
   createVisitWebpageTool,
+  createRequestNetworkAccessTool,
   (executors, options) => createGenerateImageTool(executors, toConfiguredString(options.toolsConfig?.imageGen?.model)),
   (executors, options) => createOracleTool(executors, toConfiguredString(options.toolsConfig?.oracle?.model)),
   (executors, options) => createDeepResearchTool(executors, toConfiguredString(options.toolsConfig?.deepResearch?.model)),
@@ -104,6 +113,7 @@ export function createDefaultToolExecutors(
   return {
     webSearch: createDefaultWebSearchExecutor(options),
     visitWebpage: createDefaultVisitWebpageExecutor(options),
+    requestNetworkAccess: createDefaultRequestNetworkAccessExecutor(options),
     generateImage: createDefaultGenerateImageExecutor(options),
     oracle: createDefaultOracleExecutor(options, oracleInvocation),
     deepResearch: createDefaultDeepResearchExecutor(options, deepResearchInvocation),

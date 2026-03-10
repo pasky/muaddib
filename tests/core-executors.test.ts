@@ -9,18 +9,28 @@ import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { createDefaultToolExecutors as createDefaultToolExecutorsRaw } from "../src/agent/tools/baseline-tools.js";
 import { createDefaultShareArtifactExecutor } from "../src/agent/tools/artifact.js";
 import { createDefaultOracleExecutor as createDefaultOracleExecutorRaw } from "../src/agent/tools/oracle.js";
+import {
+  isUrlTrustedInArc,
+  recordNetworkTrustEvent,
+} from "../src/agent/network-boundary.js";
 import { PiAiModelAdapter } from "../src/models/pi-ai-model-adapter.js";
 import { resetWebRateLimiters, jinaRetryConfig } from "../src/agent/tools/web.js";
 const tempDirs: string[] = [];
 const originalJinaRetryDelays = [...jinaRetryConfig.delaysMs];
+const originalMuaddibHome = process.env.MUADDIB_HOME;
+const TEST_ARC = "test-arc";
 
-beforeEach(() => {
+beforeEach(async () => {
   resetWebRateLimiters();
+  const muaddibHome = await mkdtemp(join(tmpdir(), "muaddib-ts-home-"));
+  tempDirs.push(muaddibHome);
+  process.env.MUADDIB_HOME = muaddibHome;
 });
 
 afterEach(async () => {
   vi.restoreAllMocks();
   jinaRetryConfig.delaysMs = [...originalJinaRetryDelays];
+  process.env.MUADDIB_HOME = originalMuaddibHome;
   for (const dir of tempDirs.splice(0, tempDirs.length)) {
     await rm(dir, { recursive: true, force: true });
   }
@@ -48,14 +58,23 @@ function createDefaultToolExecutors(options: Record<string, unknown> = {}) {
   return createDefaultToolExecutorsRaw({
     modelAdapter: new PiAiModelAdapter(),
     authStorage: AuthStorage.inMemory(),
+    arc: TEST_ARC,
     ...(options as any),
   });
+}
+
+async function trustUrl(url: string, arc = TEST_ARC, now = new Date()): Promise<void> {
+  await recordNetworkTrustEvent(arc, {
+    source: "approval",
+    rawUrl: url,
+  }, now);
 }
 
 function createDefaultOracleExecutor(options: Record<string, unknown> = {}, invocation?: any) {
   return createDefaultOracleExecutorRaw({
     modelAdapter: new PiAiModelAdapter(),
     authStorage: AuthStorage.inMemory(),
+    arc: TEST_ARC,
     ...(options as any),
   } as any, invocation);
 }
@@ -109,6 +128,7 @@ describe("core tool executors artifact support", () => {
 describe("core tool executors webpage secret header support", () => {
   it("visit_webpage uses direct fetch with configured auth headers for matching URL prefixes", async () => {
     const privateUrl = "https://files.slack.com/files-pri/T123/F456/report.txt";
+    await trustUrl(privateUrl);
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -402,18 +422,19 @@ describe("oracle executor with invocation context", () => {
 });
 
 describe("core tool executors web_search support", () => {
-  it("web_search returns formatted search results", async () => {
+  it("web_search returns formatted search results and seeds trust for result URLs", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       expect(url).toContain("s.jina.ai");
       expect(url).toContain("cats");
-      return new Response("Title: Cats\nURL: https://example.com\nSnippet: All about cats", { status: 200 });
+      return new Response("Title: Cats\nURL: https://example.com/docs?topic=felines\nSnippet: All about cats", { status: 200 });
     });
 
     const executors = createDefaultToolExecutors({});
     const result = await executors.webSearch("cats");
     expect(result).toContain("## Search Results");
     expect(result).toContain("All about cats");
+    expect(await isUrlTrustedInArc(TEST_ARC, "https://example.com/docs?another=1")).toBe(true);
   });
 
   it("web_search returns friendly message for no results (422)", async () => {
@@ -459,8 +480,52 @@ describe("core tool executors web_search support", () => {
   });
 });
 
+describe("core tool executors request_network_access support", () => {
+  it("records approved URLs into the current arc trust ledger", async () => {
+    const networkAccessApprover = vi.fn(async (request: {
+      arc: string;
+      url: string;
+      canonicalUrl: string;
+      reason?: string;
+    }) => ({
+      approved: true,
+      message: `approved ${request.canonicalUrl}`,
+    }));
+
+    const executors = createDefaultToolExecutors({ networkAccessApprover });
+    const result = await executors.requestNetworkAccess({
+      url: "https://Example.com/docs?page=1",
+      reason: "Need docs",
+    });
+
+    expect(networkAccessApprover).toHaveBeenCalledWith({
+      arc: TEST_ARC,
+      url: "https://Example.com/docs?page=1",
+      canonicalUrl: "https://example.com/docs",
+      reason: "Need docs",
+    });
+    expect(result).toBe("approved https://example.com/docs");
+    expect(await isUrlTrustedInArc(TEST_ARC, "https://example.com/docs?section=2")).toBe(true);
+  });
+
+  it("errors when no harness approver is provided", async () => {
+    const executors = createDefaultToolExecutors({});
+    await expect(
+      executors.requestNetworkAccess({
+        url: "https://example.com/docs?page=1",
+      }),
+    ).rejects.toThrow("request_network_access requires a harness-provided networkAccessApprover.");
+  });
+});
+
 describe("core tool executors visit_webpage support", () => {
+  it("visit_webpage rejects untrusted URLs", async () => {
+    const executors = createDefaultToolExecutors({});
+    await expect(executors.visitWebpage("https://example.com/blocked")).rejects.toThrow(/Network access denied/);
+  });
+
   it("visit_webpage fetches page content via Jina reader", async () => {
+    await trustUrl("https://example.com/page");
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (init?.method === "HEAD") {
@@ -478,7 +543,38 @@ describe("core tool executors visit_webpage support", () => {
     expect(result).toContain("Some content");
   });
 
+  it("visit_webpage auto-trusts redirect targets", async () => {
+    await trustUrl("https://example.com/start?token=1");
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "https://example.com/start?token=1" && init?.method === "HEAD") {
+        return new Response("", {
+          status: 302,
+          headers: { location: "https://cdn.example.com/final?page=1" },
+        });
+      }
+      if (url === "https://cdn.example.com/final?page=1" && init?.method === "HEAD") {
+        return new Response("", {
+          status: 200,
+          headers: { "content-type": "text/html" },
+        });
+      }
+      if (url.startsWith("https://r.jina.ai/")) {
+        return new Response("redirected page", { status: 200 });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const executors = createDefaultToolExecutors({});
+    const result = await executors.visitWebpage("https://example.com/start?token=1");
+
+    expect(result).toContain("redirected page");
+    expect(await isUrlTrustedInArc(TEST_ARC, "https://cdn.example.com/final?other=1")).toBe(true);
+  });
+
   it("visit_webpage downloads images and returns binary result", async () => {
+    await trustUrl("https://example.com/img.png");
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "HEAD") {
         return new Response("", { status: 200, headers: { "content-type": "image/png" } });
@@ -535,6 +631,7 @@ describe("core tool executors visit_webpage support", () => {
   });
 
   it("visit_webpage falls through to text when image-like URL serves HTML", async () => {
+    await trustUrl("https://commons.wikimedia.org/wiki/File:Filip-Turek.jpg");
     const htmlContent = "<html><body>File:Filip-Turek.jpg - Wikimedia Commons</body></html>";
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "HEAD") {
@@ -555,6 +652,7 @@ describe("core tool executors visit_webpage support", () => {
   });
 
   it("visit_webpage uses Jina text path for image-like URL when HEAD fails", async () => {
+    await trustUrl("https://example.com/photo.jpg");
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "HEAD") {
         throw new Error("HEAD not allowed");
@@ -580,6 +678,7 @@ describe("core tool executors visit_webpage support", () => {
   });
 
   it("visit_webpage truncates long content", async () => {
+    await trustUrl("https://example.com/");
     const longContent = "x".repeat(50000);
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "HEAD") {
@@ -595,6 +694,7 @@ describe("core tool executors visit_webpage support", () => {
   });
 
   it("visit_webpage returns empty response marker for empty body", async () => {
+    await trustUrl("https://example.com/");
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "HEAD") {
         return new Response("", { status: 200, headers: { "content-type": "text/html" } });
@@ -608,6 +708,7 @@ describe("core tool executors visit_webpage support", () => {
   });
 
   it("visit_webpage rejects oversized images", async () => {
+    await trustUrl("https://example.com/big.png");
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "HEAD") {
         return new Response("", { status: 200, headers: { "content-type": "image/png" } });
@@ -625,6 +726,7 @@ describe("core tool executors visit_webpage support", () => {
 
 describe("core tool executors visit_webpage Jina retry support", () => {
   it("visit_webpage retries on Jina HTTP 451 and succeeds on second attempt", async () => {
+    await trustUrl("https://example.com/page");
     jinaRetryConfig.delaysMs = [0, 0, 0];
     let attempt = 0;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -649,6 +751,7 @@ describe("core tool executors visit_webpage Jina retry support", () => {
   });
 
   it("visit_webpage retries on Jina HTTP 500 and throws after exhausting retries", async () => {
+    await trustUrl("https://example.com/page");
     jinaRetryConfig.delaysMs = [0, 0, 0];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "HEAD") {
@@ -666,6 +769,7 @@ describe("core tool executors visit_webpage Jina retry support", () => {
 
 describe("core tool executors visit_webpage network error diagnostics", () => {
   it("visit_webpage surfaces cause from Node fetch TypeError", async () => {
+    await trustUrl("https://brmlab.cz/test.png");
     const fetchError = new TypeError("fetch failed");
     (fetchError as any).cause = new Error("getaddrinfo ENOTFOUND brmlab.cz");
     vi.spyOn(globalThis, "fetch").mockRejectedValue(fetchError);
@@ -678,6 +782,7 @@ describe("core tool executors visit_webpage network error diagnostics", () => {
   });
 
   it("visit_webpage surfaces connection refused errors", async () => {
+    await trustUrl("https://localhost/page");
     const fetchError = new TypeError("fetch failed");
     (fetchError as any).cause = new Error("connect ECONNREFUSED 127.0.0.1:443");
     vi.spyOn(globalThis, "fetch").mockRejectedValue(fetchError);
@@ -691,6 +796,7 @@ describe("core tool executors visit_webpage network error diagnostics", () => {
 
 describe("core tool executors visit_webpage newline cleanup", () => {
   it("visit_webpage collapses excessive newlines in Jina content", async () => {
+    await trustUrl("https://example.com/page");
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "HEAD") {
         return new Response("", { status: 200, headers: { "content-type": "text/html" } });
@@ -707,6 +813,7 @@ describe("core tool executors visit_webpage newline cleanup", () => {
 
 describe("core tool executors visit_webpage LLM transcription", () => {
   it("visit_webpage post-processes content through LLM when deepResearch.model is configured", async () => {
+    await trustUrl("https://example.com/page");
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "HEAD") {
         return new Response("", { status: 200, headers: { "content-type": "text/html" } });
@@ -743,6 +850,7 @@ describe("core tool executors visit_webpage LLM transcription", () => {
   });
 
   it("visit_webpage appends query to system prompt when provided", async () => {
+    await trustUrl("https://example.com/product");
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "HEAD") {
         return new Response("", { status: 200, headers: { "content-type": "text/html" } });
@@ -771,6 +879,7 @@ describe("core tool executors visit_webpage LLM transcription", () => {
   });
 
   it("visit_webpage falls back to raw content when LLM transcription fails", async () => {
+    await trustUrl("https://example.com/page");
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "HEAD") {
         return new Response("", { status: 200, headers: { "content-type": "text/html" } });
@@ -794,6 +903,7 @@ describe("core tool executors visit_webpage LLM transcription", () => {
   });
 
   it("visit_webpage skips LLM transcription when deepResearch.model is not configured", async () => {
+    await trustUrl("https://example.com/page");
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "HEAD") {
         return new Response("", { status: 200, headers: { "content-type": "text/html" } });
@@ -861,6 +971,7 @@ describe("core tool executors visit_webpage local artifact support", () => {
 describe("core tool executors visit_webpage exact http_headers support", () => {
   it("visit_webpage uses exact http_headers match for specific URL", async () => {
     const targetUrl = "https://secret.example.com/api/data";
+    await trustUrl(targetUrl);
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (init?.method === "HEAD") {
@@ -888,6 +999,7 @@ describe("core tool executors visit_webpage exact http_headers support", () => {
 
 describe("core tool executors visit_webpage binary content support", () => {
   it("visit_webpage returns base64-encoded binary for non-text content types", async () => {
+    await trustUrl("https://example.com/file.bin");
     const binaryData = Buffer.from([0x00, 0x01, 0x02, 0x03]);
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "HEAD") {

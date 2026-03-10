@@ -13,6 +13,10 @@ import {
   createWebSearchTool,
   createVisitWebpageTool,
 } from "./web.js";
+import {
+  createDefaultRequestNetworkAccessExecutor,
+  createRequestNetworkAccessTool,
+} from "./request-network-access.js";
 
 export interface DeepResearchInput {
   query: string;
@@ -90,10 +94,12 @@ export function createDefaultDeepResearchExecutor(
     // Build web-only tools directly — no Gondolin VM needed.
     const webSearchExecutor = createDefaultWebSearchExecutor(options);
     const visitWebpageExecutor = createDefaultVisitWebpageExecutor(options);
+    const requestNetworkAccessExecutor = createDefaultRequestNetworkAccessExecutor(options);
     const webTools: ToolSet = {
       tools: [
         createWebSearchTool({ webSearch: webSearchExecutor }),
         createVisitWebpageTool({ visitWebpage: visitWebpageExecutor }),
+        createRequestNetworkAccessTool({ requestNetworkAccess: requestNetworkAccessExecutor }),
       ],
     };
 

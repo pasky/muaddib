@@ -241,6 +241,7 @@ export class CommandExecutor {
       authStorage,
       modelAdapter: this.modelAdapter,
       logger: this.logger,
+      networkAccessApprover: this.runtime.networkAccessApprover,
       eventsWatcher: this.eventsWatcher,
     };
   }

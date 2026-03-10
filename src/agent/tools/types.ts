@@ -3,6 +3,7 @@ import type { AuthStorage } from "@mariozechner/pi-coding-agent";
 import type { ToolsConfig } from "../../config/muaddib-config.js";
 import type { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import type { Logger } from "../../app/logging.js";
+import type { NetworkAccessApprover } from "../network-boundary.js";
 
 /** How a tool's I/O is persisted for future context recall. */
 export type ToolPersistType = "none" | "summary";
@@ -59,4 +60,6 @@ export interface ToolContext extends ArtifactContext {
   arc: string;
   /** HTTP header secrets for authenticated web requests. */
   secrets?: Record<string, unknown>;
+  /** Harness-provided approval callback for request_network_access. */
+  networkAccessApprover?: NetworkAccessApprover;
 }
