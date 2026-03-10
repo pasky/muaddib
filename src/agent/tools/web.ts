@@ -1,10 +1,10 @@
 import { readFile } from "node:fs/promises";
-import { resolve, relative, extname } from "node:path";
+import { extname } from "node:path";
 
 import { Type } from "@sinclair/typebox";
 
 import type { ToolContext, MuaddibTool } from "./types.js";
-import { extractLocalArtifactPath } from "./url-utils.js";
+import { resolveLocalArtifactFilePath } from "./url-utils.js";
 import { responseText } from "../message.js";
 import { toConfiguredString } from "../../utils/index.js";
 
@@ -303,18 +303,8 @@ async function tryReadLocalArtifact(
 ): Promise<VisitWebpageResult | null> {
   const artifactsPath = options.toolsConfig?.artifacts?.path;
   const artifactsUrl = options.toolsConfig?.artifacts?.url;
-  if (!artifactsPath || !artifactsUrl) return null;
-
-  const filename = extractLocalArtifactPath(url, artifactsUrl);
-  if (!filename) return null;
-
-  // Resolve and validate no path traversal.
-  const filePath = resolve(artifactsPath, filename);
-  const resolvedBase = resolve(artifactsPath);
-  const rel = relative(resolvedBase, filePath);
-  if (rel.startsWith("..") || resolve(resolvedBase, rel) !== filePath) {
-    throw new Error("Path traversal detected");
-  }
+  const filePath = resolveLocalArtifactFilePath(url, artifactsUrl, artifactsPath);
+  if (!filePath) return null;
 
   const ext = extname(filePath).toLowerCase();
   const imageMime = IMAGE_EXTENSIONS[ext];

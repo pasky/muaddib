@@ -6,6 +6,7 @@
 
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join, posix } from "node:path";
 
 import type {
@@ -15,7 +16,7 @@ import type {
   ReadOperations,
   WriteOperations,
 } from "@mariozechner/pi-coding-agent";
-import type { VM } from "@earendil-works/gondolin";
+import type { HttpFetch, VM } from "@earendil-works/gondolin";
 
 import type { GondolinConfig } from "../../config/muaddib-config.js";
 import type { Logger } from "../../app/logging.js";
@@ -25,6 +26,7 @@ import { getArcWorkspacePath, getArcCheckpointPath, createVmMounts } from "./fs.
 import { createVmHttpHooks } from "./network.js";
 import { resolveGondolinEnv } from "./env.js";
 import { getMuaddibHome } from "../../config/paths.js";
+import { resolveLocalArtifactFilePath } from "../tools/url-utils.js";
 
 // ── VM cache: one VM per arc ───────────────────────────────────────────────
 
@@ -143,12 +145,73 @@ function rewriteMissingQemuBinaryError(error: unknown): Error | null {
   );
 }
 
+function createVmFetch(
+  artifactsPath: string | undefined,
+  artifactsUrl: string | undefined,
+): HttpFetch | undefined {
+  if (!artifactsPath || !artifactsUrl) return undefined;
+
+  return async (input, init) => {
+    const url = typeof input === "string"
+      ? input
+      : ("url" in input && typeof input.url === "string")
+          ? input.url
+          : String(input);
+
+    try {
+      const filePath = resolveLocalArtifactFilePath(url, artifactsUrl, artifactsPath);
+      if (!filePath) {
+        return (globalThis.fetch as any)(input, init);
+      }
+
+      const requestMethod = init?.method ?? (
+        typeof input === "object" && input !== null && "method" in input && typeof input.method === "string"
+          ? input.method
+          : "GET"
+      );
+      const method = requestMethod.toUpperCase();
+      if (method !== "GET" && method !== "HEAD") {
+        return new Response(`Method ${method} Not Allowed`, {
+          status: 405,
+          statusText: "Method Not Allowed",
+        }) as any;
+      }
+
+      const data = await readFile(filePath);
+      return new Response(method === "HEAD" ? null : data, {
+        status: 200,
+        statusText: "OK",
+        headers: {
+          "content-length": String(data.length),
+          "content-type": "application/octet-stream",
+        },
+      }) as any;
+    } catch (error) {
+      if (error instanceof Error && error.message === "Path traversal detected") {
+        return new Response("Forbidden", { status: 403, statusText: "Forbidden" }) as any;
+      }
+
+      const code = typeof (error as { code?: unknown })?.code === "string"
+        ? (error as { code: string }).code
+        : undefined;
+      if (code === "EACCES" || code === "EPERM") {
+        return new Response("Forbidden", { status: 403, statusText: "Forbidden" }) as any;
+      }
+      if (code === "ENOENT" || code === "ENOTDIR" || code === "EISDIR") {
+        return new Response("Not Found", { status: 404, statusText: "Not Found" }) as any;
+      }
+      throw error;
+    }
+  };
+}
+
 // ── VM creation ────────────────────────────────────────────────────────────
 
 async function ensureVm(opts: VmSessionOptions): Promise<VM> {
   const { arc, serverTag, channelName, config, authStorage, logger, eventsWatcher } = opts;
   const dnsMode = resolveDnsMode(config.dnsMode);
   const skills = loadBundledSkills();
+  const artifactsPath = opts.artifactsPath;
   const artifactsUrl = opts.artifactsUrl;
   // If a checkpoint is in progress for this arc, wait for it to complete before
   // creating or returning a VM.
@@ -216,6 +279,7 @@ async function ensureVm(opts: VmSessionOptions): Promise<VM> {
 
       const vmOptions: import("@earendil-works/gondolin").VMOptions = {
         vfs: { mounts },
+        fetch: createVmFetch(artifactsPath, artifactsUrl),
         httpHooks,
         ...(Object.keys(combinedEnv).length > 0 ? { env: combinedEnv } : {}),
         dns: { mode: dnsMode },
@@ -544,6 +608,7 @@ export interface VmSessionOptions {
   channelName?: string;
   config: GondolinConfig;
   authStorage?: AuthStorage;
+  artifactsPath?: string;
   artifactsUrl?: string;
   vmOpTimeoutMs: number;
   logger?: Logger;

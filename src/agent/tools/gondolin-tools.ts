@@ -80,6 +80,7 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
     channelName,
     config,
     authStorage,
+    artifactsPath: toolsConfig?.artifacts?.path,
     artifactsUrl: toolsConfig?.artifacts?.url,
     vmOpTimeoutMs,
     logger,
@@ -129,11 +130,6 @@ function buildSystemPromptSuffix(
     ? " Need exact quotes or fine-grained chronology beyond the current context? Inspect daily JSONL logs in /chat_history/ (read-only), e.g. /chat_history/YYYY-MM-DD.jsonl."
     : "";
 
-  const artifactsUrl = toolsConfig?.artifacts?.url;
-  const artifactsSuffix = artifactsUrl
-    ? ` Artifacts: your previously produced output attachments - any URLs that start with ${artifactsUrl}, read with download_artifact skill.`
-    : "";
-
   const skills = loadBundledSkills();
   const { skills: workspaceSkills, diagnostics: skillDiagnostics } = loadWorkspaceSkills(arc);
   const allSkills = [...skills, ...workspaceSkills];
@@ -154,7 +150,6 @@ function buildSystemPromptSuffix(
     " Environment: Alpine Linux, uv venv is active (use `uv pip install` + `uv run`)." +
     arcSuffix +
     chatHistorySuffix +
-    artifactsSuffix +
     skillsSection +
     memorySuffix
   );

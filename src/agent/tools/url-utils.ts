@@ -1,3 +1,5 @@
+import { relative, resolve } from "node:path";
+
 /**
  * Shared URL/filename utilities for artifact and web tools.
  */
@@ -74,4 +76,29 @@ export function extractLocalArtifactPath(url: string, artifactsUrl: string | und
 
   if (!remainder) return undefined;
   return decodeURIComponent(remainder);
+}
+
+/**
+ * Resolve a local artifact URL to an on-disk file path under the configured artifact directory.
+ * Returns undefined when the URL does not belong to the configured artifact base URL.
+ */
+export function resolveLocalArtifactFilePath(
+  url: string,
+  artifactsUrl: string | undefined,
+  artifactsPath: string | undefined,
+): string | undefined {
+  if (!artifactsUrl || !artifactsPath) return undefined;
+
+  const relativePath = extractLocalArtifactPath(url, artifactsUrl);
+  if (!relativePath) return undefined;
+
+  const resolvedBase = resolve(artifactsPath);
+  const filePath = resolve(resolvedBase, relativePath);
+  const rel = relative(resolvedBase, filePath);
+
+  if (rel.startsWith("..") || filePath !== resolve(resolvedBase, rel || ".")) {
+    throw new Error("Path traversal detected");
+  }
+
+  return filePath;
 }

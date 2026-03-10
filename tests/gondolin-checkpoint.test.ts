@@ -5,7 +5,9 @@
  * resetGondolinVmCache + a small backdoor exposed for testing.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -1012,7 +1014,7 @@ describe("gondolin — bundled skills", () => {
     expect(memoryProviderInstances.length).toBe(1);
     const mp = memoryProviderInstances[0]!;
     expect(mp.readOnly).toBe(true);
-    expect(mp.files.get("download-artifact/SKILL.md")).toContain("artifact");
+    expect(mp.files.get("chronicle-read/SKILL.md")).toContain("/chronicle/");
 
     // The /skills mount should appear in vmOptions
     const gondolin = await import("@earendil-works/gondolin");
@@ -1022,13 +1024,13 @@ describe("gondolin — bundled skills", () => {
 
     // System prompt suffix should contain skills listing
     expect(systemPromptSuffix).toContain("<available_skills>");
-    expect(systemPromptSuffix).toContain("download-artifact");
-    expect(systemPromptSuffix).toContain("/skills/download-artifact/SKILL.md");
+    expect(systemPromptSuffix).toContain("chronicle-read");
+    expect(systemPromptSuffix).toContain("/skills/chronicle-read/SKILL.md");
   });
 
   it("does not create /skills mount when there are no skills", async () => {
-    // This test verifies the no-skills path; in practice there's always at
-    // least the download-artifact skill, but the guard is good to have.
+    // This test verifies the no-skills path; in practice there are bundled
+    // skills, but the guard is good to have.
     const fakeVm = makeFakeVm();
     await registerFakeVm(fakeVm);
 
@@ -1036,8 +1038,7 @@ describe("gondolin — bundled skills", () => {
     const bashTool = tools.find((t) => t.name === "bash")!;
     await bashTool.execute("id", { command: "echo hi" }, new AbortController().signal, () => {});
 
-    // Since download-artifact skill exists, we expect the mount to be created.
-    // This test documents that the mount IS created when skills exist.
+    // Since bundled skills exist, we expect the mount to be created.
     const gondolin = await import("@earendil-works/gondolin");
     // @ts-expect-error test-only
     const opts = gondolin.__lastVmOptions.value as { vfs: { mounts: Record<string, unknown> } };
@@ -1114,23 +1115,177 @@ describe("gondolin — artifact hostname HTTP policy exemption", () => {
 
 // ── Artifact URL in system prompt suffix ───────────────────────────────────
 
-describe("gondolin — artifact URL in systemPromptSuffix", () => {
-  it("includes artifact URL hint when toolsConfig.artifacts.url is set", () => {
+describe("gondolin — artifact prompt hints", () => {
+  it("does not mention artifact download instructions even when artifacts are configured", () => {
     const { systemPromptSuffix } = createGondolinTools({
       arc: "artifact-url-arc",
       config: gondolinConfig,
       toolsConfig: { artifacts: { path: "/tmp/artifacts", url: "https://art.example.com/files" } },
     });
-    expect(systemPromptSuffix).toContain("download_artifact");
-    expect(systemPromptSuffix).toContain("https://art.example.com/files");
+    expect(systemPromptSuffix).not.toContain("download_artifact");
+    expect(systemPromptSuffix).not.toContain("https://art.example.com/files");
   });
 
-  it("omits artifact hint when toolsConfig.artifacts is not configured", () => {
+  it("still omits artifact hints when toolsConfig.artifacts is not configured", () => {
     const { systemPromptSuffix } = createGondolinTools({
       arc: "no-artifact-arc",
       config: gondolinConfig,
     });
     expect(systemPromptSuffix).not.toContain("download_artifact");
+  });
+});
+
+describe("gondolin — artifact URL fetch interception", () => {
+  it("serves viewer and raw artifact URLs from disk without upstream fetch", async () => {
+    const artifactsPath = mkdtempSync(join(tmpdir(), "muaddib-gondolin-artifacts-"));
+    writeFileSync(join(artifactsPath, "note.txt"), "artifact body", "utf8");
+
+    const fakeVm = makeFakeVm();
+    await registerFakeVm(fakeVm);
+
+    const upstreamFetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("upstream body", { status: 200, headers: { "content-type": "text/plain" } }),
+    );
+
+    const { tools } = createGondolinTools({
+      arc: "artifact-fetch-arc",
+      config: gondolinConfig,
+      toolsConfig: { artifacts: { path: artifactsPath, url: "https://art.example.com/files" } },
+    });
+
+    const bashTool = tools.find((t) => t.name === "bash")!;
+    await bashTool.execute("id", { command: "echo hi" }, new AbortController().signal, () => {});
+
+    const gondolin = await import("@earendil-works/gondolin");
+    // @ts-expect-error test-only
+    const opts = gondolin.__lastVmOptions.value as { fetch?: typeof fetch };
+
+    expect(opts.fetch).toBeTypeOf("function");
+
+    const viewerResponse = await opts.fetch!("https://art.example.com/files/?note.txt");
+    expect(await viewerResponse.text()).toBe("artifact body");
+    expect(viewerResponse.headers.get("content-type")).toBe("application/octet-stream");
+
+    const rawResponse = await opts.fetch!("https://art.example.com/files/note.txt");
+    expect(await rawResponse.text()).toBe("artifact body");
+
+    const headResponse = await opts.fetch!("https://art.example.com/files/?note.txt", { method: "HEAD" });
+    expect(headResponse.status).toBe(200);
+    expect(await headResponse.text()).toBe("");
+
+    expect(upstreamFetch).not.toHaveBeenCalled();
+    upstreamFetch.mockRestore();
+  });
+
+  it("rejects path traversal with 403", async () => {
+    const artifactsPath = mkdtempSync(join(tmpdir(), "muaddib-gondolin-artifacts-"));
+    writeFileSync(join(artifactsPath, "legit.txt"), "ok", "utf8");
+
+    const fakeVm = makeFakeVm();
+    await registerFakeVm(fakeVm);
+
+    const { tools } = createGondolinTools({
+      arc: "traversal-arc",
+      config: gondolinConfig,
+      toolsConfig: { artifacts: { path: artifactsPath, url: "https://art.example.com/files" } },
+    });
+
+    const bashTool = tools.find((t) => t.name === "bash")!;
+    await bashTool.execute("id", { command: "echo hi" }, new AbortController().signal, () => {});
+
+    const gondolin = await import("@earendil-works/gondolin");
+    // @ts-expect-error test-only
+    const opts = gondolin.__lastVmOptions.value as { fetch?: typeof fetch };
+    const vmFetch = opts.fetch!;
+
+    // Plain traversal
+    const r1 = await vmFetch("https://art.example.com/files/../../etc/passwd");
+    expect(r1.status).toBe(403);
+
+    // Encoded traversal
+    const r2 = await vmFetch("https://art.example.com/files/%2e%2e%2f%2e%2e%2fetc/passwd");
+    expect(r2.status).toBe(403);
+
+    // Viewer-form traversal
+    const r3 = await vmFetch("https://art.example.com/files/?../../etc/passwd");
+    expect(r3.status).toBe(403);
+  });
+
+  it("returns 405 for non-GET/HEAD methods on artifact URLs", async () => {
+    const artifactsPath = mkdtempSync(join(tmpdir(), "muaddib-gondolin-artifacts-"));
+    writeFileSync(join(artifactsPath, "note.txt"), "body", "utf8");
+
+    const fakeVm = makeFakeVm();
+    await registerFakeVm(fakeVm);
+
+    const { tools } = createGondolinTools({
+      arc: "method-arc",
+      config: gondolinConfig,
+      toolsConfig: { artifacts: { path: artifactsPath, url: "https://art.example.com/files" } },
+    });
+
+    const bashTool = tools.find((t) => t.name === "bash")!;
+    await bashTool.execute("id", { command: "echo hi" }, new AbortController().signal, () => {});
+
+    const gondolin = await import("@earendil-works/gondolin");
+    // @ts-expect-error test-only
+    const opts = gondolin.__lastVmOptions.value as { fetch?: typeof fetch };
+    const vmFetch = opts.fetch!;
+
+    for (const method of ["POST", "PUT", "DELETE", "PATCH"]) {
+      const r = await vmFetch("https://art.example.com/files/?note.txt", { method });
+      expect(r.status, `expected 405 for ${method}`).toBe(405);
+    }
+  });
+
+  it("returns 404 for nonexistent artifact files", async () => {
+    const artifactsPath = mkdtempSync(join(tmpdir(), "muaddib-gondolin-artifacts-"));
+
+    const fakeVm = makeFakeVm();
+    await registerFakeVm(fakeVm);
+
+    const { tools } = createGondolinTools({
+      arc: "notfound-arc",
+      config: gondolinConfig,
+      toolsConfig: { artifacts: { path: artifactsPath, url: "https://art.example.com/files" } },
+    });
+
+    const bashTool = tools.find((t) => t.name === "bash")!;
+    await bashTool.execute("id", { command: "echo hi" }, new AbortController().signal, () => {});
+
+    const gondolin = await import("@earendil-works/gondolin");
+    // @ts-expect-error test-only
+    const opts = gondolin.__lastVmOptions.value as { fetch?: typeof fetch };
+
+    const r = await opts.fetch!("https://art.example.com/files/nonexistent.txt");
+    expect(r.status).toBe(404);
+  });
+
+  it("falls back to upstream fetch for non-artifact URLs", async () => {
+    const fakeVm = makeFakeVm();
+    await registerFakeVm(fakeVm);
+
+    const upstreamFetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("upstream body", { status: 200, headers: { "content-type": "text/plain" } }),
+    );
+
+    const { tools } = createGondolinTools({
+      arc: "non-artifact-fetch-arc",
+      config: gondolinConfig,
+      toolsConfig: { artifacts: { path: "/tmp/artifacts", url: "https://art.example.com/files" } },
+    });
+
+    const bashTool = tools.find((t) => t.name === "bash")!;
+    await bashTool.execute("id", { command: "echo hi" }, new AbortController().signal, () => {});
+
+    const gondolin = await import("@earendil-works/gondolin");
+    // @ts-expect-error test-only
+    const opts = gondolin.__lastVmOptions.value as { fetch?: typeof fetch };
+
+    const response = await opts.fetch!("https://example.com/other.txt");
+    expect(await response.text()).toBe("upstream body");
+    expect(upstreamFetch).toHaveBeenCalledWith("https://example.com/other.txt", undefined);
+    upstreamFetch.mockRestore();
   });
 });
 
@@ -1279,10 +1434,7 @@ describe("loadBundledSkills", () => {
   it("loads bundled skills with actionable descriptions and content", () => {
     const skills = loadBundledSkills();
 
-    const downloadArtifact = skills.find((s) => s.name === "download-artifact");
-    expect(downloadArtifact).toBeDefined();
-    expect(downloadArtifact!.description).toContain("artifact");
-    expect(downloadArtifact!.content).toContain("curl");
+    expect(skills.find((s) => s.name === "download-artifact")).toBeUndefined();
 
     const chronicleRead = skills.find((s) => s.name === "chronicle-read");
     expect(chronicleRead).toBeDefined();
@@ -1290,6 +1442,11 @@ describe("loadBundledSkills", () => {
     expect(chronicleRead!.description).toContain("decisions");
     expect(chronicleRead!.description).not.toContain("/chat_history");
     expect(chronicleRead!.content).toContain("/chronicle/");
+
+    const heartbeat = skills.find((s) => s.name === "heartbeat");
+    expect(heartbeat).toBeDefined();
+    expect(heartbeat!.description).toContain("HEARTBEAT.md");
+    expect(heartbeat!.content).toContain("/workspace/HEARTBEAT.md");
   });
 });
 
@@ -1298,7 +1455,7 @@ describe("formatSkillsForVmPrompt", () => {
     const skills = loadBundledSkills();
     const prompt = formatSkillsForVmPrompt(skills);
     expect(prompt).toContain("<available_skills>");
-    expect(prompt).toContain("/skills/download-artifact/SKILL.md");
+    expect(prompt).toContain("/skills/chronicle-read/SKILL.md");
     expect(prompt).toContain("</available_skills>");
   });
 
