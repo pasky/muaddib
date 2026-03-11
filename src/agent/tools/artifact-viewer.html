@@ -81,7 +81,7 @@
       font-size: 0.9em;
     }
 
-    img {
+    img, video {
       max-width: 100%;
       height: auto;
       border: 1px solid var(--border);
@@ -236,10 +236,20 @@
       return "markdown";
     }
 
+    var VIDEO_RE = /\.(mp4|webm|ogg|mov)$/i;
+
     // Configure marked with highlight.js for code blocks and mermaid support
     marked.use({
       gfm: true,
       renderer: {
+        image({ href, title, text }) {
+          if (VIDEO_RE.test(href)) {
+            var titleAttr = title ? ' title="' + escapeHtml(title) + '"' : '';
+            return '<video controls' + titleAttr + '><source src="' + escapeHtml(href) + '" />' + escapeHtml(text) + '</video>';
+          }
+          var titleAttr = title ? ' title="' + escapeHtml(title) + '"' : '';
+          return '<img src="' + escapeHtml(href) + '" alt="' + escapeHtml(text) + '"' + titleAttr + ' />';
+        },
         code({ text, lang }) {
           if (lang === "mermaid") {
             return '<pre class="mermaid">' + escapeHtml(text) + "</pre>";
@@ -300,6 +310,14 @@
           return;
         }
 
+        const videoExts = [".mp4", ".webm", ".ogg", ".mov"];
+        const isVideo = contentType.startsWith("video/") || videoExts.some(function (ext) { return lower.endsWith(ext); });
+
+        if (isVideo) {
+          content.innerHTML = '<video controls style="max-width:100%;border:1px solid var(--border);border-radius:8px;"><source src="' + rawHref + '" />' + escapeHtml(filename) + '</video>';
+          return;
+        }
+
         const htmlExts = [".html", ".htm"];
         const isHtml = contentType.includes("text/html") || htmlExts.some(function (ext) { return lower.endsWith(ext); });
 
@@ -321,7 +339,7 @@
 
         if (mode === "markdown") {
           const rawHtml = marked.parse(text);
-          content.innerHTML = DOMPurify.sanitize(rawHtml, { ADD_TAGS: ["pre"], ADD_ATTR: ["class"] });
+          content.innerHTML = DOMPurify.sanitize(rawHtml, { ADD_TAGS: ["pre", "video", "source"], ADD_ATTR: ["class", "controls", "src"] });
         } else {
           const highlighted = hljs.getLanguage(mode)
             ? hljs.highlight(text, { language: mode }).value
