@@ -148,7 +148,8 @@
               "!s": {},
               "!a": {
                 "reasoningEffort": "medium",
-		"model": "anthropic:claude-opus-4-6"
+		"model": "anthropic:claude-opus-4-6",
+		"visionModel": "anthropic:claude-opus-4-6"
               }
             }
           },
