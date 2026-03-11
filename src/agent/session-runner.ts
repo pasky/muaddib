@@ -174,7 +174,12 @@ export class SessionRunner {
               if (assistantMessageObj) {
                 deliveredAssistantMessages.add(assistantMessageObj);
               }
-              queueResponseDelivery(responseSuffix ? `${text} ${responseSuffix}` : text);
+              // Don't decorate NULL sentinel responses with suffixes — they must
+              // pass through to onResponse unchanged so callers can suppress them.
+              const decorated = responseSuffix && !/^["'`]?\s*null\s*["'`]?$/iu.test(text)
+                ? `${text} ${responseSuffix}`
+                : text;
+              queueResponseDelivery(decorated);
             }
           } else if (text && responseMuted) {
             this.logger.info("Suppressing post-response text", truncateForDebug(text, 200));

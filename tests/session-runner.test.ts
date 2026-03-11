@@ -871,5 +871,43 @@ describe("SessionRunner", () => {
     }
   });
 
+  it.each([
+    { response: "NULL", expected: "NULL", desc: "NULL sentinel is not decorated" },
+    { response: "Here is the analysis.", expected: "Here is the analysis. [vision fallback to kimi-k2.5]", desc: "normal response gets suffix" },
+  ])("vision fallback suffix: $desc", async ({ response, expected }) => {
+    vi.useFakeTimers();
+    try {
+      const callbacks: Array<(event: any) => void> = [];
+      const session = {
+        messages: [] as any[],
+        subscribe: vi.fn((cb: (event: any) => void) => { callbacks.push(cb); return vi.fn(); }),
+        prompt: vi.fn(async () => {
+          callbacks.forEach((cb) => cb({ type: "tool_execution_start", toolName: "read", args: {} }));
+          callbacks.forEach((cb) => cb({ type: "tool_execution_end", toolName: "read", isError: false, result: [{ type: "text", text: "ok" }] }));
+          session.messages.push({ role: "assistant", content: [{ type: "text", text: response }], usage: makeUsage(1), stopReason: "stop" });
+          callbacks.forEach((cb) => cb({ type: "message_end", message: session.messages.at(-1) }));
+          callbacks.forEach((cb) => cb({ type: "turn_end" }));
+        }),
+      };
+      mockCreateAgentSessionForInvocation.mockReturnValue({
+        session, agent: { setModel: vi.fn() }, ensureProviderKey: vi.fn(async () => {}),
+        responseTimestamp: { lastResponseAt: 0 }, getVisionFallbackActivated: () => true,
+      });
+      const deliveredTexts: string[] = [];
+      const runner = new SessionRunner({
+        model: "openai:gpt-4o-mini", systemPrompt: "sys", authStorage: AuthStorage.inMemory(),
+        logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+        modelAdapter: { resolve: (spec: string) => ({ spec: { provider: spec.split(":")[0], modelId: spec.split(":")[1] }, model: { provider: spec.split(":")[0], id: spec.split(":")[1] } }) } as any,
+        onResponse: async (text: string) => { deliveredTexts.push(text); },
+      });
+      const promise = runner.prompt("hello", { visionFallbackModel: "moonshotai:kimi-k2.5" });
+      await vi.runAllTimersAsync();
+      await promise;
+      expect(deliveredTexts).toEqual([expected]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
 
 });
