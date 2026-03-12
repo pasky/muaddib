@@ -215,7 +215,7 @@ export function createDefaultVisitWebpageExecutor(
       options.logger?.debug(`HEAD ${url} failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    if (contentType.startsWith("image/")) {
+    if (contentType.startsWith("image/") && !contentType.includes("svg")) {
       const imageResponse = await diagnosticFetch(url, {
         headers: requestHeaders,
       });

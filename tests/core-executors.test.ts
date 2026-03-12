@@ -470,6 +470,26 @@ describe("core tool executors visit_webpage support", () => {
     expect((result as any).mimeType).toBe("image/png");
   });
 
+  it("visit_webpage treats SVG as text content, not as image", async () => {
+    const svgContent = '<svg xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="40"/></svg>';
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "HEAD") {
+        return new Response("", { status: 200, headers: { "content-type": "image/svg+xml" } });
+      }
+      const url = String(input);
+      if (url.startsWith("https://r.jina.ai/")) {
+        return new Response(svgContent, { status: 200 });
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    const executors = createDefaultToolExecutors({});
+    const result = await executors.visitWebpage("https://example.com/bird.svg");
+    // SVG should be returned as text, not as an image object
+    expect(typeof result).toBe("string");
+    expect(result as string).toContain("circle");
+  });
+
   it("visit_webpage falls through to text when image-like URL serves HTML", async () => {
     const htmlContent = "<html><body>File:Filip-Turek.jpg - Wikimedia Commons</body></html>";
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_input: RequestInfo | URL, init?: RequestInit) => {
