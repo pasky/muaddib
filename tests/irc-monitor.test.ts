@@ -686,6 +686,7 @@ describe("IrcRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async () => {},
       },
+      retryDelayMs: 0,
       varlinkEvents: {
         connect: async () => {
           throw new Error("connection refused");

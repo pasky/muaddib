@@ -51,6 +51,8 @@ export interface IrcRoomMonitorOptions {
   responseCleaner?: (text: string, nick: string) => string;
   logger?: Logger;
   logWriter?: RuntimeLogWriter;
+  /** Override per-attempt retry delay (ms). Default: exponential backoff (2^attempt * 1000). */
+  retryDelayMs?: number;
 }
 
 export class IrcRoomMonitor {
@@ -313,7 +315,7 @@ export class IrcRoomMonitor {
           return false;
         }
 
-        const waitMs = 2 ** attempt * 1000;
+        const waitMs = this.options.retryDelayMs ?? 2 ** attempt * 1000;
         this.logger.info(`Retrying in ${waitMs / 1000} seconds...`);
         await sleep(waitMs);
       }
