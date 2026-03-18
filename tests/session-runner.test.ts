@@ -289,12 +289,12 @@ describe("SessionRunner", () => {
 
     const runner = makeRunner({
       systemPrompt: "base prompt",
-      toolSet: { tools: [], systemPromptSuffix: "Filesystem: /workspace persists; /tmp/session-abc is your session working directory." },
+      toolSet: { tools: [], systemPromptSuffix: "Filesystem: /workspace persists; /workspace/.sessions/session-abc is your working directory." },
     });
     await runner.prompt("hello");
 
     const calledWith = mockCreateAgentSessionForInvocation.mock.calls[0]![0] as { systemPrompt: string };
-    expect(calledWith.systemPrompt).toBe("base prompt\n\nFilesystem: /workspace persists; /tmp/session-abc is your session working directory.");
+    expect(calledWith.systemPrompt).toBe("base prompt\n\nFilesystem: /workspace persists; /workspace/.sessions/session-abc is your working directory.");
   });
 
   it("passes system prompt unchanged when toolSet has no systemPromptSuffix", async () => {

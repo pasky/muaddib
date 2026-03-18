@@ -64,7 +64,7 @@ export interface GondolinToolsOptions {
  * session ends — whether it succeeds or fails.
  *
  * One VM is created (and cached) per arc.  Each call to this function creates
- * a fresh session directory at /tmp/session-{uuid}/ which becomes the default
+ * a fresh session directory at /workspace/.sessions/session-{id}/ which becomes the default
  * working directory for bash and the base for relative path resolution.
  * The last 8 session dirs are kept across checkpoints so the agent can revisit them.
  */
@@ -146,7 +146,7 @@ function buildSystemPromptSuffix(
       : "";
 
   return (
-    `Filesystem: /workspace persists across sessions; ${sessionDir} is your ephemeral working directory (last 8 session dirs in /tmp/session-* are kept).` +
+    `Filesystem: /workspace persists across sessions; ${sessionDir} is your working directory (last 8 session dirs in /workspace/.sessions/ are kept).` +
     " Environment: Alpine Linux, uv venv is active (use `uv pip install` + `uv run`)." +
     arcSuffix +
     chatHistorySuffix +

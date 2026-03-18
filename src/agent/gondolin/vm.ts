@@ -567,7 +567,7 @@ export async function checkpointGondolinArc(
   const checkpointPromise = (async () => {
     try {
       await vm.exec(["/bin/sh", "-c",
-        "ls -1dt /tmp/session-* 2>/dev/null | tail -n +9 | xargs rm -rf"]);
+        "ls -1dt /workspace/.sessions/session-* 2>/dev/null | tail -n +9 | xargs rm -rf"]);
       await vm.checkpoint(checkpointPath);
       logger?.info(`Gondolin VM checkpointed for arc ${arc}: ${checkpointPath}`);
     } catch (err) {
@@ -646,7 +646,7 @@ export function createVmSession(opts: VmSessionOptions): VmSession {
   // active even before the VM has been started or any tool has been called.
   registerActiveSession(arc);
 
-  const sessionDir = `/tmp/session-${randomUUID().slice(0, 8)}`;
+  const sessionDir = `/workspace/.sessions/session-${randomUUID().slice(0, 8)}`;
 
   let vmReady: Promise<VM> | null = null;
 
