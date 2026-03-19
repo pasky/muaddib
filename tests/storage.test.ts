@@ -13,6 +13,7 @@ import { ChronicleLifecycleTs } from "../src/chronicle/lifecycle.js";
 import { AutoChroniclerTs } from "../src/rooms/autochronicler.js";
 import { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { buildArc } from "../src/rooms/message.js";
+import type { RoomMessage } from "../src/rooms/message.js";
 import { createTempHistoryStore } from "./test-helpers.js";
 
 function makeAssistantText(text: string) {
@@ -691,5 +692,117 @@ describe("AutoChroniclerTs", () => {
 
     await history.close();
     await chronicleStore.close();
+  });
+});
+
+// ── In-flight trigger annotation ──
+
+function roomMsg(nick: string, content: string, mynick = "Bot"): RoomMessage {
+  return {
+    serverTag: "test",
+    channelName: "#test",
+    arc: "test###test",
+    nick,
+    mynick,
+    content,
+  };
+}
+
+/** Tiny delay to ensure unique `new Date().toISOString()` timestamps between addMessage calls. */
+const tick = () => new Promise<void>((r) => setTimeout(r, 2));
+
+describe("ChatHistoryStore – in-flight trigger annotation", () => {
+  it("annotates in-flight trigger messages", async () => {
+    const store = createTempHistoryStore();
+    await store.initialize();
+
+    await store.addMessage(roomMsg("fenn", "hello bot"), { selfRun: true });
+    await tick();
+    await store.addMessage(roomMsg("mlu", "hey bot"), { selfRun: true });
+
+    const context = await store.getContext("test###test");
+
+    const fennMsg = context.find((m) => typeof m.content === "string" && m.content.includes("fenn"));
+    expect(fennMsg).toBeDefined();
+    expect(fennMsg!.content).toContain("<meta>(My response to this message is already in progress.)</meta>");
+
+    const mluMsg = context.find((m) => typeof m.content === "string" && m.content.includes("mlu"));
+    expect(mluMsg).toBeDefined();
+    expect(mluMsg!.content).toContain("<meta>(My response to this message is already in progress.)</meta>");
+  });
+
+  it("does not annotate triggers that already have a response", async () => {
+    const store = createTempHistoryStore();
+    await store.initialize();
+
+    const fennTs = await store.addMessage(roomMsg("fenn", "hello bot"), { selfRun: true });
+    await tick();
+    await store.addMessage(roomMsg("Bot", "hi fenn"), { run: fennTs });
+    await tick();
+    await store.addMessage(roomMsg("mlu", "hey bot"), { selfRun: true });
+
+    const context = await store.getContext("test###test");
+
+    const fennMsg = context.find((m) => typeof m.content === "string" && m.content.includes("fenn") && !m.content.includes("Bot"));
+    expect(fennMsg).toBeDefined();
+    expect(fennMsg!.content).not.toContain("<meta>");
+
+    const mluMsg = context.find((m) => typeof m.content === "string" && m.content.includes("mlu"));
+    expect(mluMsg).toBeDefined();
+    expect(mluMsg!.content).toContain("<meta>");
+  });
+
+  it("does not annotate messages that are not self-run triggers", async () => {
+    const store = createTempHistoryStore();
+    await store.initialize();
+
+    await store.addMessage(roomMsg("fenn", "just chatting"));
+    await tick();
+    await store.addMessage(roomMsg("mlu", "hey bot"), { selfRun: true });
+
+    const context = await store.getContext("test###test");
+
+    const fennMsg = context.find((m) => typeof m.content === "string" && m.content.includes("fenn"));
+    expect(fennMsg).toBeDefined();
+    expect(fennMsg!.content).not.toContain("<meta>");
+  });
+
+  it("annotates multiple in-flight triggers from different nicks", async () => {
+    const store = createTempHistoryStore();
+    await store.initialize();
+
+    await store.addMessage(roomMsg("alice", "q1"), { selfRun: true });
+    await tick();
+    await store.addMessage(roomMsg("bob", "q2"), { selfRun: true });
+    await tick();
+    await store.addMessage(roomMsg("charlie", "q3"), { selfRun: true });
+
+    const context = await store.getContext("test###test");
+
+    const annotated = context.filter(
+      (m) => typeof m.content === "string" && m.content.includes("<meta>"),
+    );
+    expect(annotated).toHaveLength(3);
+  });
+
+  it("handles same nick with multiple in-flight triggers across modes", async () => {
+    const store = createTempHistoryStore();
+    await store.initialize();
+
+    const ts1 = await store.addMessage(roomMsg("fenn", "!s deep question"), { selfRun: true });
+    await tick();
+    await store.addMessage(roomMsg("fenn", "!q quick question"), { selfRun: true });
+    await tick();
+    await store.addMessage(roomMsg("Bot", "deep answer"), { run: ts1 });
+
+    const context = await store.getContext("test###test");
+
+    const deepMsg = context.find((m) => typeof m.content === "string" && m.content.includes("deep question"));
+    expect(deepMsg).toBeDefined();
+    expect(deepMsg!.content).not.toContain("<meta>");
+
+    const quickMsg = context.find((m) => typeof m.content === "string" && m.content.includes("quick question"));
+    expect(quickMsg).toBeDefined();
+    expect(quickMsg!.content).toContain("<meta>");
   });
 });

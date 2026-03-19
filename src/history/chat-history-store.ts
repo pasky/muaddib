@@ -179,7 +179,7 @@ export class ChatHistoryStore {
     const lines = threadId
       ? await this.readThreadContext(arc, threadId, inferenceLimit)
       : await this.readMainContext(arc, inferenceLimit);
-    return this.formatContextLines(lines);
+    return this.formatContextLines(this.annotateInFlightTriggers(lines));
   }
 
   async getFullHistory(
@@ -510,5 +510,41 @@ export class ChatHistoryStore {
     if (!mode) return "";
     if (mode.startsWith("!")) return `${mode} `;
     return "";
+  }
+
+  /**
+   * Annotate context lines where a user message triggered a session
+   * (`run === ts`, i.e. selfRun) but no assistant response with matching
+   * `run` has been persisted yet — meaning the session is still in flight.
+   *
+   * Appends a `<meta>` hint so the agent knows not to respond to it.
+   * Nick-agnostic: even the triggering user's own earlier in-flight sessions
+   * (e.g. a different mode) get annotated correctly.  The current trigger
+   * message is not in the context (it's sliced off and sent as the query).
+   */
+  private annotateInFlightTriggers(lines: JsonlLine[]): JsonlLine[] {
+    // Collect all `run` values that have a matching assistant response.
+    const resolvedRuns = new Set<string>();
+    for (const line of lines) {
+      if (line.r === "assistant" && line.run) {
+        resolvedRuns.add(line.run);
+      }
+    }
+
+    return lines.map((line) => {
+      if (
+        line.r !== "user" ||
+        !line.run ||
+        line.run !== line.ts ||
+        resolvedRuns.has(line.run)
+      ) {
+        return line;
+      }
+
+      return {
+        ...line,
+        m: (line.m ?? "") + "\n<meta>(My response to this message is already in progress.)</meta>",
+      };
+    });
   }
 }
