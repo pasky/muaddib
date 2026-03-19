@@ -277,13 +277,22 @@ async function ensureVm(opts: VmSessionOptions): Promise<VM> {
         ...placeholderEnv,
       };
 
+      // Resolve the guest image directory so we can pass it explicitly via
+      // sandbox.imagePath.  This is required for checkpoint resume: gondolin
+      // compares the manifest buildId of the provided imagePath against the
+      // checkpoint's stored buildId and throws on mismatch, which lets us
+      // detect stale checkpoints and start fresh.  Without imagePath, gondolin
+      // falls back to scanning its cache by buildId and may silently resume
+      // from an outdated cached image even when the custom image has changed.
+      const guestDir = process.env.GONDOLIN_GUEST_DIR;
+
       const vmOptions: import("@earendil-works/gondolin").VMOptions = {
         vfs: { mounts },
         fetch: createVmFetch(artifactsPath, artifactsUrl),
         httpHooks,
         ...(Object.keys(combinedEnv).length > 0 ? { env: combinedEnv } : {}),
         dns: { mode: dnsMode },
-        sandbox: { debug: ["protocol"] },
+        sandbox: { debug: ["protocol"], ...(guestDir ? { imagePath: guestDir } : {}) },
         debugLog,
       };
 

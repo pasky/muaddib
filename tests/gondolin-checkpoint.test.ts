@@ -1561,3 +1561,57 @@ describe("gondolin — post-resume health check", () => {
     expect(existsSync(checkpointPath)).toBe(true);
   });
 });
+
+// ── sandbox.imagePath passthrough for checkpoint buildId validation ────────
+
+describe("gondolin — sandbox.imagePath for checkpoint invalidation", () => {
+  it("passes GONDOLIN_GUEST_DIR as sandbox.imagePath in vmOptions", async () => {
+    const fakeVm = makeFakeVm();
+    await registerFakeVm(fakeVm);
+
+    const testGuestDir = "/tmp/test-gondolin-guest-dir";
+    process.env.GONDOLIN_GUEST_DIR = testGuestDir;
+
+    try {
+      const { tools } = createGondolinTools({ arc: "imagepath-arc", config: gondolinConfig });
+      const bashTool = tools.find((t) => t.name === "bash")!;
+      await bashTool.execute("id", { command: "echo hi" }, new AbortController().signal, () => {});
+
+      const gondolin = await import("@earendil-works/gondolin");
+      // @ts-expect-error test-only
+      const opts = gondolin.__lastVmOptions.value as { sandbox?: { imagePath?: string; debug?: string[] } };
+      expect(opts.sandbox?.imagePath).toBe(testGuestDir);
+      expect(opts.sandbox?.debug).toEqual(["protocol"]);
+    } finally {
+      delete process.env.GONDOLIN_GUEST_DIR;
+    }
+  });
+
+  it("falls back to auto-detected custom image dir when GONDOLIN_GUEST_DIR is not set", async () => {
+    const fakeVm = makeFakeVm();
+    await registerFakeVm(fakeVm);
+
+    delete process.env.GONDOLIN_GUEST_DIR;
+
+    const { tools } = createGondolinTools({ arc: "no-imagepath-arc", config: gondolinConfig });
+    const bashTool = tools.find((t) => t.name === "bash")!;
+    await bashTool.execute("id", { command: "echo hi" }, new AbortController().signal, () => {});
+
+    const gondolin = await import("@earendil-works/gondolin");
+    // @ts-expect-error test-only
+    const opts = gondolin.__lastVmOptions.value as { sandbox?: { imagePath?: string; debug?: string[] } };
+    // When GONDOLIN_GUEST_DIR is not set, the code auto-detects
+    // $MUADDIB_HOME/gondolin-image if it exists and sets both the env var
+    // and sandbox.imagePath.  If that dir doesn't exist either, imagePath
+    // is omitted (gondolin falls back to its own default/cache resolution).
+    const { getMuaddibHome } = await import("../src/config/paths.js");
+    const autoDetectedDir = getMuaddibHome() + "/gondolin-image";
+    const { existsSync } = await import("node:fs");
+    if (existsSync(autoDetectedDir)) {
+      expect(opts.sandbox?.imagePath).toBe(autoDetectedDir);
+    } else {
+      expect(opts.sandbox?.imagePath).toBeUndefined();
+    }
+    expect(opts.sandbox?.debug).toEqual(["protocol"]);
+  });
+});
