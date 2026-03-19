@@ -3,9 +3,10 @@ set -euo pipefail
 
 # Build a custom Gondolin guest image for Muaddib.
 #
-# The image includes Python 3 (pip, numpy, matplotlib), Node.js, npm, uv,
-# Chromium, poppler-utils, jq, git, imagemagick, a uv venv with pip (created on first boot),
-# and a 4 GB rootfs so the agent has room to install additional packages at runtime.
+# The image includes Python 3 (pip, numpy, matplotlib), Node.js, npm (upgraded),
+# uv, Chromium, Playwright, poppler-utils, jq, git, imagemagick, a uv venv with
+# pip (created on first boot), and a 4 GB rootfs so the agent has room to install
+# additional packages at runtime.
 #
 # Alpine 3.23 ships Node.js 24 in its main repo, so no version manager is needed.
 #
@@ -119,7 +120,18 @@ ARCH=$(node -e "console.log(process.arch === 'arm64' ? 'aarch64' : 'x86_64')")
 
 INIT_EXTRA=$(mktemp /tmp/gondolin-init-extra-XXXXXX.sh)
 cat > "$INIT_EXTRA" << 'INITEOF'
+# Upgrade npm — Alpine 3.23's bundled version is broken
+rm -rf /usr/lib/node_modules/npm
+mkdir -p /usr/lib/node_modules/npm
+curl -fsSL https://registry.npmjs.org/npm/-/npm-11.2.0.tgz \
+  | tar -xz -C /usr/lib/node_modules/npm --strip-components=1
+
+# Create uv venv with system site-packages
 [ -d /opt/venv ] || uv venv --system-site-packages --seed /opt/venv
+
+# Install Playwright (uses system Chromium via CHROME_BIN)
+npm install -g playwright
+PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npx playwright install-deps 2>/dev/null || true
 INITEOF
 
 BUILD_CONFIG=$(mktemp /tmp/gondolin-build-XXXXXX.json)
@@ -173,7 +185,8 @@ cat > "$BUILD_CONFIG" << EOF
   "env": {
     "VIRTUAL_ENV": "/opt/venv",
     "PATH": "/opt/venv/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-    "CHROME_BIN": "/usr/bin/chromium-browser"
+    "CHROME_BIN": "/usr/bin/chromium-browser",
+    "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH": "/usr/bin/chromium-browser"
   }
 }
 EOF
