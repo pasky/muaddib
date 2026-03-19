@@ -129,9 +129,26 @@ curl -fsSL https://registry.npmjs.org/npm/-/npm-11.2.0.tgz \
 # Create uv venv with system site-packages
 [ -d /opt/venv ] || uv venv --system-site-packages --seed /opt/venv
 
-# Install Playwright (uses system Chromium via CHROME_BIN)
-npm install -g playwright
-PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npx playwright install-deps 2>/dev/null || true
+# Install Playwright and wire it to system Chromium.
+# Playwright's chromium.launch() won't honour env vars for the executable path —
+# it only looks in its own browser registry paths.  We install the npm package
+# (skipping the bundled browser download, which wouldn't work on Alpine/musl
+# anyway) and then create symlinks from every path Playwright expects to the
+# real system Chromium binary.
+PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install -g playwright
+
+# Discover the paths Playwright will probe for chromium / headless-shell and
+# symlink them to the Alpine system Chromium.
+node -e '
+  const { registry } = require("playwright-core/lib/server");
+  for (const name of ["chromium", "chromium-headless-shell"]) {
+    const exe = registry.findExecutable(name);
+    if (exe) console.log(exe.executablePath("linux"));
+  }
+' 2>/dev/null | while read -r p; do
+  mkdir -p "$(dirname "$p")"
+  ln -sf /usr/bin/chromium-browser "$p"
+done
 INITEOF
 
 BUILD_CONFIG=$(mktemp /tmp/gondolin-build-XXXXXX.json)
@@ -185,8 +202,7 @@ cat > "$BUILD_CONFIG" << EOF
   "env": {
     "VIRTUAL_ENV": "/opt/venv",
     "PATH": "/opt/venv/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-    "CHROME_BIN": "/usr/bin/chromium-browser",
-    "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH": "/usr/bin/chromium-browser"
+    "CHROME_BIN": "/usr/bin/chromium-browser"
   }
 }
 EOF
