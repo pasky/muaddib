@@ -235,7 +235,10 @@ export class RoomMessageHandler {
 
   private steerAgent(agent: Agent, message: RoomMessage): void {
     const ts = formatUtcTime().slice(-5);
-    const baseText = `[${ts}] <${message.nick}> ${message.content}`;
+    const nickContent = message.trusted === false
+      ? `[UNTRUSTED] <${message.nick}> ${message.content}[/UNTRUSTED]`
+      : `<${message.nick}> ${message.content}`;
+    const baseText = `[${ts}] ${nickContent}`;
 
     // Direct messages (in-channel mentions, DMs) are user follow-ups — steer
     // them verbatim. Passive/background messages get the "do not derail" wrapper.

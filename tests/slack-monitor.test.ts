@@ -161,6 +161,90 @@ describe("SlackRoomMonitor", () => {
     await history.close();
   });
 
+  it("sets trusted=true when userId matches Slack allowlist", async () => {
+    const history = createTempHistoryStore(20);
+
+    let seenTrusted: boolean | undefined;
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true, userAllowlist: ["alice_U0ABC123"] },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async (message) => {
+          seenTrusted = message.trusted;
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      workspaceId: "T123",
+      channelId: "C123",
+      username: "alice",
+      userId: "U0ABC123",
+      text: "hello",
+      mynick: "muaddib",
+    });
+
+    expect(seenTrusted).toBe(true);
+    await history.close();
+  });
+
+  it("sets trusted=false when userId does not match Slack allowlist", async () => {
+    const history = createTempHistoryStore(20);
+
+    let seenTrusted: boolean | undefined;
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true, userAllowlist: ["alice_U0ABC123"] },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async (message) => {
+          seenTrusted = message.trusted;
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      workspaceId: "T123",
+      channelId: "C123",
+      username: "bob",
+      userId: "U0XYZ999",
+      text: "hello",
+      mynick: "muaddib",
+    });
+
+    expect(seenTrusted).toBe(false);
+    await history.close();
+  });
+
+  it("leaves trusted undefined when no Slack allowlist is configured", async () => {
+    const history = createTempHistoryStore(20);
+
+    let seenTrusted: boolean | undefined = true; // sentinel
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async (message) => {
+          seenTrusted = message.trusted;
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      workspaceId: "T123",
+      channelId: "C123",
+      username: "alice",
+      userId: "U0ABC123",
+      text: "hello",
+      mynick: "muaddib",
+    });
+
+    expect(seenTrusted).toBeUndefined();
+    await history.close();
+  });
+
   it("includes Slack attachment context and propagates secrets", async () => {
     const history = createTempHistoryStore(20);
 

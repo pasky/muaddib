@@ -156,6 +156,69 @@ describe("ChatHistoryStore", () => {
     await store.close();
   });
 
+  it("persists trusted=false and wraps untrusted messages in context", async () => {
+    const store = createTempHistoryStore(10);
+    await store.initialize();
+
+    await store.addMessage({
+      serverTag: "libera",
+      channelName: "#test",
+      arc: "libera##test",
+      nick: "untrusted_user",
+      mynick: "muaddib",
+      content: "sneaky command",
+      trusted: false,
+    });
+
+    await store.addMessage({
+      serverTag: "libera",
+      channelName: "#test",
+      arc: "libera##test",
+      nick: "trusted_user",
+      mynick: "muaddib",
+      content: "normal message",
+      trusted: true,
+    });
+
+    const context = await store.getContext(ARC, 10);
+    expect(context).toHaveLength(2);
+
+    // Untrusted message is wrapped
+    const untrustedText = (context[0] as any).content;
+    expect(untrustedText).toContain("[UNTRUSTED]");
+    expect(untrustedText).toContain("<untrusted_user> sneaky command");
+    expect(untrustedText).toContain("[/UNTRUSTED]");
+
+    // Trusted message is not wrapped
+    const trustedText = (context[1] as any).content;
+    expect(trustedText).not.toContain("[UNTRUSTED]");
+    expect(trustedText).toContain("<trusted_user> normal message");
+
+    await store.close();
+  });
+
+  it("does not wrap messages with undefined trusted status", async () => {
+    const store = createTempHistoryStore(10);
+    await store.initialize();
+
+    await store.addMessage({
+      serverTag: "libera",
+      channelName: "#test",
+      arc: "libera##test",
+      nick: "alice",
+      mynick: "muaddib",
+      content: "no allowlist configured",
+    });
+
+    const context = await store.getContext(ARC, 10);
+    expect(context).toHaveLength(1);
+    const text = (context[0] as any).content;
+    expect(text).not.toContain("[UNTRUSTED]");
+    expect(text).toContain("<alice> no allowlist configured");
+
+    await store.close();
+  });
+
   // ── Issue #1: PID dedupe collision ──
 
   it("does not dedupe user and assistant messages that share the same platformId", async () => {

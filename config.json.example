@@ -204,6 +204,8 @@
 
     "irc": {
       "enabled": true,
+      "_comment_userAllowlist": "IRC: hostmask glob patterns, e.g. *!*@unaffiliated/pasky. Requires hostmask support in the varlink plugin.",
+      "userAllowlist": [],
       "varlink": {
         "socketPath": "~/.irssi/varlink.sock"
       },
@@ -226,6 +228,8 @@
 
     "discord": {
       "enabled": false,
+      "_comment_userAllowlist": "Discord/Slack: normalizeName(displayName)_platformId — check your arcs/ directory for DM channel names, e.g. John_Doe_123456789012345678",
+      "userAllowlist": [],
       "replyEditDebounceSeconds": 30.0,
       "promptVars": {
         "output": " You are now connected to Discord, and can afford using even _very light_ italics / bold text styling."
@@ -245,6 +249,8 @@
 
     "slack": {
       "enabled": false,
+      "_comment_userAllowlist": "Slack: normalizeName(displayName)_userId — check your arcs/ directory for DM channel names, e.g. john_doe_U0ABC123",
+      "userAllowlist": [],
       "workspaces": {
         "T123": {
           "name": "AmazingB2BSaaS"

@@ -712,6 +712,143 @@ describe("IrcRoomMonitor", () => {
     await history.close();
   });
 
+  it("sets trusted=true when hostmask matches allowlist pattern", async () => {
+    const history = createTempHistoryStore(20);
+    await history.initialize();
+
+    let seenTrusted: boolean | undefined;
+
+    const monitor = new IrcRoomMonitor({
+      roomConfig: {
+        userAllowlist: ["*!*@unaffiliated/pasky", "*!*@freenode/staff/*"],
+        varlink: { socketPath: "/tmp/varlink.sock" },
+      },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async (message) => {
+          seenTrusted = message.trusted;
+        },
+      },
+      varlinkEvents: new FakeEventsClient(),
+      varlinkSender: new FakeSender(),
+    });
+
+    await monitor.processMessageEvent({
+      type: "message",
+      subtype: "public",
+      server: "libera",
+      target: "#test",
+      nick: "pasky",
+      message: "hello",
+      hostmask: "pasky!~pasky@unaffiliated/pasky",
+    });
+
+    expect(seenTrusted).toBe(true);
+    await history.close();
+  });
+
+  it("sets trusted=false when hostmask does not match allowlist", async () => {
+    const history = createTempHistoryStore(20);
+    await history.initialize();
+
+    let seenTrusted: boolean | undefined;
+
+    const monitor = new IrcRoomMonitor({
+      roomConfig: {
+        userAllowlist: ["*!*@unaffiliated/pasky"],
+        varlink: { socketPath: "/tmp/varlink.sock" },
+      },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async (message) => {
+          seenTrusted = message.trusted;
+        },
+      },
+      varlinkEvents: new FakeEventsClient(),
+      varlinkSender: new FakeSender(),
+    });
+
+    await monitor.processMessageEvent({
+      type: "message",
+      subtype: "public",
+      server: "libera",
+      target: "#test",
+      nick: "stranger",
+      message: "hello",
+      hostmask: "stranger!~user@some.host.com",
+    });
+
+    expect(seenTrusted).toBe(false);
+    await history.close();
+  });
+
+  it("sets trusted=false when allowlist is configured but hostmask is missing", async () => {
+    const history = createTempHistoryStore(20);
+    await history.initialize();
+
+    let seenTrusted: boolean | undefined;
+
+    const monitor = new IrcRoomMonitor({
+      roomConfig: {
+        userAllowlist: ["*!*@unaffiliated/pasky"],
+        varlink: { socketPath: "/tmp/varlink.sock" },
+      },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async (message) => {
+          seenTrusted = message.trusted;
+        },
+      },
+      varlinkEvents: new FakeEventsClient(),
+      varlinkSender: new FakeSender(),
+    });
+
+    await monitor.processMessageEvent({
+      type: "message",
+      subtype: "public",
+      server: "libera",
+      target: "#test",
+      nick: "alice",
+      message: "hello",
+    });
+
+    expect(seenTrusted).toBe(false);
+    await history.close();
+  });
+
+  it("leaves trusted undefined when no allowlist is configured", async () => {
+    const history = createTempHistoryStore(20);
+    await history.initialize();
+
+    let seenTrusted: boolean | undefined = true; // sentinel to detect undefined
+
+    const monitor = new IrcRoomMonitor({
+      roomConfig: {
+        varlink: { socketPath: "/tmp/varlink.sock" },
+      },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async (message) => {
+          seenTrusted = message.trusted;
+        },
+      },
+      varlinkEvents: new FakeEventsClient(),
+      varlinkSender: new FakeSender(),
+    });
+
+    await monitor.processMessageEvent({
+      type: "message",
+      subtype: "public",
+      server: "libera",
+      target: "#test",
+      nick: "alice",
+      message: "hello",
+    });
+
+    expect(seenTrusted).toBeUndefined();
+    await history.close();
+  });
+
   it("processes IRC events concurrently without waiting for previous handler completion", async () => {
     const history = createTempHistoryStore(20);
     await history.initialize();

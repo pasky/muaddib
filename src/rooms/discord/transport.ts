@@ -224,6 +224,7 @@ export class DiscordGatewayTransport implements DiscordEventSource, DiscordSende
       messageId: message.id,
       threadId,
       username,
+      authorId: message.author.id,
       content: normalizeDiscordEmoji(message.cleanContent || message.content),
       mynick,
       attachments: mapDiscordAttachments(message.attachments),

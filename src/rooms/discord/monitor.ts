@@ -1,11 +1,11 @@
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import type { RoomConfig } from "../../config/muaddib-config.js";
 import { CONSOLE_LOGGER, RuntimeLogWriter, type Logger } from "../../app/logging.js";
-import { appendAttachmentBlock, escapeRegExp, nowMonotonicSeconds, requireNonEmptyString, sleep, stripLeadingMention } from "../../utils/index.js";
+import { appendAttachmentBlock, escapeRegExp, normalizeName, nowMonotonicSeconds, requireNonEmptyString, sleep, stripLeadingMention } from "../../utils/index.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import { RoomMessageHandler } from "../command/message-handler.js";
 import { InFlightTaskSet } from "../in-flight-task-set.js";
-import { type RoomMessage, buildArc } from "../message.js";
+import { type RoomMessage, buildArc, matchPlatformAllowlist } from "../message.js";
 import type { RoomGateway } from "../room-gateway.js";
 import {
   sendWithRetryResult,
@@ -39,6 +39,7 @@ export interface DiscordMessageEvent {
   messageId?: string;
   threadId?: string;
   username: string;
+  authorId?: string;
   content: string;
   mynick: string;
   attachments?: DiscordAttachment[];
@@ -306,6 +307,11 @@ export class DiscordRoomMonitor {
         ? `discord:${event.guildId}`
         : "discord:_DM";
 
+    const userAllowlist = this.options.roomConfig.userAllowlist;
+    const trusted = userAllowlist
+      ? matchPlatformAllowlist(event.authorId ? `${normalizeName(event.username)}_${event.authorId}` : undefined, userAllowlist)
+      : undefined;
+
     const channelName = event.channelName ?? event.channelId;
     const message: RoomMessage = {
       serverTag,
@@ -315,6 +321,7 @@ export class DiscordRoomMonitor {
       mynick: event.mynick,
       content: cleanedContent,
       isDirect,
+      trusted,
       // Preserve the mention context for history and LLM (e.g. "@MuaddibLLM keeppandoraopen.org").
       // Only set for channel mentions (not DMs where there is no mention to preserve).
       originalContent: event.mentionsBot && !event.isDirectMessage

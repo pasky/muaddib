@@ -45,6 +45,8 @@ export interface JsonlLine {
   n?: string;
   r?: ChatRole;
   m?: string;
+  /** Whether the user is trusted per the room's userAllowlist. */
+  tr?: boolean;
   run?: string;
   call?: string;
   model?: string;
@@ -119,6 +121,7 @@ export class ChatHistoryStore {
       m: rawText,
     };
 
+    if (message.trusted === false) line.tr = false;
     if (options.mode) line.mode = options.mode;
     if (options.selfRun) line.run = ts;
     if (options.run) line.run = options.run;
@@ -455,7 +458,10 @@ export class ChatHistoryStore {
       const timeOnly = line.ts.slice(11, 16); // HH:MM
       const nick = line.n ?? "?";
       const content = line.m ?? "";
-      const formatted = `<${nick}> ${content}`;
+      const isUntrusted = line.tr === false;
+      const formatted = isUntrusted
+        ? `[UNTRUSTED] <${nick}> ${content}[/UNTRUSTED]`
+        : `<${nick}> ${content}`;
       const modePrefix = line.r === "assistant" && line.mode ? this.modeToPrefix(line.mode) : "";
       const text = `${modePrefix}[${timeOnly}] ${formatted}`;
       const timestamp = new Date(line.ts).getTime() || 0;

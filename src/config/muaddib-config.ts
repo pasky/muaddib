@@ -249,6 +249,8 @@ export interface ProactiveRoomConfig {
 
 export interface RoomConfig {
   enabled?: boolean;
+  /** Allowlist of trusted user identifiers. When set, messages from users not on the list are marked untrusted. Format depends on room type: IRC uses hostmask glob patterns, Discord/Slack use normalizeName(displayName)_platformId. */
+  userAllowlist?: string[];
   command?: CommandConfig;
   proactive?: ProactiveRoomConfig;
   promptVars?: Record<string, string>;
@@ -296,7 +298,7 @@ export function mergeRoomConfigs(
 }
 
 function roomMergeHook(key: string, baseVal: unknown, overrideVal: unknown): unknown | undefined {
-  if (key === "ignoreUsers" && Array.isArray(baseVal) && Array.isArray(overrideVal)) {
+  if ((key === "ignoreUsers" || key === "userAllowlist") && Array.isArray(baseVal) && Array.isArray(overrideVal)) {
     return [...baseVal, ...overrideVal];
   }
 

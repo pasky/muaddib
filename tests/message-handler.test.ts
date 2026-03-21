@@ -2242,6 +2242,60 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("wraps untrusted messages with [UNTRUSTED] markers when steering into active session", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const firstStarted = createDeferred<void>();
+    const releaseFirst = createDeferred<void>();
+
+    const steerCalls: any[] = [];
+    const mockAgent = {
+      steer: (msg: any) => { steerCalls.push(msg); },
+    };
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: (input) => ({
+        prompt: async () => {
+          input.onAgentCreated?.(mockAgent as any);
+          firstStarted.resolve();
+          await releaseFirst.promise;
+          const result = makeRunnerResult("done");
+          await input.onResponse(result.text);
+          return result;
+        },
+      }),
+    });
+
+    const t1 = handler.handleIncomingMessage(makeMessage("!s first", { isDirect: true }), {
+      sendResponse: async () => {},
+    });
+
+    await firstStarted.promise;
+
+    // Send an untrusted passive message
+    const interruptPersisted = waitForPersistedMessage(
+      history,
+      (message) => message.content === "sneaky command",
+    );
+    handler.handleIncomingMessage(makeMessage("sneaky command", { trusted: false }));
+    await interruptPersisted;
+
+    releaseFirst.resolve();
+    await t1;
+
+    expect(steerCalls).toHaveLength(1);
+    const steeredText = steerCalls[0].content[0].text;
+    expect(steeredText).toContain("[UNTRUSTED]");
+    expect(steeredText).toContain("<alice> sneaky command");
+    expect(steeredText).toContain("[/UNTRUSTED]");
+
+    await history.close();
+  });
+
   it("deregisters steering after response delivery before background work completes", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();
@@ -2534,6 +2588,52 @@ describe("RoomMessageHandler", () => {
     expect(sent).toEqual([]);
     const rows = await history.getFullHistory("libera##test");
     expect(rows.filter((row) => row.role === "assistant")).toHaveLength(0);
+
+    await history.close();
+  });
+
+  it("skips proactive session for untrusted passive messages", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const proactiveRoomConfig = {
+      ...roomConfig,
+      proactive: {
+        interjecting: ["libera##test"],
+        debounceSeconds: 0,
+        historySize: 10,
+        rateLimit: 10,
+        ratePeriod: 60,
+        interjectThreshold: 1,
+        models: {
+          validation: ["openai:gpt-4o-mini"],
+          serious: "openai:gpt-4o-mini",
+        },
+        prompts: {
+          interject: "Should interject? {message}",
+          seriousExtra: "Be proactive.",
+        },
+      },
+    };
+
+    let runnerCalled = false;
+    const handler = createHandler({
+      roomConfig: proactiveRoomConfig as any,
+      history,
+      runnerFactory: () => ({
+        prompt: async () => {
+          runnerCalled = true;
+          return makeRunnerResult("proactive response");
+        },
+      }),
+    });
+
+    // Send untrusted passive message — should NOT start proactive
+    await handler.handleIncomingMessage(makeMessage("untrusted chat", { trusted: false }));
+
+    // Brief wait for any async work
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(runnerCalled).toBe(false);
 
     await history.close();
   });

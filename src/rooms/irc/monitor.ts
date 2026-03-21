@@ -5,7 +5,7 @@ import { escapeRegExp, requireNonEmptyString, sleep } from "../../utils/index.js
 import type { MuaddibRuntime } from "../../runtime.js";
 import { RoomMessageHandler } from "../command/message-handler.js";
 import { InFlightTaskSet } from "../in-flight-task-set.js";
-import { buildArc, type RoomMessage } from "../message.js";
+import { buildArc, matchIrcAllowlist, type RoomMessage } from "../message.js";
 import type { RoomGateway } from "../room-gateway.js";
 import { VarlinkClient, VarlinkSender } from "./varlink.js";
 import type { ArcEventsWatcher } from "../../events/watcher.js";
@@ -17,6 +17,7 @@ export interface IrcEvent {
   target?: string;
   nick?: string;
   message?: string;
+  hostmask?: string;
 }
 
 export interface IrcSender {
@@ -252,6 +253,11 @@ export class IrcRoomMonitor {
     const effectiveNick = inputMatch?.groups?.nick ?? normalizedNick;
     const cleanedMessage = inputMatch?.groups?.content ?? normalizedMessage;
 
+    const userAllowlist = this.options.roomConfig.userAllowlist;
+    const trusted = userAllowlist
+      ? matchIrcAllowlist(event.hostmask, userAllowlist)
+      : undefined;
+
     const roomMessage: RoomMessage = {
       serverTag: server,
       channelName,
@@ -260,6 +266,7 @@ export class IrcRoomMonitor {
       mynick,
       content: isDirect ? cleanedMessage : normalizedMessage,
       isDirect,
+      trusted,
       // Preserve the full channel message (e.g. "MuaddibLLM: keeppandoraopen.org") for history
       // and LLM context; only set when the bot-nick prefix was actually stripped.
       originalContent: inputMatch ? normalizedMessage : undefined,

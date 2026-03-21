@@ -540,6 +540,87 @@ describe("DiscordRoomMonitor", () => {
     await history.close();
   });
 
+  it("sets trusted=true when authorId matches Discord allowlist", async () => {
+    const history = createTempHistoryStore(20);
+
+    let seenTrusted: boolean | undefined;
+
+    const monitor = new DiscordRoomMonitor({
+      roomConfig: { enabled: true, userAllowlist: ["alice_123456"] },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async (message) => {
+          seenTrusted = message.trusted;
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      channelId: "chan-1",
+      username: "alice",
+      authorId: "123456",
+      content: "hello",
+      mynick: "muaddib",
+    });
+
+    expect(seenTrusted).toBe(true);
+    await history.close();
+  });
+
+  it("sets trusted=false when authorId does not match Discord allowlist", async () => {
+    const history = createTempHistoryStore(20);
+
+    let seenTrusted: boolean | undefined;
+
+    const monitor = new DiscordRoomMonitor({
+      roomConfig: { enabled: true, userAllowlist: ["alice_123456"] },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async (message) => {
+          seenTrusted = message.trusted;
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      channelId: "chan-1",
+      username: "bob",
+      authorId: "999999",
+      content: "hello",
+      mynick: "muaddib",
+    });
+
+    expect(seenTrusted).toBe(false);
+    await history.close();
+  });
+
+  it("leaves trusted undefined when no Discord allowlist is configured", async () => {
+    const history = createTempHistoryStore(20);
+
+    let seenTrusted: boolean | undefined = true; // sentinel
+
+    const monitor = new DiscordRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async (message) => {
+          seenTrusted = message.trusted;
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      channelId: "chan-1",
+      username: "alice",
+      authorId: "123456",
+      content: "hello",
+      mynick: "muaddib",
+    });
+
+    expect(seenTrusted).toBeUndefined();
+    await history.close();
+  });
+
   it("passes passive messages with isDirect=false", async () => {
     const history = createTempHistoryStore(20);
 

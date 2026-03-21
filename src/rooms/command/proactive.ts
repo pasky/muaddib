@@ -159,6 +159,10 @@ export class ProactiveRunner {
     sendResponse: SendResponse,
     hasActiveCommandSession: () => boolean,
   ): boolean {
+    if (message.trusted === false) {
+      return false;
+    }
+
     const channelKey = CommandResolver.channelKey(message.serverTag, message.channelName);
     if (!this.channels.has(channelKey)) {
       return false;

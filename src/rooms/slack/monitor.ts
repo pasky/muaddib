@@ -8,7 +8,7 @@ import { appendAttachmentBlock, normalizeName, nowMonotonicSeconds, requireNonEm
 import type { MuaddibRuntime } from "../../runtime.js";
 import { RoomMessageHandler } from "../command/message-handler.js";
 import { InFlightTaskSet } from "../in-flight-task-set.js";
-import { type RoomMessage, buildArc } from "../message.js";
+import { type RoomMessage, buildArc, matchPlatformAllowlist } from "../message.js";
 import type { RoomGateway } from "../room-gateway.js";
 import {
   sendWithRetryResult,
@@ -351,6 +351,11 @@ export class SlackRoomMonitor {
       return;
     }
 
+    const userAllowlist = this.options.roomConfig.userAllowlist;
+    const trusted = userAllowlist
+      ? matchPlatformAllowlist(event.userId ? `${normalizeName(event.username)}_${event.userId}` : undefined, userAllowlist)
+      : undefined;
+
     const serverTag = `slack:${event.workspaceName ?? event.workspaceId}`;
     const channelName = resolveSlackChannelName(event);
 
@@ -365,6 +370,7 @@ export class SlackRoomMonitor {
       mynick: event.mynick,
       content: cleanedContent,
       isDirect,
+      trusted,
       // Preserve the mention context for history and LLM (e.g. "@MuaddibLLM keeppandoraopen.org").
       // Only set for channel mentions (not DMs where there is no mention to preserve).
       originalContent: event.mentionsBot && !event.isDirectMessage
