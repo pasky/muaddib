@@ -228,7 +228,7 @@ describe("RoomMessageHandler", () => {
 
     expect(sent[0]).toBe("done");
     expect(runnerModel).toBe("openai:gpt-4o-mini");
-    expect(runnerPrompt).toMatch(/^\[\d{2}:\d{2}\] <alice> hello there$/);
+    expect(runnerPrompt).toMatch(/^-{30}\n\[\d{2}:\d{2}\] <alice> hello there$/);
     expect(runnerThinkingLevel).toBe("medium");
     expect(runnerContextContents.some((entry) => entry.includes("!a hello there"))).toBe(false);
     expect(runnerContextContents.some((entry) => entry.includes("previous context"))).toBe(true);
@@ -609,7 +609,7 @@ describe("RoomMessageHandler", () => {
     await handler.handleIncomingMessage(incoming, { sendResponse: async () => {} });
 
     expect(contextReducer.reduce).toHaveBeenCalledTimes(1);
-    expect(runnerPrompt).toMatch(/^\[\d{2}:\d{2}\] <alice> reduce context please$/);
+    expect(runnerPrompt).toMatch(/^-{30}\n\[\d{2}:\d{2}\] <alice> reduce context please$/);
     expect(runnerContextContents).toEqual(["[10:00] <summary> reduced context"]);
     expect(runnerContextContents.some((entry) => entry.includes("previous context"))).toBe(false);
 

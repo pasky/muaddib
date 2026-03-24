@@ -404,7 +404,7 @@ export class CommandExecutor {
     const queryTimestamp = formatUtcTime().slice(-5); // HH:MM in UTC, matching history format
     const queryContent = message.originalContent ?? resolved.queryText;
     const { usage, peakTurnInput, toolCallsCount, backgroundWork } = await this.invokeAndPostProcess(
-      runner, message, `[${queryTimestamp}] <${message.nick}> ${queryContent}`, runnerContext, toolSet.tools, {
+      runner, message, `------------------------------\n[${queryTimestamp}] <${message.nick}> ${queryContent}`, runnerContext, toolSet.tools, {
         reasoningEffort: resolved.runtime.reasoningEffort,
         visionModel: resolved.runtime.visionModel ?? undefined,
         memoryUpdate: resolved.runtime.memoryUpdate,
