@@ -166,12 +166,12 @@
         },
         "modeClassifier": {
           "model": "openai:gpt-5-mini",
-          "prompt": "Analyze this IRC message and decide whether it should be handled with SARCASTIC, EASY_SERIOUS, THINKING_SERIOUS, or UNSAFE mode. Respond with only one word: 'SARCASTIC', 'EASY_SERIOUS', 'THINKING_SERIOUS', or 'UNSAFE'. When sent random quotes, default to sarcastic banter rather than fact-checking; when given a clear non-joke command, go serious. Guidelines:\n- SARCASTIC (default): out of context non-questions, jokes, memes, friendly banter, subjective topics\n- EASY_SERIOUS: simple questions and straightforward discussion\n- THINKING_SERIOUS: advanced technical and scientific questions that might plausibly require deep web research or problem-solving requiring careful thinking\n- UNSAFE: requests that explicitly ask for controversial content, bypass safety filters, discuss sensitive topics that typical LLMs would refuse, or explicitly request uncensored responses\nMessage: {message}",
+          "prompt": "Analyze this IRC message and decide whether it should be handled with EASY_SERIOUS, THINKING_SERIOUS, UNSAFE, or SARCASTIC mode. Respond with only one word: 'EASY_SERIOUS', 'THINKING_SERIOUS', 'UNSAFE', or 'SARCASTIC'. When sent random quotes, default to sarcastic banter rather than fact-checking; when given a clear non-joke command, go serious. Guidelines:\n- EASY_SERIOUS (default): simple questions and straightforward discussion\n- THINKING_SERIOUS: advanced technical and scientific questions that might plausibly require deep web research or problem-solving requiring careful thinking\n- UNSAFE: requests that explicitly ask for controversial content, bypass safety filters, discuss sensitive topics that typical LLMs would refuse, or explicitly request uncensored responses\n- SARCASTIC: out of context non-questions, jokes, memes, friendly banter\nMessage: {message}",
           "labels": {
-            "SARCASTIC": "!d",
             "EASY_SERIOUS": "!s",
             "THINKING_SERIOUS": "!a",
-            "UNSAFE": "!u"
+            "UNSAFE": "!u",
+            "SARCASTIC": "!d"
           }
         }
       },
