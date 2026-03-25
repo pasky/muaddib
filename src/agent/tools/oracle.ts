@@ -6,7 +6,7 @@ import { iterationsToSessionLimits } from "../../config/muaddib-config.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { stringifyError, toConfiguredString } from "../../utils/index.js";
 import type { RunnerLogger } from "../session-factory.js";
-import { SessionRunner } from "../session-runner.js";
+import { SessionRunner, type PromptResult } from "../session-runner.js";
 import type { MuaddibTool, ToolContext, ToolSet } from "./types.js";
 
 export interface OracleInput {
@@ -138,8 +138,9 @@ export function createDefaultOracleExecutor(
 
     logger.info(`${ORACLE_LOG_SEPARATOR} CONSULTING ORACLE: ${query.slice(0, 500)}...`);
 
+    let result: PromptResult | undefined;
     try {
-      const result = await runner.prompt(query, {
+      result = await runner.prompt(query, {
         contextMessages: invocation?.conversationContext,
         thinkingLevel,
       });
@@ -153,6 +154,8 @@ export function createDefaultOracleExecutor(
       }
       logger.info(`${ORACLE_LOG_SEPARATOR} Oracle failed: ${message}`);
       throw error;
+    } finally {
+      await result?.session?.dispose();
     }
   };
 }

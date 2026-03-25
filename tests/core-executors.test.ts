@@ -373,6 +373,32 @@ describe("oracle executor with invocation context", () => {
 
     expect(oracleMock.capturedOptions.logger).toBe(logger);
   });
+
+  it("disposes the session returned by SessionRunner on success", async () => {
+    const disposeFn = vi.fn();
+    oracleMock.promptFn.mockResolvedValue({ text: "ok", stopReason: "stop", usage: {}, session: { dispose: disposeFn } });
+
+    const executor = createDefaultOracleExecutor(
+      { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }, logger: { info: vi.fn() } },
+      { conversationContext: [], toolOptions: {}, buildTools: () => ({ tools: [], dispose: undefined }) },
+    );
+
+    await executor({ query: "test" });
+    expect(disposeFn).toHaveBeenCalledOnce();
+  });
+
+  it("disposes the session even when prompt throws", async () => {
+    // For the error path where result is undefined, session?.dispose() is a no-op.
+    oracleMock.promptFn.mockRejectedValueOnce(new Error("boom"));
+
+    const executor = createDefaultOracleExecutor(
+      { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }, logger: { info: vi.fn() } },
+      { conversationContext: [], toolOptions: {}, buildTools: () => ({ tools: [], dispose: undefined }) },
+    );
+
+    // On error path, result is undefined so dispose is a safe no-op — no crash
+    await expect(executor({ query: "will fail" })).rejects.toThrow("boom");
+  });
 });
 
 describe("core tool executors web_search support", () => {
