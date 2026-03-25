@@ -37,6 +37,8 @@ export interface RuntimeSettings {
   model: string | null;
   visionModel: string | null;
   historySize: number;
+  /** Partial tool config overrides, deep-merged over the global agent.tools config. */
+  toolsOverrides: Record<string, unknown> | null;
 }
 
 export class CommandResolver {
@@ -191,6 +193,8 @@ export class CommandResolver {
         visionModel:
           (overrides.visionModel as string | undefined) ?? modeConfig.visionModel ?? null,
         historySize: Number(modeConfig.historySize ?? this.commandConfig.historySize),
+        toolsOverrides:
+          (overrides.tools as Record<string, unknown> | undefined) ?? null,
       },
     };
   }

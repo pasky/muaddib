@@ -386,7 +386,7 @@ export class CommandExecutor {
       await deliver(cleaned, { mode: resolved.selectedTrigger ?? undefined });
     };
 
-    const toolSet = this.selectTools(message, resolved.runtime.allowedTools, runnerContext);
+    const toolSet = this.selectTools(message, resolved.runtime.allowedTools, runnerContext, resolved.runtime.toolsOverrides);
 
     const progressConfig = this.agentConfig.progress;
 
@@ -839,9 +839,14 @@ export class CommandExecutor {
     message: RoomMessage,
     allowedTools: string[] | null,
     conversationContext?: Message[],
+    toolsOverrides?: Record<string, unknown> | null,
   ): ToolSet {
+    const baseOptions = this.buildToolOptions();
     const invocationToolOptions: BaselineToolOptions = {
-      ...this.buildToolOptions(),
+      ...baseOptions,
+      toolsConfig: toolsOverrides
+        ? mergeToolsConfig(baseOptions.toolsConfig, toolsOverrides)
+        : baseOptions.toolsConfig,
       arc: message.arc,
       serverTag: message.serverTag,
       channelName: message.channelName,
@@ -1025,4 +1030,34 @@ function trimToMaxBytes(text: string, maxBytes: number): string {
   return new TextDecoder("utf-8", { fatal: false }).decode(
     Buffer.from(text, "utf-8").subarray(0, maxBytes),
   ).replace(/\uFFFD$/, "");
+}
+
+import type { ToolsConfig } from "../../config/muaddib-config.js";
+
+/**
+ * Recursive deep merge of per-trigger tool config overrides onto the global tools config.
+ * Plain objects are merged recursively; arrays and primitives are replaced outright.
+ */
+function mergeToolsConfig(
+  base: ToolsConfig | undefined,
+  overrides: Record<string, unknown>,
+): ToolsConfig {
+  return deepMerge((base ?? {}) as Record<string, unknown>, overrides) as ToolsConfig;
+}
+
+function deepMerge(base: Record<string, unknown>, overrides: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...base };
+  for (const [key, value] of Object.entries(overrides)) {
+    const baseValue = result[key];
+    if (isPlainObject(value) && isPlainObject(baseValue)) {
+      result[key] = deepMerge(baseValue, value);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

@@ -302,6 +302,51 @@ describe("CommandResolver", () => {
   });
 });
 
+describe("CommandResolver runtimeForTrigger toolsOverrides", () => {
+  it("returns null toolsOverrides when trigger has no tools override", () => {
+    const resolver = new CommandResolver(
+      commandConfig as any,
+      async () => "EASY_SERIOUS",
+      "!h",
+      new Set(["!c"]),
+      (model) => String(model),
+    );
+
+    const { runtime } = resolver.runtimeForTrigger("!s");
+    expect(runtime.toolsOverrides).toBeNull();
+  });
+
+  it("returns toolsOverrides from trigger config", () => {
+    const config = {
+      ...commandConfig,
+      modes: {
+        ...commandConfig.modes,
+        serious: {
+          ...commandConfig.modes.serious,
+          triggers: {
+            "!s": { tools: { visitWebpage: { model: "" } } },
+            "!a": { reasoningEffort: "medium" },
+          },
+        },
+      },
+    };
+
+    const resolver = new CommandResolver(
+      config as any,
+      async () => "EASY_SERIOUS",
+      "!h",
+      new Set(["!c"]),
+      (model) => String(model),
+    );
+
+    const { runtime } = resolver.runtimeForTrigger("!s");
+    expect(runtime.toolsOverrides).toEqual({ visitWebpage: { model: "" } });
+
+    const { runtime: aRuntime } = resolver.runtimeForTrigger("!a");
+    expect(aRuntime.toolsOverrides).toBeNull();
+  });
+});
+
 describe("modelStrCore", () => {
   it("strips provider prefix", () => {
     expect(modelStrCore("anthropic:claude-opus-4-6")).toBe("claude-opus-4-6");

@@ -143,7 +143,9 @@
             "reasoningEffort": "low",
             "steering": true,
             "triggers": {
-              "!s": {},
+              "!s": {
+                "tools": { "visitWebpage": { "model": "" } }
+              },
               "!a": {
                 "autoReduceContext": true,
                 "reasoningEffort": "medium",
