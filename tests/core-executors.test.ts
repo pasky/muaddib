@@ -1152,4 +1152,33 @@ describe("buildMemoryUpdatePrompt", () => {
     });
     expect(prompt).toContain("Skill creation:");
   });
+
+  it("includes per-user memory when nick is provided", () => {
+    const arc = "memory-user-arc";
+    const workspacePath = getArcWorkspacePath(arc);
+    mkdirSync(join(workspacePath, "users"), { recursive: true });
+    writeFileSync(join(workspacePath, "users", "alice.md"), "Prefers dark mode.");
+
+    const prompt = buildMemoryUpdatePrompt(arc, undefined, undefined, "alice");
+    expect(prompt).toContain('<user-memory nick="alice"');
+    expect(prompt).toContain("Prefers dark mode.");
+    expect(prompt).toContain("/workspace/users/alice.md");
+  });
+
+  it("shows empty per-user memory placeholder when user file does not exist", () => {
+    const arc = "memory-user-empty-arc";
+    const workspacePath = getArcWorkspacePath(arc);
+    mkdirSync(workspacePath, { recursive: true });
+
+    const prompt = buildMemoryUpdatePrompt(arc, undefined, undefined, "bob");
+    expect(prompt).toContain('<user-memory nick="bob"');
+    expect(prompt).toContain("(empty - not yet created)");
+    expect(prompt).toContain("/workspace/users/bob.md");
+  });
+
+  it("omits per-user memory when nick is not provided", () => {
+    const prompt = buildMemoryUpdatePrompt("nonexistent-memory-arc");
+    expect(prompt).not.toContain("<user-memory");
+    expect(prompt).not.toContain("/workspace/users/");
+  });
 });

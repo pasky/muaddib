@@ -42,7 +42,7 @@ import type { ProactiveConfig } from "./proactive.js";
 import { generateToolSummaryFromSession } from "./tool-summary.js";
 import type { Logger } from "../../app/logging.js";
 import type { AgentConfig, MemoryConfig, SkillsConfig } from "../../config/muaddib-config.js";
-import { loadArcMemoryFile } from "../../agent/gondolin/index.js";
+import { loadArcMemoryFile, loadArcUserMemoryFile } from "../../agent/gondolin/index.js";
 import type { ArcEventsWatcher } from "../../events/watcher.js";
 
 // ── Public types ──
@@ -595,7 +595,7 @@ export class CommandExecutor {
           const memoryPrompt = buildMemoryUpdatePrompt(message.arc, this.agentConfig.tools?.memory, {
             toolCallsCount: agentResult.toolCallsCount ?? 0,
             skillsConfig: this.agentConfig.tools?.skills,
-          });
+          }, message.nick);
           await agentResult.session.prompt(memoryPrompt);
         } catch (err) {
           this.logger.warn("Memory update failed", String(err));
@@ -853,6 +853,7 @@ export class CommandExecutor {
       channelName: message.channelName,
       secrets: message.secrets,
       skipMemory,
+      nick: message.nick,
     };
 
     const toolSet = createBaselineAgentTools({
@@ -999,7 +1000,7 @@ export interface PostSessionOptions {
   skillsConfig?: SkillsConfig;
 }
 
-export function buildMemoryUpdatePrompt(arc: string, memoryConfig?: MemoryConfig, options?: PostSessionOptions): string {
+export function buildMemoryUpdatePrompt(arc: string, memoryConfig?: MemoryConfig, options?: PostSessionOptions, nick?: string): string {
   const charLimit = memoryConfig?.charLimit ?? DEFAULT_MEMORY_CHAR_LIMIT;
   const content = loadArcMemoryFile(arc);
 
@@ -1010,7 +1011,21 @@ export function buildMemoryUpdatePrompt(arc: string, memoryConfig?: MemoryConfig
 
   const displayContent = content.trim() || "(empty - not yet created)";
 
-  let prompt = `<meta>Session complete. DO NOT RESPOND ANYMORE.\n\nWrap-up task: Here is your current memory (${chars}/${charLimit} chars${capacityWarning}):\n<memory file="/workspace/MEMORY.md">\n${displayContent}\n</memory>\nIf you learned something worth persisting for the long term (beyond the continuously moving chronicle: user preferences, big lessons, key decisions), update /workspace/MEMORY.md using the edit or write tool. Keep entries concise. If nothing worth saving, do nothing.`;
+  let prompt = `<meta>Session complete. DO NOT RESPOND ANYMORE.\n\nWrap-up task: Here is your current shared memory (${chars}/${charLimit} chars${capacityWarning}):\n<memory file="/workspace/MEMORY.md">\n${displayContent}\n</memory>\nUse /workspace/MEMORY.md for shared knowledge (project decisions, big lessons, channel-wide facts).`;
+
+  // Per-user memory section
+  if (nick) {
+    const userContent = loadArcUserMemoryFile(arc, nick);
+    const userChars = userContent.length;
+    const userCharLimit = Math.round(charLimit / 2);
+    const userCapacityWarning = userChars >= userCharLimit * 0.8
+      ? " - you must consolidate existing entries if you add something"
+      : "";
+    const userDisplayContent = userContent.trim() || "(empty - not yet created)";
+    prompt += `\n\nPer-user memory for ${nick} (${userChars}/${userCharLimit} chars${userCapacityWarning}):\n<user-memory nick="${nick}" file="/workspace/users/${nick}.md">\n${userDisplayContent}\n</user-memory>\nUse /workspace/users/${nick}.md for user-specific notes (preferences, personal context, interaction style).`;
+  }
+
+  prompt += `\n\nIf you learned something worth persisting for the long term (beyond the continuously moving chronicle), update the appropriate memory file using the edit or write tool. Keep entries concise. If nothing worth saving, do nothing.`;
 
   // Skill creation section - appended when session was complex enough
   const toolCallsCount = options?.toolCallsCount ?? 0;

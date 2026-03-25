@@ -37,6 +37,7 @@ import type { ArcEventsWatcher } from "../../events/watcher.js";
 import {
   getArcChatHistoryDir,
   loadArcMemoryFile,
+  loadArcUserMemoryFile,
   createVmReadOps,
   createVmWriteOps,
   createVmEditOps,
@@ -58,6 +59,8 @@ export interface GondolinToolsOptions {
   eventsWatcher?: ArcEventsWatcher;
   /** When true, omit MEMORY.md from the system prompt suffix (used by !c / noContext). */
   skipMemory?: boolean;
+  /** Nick of the user who triggered this session (for per-user memory). */
+  nick?: string;
 }
 
 /**
@@ -71,7 +74,7 @@ export interface GondolinToolsOptions {
  * The last 8 session dirs are kept across checkpoints so the agent can revisit them.
  */
 export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
-  const { arc, serverTag, channelName, config, authStorage, toolsConfig, logger, eventsWatcher, skipMemory } = options;
+  const { arc, serverTag, channelName, config, authStorage, toolsConfig, logger, eventsWatcher, skipMemory, nick } = options;
 
   const bashTimeoutSeconds = config.bashTimeoutSeconds ?? 270;
   const vmOpTimeoutMs = bashTimeoutSeconds * 1000;
@@ -112,7 +115,7 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
     shareArtifactTool,
   ];
 
-  const systemPromptSuffix = buildSystemPromptSuffix(arc, sessionDir, toolsConfig, serverTag, channelName, skipMemory);
+  const systemPromptSuffix = buildSystemPromptSuffix(arc, sessionDir, toolsConfig, serverTag, channelName, skipMemory, nick);
 
   const dispose = () => checkpointGondolinArc(arc, logger);
 
@@ -128,6 +131,7 @@ function buildSystemPromptSuffix(
   serverTag?: string,
   channelName?: string,
   skipMemory?: boolean,
+  nick?: string,
 ): string {
   const chatHistorySuffix = existsSync(getArcChatHistoryDir(arc))
     ? " Need exact quotes or fine-grained chronology beyond the current context? Inspect daily JSONL logs in /chat_history/ (read-only), e.g. /chat_history/YYYY-MM-DD.jsonl."
@@ -143,6 +147,11 @@ function buildSystemPromptSuffix(
     ? `\n<memory file="/workspace/MEMORY.md">\n${memoryContent}\n</memory>`
     : "";
 
+  const userMemoryContent = (skipMemory || !nick) ? "" : loadArcUserMemoryFile(arc, nick);
+  const userMemorySuffix = userMemoryContent.trim()
+    ? `\n<user-memory nick="${nick}" file="/workspace/users/${nick}.md">\n${userMemoryContent}\n</user-memory>`
+    : "(per-user memories belong in /workspace/users/<nick>.md)";
+
   const arcSuffix =
     serverTag && channelName
       ? ` Arc: server="${serverTag}", channel="${channelName}".`
@@ -154,6 +163,7 @@ function buildSystemPromptSuffix(
     arcSuffix +
     chatHistorySuffix +
     skillsSection +
-    memorySuffix
+    memorySuffix +
+    userMemorySuffix
   );
 }

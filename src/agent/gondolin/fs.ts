@@ -63,6 +63,20 @@ export function loadArcMemoryFile(arc: string): string {
   }
 }
 
+/**
+ * Best-effort read of `/workspace/users/<nick>.md` for the given arc and user.
+ * Returns the file content, or `""` if the file is absent or unreadable.
+ */
+export function loadArcUserMemoryFile(arc: string, nick: string): string {
+  const userMemoryPath = join(getArcWorkspacePath(arc), "users", `${nick}.md`);
+  if (!existsSync(userMemoryPath)) return "";
+  try {
+    return readFileSync(userMemoryPath, "utf8");
+  } catch {
+    return "";
+  }
+}
+
 // ── VM mount table ─────────────────────────────────────────────────────────
 
 export interface CreateVmMountsOptions {

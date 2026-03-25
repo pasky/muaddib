@@ -3,6 +3,7 @@ export {
   getArcChronicleDir,
   getArcChatHistoryDir,
   loadArcMemoryFile,
+  loadArcUserMemoryFile,
 } from "./fs.js";
 
 export {

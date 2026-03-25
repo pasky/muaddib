@@ -81,6 +81,9 @@ export interface BaselineToolOptions extends ToolContext {
 
   /** When true, omit MEMORY.md from the system prompt suffix (used by !c / noContext). */
   skipMemory?: boolean;
+
+  /** Nick of the user who triggered this session (for per-user memory). */
+  nick?: string;
 }
 
 type ExecutorBackedToolFactory = (executors: BaselineToolExecutors, options: BaselineToolOptions) => MuaddibTool;
@@ -137,6 +140,7 @@ export function createBaselineAgentTools(options: BaselineToolOptions): ToolSet 
     logger: options.logger,
     eventsWatcher: options.eventsWatcher,
     skipMemory: options.skipMemory,
+    nick: options.nick,
   });
 
   const tools = [
