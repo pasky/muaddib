@@ -2042,6 +2042,14 @@ describe("RoomMessageHandler", () => {
     // Runner should NOT be called since score is below threshold
     expect(runnerCalled).toBe(false);
 
+    // Passive message must NOT be annotated as "in progress" in future context
+    const context = await history.getContext("libera##test");
+    const chatMsg = context.find(
+      (m) => typeof m.content === "string" && m.content.includes("just chatting"),
+    );
+    expect(chatMsg).toBeDefined();
+    expect(chatMsg!.content).not.toContain("<meta>");
+
     await history.close();
   });
 

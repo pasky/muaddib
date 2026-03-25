@@ -131,11 +131,12 @@ export class RoomMessageHandler {
       );
     }
 
-    // ── Persist trigger message ──
-    const triggerTs = await this.history.addMessage(message, { selfRun: true });
-
     // ── Route: passive vs direct ──
+    // Passive messages are persisted WITHOUT selfRun so that
+    // annotateInFlightTriggers doesn't permanently tag them as "in progress"
+    // when the bot decides not to respond (the common case for ambient chatter).
     if (!message.isDirect) {
+      await this.history.addMessage(message);
       this.logger.debug(
         "Handling passive message",
         `arc=${message.arc}`,
@@ -144,6 +145,9 @@ export class RoomMessageHandler {
       await this.handlePassiveMessage(message, sendResponse);
       return;
     }
+
+    // ── Persist trigger message (direct commands only) ──
+    const triggerTs = await this.history.addMessage(message, { selfRun: true });
 
     this.logger.debug(
       "Handling direct command",
