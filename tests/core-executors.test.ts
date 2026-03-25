@@ -719,6 +719,7 @@ describe("core tool executors visit_webpage LLM transcription", () => {
     const [modelSpec, context, options] = modelAdapter.completeSimple.mock.calls[0] as any[];
     expect(modelSpec).toBe("anthropic:claude-haiku");
     expect(context.systemPrompt).toContain("web content transcriber");
+    expect(context.systemPrompt).toContain("NEVER fabricate");
     expect(context.messages[0].content).toContain("Actual content");
     expect(options.callType).toBe("webTranscript");
   });

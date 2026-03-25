@@ -370,7 +370,10 @@ const WEB_TRANSCRIPT_SYSTEM_PROMPT =
   "- Keep document structure (headings, lists, tables) intact\n" +
   "- Do NOT summarize or paraphrase — transcribe the actual content literally\n" +
   "- Do NOT add commentary or explanations\n" +
-  "- Be thorough with the actual content but ruthless with boilerplate";
+  "- Be thorough with the actual content but ruthless with boilerplate\n" +
+  "- CRITICAL: If the page is an error, CAPTCHA, access-denied, or bot-detection wall, " +
+  "output ONLY the literal error text you see. NEVER fabricate, guess, or reconstruct " +
+  "what the article would say from your training data. You do not know the page content.";
 
 /**
  * Post-process fetched web content through an LLM to strip boilerplate,
