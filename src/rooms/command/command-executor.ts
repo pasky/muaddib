@@ -1033,31 +1033,11 @@ function trimToMaxBytes(text: string, maxBytes: number): string {
 }
 
 import type { ToolsConfig } from "../../config/muaddib-config.js";
+import { deepMerge } from "../../utils/index.js";
 
-/**
- * Recursive deep merge of per-trigger tool config overrides onto the global tools config.
- * Plain objects are merged recursively; arrays and primitives are replaced outright.
- */
 function mergeToolsConfig(
   base: ToolsConfig | undefined,
   overrides: Record<string, unknown>,
 ): ToolsConfig {
   return deepMerge((base ?? {}) as Record<string, unknown>, overrides) as ToolsConfig;
-}
-
-function deepMerge(base: Record<string, unknown>, overrides: Record<string, unknown>): Record<string, unknown> {
-  const result = { ...base };
-  for (const [key, value] of Object.entries(overrides)) {
-    const baseValue = result[key];
-    if (isPlainObject(value) && isPlainObject(baseValue)) {
-      result[key] = deepMerge(baseValue, value);
-    } else {
-      result[key] = value;
-    }
-  }
-  return result;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

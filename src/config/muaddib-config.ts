@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
 
 import { getMuaddibHome, resolveMuaddibPath } from "./paths.js";
+import { deepMerge, isRecord } from "../utils/index.js";
 
 // ── Config interfaces (camelCase) ──────────────────────────────────────
 
@@ -270,76 +271,42 @@ type DeepPartial<T> = T extends object
 
 // ── Deep merge with room-specific semantics ────────────────────────────
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 /**
  * Deep-merges two room config objects with room-specific semantics:
  * - `ignoreUsers` arrays are concatenated (not replaced) at any nesting depth
  * - `promptVars` string values are concatenated (not replaced) at any nesting depth
+ *
+ * Built on the generic `deepMerge` with per-key hooks for the special cases.
  */
 export function mergeRoomConfigs(
   base: DeepPartial<RoomConfig>,
   override: DeepPartial<RoomConfig>,
 ): RoomConfig {
-  return deepMergeRoomConfig(
+  return deepMerge(
     base as Record<string, unknown>,
     override as Record<string, unknown>,
+    roomMergeHook,
   ) as RoomConfig;
 }
 
-function deepMergeRoomConfig(
-  base: Record<string, unknown>,
-  override: Record<string, unknown>,
-): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-
-  for (const [key, value] of Object.entries(base)) {
-    if (Array.isArray(value)) {
-      result[key] = [...value];
-    } else if (isObject(value)) {
-      result[key] = deepMergeRoomConfig(value, {});
-    } else {
-      result[key] = value;
-    }
+function roomMergeHook(key: string, baseVal: unknown, overrideVal: unknown): unknown | undefined {
+  if (key === "ignoreUsers" && Array.isArray(baseVal) && Array.isArray(overrideVal)) {
+    return [...baseVal, ...overrideVal];
   }
 
-  for (const [key, value] of Object.entries(override)) {
-    if (key === "ignoreUsers" && Array.isArray(value)) {
-      const baseList = (result[key] as unknown[] | undefined) ?? [];
-      result[key] = [...baseList, ...value];
-      continue;
-    }
-
-    if (key === "promptVars" && isObject(value)) {
-      const baseVars = (result[key] as Record<string, unknown> | undefined) ?? {};
-      const mergedVars: Record<string, unknown> = { ...baseVars };
-      for (const [varKey, varValue] of Object.entries(value)) {
-        if (typeof mergedVars[varKey] === "string" && typeof varValue === "string") {
-          mergedVars[varKey] = `${mergedVars[varKey]}${varValue}`;
-        } else {
-          mergedVars[varKey] = varValue;
-        }
+  if (key === "promptVars" && isRecord(baseVal) && isRecord(overrideVal)) {
+    const merged: Record<string, unknown> = { ...baseVal };
+    for (const [varKey, varValue] of Object.entries(overrideVal)) {
+      if (typeof merged[varKey] === "string" && typeof varValue === "string") {
+        merged[varKey] = `${merged[varKey]}${varValue}`;
+      } else {
+        merged[varKey] = varValue;
       }
-      result[key] = mergedVars;
-      continue;
     }
-
-    if (Array.isArray(value)) {
-      result[key] = [...value];
-      continue;
-    }
-
-    if (isObject(value) && isObject(result[key])) {
-      result[key] = deepMergeRoomConfig(result[key] as Record<string, unknown>, value);
-      continue;
-    }
-
-    result[key] = value;
+    return merged;
   }
 
-  return result;
+  return undefined;
 }
 
 // ── MuaddibConfig ──────────────────────────────────────────────────────

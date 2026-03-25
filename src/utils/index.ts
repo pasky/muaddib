@@ -61,6 +61,41 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * Per-key merge hook.  Return a value to override the default merge for that key,
+ * or `undefined` to fall through to the standard recursive merge.
+ */
+export type DeepMergeHook = (key: string, baseVal: unknown, overrideVal: unknown) => unknown | undefined;
+
+/**
+ * Recursive deep merge. Plain objects are merged recursively;
+ * arrays and primitives in `overrides` replace the base value.
+ * An optional `hook` can override merge behavior for specific keys.
+ */
+export function deepMerge(
+  base: Record<string, unknown>,
+  overrides: Record<string, unknown>,
+  hook?: DeepMergeHook,
+): Record<string, unknown> {
+  const result = { ...base };
+  for (const [key, value] of Object.entries(overrides)) {
+    const baseValue = result[key];
+    if (hook) {
+      const hooked = hook(key, baseValue, value);
+      if (hooked !== undefined) {
+        result[key] = hooked;
+        continue;
+      }
+    }
+    if (isRecord(value) && isRecord(baseValue)) {
+      result[key] = deepMerge(baseValue, value, hook);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
 /** Cast to Record if it's a non-array plain object, otherwise null. */
 export function asRecord(value: unknown): Record<string, unknown> | null {
   return isRecord(value) ? value : null;
