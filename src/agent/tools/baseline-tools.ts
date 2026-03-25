@@ -78,6 +78,9 @@ export interface BaselineToolOptions extends ToolContext {
 
   /** Arc events watcher for Gondolin /events/ mount notifications. */
   eventsWatcher?: ArcEventsWatcher;
+
+  /** When true, omit MEMORY.md from the system prompt suffix (used by !c / noContext). */
+  skipMemory?: boolean;
 }
 
 type ExecutorBackedToolFactory = (executors: BaselineToolExecutors, options: BaselineToolOptions) => MuaddibTool;
@@ -133,6 +136,7 @@ export function createBaselineAgentTools(options: BaselineToolOptions): ToolSet 
     toolsConfig: options.toolsConfig,
     logger: options.logger,
     eventsWatcher: options.eventsWatcher,
+    skipMemory: options.skipMemory,
   });
 
   const tools = [

@@ -56,6 +56,8 @@ export interface GondolinToolsOptions {
   toolsConfig?: ToolsConfig;
   logger?: Logger;
   eventsWatcher?: ArcEventsWatcher;
+  /** When true, omit MEMORY.md from the system prompt suffix (used by !c / noContext). */
+  skipMemory?: boolean;
 }
 
 /**
@@ -69,7 +71,7 @@ export interface GondolinToolsOptions {
  * The last 8 session dirs are kept across checkpoints so the agent can revisit them.
  */
 export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
-  const { arc, serverTag, channelName, config, authStorage, toolsConfig, logger, eventsWatcher } = options;
+  const { arc, serverTag, channelName, config, authStorage, toolsConfig, logger, eventsWatcher, skipMemory } = options;
 
   const bashTimeoutSeconds = config.bashTimeoutSeconds ?? 270;
   const vmOpTimeoutMs = bashTimeoutSeconds * 1000;
@@ -110,7 +112,7 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
     shareArtifactTool,
   ];
 
-  const systemPromptSuffix = buildSystemPromptSuffix(arc, sessionDir, toolsConfig, serverTag, channelName);
+  const systemPromptSuffix = buildSystemPromptSuffix(arc, sessionDir, toolsConfig, serverTag, channelName, skipMemory);
 
   const dispose = () => checkpointGondolinArc(arc, logger);
 
@@ -125,6 +127,7 @@ function buildSystemPromptSuffix(
   toolsConfig?: ToolsConfig,
   serverTag?: string,
   channelName?: string,
+  skipMemory?: boolean,
 ): string {
   const chatHistorySuffix = existsSync(getArcChatHistoryDir(arc))
     ? " Need exact quotes or fine-grained chronology beyond the current context? Inspect daily JSONL logs in /chat_history/ (read-only), e.g. /chat_history/YYYY-MM-DD.jsonl."
@@ -135,7 +138,7 @@ function buildSystemPromptSuffix(
   const allSkills = [...skills, ...workspaceSkills];
   const skillsSection = formatSkillsForVmPrompt(allSkills, skillDiagnostics);
 
-  const memoryContent = loadArcMemoryFile(arc);
+  const memoryContent = skipMemory ? "" : loadArcMemoryFile(arc);
   const memorySuffix = memoryContent.trim()
     ? `\n<memory file="/workspace/MEMORY.md">\n${memoryContent}\n</memory>`
     : "";

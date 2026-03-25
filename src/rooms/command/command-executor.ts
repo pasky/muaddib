@@ -386,7 +386,7 @@ export class CommandExecutor {
       await deliver(cleaned, { mode: resolved.selectedTrigger ?? undefined });
     };
 
-    const toolSet = this.selectTools(message, resolved.runtime.allowedTools, runnerContext, resolved.runtime.toolsOverrides);
+    const toolSet = this.selectTools(message, resolved.runtime.allowedTools, runnerContext, resolved.runtime.toolsOverrides, resolved.noContext);
 
     const progressConfig = this.agentConfig.progress;
 
@@ -840,6 +840,7 @@ export class CommandExecutor {
     allowedTools: string[] | null,
     conversationContext?: Message[],
     toolsOverrides?: Record<string, unknown> | null,
+    skipMemory?: boolean,
   ): ToolSet {
     const baseOptions = this.buildToolOptions();
     const invocationToolOptions: BaselineToolOptions = {
@@ -851,6 +852,7 @@ export class CommandExecutor {
       serverTag: message.serverTag,
       channelName: message.channelName,
       secrets: message.secrets,
+      skipMemory,
     };
 
     const toolSet = createBaselineAgentTools({

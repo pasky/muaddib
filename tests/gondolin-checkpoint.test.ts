@@ -1402,6 +1402,21 @@ describe("gondolin — MEMORY.md in systemPromptSuffix", () => {
     });
     expect(systemPromptSuffix).not.toContain("<memory");
   });
+
+  it("omits <memory> tag when skipMemory is true even if MEMORY.md exists", () => {
+    const arc = "skip-memory-arc";
+    const workspacePath = getArcWorkspacePath(arc);
+    mkdirSync(workspacePath, { recursive: true });
+    writeFileSync(`${workspacePath}/MEMORY.md`, "Important persistent note.");
+
+    const { systemPromptSuffix } = createGondolinTools({
+      arc,
+      config: gondolinConfig,
+      skipMemory: true,
+    });
+    expect(systemPromptSuffix).not.toContain("<memory");
+    expect(systemPromptSuffix).not.toContain("Important persistent note.");
+  });
 });
 
 // ── Arc info in system prompt suffix ──────────────────────────────────────
