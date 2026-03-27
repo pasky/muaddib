@@ -256,7 +256,7 @@ export class SessionRunner {
         const reason = emptyMsg?.stopReason ?? "unknown";
         const errorDetail = emptyMsg?.errorMessage ? `: ${emptyMsg.errorMessage}` : "";
         const delaySec = EMPTY_RETRY_DELAYS_MS[i] / 1_000;
-        const retryMsg = `Empty assistant text detected (stopReason=${reason}${errorDetail}), retrying in ${delaySec}s (${i + 1}/${EMPTY_RETRY_DELAYS_MS.length})`;
+        const retryMsg = `Error: empty assistant text (stopReason=${reason}${errorDetail}), retrying in ${delaySec}s (${i + 1}/${EMPTY_RETRY_DELAYS_MS.length})`;
         this.logger.error(retryMsg);
         await this.onResponse?.(retryMsg);
         await new Promise((resolve) => setTimeout(resolve, EMPTY_RETRY_DELAYS_MS[i]));

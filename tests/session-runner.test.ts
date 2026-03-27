@@ -126,6 +126,7 @@ describe("SessionRunner", () => {
   it("retries empty completions and aggregates usage/tool+turn counters", async () => {
     vi.useFakeTimers();
     try {
+      const deliveredTexts: string[] = [];
       const unsubscribe = vi.fn();
       const ctx = makeMockSession({
         promptImpl: async (c) => {
@@ -156,7 +157,7 @@ describe("SessionRunner", () => {
       // Override subscribe to track unsubscribe
       ctx.session.subscribe = vi.fn((cb: any) => { ctx.callbacks.push(cb); return unsubscribe; });
 
-      const runner = makeRunner();
+      const runner = makeRunner({ onResponse: (text: string) => { deliveredTexts.push(text); } });
       const promise = runner.prompt("hello");
       await vi.runAllTimersAsync();
       const result = await promise;
@@ -169,6 +170,9 @@ describe("SessionRunner", () => {
       expect(result.stopReason).toBe("stop");
       expect(ctx.ensureProviderKey).toHaveBeenCalledWith("openai");
       expect(unsubscribe).not.toHaveBeenCalled();
+      // Retry diagnostic is sent through onResponse (visible in normal mode)
+      expect(deliveredTexts).toContain("final answer");
+      expect(deliveredTexts.some(t => t.startsWith("Error: empty assistant text"))).toBe(true);
       await result.session!.dispose();
       expect(unsubscribe).toHaveBeenCalledTimes(1);
     } finally {
