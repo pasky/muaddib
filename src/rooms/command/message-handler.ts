@@ -90,9 +90,17 @@ export class RoomMessageHandler {
     this.proactiveRunner?.cancelAll();
   }
 
+  /** Execute an event-triggered command with quiet output, bypassing steering. */
+  async executeEvent(
+    message: RoomMessage,
+    sendResponse: SendResponse,
+  ): Promise<void> {
+    await this.executor.executeEvent(message, sendResponse);
+  }
+
   async handleIncomingMessage(
     message: RoomMessage,
-    options?: { sendResponse?: SendResponse; finalOnly?: boolean },
+    options?: { sendResponse?: SendResponse },
   ): Promise<void> {
     const sendResponse: SendResponse = options?.sendResponse ?? (async () => {});
     const key = sessionKey(message);
@@ -160,13 +168,12 @@ export class RoomMessageHandler {
       // - Break-out messages from an active session (!c, @model, !h, parse errors)
       // - Messages that bypass steering on their own (help, parse errors,
       //   no-context, non-steering modes/channel policies)
-      const finalOnly = options?.finalOnly;
       if (breakingActiveSession || this.resolver.shouldBypassSteering(message)) {
-        await this.executor.execute(message, triggerTs, sendResponse, undefined, undefined, { finalOnly });
+        await this.executor.execute(message, triggerTs, sendResponse);
         return;
       }
 
-      await this.handleCommandMessage(message, triggerTs, sendResponse, finalOnly);
+      await this.handleCommandMessage(message, triggerTs, sendResponse);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       this.logger.error("Agent execution failed", `nick=${message.nick}`, `error=${errorMsg}`);
@@ -183,7 +190,6 @@ export class RoomMessageHandler {
     message: RoomMessage,
     triggerTs: string,
     sendResponse: SendResponse,
-    finalOnly?: boolean,
   ): Promise<void> {
     const key = sessionKey(message);
 
@@ -217,7 +223,6 @@ export class RoomMessageHandler {
           // new messages from being steered into the session during that window.
           this.activeSteers.delete(key);
         },
-        { finalOnly },
       );
     } finally {
       // Safety fallback: ensure cleanup even if execute() throws before

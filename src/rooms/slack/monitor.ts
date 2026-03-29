@@ -215,11 +215,8 @@ export class SlackRoomMonitor {
             isDirect: true,
           };
           const run = async (): Promise<void> => {
-            await commandHandler.handleIncomingMessage(message, {
-              sendResponse: async (text) => {
-                await firstTransport.sendMessage(channelId, text);
-              },
-              finalOnly: true,
+            await commandHandler.executeEvent(message, async (text) => {
+              await firstTransport.sendMessage(channelId, text);
             });
           };
           await logWriter.withMessageContext({ arc, nick: "event", message: content }, run);

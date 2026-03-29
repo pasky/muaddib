@@ -101,9 +101,9 @@ describe("IrcRoomMonitor", () => {
 
     const sendSpy = vi.spyOn(VarlinkSender.prototype, "sendMessage").mockResolvedValue(true);
     const nickSpy = vi.spyOn(VarlinkSender.prototype, "getServerNick").mockResolvedValue("muaddib");
-    const handleIncomingSpy = vi.spyOn(RoomMessageHandler.prototype, "handleIncomingMessage").mockImplementation(
-      async (_message, options) => {
-        await options?.sendResponse?.("lineA\n\nlineB");
+    const executeEventSpy = vi.spyOn(RoomMessageHandler.prototype, "executeEvent").mockImplementation(
+      async (_message, sendResponse) => {
+        await sendResponse?.("lineA\n\nlineB");
       },
     );
 
@@ -135,9 +135,9 @@ describe("IrcRoomMonitor", () => {
       expect(sendSpy).toHaveBeenNthCalledWith(1, "#test", "first ; second", "libera");
       expect(sendSpy).toHaveBeenNthCalledWith(2, "#test", "lineA ; lineB", "libera");
       expect(nickSpy).toHaveBeenCalledWith("libera");
-      expect(handleIncomingSpy).toHaveBeenCalledTimes(1);
+      expect(executeEventSpy).toHaveBeenCalledTimes(1);
     } finally {
-      handleIncomingSpy.mockRestore();
+      executeEventSpy.mockRestore();
       nickSpy.mockRestore();
       sendSpy.mockRestore();
       await history.close();

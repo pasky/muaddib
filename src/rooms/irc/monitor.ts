@@ -125,12 +125,9 @@ export class IrcRoomMonitor {
             isDirect: true,
           };
           const run = async (): Promise<void> => {
-            await commandHandler.handleIncomingMessage(message, {
-              sendResponse: async (text) => {
-                const responseText = monitor.responseCleaner(text, message.nick);
-                await varlinkSender.sendMessage(channelName, responseText, serverTag);
-              },
-              finalOnly: true,
+            await commandHandler.executeEvent(message, async (text) => {
+              const responseText = monitor.responseCleaner(text, message.nick);
+              await varlinkSender.sendMessage(channelName, responseText, serverTag);
             });
           };
           await logWriter.withMessageContext({ arc, nick: "event", message: content }, run);

@@ -2090,7 +2090,7 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
-  it("finalOnly suppresses Error: responses, prefixes model tag, and skips cost followups", async () => {
+  it("executeEvent uses quiet output: suppresses errors, prefixes model tag, skips cost followups", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();
 
@@ -2112,10 +2112,10 @@ describe("RoomMessageHandler", () => {
       }),
     });
 
-    await handler.handleIncomingMessage(makeMessage("!s event command", { isDirect: true }), {
-      sendResponse: async (text) => { sent.push(text); },
-      finalOnly: true,
-    });
+    await handler.executeEvent(
+      makeMessage("!s event command", { isDirect: true }),
+      async (text) => { sent.push(text); },
+    );
 
     // Only the real response should be sent, prefixed with model tag
     expect(sent).toHaveLength(1);

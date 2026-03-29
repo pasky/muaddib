@@ -38,7 +38,6 @@ import {
   CommandResolver,
   type CommandConfig,
 } from "./resolver.js";
-import type { ProactiveConfig } from "./proactive.js";
 import { generateToolSummaryFromSession } from "./tool-summary.js";
 import type { Logger } from "../../app/logging.js";
 import type { AgentConfig, MemoryConfig, SkillsConfig } from "../../config/muaddib-config.js";
@@ -77,6 +76,30 @@ export type CommandRunnerFactory = (input: CommandRunnerFactoryInput) => {
 
 export interface CommandRateLimiter {
   checkLimit(): boolean;
+}
+
+// ── Quiet execution params (shared by proactive + events) ──
+
+export interface QuietExecuteParams {
+  modelSpec: string;
+  modeKey: string;
+  trigger: string;
+  systemPrompt: string;
+  historySize: number;
+  reasoningEffort: string;
+  allowedTools: string[] | null;
+  promptReminder?: string;
+}
+
+/** Result returned by resolveForExecution when resolution succeeds. */
+export interface ResolvedExecution {
+  modelSpec: string;
+  modeKey: string;
+  trigger: string;
+  runtime: import("./resolver.js").RuntimeSettings;
+  modeConfig: import("../../config/muaddib-config.js").ModeConfig;
+  resolved: import("./resolver.js").ResolvedCommand;
+  context: Message[];
 }
 
 /** Result from invokeAndPostProcess — the shared agent invocation tail. */
@@ -204,18 +227,17 @@ export class CommandExecutor {
     };
   }
 
+  // ── Command resolution (extracted for composability) ──
+
   /**
-   * Execute a command: resolve mode, build context, run agent, process result,
-   * persist, and deliver response.
+   * Resolve a command message into execution params: mode, model, trigger, context.
+   * Handles rate limiting, parse errors, and help requests via the deliver callback.
+   * Returns null when an early response was sent (error/help/rate-limit).
    */
-  async execute(
+  async resolveForExecution(
     message: RoomMessage,
-    triggerTs: string,
-    sendResponse: SendResponse,
-    onAgentCreated?: (agent: Agent) => void,
-    onResponseDelivered?: () => void,
-    options?: { finalOnly?: boolean },
-  ): Promise<void> {
+    deliver: (text: string) => Promise<void>,
+  ): Promise<ResolvedExecution | null> {
     const { commandConfig, logger } = this;
     const defaultSize = commandConfig.historySize;
     const maxSize = Math.max(
@@ -223,25 +245,12 @@ export class CommandExecutor {
       ...Object.values(commandConfig.modes).map((mode) => Number(mode.historySize ?? 0)),
     );
 
-    // ── Unified delivery: send + persist (used for all responses) ──
-    const deliver = async (
-      text: string,
-      persistOptions?: { mode?: string },
-    ): Promise<void> => {
-      logger.info("Delivering response", `arc=${message.arc}`, `response=${text}`);
-      const sr = await sendResponse(text);
-      await this.persistBotResponse(message.arc, message, text, sr ?? undefined, {
-        run: triggerTs,
-        ...persistOptions,
-      });
-    };
-
     // ── Rate limit ──
 
     if (!this.rateLimiter.checkLimit()) {
       logger.warn("Rate limit triggered", `arc=${message.arc}`, `nick=${message.nick}`);
       await deliver(`${message.nick}: Slow down a little, will you? (rate limiting)`);
-      return;
+      return null;
     }
 
     logger.info(
@@ -270,18 +279,18 @@ export class CommandExecutor {
         `content=${message.content}`,
       );
       await deliver(`${message.nick}: ${resolved.error}`);
-      return;
+      return null;
     }
 
     if (resolved.helpRequested) {
       logger.debug("Sending help message", `nick=${message.nick}`);
       await deliver(this.resolver.buildHelpMessage(message.serverTag, message.channelName));
-      return;
+      return null;
     }
 
     if (!resolved.modeKey || !resolved.runtime || !resolved.selectedTrigger) {
       await deliver(`${message.nick}: Internal command resolution error.`);
-      return;
+      return null;
     }
 
     const modeConfig = commandConfig.modes[resolved.modeKey];
@@ -293,7 +302,7 @@ export class CommandExecutor {
 
     if (!modelSpec) {
       await deliver(`${message.nick}: No model configured for mode '${resolved.modeKey}'.`);
-      return;
+      return null;
     }
 
     if (resolved.modelOverride) {
@@ -333,19 +342,61 @@ export class CommandExecutor {
       `context_disabled=${resolved.noContext}`,
     );
 
+    return {
+      modelSpec,
+      modeKey: resolved.modeKey,
+      trigger: resolved.selectedTrigger,
+      runtime: resolved.runtime,
+      modeConfig,
+      resolved,
+      context,
+    };
+  }
+
+  /**
+   * Execute a command: resolve mode, build context, run agent, process result,
+   * persist, and deliver response.
+   */
+  async execute(
+    message: RoomMessage,
+    triggerTs: string,
+    sendResponse: SendResponse,
+    onAgentCreated?: (agent: Agent) => void,
+    onResponseDelivered?: () => void,
+  ): Promise<void> {
+    const { logger } = this;
+
+    // ── Unified delivery: send + persist (used for all responses) ──
+    const deliver = async (
+      text: string,
+      persistOptions?: { mode?: string },
+    ): Promise<void> => {
+      logger.info("Delivering response", `arc=${message.arc}`, `response=${text}`);
+      const sr = await sendResponse(text);
+      await this.persistBotResponse(message.arc, message, text, sr ?? undefined, {
+        run: triggerTs,
+        ...persistOptions,
+      });
+    };
+
+    const result = await this.resolveForExecution(message, (text) => deliver(text));
+    if (!result) return;
+
+    const { modelSpec, modeKey, trigger, runtime: resolvedRuntime, modeConfig, resolved, context } = result;
+
     // ── Build context & invoke agent ──
 
     const systemPrompt = this.buildSystemPrompt(
-      resolved.modeKey,
+      modeKey,
       message.mynick,
       resolved.modelOverride ?? undefined,
-      resolved.selectedTrigger ?? undefined,
+      trigger,
     );
 
     let prependedContext: Message[] = [];
     if (
       !resolved.noContext &&
-      resolved.runtime.includeChapterSummary &&
+      resolvedRuntime.includeChapterSummary &&
       this.runtime.chronicle?.chronicleStore
     ) {
       prependedContext = await this.runtime.chronicle.chronicleStore.getChapterContextMessages(
@@ -354,12 +405,12 @@ export class CommandExecutor {
     }
 
     let selectedContext: Message[] = (resolved.noContext ? context.slice(-1) : context).slice(
-      -resolved.runtime.historySize,
+      -resolvedRuntime.historySize,
     );
 
     if (
       !resolved.noContext &&
-      resolved.runtime.autoReduceContext &&
+      resolvedRuntime.autoReduceContext &&
       this.contextReducer.isConfigured &&
       selectedContext.length > 1
     ) {
@@ -380,19 +431,14 @@ export class CommandExecutor {
     // Agent response callback: cleans text + applies length policy, then delivers.
     // Used for all agent text (intermediate + final) and progress reports.
     // NULL sentinels from steered background messages are suppressed.
-    // When finalOnly is set (e.g. event-triggered runs), Error: prefixes are
-    // also suppressed and the model tag is prepended — matching proactive output.
-    const finalOnly = options?.finalOnly;
     const onResponse = async (text: string): Promise<void> => {
       let cleaned = this.cleanResponseText(text, message.nick);
       cleaned = await this.applyResponseLengthPolicy(cleaned, message.arc);
       if (!cleaned || isNullSentinel(cleaned)) return;
-      if (finalOnly && cleaned.startsWith("Error: ")) return;
-      const output = finalOnly ? `[${modelStrCore(modelSpec)}] ${cleaned}` : cleaned;
-      await deliver(output, { mode: resolved.selectedTrigger ?? undefined });
+      await deliver(cleaned, { mode: trigger });
     };
 
-    const toolSet = this.selectTools(message, resolved.runtime.allowedTools, runnerContext, resolved.runtime.toolsOverrides, resolved.noContext);
+    const toolSet = this.selectTools(message, resolvedRuntime.allowedTools, runnerContext, resolvedRuntime.toolsOverrides, resolved.noContext);
 
     const progressConfig = this.agentConfig.progress;
 
@@ -411,16 +457,14 @@ export class CommandExecutor {
     const queryContent = message.originalContent ?? resolved.queryText;
     const { usage, peakTurnInput, toolCallsCount, backgroundWork } = await this.invokeAndPostProcess(
       runner, message, `------------------------------\n[${queryTimestamp}] <${message.nick}> ${queryContent}`, runnerContext, toolSet.tools, {
-        reasoningEffort: resolved.runtime.reasoningEffort,
-        visionModel: resolved.runtime.visionModel ?? undefined,
-        memoryUpdate: resolved.runtime.memoryUpdate,
-        toolSummary: resolved.runtime.toolSummary,
+        reasoningEffort: resolvedRuntime.reasoningEffort,
+        visionModel: resolvedRuntime.visionModel ?? undefined,
+        memoryUpdate: resolvedRuntime.memoryUpdate,
+        toolSummary: resolvedRuntime.toolSummary,
       }, triggerTs,
     );
 
     // Log the completed agent run with cost/context stats.
-    // peakTurnInput (input + cacheRead + cacheWrite for the largest turn) represents
-    // actual context window fill; summed usage.input excludes cached tokens.
     const costStr = usage ? `$${usage.cost.total.toFixed(4)}` : "?";
     let ctxStr = peakTurnInput > 0 ? `${Math.round(peakTurnInput / 1000)}k` : "?";
     if (peakTurnInput > 0) {
@@ -438,7 +482,6 @@ export class CommandExecutor {
 
     // Persist structured cost row for every run (including low-cost ones), then
     // send optional human-readable followups for expensive runs/milestones.
-    // finalOnly runs (events) skip cost followup chatter — only the structured row is logged.
     if (usage && usage.cost.total > 0) {
       await this.history.logLlmCost(message.arc, {
         run: triggerTs,
@@ -448,9 +491,7 @@ export class CommandExecutor {
         outTok: usage.output,
         cost: usage.cost.total,
       });
-      if (!finalOnly) {
-        await this.emitCostFollowups(message, usage, toolCallsCount, deliver);
-      }
+      await this.emitCostFollowups(message, usage, toolCallsCount, deliver);
     }
 
     await backgroundWork;
@@ -460,75 +501,63 @@ export class CommandExecutor {
       "Agent run complete",
       `arc=${message.arc}`,
       `mode=${resolved.selectedLabel ?? "n/a"}`,
-      `trigger=${resolved.selectedTrigger ?? "n/a"}`,
+      `trigger=${trigger}`,
       `ctx=${ctxStr}`,
       `cost=${costStr}`,
     );
   }
 
+  // ── Quiet execution (shared by proactive interjection + events) ──
+
   /**
-   * Execute a proactive interjection in serious mode with extra prompt.
-   * Returns true if a response was actually sent.
+   * Run an agent with "quiet" output policy: only final model text reaches the
+   * room, Error:-prefixed and NULL sentinel responses are suppressed, output is
+   * prefixed with `[model]` tag, and no cost followups are emitted.
    *
-   * Proactive responses send only model text outputs — no progress reports,
-   * no error messages to the room.
+   * Returns true if any response was actually delivered to the room.
    */
-  async executeProactive(
+  async executeQuiet(
     message: RoomMessage,
     sendResponse: SendResponse,
-    proactiveConfig: ProactiveConfig,
-    classifiedTrigger: string,
-    classifiedRuntime: { reasoningEffort: string; allowedTools: string[] | null },
+    params: QuietExecuteParams,
     onAgentCreated?: (agent: Agent) => void,
   ): Promise<boolean> {
     const { logger } = this;
-    const modelSpec = proactiveConfig.models.serious;
-    const systemPrompt =
-      this.buildSystemPrompt("serious", message.mynick) +
-      " " + proactiveConfig.prompts.seriousExtra;
+    const { modelSpec, trigger, systemPrompt, historySize, reasoningEffort, allowedTools, promptReminder } = params;
 
-    const context = await this.history.getContextForMessage(
-      message,
-      proactiveConfig.historySize,
-    );
+    const context = await this.history.getContextForMessage(message, historySize);
 
     const runnerContext: Message[] = [
       ...context.slice(0, -1),
     ];
 
-    const proactiveProgressConfig = this.agentConfig.progress;
-
-    // Proactive delivery: prefix with model tag, send + persist.
+    // Quiet delivery: prefix with model tag, send + persist.
     const deliver = async (text: string): Promise<void> => {
       logger.info("Delivering response", `arc=${message.arc}`, `response=${text}`);
       const sr = await sendResponse(text);
       await this.persistBotResponse(message.arc, message, text, sr ?? undefined, {
-        mode: classifiedTrigger,
+        mode: trigger,
       });
     };
 
-    // Proactive agent response: cleans text, prefixes with model tag, then delivers.
-    // Progress reports are intentionally excluded — only model text outputs are sent.
-    // NULL sentinels and error prefixes are suppressed here so they never reach the room.
-    let proactiveDelivered = false;
+    // Quiet output: only final model text, Error: and NULL suppressed, model tag prefix.
+    let delivered = false;
     const onResponse = async (text: string): Promise<void> => {
       let cleaned = this.cleanResponseText(text, message.nick);
       cleaned = await this.applyResponseLengthPolicy(cleaned, message.arc);
       if (!cleaned || isNullSentinel(cleaned) || cleaned.startsWith("Error: ")) return;
-      proactiveDelivered = true;
+      delivered = true;
       await deliver(`[${modelStrCore(modelSpec)}] ${cleaned}`);
     };
 
-    // selectTools is called WITHOUT onResponse — proactive
-    // sessions must not flood the room with progress messages.
-    const toolSet = this.selectTools(message, classifiedRuntime.allowedTools, runnerContext);
+    const toolSet = this.selectTools(message, allowedTools, runnerContext);
 
     const runner = this.runnerFactory({
       model: modelSpec,
       systemPrompt,
       toolSet,
-      metaReminder: this.commandConfig.modes.serious?.promptReminder,
-      progressThresholdSeconds: proactiveProgressConfig?.thresholdSeconds,
+      metaReminder: promptReminder,
+      progressThresholdSeconds: this.agentConfig.progress?.thresholdSeconds,
       onResponse,
       logger,
       onAgentCreated,
@@ -540,17 +569,15 @@ export class CommandExecutor {
     let result: PromptRunResult;
     try {
       result = await this.invokeAndPostProcess(runner, message, queryText, runnerContext, toolSet.tools, {
-        reasoningEffort: classifiedRuntime.reasoningEffort,
+        reasoningEffort,
       });
     } catch (error) {
-      logger.error("Error during proactive agent execution", error);
+      logger.error("Error during quiet agent execution", error);
       return false;
     }
 
-    // onResponse already filters NULL sentinels, errors, and empty text —
-    // check whether anything was actually delivered to the room.
-    if (!proactiveDelivered) {
-      logger.info("Agent decided not to interject proactively", `arc=${message.arc}`);
+    if (!delivered) {
+      logger.info("Agent produced no output in quiet mode", `arc=${message.arc}`);
       await result.backgroundWork;
       return false;
     }
@@ -559,11 +586,42 @@ export class CommandExecutor {
     await this.triggerAutoChronicler(message, this.commandConfig.historySize);
 
     logger.info(
-      "Proactive response delivered",
+      "Quiet response delivered",
       `arc=${message.arc}`,
-      `trigger=${classifiedTrigger}`,
+      `trigger=${trigger}`,
     );
     return true;
+  }
+
+  /**
+   * Execute an event-triggered command: resolve mode via the standard pipeline,
+   * then run with quiet output (only final text, no cost followups).
+   * Bypasses steering and session management entirely.
+   */
+  async executeEvent(
+    message: RoomMessage,
+    sendResponse: SendResponse,
+  ): Promise<void> {
+    // Persist trigger so it appears in history context.
+    await this.history.addMessage(message, { selfRun: true });
+
+    const result = await this.resolveForExecution(message, async (text) => {
+      this.logger.warn("Event resolution early return", `arc=${message.arc}`, `response=${text}`);
+    });
+    if (!result) return;
+
+    const { modelSpec, modeKey, trigger, runtime: resolvedRuntime, modeConfig } = result;
+
+    await this.executeQuiet(message, sendResponse, {
+      modelSpec,
+      modeKey,
+      trigger,
+      systemPrompt: this.buildSystemPrompt(modeKey, message.mynick, undefined, trigger),
+      historySize: resolvedRuntime.historySize,
+      reasoningEffort: resolvedRuntime.reasoningEffort,
+      allowedTools: resolvedRuntime.allowedTools,
+      promptReminder: modeConfig.promptReminder,
+    });
   }
 
   // ── Shared: prompt invocation + post-processing ──

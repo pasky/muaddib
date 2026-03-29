@@ -312,12 +312,19 @@ export class ProactiveRunner {
       `reason=${evalResult.reason}`,
     );
 
-    await this.executor.executeProactive(
+    await this.executor.executeQuiet(
       message,
       sendResponse,
-      this.config,
-      classifiedTrigger,
-      classifiedRuntime,
+      {
+        modelSpec: this.config.models.serious,
+        modeKey: "serious",
+        trigger: classifiedTrigger,
+        systemPrompt: this.executor.buildSystemPrompt("serious", message.mynick)
+          + " " + this.config.prompts.seriousExtra,
+        historySize: this.config.historySize,
+        reasoningEffort: classifiedRuntime.reasoningEffort,
+        allowedTools: classifiedRuntime.allowedTools,
+      },
       (agent) => { this.activeAgents.set(channelKey, agent); },
     );
   }
