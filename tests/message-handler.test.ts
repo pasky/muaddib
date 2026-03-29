@@ -2090,6 +2090,49 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("finalOnly suppresses Error: responses, prefixes model tag, and skips cost followups", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const sent: string[] = [];
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: (input) => ({
+        prompt: async () => {
+          // Emit an error, a NULL, and a real response
+          await input.onResponse("Error: something went wrong");
+          await input.onResponse("NULL");
+          const result = makeRunnerResult("event output here", { totalCost: 0.50 });
+          await input.onResponse(result.text);
+          return result;
+        },
+      }),
+    });
+
+    await handler.handleIncomingMessage(makeMessage("!s event command", { isDirect: true }), {
+      sendResponse: async (text) => { sent.push(text); },
+      finalOnly: true,
+    });
+
+    // Only the real response should be sent, prefixed with model tag
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("[gpt-4o-mini]");
+    expect(sent[0]).toContain("event output here");
+
+    // Error and NULL should not appear
+    expect(sent.some((s) => s.includes("Error:"))).toBe(false);
+    expect(sent.some((s) => s.toUpperCase().includes("NULL"))).toBe(false);
+
+    // Cost followup should NOT be sent despite high cost ($0.50)
+    expect(sent.some((s) => s.includes("tool calls"))).toBe(false);
+    expect(sent.some((s) => s.includes("cost $"))).toBe(false);
+
+    await history.close();
+  });
+
   it("drops proactive NULL sentinel responses instead of sending them", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();

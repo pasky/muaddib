@@ -158,6 +158,7 @@ export class DiscordRoomMonitor {
               sendResponse: async (text) => {
                 await transport.sendMessage(channelId, text);
               },
+              finalOnly: true,
             });
           };
           await logWriter.withMessageContext({ arc, nick: "event", message: content }, run);

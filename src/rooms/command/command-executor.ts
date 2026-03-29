@@ -214,6 +214,7 @@ export class CommandExecutor {
     sendResponse: SendResponse,
     onAgentCreated?: (agent: Agent) => void,
     onResponseDelivered?: () => void,
+    options?: { finalOnly?: boolean },
   ): Promise<void> {
     const { commandConfig, logger } = this;
     const defaultSize = commandConfig.historySize;
@@ -379,11 +380,16 @@ export class CommandExecutor {
     // Agent response callback: cleans text + applies length policy, then delivers.
     // Used for all agent text (intermediate + final) and progress reports.
     // NULL sentinels from steered background messages are suppressed.
+    // When finalOnly is set (e.g. event-triggered runs), Error: prefixes are
+    // also suppressed and the model tag is prepended — matching proactive output.
+    const finalOnly = options?.finalOnly;
     const onResponse = async (text: string): Promise<void> => {
       let cleaned = this.cleanResponseText(text, message.nick);
       cleaned = await this.applyResponseLengthPolicy(cleaned, message.arc);
       if (!cleaned || isNullSentinel(cleaned)) return;
-      await deliver(cleaned, { mode: resolved.selectedTrigger ?? undefined });
+      if (finalOnly && cleaned.startsWith("Error: ")) return;
+      const output = finalOnly ? `[${modelStrCore(modelSpec)}] ${cleaned}` : cleaned;
+      await deliver(output, { mode: resolved.selectedTrigger ?? undefined });
     };
 
     const toolSet = this.selectTools(message, resolved.runtime.allowedTools, runnerContext, resolved.runtime.toolsOverrides, resolved.noContext);
@@ -432,6 +438,7 @@ export class CommandExecutor {
 
     // Persist structured cost row for every run (including low-cost ones), then
     // send optional human-readable followups for expensive runs/milestones.
+    // finalOnly runs (events) skip cost followup chatter — only the structured row is logged.
     if (usage && usage.cost.total > 0) {
       await this.history.logLlmCost(message.arc, {
         run: triggerTs,
@@ -441,7 +448,9 @@ export class CommandExecutor {
         outTok: usage.output,
         cost: usage.cost.total,
       });
-      await this.emitCostFollowups(message, usage, toolCallsCount, deliver);
+      if (!finalOnly) {
+        await this.emitCostFollowups(message, usage, toolCallsCount, deliver);
+      }
     }
 
     await backgroundWork;

@@ -130,6 +130,7 @@ export class IrcRoomMonitor {
                 const responseText = monitor.responseCleaner(text, message.nick);
                 await varlinkSender.sendMessage(channelName, responseText, serverTag);
               },
+              finalOnly: true,
             });
           };
           await logWriter.withMessageContext({ arc, nick: "event", message: content }, run);

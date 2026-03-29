@@ -219,6 +219,7 @@ export class SlackRoomMonitor {
               sendResponse: async (text) => {
                 await firstTransport.sendMessage(channelId, text);
               },
+              finalOnly: true,
             });
           };
           await logWriter.withMessageContext({ arc, nick: "event", message: content }, run);
