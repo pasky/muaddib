@@ -496,6 +496,24 @@ describe("core tool executors visit_webpage support", () => {
     expect((result as any).mimeType).toBe("image/png");
   });
 
+  it("visit_webpage normalizes non-standard image/jpg to image/jpeg", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "HEAD") {
+        return new Response("", { status: 200, headers: { "content-type": "image/jpg" } });
+      }
+      return new Response(Uint8Array.from([0xff, 0xd8, 0xff, 0xe0]), {
+        status: 200,
+        headers: { "content-type": "image/jpg" },
+      });
+    });
+
+    const executors = createDefaultToolExecutors({});
+    const result = await executors.visitWebpage("https://example.com/photo.jpg");
+    expect(typeof result).toBe("object");
+    expect((result as any).kind).toBe("image");
+    expect((result as any).mimeType).toBe("image/jpeg");
+  });
+
   it("visit_webpage treats SVG as text content, not as image", async () => {
     const svgContent = '<svg xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="40"/></svg>';
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {

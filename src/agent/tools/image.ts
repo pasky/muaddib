@@ -317,11 +317,14 @@ function parseDataUrlImage(dataUrl: string): ParsedDataUrlImage {
     throw new Error("Image generation returned unsupported image payload format.");
   }
 
-  const mimeType = match[1].trim().toLowerCase();
+  const rawMimeType = match[1].trim().toLowerCase();
   const data = match[2].trim();
-  if (!mimeType || !data) {
+  if (!rawMimeType || !data) {
     throw new Error("Image generation returned empty image payload.");
   }
+
+  // Normalize non-standard "image/jpg" to the canonical "image/jpeg".
+  const mimeType = rawMimeType === "image/jpg" ? "image/jpeg" : rawMimeType;
 
   return {
     mimeType,

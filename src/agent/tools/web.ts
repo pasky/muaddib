@@ -223,8 +223,10 @@ export function createDefaultVisitWebpageExecutor(
         throw new Error(`Failed to download image: HTTP ${imageResponse.status}`);
       }
 
-      const imageMimeType =
+      const rawImageMime =
         (imageResponse.headers.get("content-type") ?? "image/png").split(";")[0].trim();
+      // Normalize non-standard "image/jpg" to the canonical "image/jpeg".
+      const imageMimeType = rawImageMime === "image/jpg" ? "image/jpeg" : rawImageMime;
       const imageBytes = Buffer.from(await imageResponse.arrayBuffer());
       if (imageBytes.length > maxImageBytes) {
         throw new Error(
