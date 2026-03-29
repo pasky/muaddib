@@ -836,6 +836,7 @@ export class CommandExecutor {
 
   private cleanResponseText(text: string, nick: string): string {
     const cleaned = stripLeadingIrcContextEchoPrefixes(text.trim());
+    if (cleaned.startsWith("[internal monologue]")) return "";
     if (!this.overrides?.responseCleaner) {
       return cleaned;
     }
