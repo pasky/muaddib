@@ -5,9 +5,10 @@
  * resetGondolinVmCache + a small backdoor exposed for testing.
  */
 
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -32,6 +33,9 @@ import {
   formatSkillsForVmPrompt,
 } from "../src/agent/skills/load-skills.js";
 import { buildArc } from "../src/rooms/message.js";
+
+const hasQemuImg = spawnSync("qemu-img", ["--version"], { stdio: "ignore" }).status === 0;
+const itWithQemuImg = hasQemuImg ? it : it.skip;
 
 // We reach into the module's Maps via the exported reset helper and a small
 // test-only shim: we import the Maps indirectly by calling createGondolinTools
@@ -58,6 +62,7 @@ function makeFakeVm() {
     close: vi.fn().mockResolvedValue(undefined),
     checkpoint: vi.fn(async (path: string) => {
       checkpointCalls.push(path);
+      writeFileSync(path, "fake-checkpoint");
       if (checkpointPromise) await checkpointPromise;
     }),
     // Test control: make the next checkpoint() call hang until released
@@ -77,6 +82,24 @@ function makeFakeVm() {
 }
 
 type FakeVm = ReturnType<typeof makeFakeVm>;
+
+function getQcow2BackingPath(imagePath: string): string | null {
+  const raw = execFileSync("qemu-img", ["info", "--output=json", imagePath], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const info = JSON.parse(raw) as {
+    "backing-filename"?: unknown;
+    "format-specific"?: { data?: { "backing-filename"?: unknown } };
+  };
+  const backing = typeof info["backing-filename"] === "string"
+    ? info["backing-filename"]
+    : typeof info["format-specific"]?.data?.["backing-filename"] === "string"
+        ? info["format-specific"]?.data?.["backing-filename"]
+        : null;
+  if (!backing) return null;
+  return backing.startsWith("/") ? resolve(backing) : resolve(dirname(imagePath), backing);
+}
 
 /**
  * Reach into the module's vmCache by monkey-patching the dynamic import that
@@ -360,6 +383,68 @@ describe("checkpointGondolinArc — vm.close on checkpoint failure", () => {
     expect(fakeVm.checkpoint).toHaveBeenCalledTimes(1);
     // close() should NOT be called on success — checkpoint already stops the VM
     expect(fakeVm.close).not.toHaveBeenCalled();
+  });
+});
+
+describe("checkpointGondolinArc — checkpoint overwrite workaround", () => {
+  itWithQemuImg("stages checkpoint publication and rebases away the previous checkpoint backing", async () => {
+    const tmpHome = mkdtempSync(join(tmpdir(), "muaddib-checkpoint-home-"));
+    const oldHome = process.env.MUADDIB_HOME;
+    process.env.MUADDIB_HOME = tmpHome;
+
+    try {
+      const arc = "overwrite-workaround-arc";
+      const trailer = Buffer.from("FAKE_TRAILER_KEEP_ME");
+      const rootfsPath = join(tmpHome, "rootfs.ext4");
+      writeFileSync(rootfsPath, "");
+      truncateSync(rootfsPath, 64 * 1024 * 1024);
+
+      const { getArcCheckpointPath } = await import("../src/agent/gondolin/fs.js");
+      const checkpointPath = getArcCheckpointPath(arc);
+      mkdirSync(dirname(checkpointPath), { recursive: true });
+      execFileSync(
+        "qemu-img",
+        ["create", "-f", "qcow2", "-F", "raw", "-b", rootfsPath, checkpointPath],
+        { stdio: "ignore" },
+      );
+
+      const fakeVm = makeFakeVm();
+      fakeVm.checkpoint.mockImplementationOnce(async (path: string) => {
+        fakeVm.checkpointCalls.push(path);
+        execFileSync(
+          "qemu-img",
+          ["create", "-f", "qcow2", "-F", "qcow2", "-b", checkpointPath, path],
+          { stdio: "ignore" },
+        );
+        writeFileSync(path, trailer, { flag: "a" });
+      });
+
+      const gondolin = await import("@earendil-works/gondolin");
+      // @ts-expect-error test-only
+      gondolin.VmCheckpoint.load.mockReturnValueOnce({
+        resume: vi.fn(async () => fakeVm),
+      });
+
+      const logger = makeLogger();
+      const { tools } = createGondolinTools({ arc, config: gondolinConfig, logger });
+      await warmVm(tools);
+
+      await checkpointGondolinArc(arc, logger);
+
+      expect(fakeVm.checkpoint).toHaveBeenCalledTimes(1);
+      expect(fakeVm.checkpointCalls[0]).not.toBe(checkpointPath);
+      expect(fakeVm.checkpointCalls[0]).toContain(".checkpoint-staging-");
+      expect(getQcow2BackingPath(checkpointPath)).toBe(rootfsPath);
+      expect(readFileSync(checkpointPath).subarray(-trailer.length).equals(trailer)).toBe(true);
+      expect(logger.error).not.toHaveBeenCalled();
+    } finally {
+      if (oldHome === undefined) {
+        delete process.env.MUADDIB_HOME;
+      } else {
+        process.env.MUADDIB_HOME = oldHome;
+      }
+      rmSync(tmpHome, { recursive: true, force: true });
+    }
   });
 });
 

@@ -4,10 +4,11 @@
  * pi-coding-agent's Read/Write/Edit/BashOperations to a Gondolin VM.
  */
 
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join, posix } from "node:path";
+import { basename, dirname, isAbsolute, join, posix, resolve } from "node:path";
 
 import type {
   AuthStorage,
@@ -143,6 +144,95 @@ function rewriteMissingQemuBinaryError(error: unknown): Error | null {
     `Missing host dependency '${binary}' required by Muaddib's Gondolin sandbox. Install QEMU on the host (Debian/Ubuntu: sudo apt install qemu-system qemu-utils; macOS: brew install qemu) and ensure '${binary}' is on PATH.`,
     { cause: error },
   );
+}
+
+function inferDiskFormatFromPath(diskPath: string): "raw" | "qcow2" {
+  const lower = diskPath.toLowerCase();
+  return lower.endsWith(".qcow2") || lower.endsWith(".qcow") ? "qcow2" : "raw";
+}
+
+type QemuImgInfo = Record<string, unknown>;
+
+function qemuImgInfoJson(imagePath: string): QemuImgInfo {
+  const raw = execFileSync("qemu-img", ["info", "--output=json", imagePath], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  return JSON.parse(raw) as QemuImgInfo;
+}
+
+function extractBackingFilename(info: Record<string, any>): string | null {
+  if (typeof info["backing-filename"] === "string") {
+    return info["backing-filename"];
+  }
+
+  const formatSpecific = info["format-specific"] as { data?: Record<string, unknown> } | undefined;
+  if (typeof formatSpecific?.data?.["backing-filename"] === "string") {
+    return formatSpecific.data["backing-filename"] as string;
+  }
+
+  return null;
+}
+
+function resolveQcow2BackingPath(imagePath: string): string | null {
+  const backing = extractBackingFilename(qemuImgInfoJson(imagePath));
+  if (!backing) return null;
+  return isAbsolute(backing) ? resolve(backing) : resolve(dirname(imagePath), backing);
+}
+
+function safeRebaseQcow2InPlace(imagePath: string, backingPath: string): void {
+  execFileSync(
+    "qemu-img",
+    ["rebase", "-F", inferDiskFormatFromPath(backingPath), "-b", backingPath, imagePath],
+    { stdio: "ignore" },
+  );
+}
+
+async function checkpointVmWithOverwriteWorkaround(
+  arc: string,
+  vm: VM,
+  checkpointPath: string,
+  logger?: Logger,
+): Promise<void> {
+  const resolvedCheckpointPath = resolve(checkpointPath);
+  const stagingDir = join(dirname(resolvedCheckpointPath), `.checkpoint-staging-${randomUUID().slice(0, 8)}`);
+  const stagedCheckpointPath = join(stagingDir, basename(resolvedCheckpointPath));
+  const hadExistingCheckpoint = existsSync(resolvedCheckpointPath);
+
+  mkdirSync(stagingDir, { recursive: true });
+
+  let published = false;
+  try {
+    await vm.checkpoint(stagedCheckpointPath);
+
+    if (hadExistingCheckpoint) {
+      const stagedBacking = resolveQcow2BackingPath(stagedCheckpointPath);
+      if (stagedBacking === resolvedCheckpointPath) {
+        const desiredBacking = resolveQcow2BackingPath(resolvedCheckpointPath);
+        if (!desiredBacking) {
+          throw new Error(
+            `Muaddib checkpoint workaround could not determine the existing checkpoint backing file for ${resolvedCheckpointPath}`,
+          );
+        }
+        logger?.debug(
+          `Gondolin checkpoint workaround: rebasing staged checkpoint for arc ${arc} from ${resolvedCheckpointPath} to ${desiredBacking}`,
+        );
+        safeRebaseQcow2InPlace(stagedCheckpointPath, desiredBacking);
+      }
+    }
+
+    renameSync(stagedCheckpointPath, resolvedCheckpointPath);
+    published = true;
+  } finally {
+    if (!published) {
+      try {
+        unlinkSync(stagedCheckpointPath);
+      } catch {
+        // ignore
+      }
+    }
+    rmSync(stagingDir, { recursive: true, force: true });
+  }
 }
 
 function createVmFetch(
@@ -577,10 +667,11 @@ export async function checkpointGondolinArc(
     try {
       await vm.exec(["/bin/sh", "-c",
         "ls -1dt /workspace/.sessions/session-* 2>/dev/null | tail -n +9 | xargs rm -rf"]);
-      await vm.checkpoint(checkpointPath);
+      await checkpointVmWithOverwriteWorkaround(arc, vm, checkpointPath, logger);
       logger?.info(`Gondolin VM checkpointed for arc ${arc}: ${checkpointPath}`);
     } catch (err) {
-      logger?.error(`Gondolin checkpoint failed for arc ${arc}`, String(err));
+      const reportedError = rewriteMissingQemuBinaryError(err) ?? err;
+      logger?.error(`Gondolin checkpoint failed for arc ${arc}`, String(reportedError));
       await vm.close().catch(() => {});
     } finally {
       vmCheckpointInProgress.delete(arc);
