@@ -448,6 +448,101 @@ describe("checkpointGondolinArc — checkpoint overwrite workaround", () => {
   });
 });
 
+describe("checkpointGondolinArc — gondolin trailer preserved after rebase", () => {
+  itWithQemuImg("preserves the gondolin checkpoint trailer (GONDCPT1) when rebasing away self-reference", async () => {
+    const tmpHome = mkdtempSync(join(tmpdir(), "muaddib-trailer-rebase-"));
+    const oldHome = process.env.MUADDIB_HOME;
+    process.env.MUADDIB_HOME = tmpHome;
+
+    try {
+      const arc = "trailer-rebase-arc";
+      const rootfsPath = join(tmpHome, "rootfs.ext4");
+      writeFileSync(rootfsPath, "");
+      truncateSync(rootfsPath, 64 * 1024 * 1024);
+
+      const { getArcCheckpointPath } = await import("../src/agent/gondolin/fs.js");
+      const checkpointPath = getArcCheckpointPath(arc);
+      mkdirSync(dirname(checkpointPath), { recursive: true });
+
+      // Create existing checkpoint backed by rootfs, and write data into it
+      // so the rebase has real cluster deltas to merge.
+      execFileSync(
+        "qemu-img",
+        ["create", "-f", "qcow2", "-F", "raw", "-b", rootfsPath, checkpointPath],
+        { stdio: "ignore" },
+      );
+      // Write data into the old checkpoint's overlay so the rebase has real
+      // cluster deltas to merge (forces cluster allocation at end of staged file).
+      execFileSync(
+        "qemu-io",
+        ["-c", "write -P 0xAB 0 1M", checkpointPath],
+        { stdio: "ignore" },
+      );
+
+      // Build a proper gondolin-format trailer: [json][magic][u64be length]
+      const MAGIC = Buffer.from("GONDCPT1");
+      const trailerJson = Buffer.from(JSON.stringify({
+        version: 1,
+        buildId: "test-build-id",
+        createdWithVmm: "qemu",
+      }) + "\n", "utf8");
+      const trailerFooter = Buffer.alloc(16);
+      MAGIC.copy(trailerFooter, 0);
+      trailerFooter.writeBigUInt64BE(BigInt(trailerJson.length), 8);
+      const fullTrailer = Buffer.concat([trailerJson, trailerFooter]);
+
+      const fakeVm = makeFakeVm();
+      fakeVm.checkpoint.mockImplementationOnce(async (path: string) => {
+        fakeVm.checkpointCalls.push(path);
+        // Staged checkpoint backed by existing checkpoint (self-reference bug)
+        execFileSync(
+          "qemu-img",
+          ["create", "-f", "qcow2", "-F", "qcow2", "-b", checkpointPath, path],
+          { stdio: "ignore" },
+        );
+        // Append gondolin trailer (as real gondolin does)
+        writeFileSync(path, fullTrailer, { flag: "a" });
+      });
+
+      const gondolin = await import("@earendil-works/gondolin");
+      // @ts-expect-error test-only
+      gondolin.VmCheckpoint.load.mockReturnValueOnce({
+        resume: vi.fn(async () => fakeVm),
+      });
+
+      const logger = makeLogger();
+      const { tools } = createGondolinTools({ arc, config: gondolinConfig, logger });
+      await warmVm(tools);
+
+      await checkpointGondolinArc(arc, logger);
+
+      // The checkpoint should have been rebased to rootfs (no self-reference)
+      expect(getQcow2BackingPath(checkpointPath)).toBe(rootfsPath);
+
+      // The gondolin trailer must survive the rebase — verify magic is present
+      const data = readFileSync(checkpointPath);
+      const lastFooter = data.subarray(data.length - 16);
+      expect(lastFooter.subarray(0, 8).equals(MAGIC)).toBe(true);
+
+      // Verify the trailer JSON can be parsed back
+      const jsonLen = Number(lastFooter.readBigUInt64BE(8));
+      const jsonBuf = data.subarray(data.length - 16 - jsonLen, data.length - 16);
+      const parsed = JSON.parse(jsonBuf.toString("utf8"));
+      expect(parsed.version).toBe(1);
+      expect(parsed.buildId).toBe("test-build-id");
+
+      expect(logger.error).not.toHaveBeenCalled();
+    } finally {
+      if (oldHome === undefined) {
+        delete process.env.MUADDIB_HOME;
+      } else {
+        process.env.MUADDIB_HOME = oldHome;
+      }
+      rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("closeAllVms — process-level cleanup", () => {
   it("closes all cached VMs and clears the cache", async () => {
     const fakeVm1 = makeFakeVm();

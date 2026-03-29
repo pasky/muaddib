@@ -6,7 +6,7 @@
 
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, posix, resolve } from "node:path";
 
@@ -180,6 +180,41 @@ function resolveQcow2BackingPath(imagePath: string): string | null {
   return isAbsolute(backing) ? resolve(backing) : resolve(dirname(imagePath), backing);
 }
 
+/**
+ * Read the raw gondolin checkpoint trailer bytes from the end of a qcow2 file.
+ *
+ * Gondolin appends `[json][8-byte magic "GONDCPT1"][u64be json-length]` after
+ * the qcow2 image data.  qemu-img ignores these trailing bytes, but
+ * `qemu-img rebase` allocates new clusters at the end of the file and
+ * overwrites them.  This helper extracts the full trailer so it can be
+ * re-appended after a rebase.
+ */
+function extractCheckpointTrailerBytes(filePath: string): Buffer | null {
+  const MAGIC = Buffer.from("GONDCPT1"); // 8 bytes
+  const FOOTER_SIZE = 16; // magic(8) + u64be(8)
+
+  const fd = openSync(filePath, "r");
+  try {
+    const size = fstatSync(fd).size;
+    if (size < FOOTER_SIZE) return null;
+
+    const footer = Buffer.alloc(FOOTER_SIZE);
+    readSync(fd, footer, 0, FOOTER_SIZE, size - FOOTER_SIZE);
+    if (!footer.subarray(0, 8).equals(MAGIC)) return null;
+
+    const jsonLen = Number(footer.readBigUInt64BE(8));
+    const totalTrailerLen = jsonLen + FOOTER_SIZE;
+    const trailerStart = size - totalTrailerLen;
+    if (trailerStart < 0) return null;
+
+    const trailer = Buffer.alloc(totalTrailerLen);
+    readSync(fd, trailer, 0, totalTrailerLen, trailerStart);
+    return trailer;
+  } finally {
+    closeSync(fd);
+  }
+}
+
 function safeRebaseQcow2InPlace(imagePath: string, backingPath: string): void {
   execFileSync(
     "qemu-img",
@@ -217,7 +252,14 @@ async function checkpointVmWithOverwriteWorkaround(
         logger?.debug(
           `Gondolin checkpoint workaround: rebasing staged checkpoint for arc ${arc} from ${resolvedCheckpointPath} to ${desiredBacking}`,
         );
+        // qemu-img rebase allocates new clusters at the end of the file,
+        // which overwrites the gondolin checkpoint trailer.  Save it
+        // before rebase and re-append afterwards.
+        const trailerBytes = extractCheckpointTrailerBytes(stagedCheckpointPath);
         safeRebaseQcow2InPlace(stagedCheckpointPath, desiredBacking);
+        if (trailerBytes) {
+          writeFileSync(stagedCheckpointPath, trailerBytes, { flag: "a" });
+        }
       }
     }
 
