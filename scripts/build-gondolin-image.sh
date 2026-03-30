@@ -120,22 +120,26 @@ ARCH=$(node -e "console.log(process.arch === 'arm64' ? 'aarch64' : 'x86_64')")
 
 INIT_EXTRA=$(mktemp /tmp/gondolin-init-extra-XXXXXX.sh)
 cat > "$INIT_EXTRA" << 'INITEOF'
-# Upgrade npm — Alpine 3.23's bundled version is broken
-rm -rf /usr/lib/node_modules/npm
-mkdir -p /usr/lib/node_modules/npm
-curl -fsSL https://registry.npmjs.org/npm/-/npm-11.2.0.tgz \
-  | tar -xz -C /usr/lib/node_modules/npm --strip-components=1
+# ── Boot-time fixups (idempotent) ──────────────────────────────────────────
+# These steps run during image build AND on every fresh boot (checkpoint miss).
+# Each step is guarded so that a transient network failure during fresh boot
+# cannot crash init — the artifacts are already baked into the rootfs.
+
+# Upgrade npm — Alpine 3.23's bundled version is broken.
+if ! npm --version 2>/dev/null | grep -q '^11\.'; then
+  rm -rf /usr/lib/node_modules/npm
+  mkdir -p /usr/lib/node_modules/npm
+  curl -fsSL https://registry.npmjs.org/npm/-/npm-11.2.0.tgz \
+    | tar -xz -C /usr/lib/node_modules/npm --strip-components=1
+fi
 
 # Create uv venv with system site-packages
 [ -d /opt/venv ] || uv venv --system-site-packages --seed /opt/venv
 
 # Install Playwright and wire it to system Chromium.
-# Playwright's chromium.launch() won't honour env vars for the executable path —
-# it only looks in its own browser registry paths.  We install the npm package
-# (skipping the bundled browser download, which wouldn't work on Alpine/musl
-# anyway) and then create symlinks from every path Playwright expects to the
-# real system Chromium binary.
-PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install -g playwright
+if ! node -e "require('playwright-core')" 2>/dev/null; then
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install -g playwright
+fi
 
 # Discover the paths Playwright will probe for chromium / headless-shell and
 # symlink them to the Alpine system Chromium.
@@ -146,6 +150,7 @@ node -e '
     if (exe) console.log(exe.executablePath("linux"));
   }
 ' 2>/dev/null | while read -r p; do
+  [ -e "$p" ] && continue
   mkdir -p "$(dirname "$p")"
   ln -sf /usr/bin/chromium-browser "$p"
 done
