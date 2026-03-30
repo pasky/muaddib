@@ -6,6 +6,7 @@ import { Type } from "@sinclair/typebox";
 import type { ToolContext, MuaddibTool } from "./types.js";
 import { resolveLocalArtifactFilePath } from "./url-utils.js";
 import { responseText } from "../message.js";
+import { LLM_CALL_TYPE } from "../../cost/llm-call-type.js";
 import { toConfiguredString } from "../../utils/index.js";
 
 export interface VisitWebpageImageResult {
@@ -417,7 +418,7 @@ async function transcribeWebContent(
         systemPrompt,
       },
       {
-        callType: "webTranscript",
+        callType: LLM_CALL_TYPE.VISIT_WEBPAGE,
         logger: options.logger,
         streamOptions: { reasoning: "low" },
       },

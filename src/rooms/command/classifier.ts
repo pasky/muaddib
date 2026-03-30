@@ -5,6 +5,7 @@ import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { messageText } from "../../utils/index.js";
 import { responseText as extractResponseText } from "../../agent/message.js";
 import type { CommandConfig } from "./resolver.js";
+import { LLM_CALL_TYPE } from "../../cost/llm-call-type.js";
 
 export interface ModeClassifierOptions {
   modelAdapter: PiAiModelAdapter;
@@ -44,7 +45,7 @@ export function createModeClassifier(
           systemPrompt: `${prompt}\n\nReturn exactly one classifier label token. No explanation. If uncertain, pick the best label.`,
         },
         {
-          callType: "modeClassifier",
+          callType: LLM_CALL_TYPE.MODE_CLASSIFIER,
           logger,
           streamOptions: { reasoning: "minimal" },
         },

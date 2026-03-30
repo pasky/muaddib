@@ -6,6 +6,8 @@ import type { MuaddibTool, ToolContext, ToolSet } from "./types.js";
 import type { Message } from "@mariozechner/pi-ai";
 import type { RunnerLogger } from "../session-factory.js";
 import { stringifyError, toConfiguredString } from "../../utils/index.js";
+import { withCostSpan } from "../../cost/cost-span.js";
+import { LLM_CALL_TYPE } from "../../cost/llm-call-type.js";
 import { iterationsToSessionLimits } from "../../config/muaddib-config.js";
 import {
   createDefaultWebSearchExecutor,
@@ -110,10 +112,10 @@ export function createDefaultDeepResearchExecutor(
     logger.info(`${DEEP_RESEARCH_LOG_SEPARATOR} DEEP RESEARCH: ${query.slice(0, 500)}...`);
 
     try {
-      const result = await runner.prompt(query, {
+      const result = await withCostSpan(LLM_CALL_TYPE.DEEP_RESEARCH, { arc: options.arc }, async () => await runner.prompt(query, {
         contextMessages: invocation?.conversationContext,
         thinkingLevel: "low",
-      });
+      }));
       logger.info(`${DEEP_RESEARCH_LOG_SEPARATOR} Deep research response: ${result.text.slice(0, 500)}...`);
       return result.text;
     } catch (error) {

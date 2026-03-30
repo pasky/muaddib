@@ -9,6 +9,7 @@ import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { createDefaultToolExecutors as createDefaultToolExecutorsRaw } from "../src/agent/tools/baseline-tools.js";
 import { createDefaultShareArtifactExecutor } from "../src/agent/tools/artifact.js";
 import { createDefaultOracleExecutor as createDefaultOracleExecutorRaw } from "../src/agent/tools/oracle.js";
+import { LLM_CALL_TYPE } from "../src/cost/llm-call-type.js";
 import { PiAiModelAdapter } from "../src/models/pi-ai-model-adapter.js";
 import { resetWebRateLimiters, jinaRetryConfig } from "../src/agent/tools/web.js";
 const tempDirs: string[] = [];
@@ -739,7 +740,7 @@ describe("core tool executors visit_webpage LLM transcription", () => {
     expect(context.systemPrompt).toContain("web content transcriber");
     expect(context.systemPrompt).toContain("NEVER fabricate");
     expect(context.messages[0].content).toContain("Actual content");
-    expect(options.callType).toBe("webTranscript");
+    expect(options.callType).toBe(LLM_CALL_TYPE.VISIT_WEBPAGE);
   });
 
   it("visit_webpage appends query to system prompt when provided", async () => {

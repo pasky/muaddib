@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { RuntimeLogWriter } from "../src/app/logging.js";
+import { LLM_CALL_TYPE } from "../src/cost/llm-call-type.js";
 import { UserCostLedger } from "../src/cost/user-cost-ledger.js";
 import type { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import {
@@ -1426,6 +1427,7 @@ describe("RoomMessageHandler", () => {
       "libera",
       "#test",
       40,
+      expect.objectContaining({ userArc: "libera#alice" }),
     );
     expect(autoChronicler.checkAndChronicle).toHaveBeenNthCalledWith(
       2,
@@ -1433,6 +1435,7 @@ describe("RoomMessageHandler", () => {
       "libera",
       "#test",
       40,
+      undefined,
     );
 
     const rateLimitedAutoChronicler = {
@@ -2303,7 +2306,7 @@ describe("RoomMessageHandler", () => {
     const agentReady = createDeferred<void>();
     const releaseAgent = createDeferred<void>();
     // Gate that blocks triggerAutoChronicler — this runs AFTER
-    // onResponseDelivered and after backgroundWork in execute().
+    // onResponseDelivered and after post-response maintenance in execute().
     const chroniclerStarted = createDeferred<void>();
     const releaseChronicler = createDeferred<void>();
 
@@ -2357,7 +2360,7 @@ describe("RoomMessageHandler", () => {
 
     // Wait until triggerAutoChronicler starts — by this point execute()
     // has completed delivering the response and called onResponseDelivered
-    // (deregistering steering), and awaited backgroundWork. But execute()
+    // (deregistering steering), and awaited post-response maintenance. But execute()
     // itself hasn't returned yet because triggerAutoChronicler is blocked.
     await chroniclerStarted.promise;
 
@@ -2634,7 +2637,7 @@ describe("RoomMessageHandler", () => {
       }),
       modelAdapter: {
         completeSimple: async (_model: string, _payload: unknown, callOptions?: { callType?: string }) => {
-          if (callOptions?.callType === "modeClassifier") {
+          if (callOptions?.callType === LLM_CALL_TYPE.MODE_CLASSIFIER) {
             return { content: [{ type: "text", text: "EASY_SERIOUS" }] };
           }
           return { content: [{ type: "text", text: "Score: 9/10" }] };

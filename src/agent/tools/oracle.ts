@@ -5,6 +5,8 @@ import { Type } from "@sinclair/typebox";
 import { iterationsToSessionLimits } from "../../config/muaddib-config.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { stringifyError, toConfiguredString } from "../../utils/index.js";
+import { withCostSpan } from "../../cost/cost-span.js";
+import { LLM_CALL_TYPE } from "../../cost/llm-call-type.js";
 import type { RunnerLogger } from "../session-factory.js";
 import { SessionRunner, type PromptResult } from "../session-runner.js";
 import type { MuaddibTool, ToolContext, ToolSet } from "./types.js";
@@ -140,10 +142,10 @@ export function createDefaultOracleExecutor(
 
     let result: PromptResult | undefined;
     try {
-      result = await runner.prompt(query, {
+      result = await withCostSpan(LLM_CALL_TYPE.ORACLE, { arc: options.arc }, async () => await runner.prompt(query, {
         contextMessages: invocation?.conversationContext,
         thinkingLevel,
-      });
+      }));
       logger.info(`${ORACLE_LOG_SEPARATOR} Oracle response: ${result.text.slice(0, 500)}...`);
       return result.text;
     } catch (error) {

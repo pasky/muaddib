@@ -43,6 +43,8 @@ import {
   UserKeyStore,
 } from "../../cost/user-key-store.js";
 import { UserCostLedger } from "../../cost/user-cost-ledger.js";
+import { withPersistedCostSpan, recordUsage, withCostSpan, currentCostSpan } from "../../cost/cost-span.js";
+import { LLM_CALL_TYPE } from "../../cost/llm-call-type.js";
 import { ContextReducerTs, type ContextReducer } from "./context-reducer.js";
 import type { RoomMessage } from "../message.js";
 import type { MuaddibRuntime } from "../../runtime.js";
@@ -638,13 +640,29 @@ export class CommandExecutor {
     const queryLine = message.trusted === false
       ? `------------------------------\n[${queryTimestamp}] [UNTRUSTED] <${message.nick}> ${queryContent}[/UNTRUSTED]`
       : `------------------------------\n[${queryTimestamp}] <${message.nick}> ${queryContent}`;
-    const { usage, peakTurnInput, toolCallsCount, backgroundWork } = await this.invokeAndPostProcess(
-      runner, message, queryLine, runnerContext, toolSet.tools, {
-        reasoningEffort: resolvedRuntime.reasoningEffort,
-        visionModel: resolvedRuntime.visionModel ?? undefined,
-        memoryUpdate: resolvedRuntime.memoryUpdate,
-        toolSummary: resolvedRuntime.toolSummary,
-      }, triggerTs,
+    const { usage, peakTurnInput, toolCallsCount, backgroundWork } = await withPersistedCostSpan(
+      "execute",
+      {
+        arc: message.arc,
+        userArc,
+        trigger,
+        requestedAgentModel: modelSpec,
+        byok: budgetStatus.state === "byok",
+      },
+      {
+        history: this.history,
+        run: triggerTs,
+        userCostLedger: this.userCostLedger,
+      },
+      async () => await this.invokeAndPostProcess(
+        runner, message, queryLine, runnerContext, toolSet.tools, {
+          reasoningEffort: resolvedRuntime.reasoningEffort,
+          visionModel: resolvedRuntime.visionModel ?? undefined,
+          memoryUpdate: resolvedRuntime.memoryUpdate,
+          toolSummary: resolvedRuntime.toolSummary,
+          modelSpec: effectiveModelSpec,
+        }, triggerTs,
+      ),
     );
 
     // Log the completed agent run with cost/context stats.
@@ -663,23 +681,8 @@ export class CommandExecutor {
     // steering before the potentially long background work begins.
     onResponseDelivered?.();
 
-    // Persist structured cost row for every run (including low-cost ones), then
-    // send optional human-readable followups for expensive runs/milestones.
+    // Send optional human-readable followups for expensive runs/milestones.
     if (usage && usage.cost.total > 0) {
-      await this.history.logLlmCost(message.arc, {
-        run: triggerTs,
-        call: "agent_run",
-        model: effectiveModelSpec,
-        inTok: usage.input + usage.cacheRead + usage.cacheWrite,
-        outTok: usage.output,
-        cost: usage.cost.total,
-      });
-      await this.userCostLedger.logUserCost(userArc, {
-        cost: usage.cost.total,
-        byok: budgetStatus.state === "byok",
-        arc: message.arc,
-        model: modelSpec,
-      });
       await this.emitCostFollowups(message, usage, toolCallsCount, deliver);
     }
 
@@ -759,12 +762,19 @@ export class CommandExecutor {
 
     const lastMessage = context[context.length - 1];
     const queryText = lastMessage ? messageText(lastMessage) : "";
+    const userArc = buildUserArc(message.serverTag, message.nick);
 
     let result: PromptRunResult;
     try {
-      result = await this.invokeAndPostProcess(runner, message, queryText, runnerContext, toolSet.tools, {
-        reasoningEffort,
-      });
+      result = await withPersistedCostSpan(
+        "execute_quiet",
+        { arc: message.arc, userArc, trigger },
+        { history: this.history, userCostLedger: this.userCostLedger },
+        async () => await this.invokeAndPostProcess(runner, message, queryText, runnerContext, toolSet.tools, {
+          reasoningEffort,
+          modelSpec,
+        }),
+      );
     } catch (error) {
       logger.error("Error during quiet agent execution", error);
       return false;
@@ -832,7 +842,7 @@ export class CommandExecutor {
     queryText: string,
     contextMessages: Message[],
     tools: MuaddibTool[],
-    opts: { reasoningEffort: string; visionModel?: string; memoryUpdate?: boolean; toolSummary?: boolean },
+    opts: { reasoningEffort: string; visionModel?: string; memoryUpdate?: boolean; toolSummary?: boolean; modelSpec?: string },
     triggerTs?: string,
   ): Promise<PromptRunResult> {
     const agentResult = await runner.prompt(queryText, {
@@ -841,6 +851,16 @@ export class CommandExecutor {
       visionFallbackModel: opts.visionModel,
       refusalFallbackModel: this.refusalFallbackModel ?? undefined,
     });
+
+    // Record top-level usage into the active cost span.  The session runner
+    // may have already recorded per-turn entries; if the span has no entries
+    // yet (e.g. mocked runners in tests) this ensures the aggregate is captured.
+    if (agentResult.usage) {
+      const span = currentCostSpan();
+      if (span && span.allEntries().length === 0) {
+        recordUsage(LLM_CALL_TYPE.AGENT_RUN, opts.modelSpec ?? "unknown", agentResult.usage);
+      }
+    }
 
     // Deferred: memory update, tool summary persistence, session dispose.
     // Callers await this *after* sending the response so the user isn't blocked.
@@ -1022,11 +1042,16 @@ export class CommandExecutor {
       return;
     }
 
+    const dmUserArc = message.isDirect
+      ? buildUserArc(message.serverTag, message.nick)
+      : undefined;
+
     await this.runtime.chronicle.autoChronicler.checkAndChronicle(
       message.mynick,
       message.serverTag,
       message.channelName,
       maxSize,
+      dmUserArc ? { userArc: dmUserArc, userCostLedger: this.userCostLedger } : undefined,
     );
   }
 

@@ -13,6 +13,7 @@ import {
 } from "../src/cost/cost-policy.js";
 import { remapToOpenRouter } from "../src/cost/model-remap.js";
 import { resolveProviderOverrideModel } from "../src/models/provider-overrides.js";
+import { LLM_CALL_TYPE, isLlmCallType } from "../src/cost/llm-call-type.js";
 import { UserCostLedger } from "../src/cost/user-cost-ledger.js";
 import { UserKeyStore } from "../src/cost/user-key-store.js";
 import { buildArc } from "../src/rooms/message.js";
@@ -72,6 +73,16 @@ describe("resolveCostPolicyConfig", () => {
       freeTierBudgetUsd: 2,
       freeTierWindowHours: 24,
     });
+  });
+});
+
+describe("LLM call types", () => {
+  it("defines all canonical call types with a working type guard", () => {
+    for (const value of Object.values(LLM_CALL_TYPE)) {
+      expect(isLlmCallType(value)).toBe(true);
+    }
+    expect(isLlmCallType("nonexistent")).toBe(false);
+    expect(LLM_CALL_TYPE.GENERATE_IMAGE).toBe("generate_image");
   });
 });
 

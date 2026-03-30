@@ -7,6 +7,9 @@ import { buildArc } from "./message.js";
 import { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
 import { responseText } from "../agent/message.js";
 import { ArcLockManager } from "../utils/arc-lock.js";
+import { withPersistedCostSpan } from "../cost/cost-span.js";
+import type { UserCostLedger } from "../cost/user-cost-ledger.js";
+import { LLM_CALL_TYPE } from "../cost/llm-call-type.js";
 
 export interface AutoChronicler {
   checkAndChronicle(
@@ -14,6 +17,7 @@ export interface AutoChronicler {
     server: string,
     channel: string,
     maxSize: number,
+    opts?: { userArc?: string; userCostLedger?: UserCostLedger },
   ): Promise<boolean>;
 }
 
@@ -56,34 +60,42 @@ export class AutoChroniclerTs implements AutoChronicler {
     server: string,
     channel: string,
     maxSize: number,
+    opts?: { userArc?: string; userCostLedger?: UserCostLedger },
   ): Promise<boolean> {
     const arc = buildArc(server, channel);
 
     return await this.arcLock.run(arc, async () => {
-      const unchronicledCount = await this.options.history.countRecentUnchronicled(
-        arc,
-        AutoChroniclerTs.MAX_LOOKBACK_DAYS,
+      return await withPersistedCostSpan(
+        "autochronicler",
+        { arc, ...(opts?.userArc ? { userArc: opts.userArc } : {}) },
+        { history: this.options.history, ...(opts?.userCostLedger ? { userCostLedger: opts.userCostLedger } : {}) },
+        async () => {
+          const unchronicledCount = await this.options.history.countRecentUnchronicled(
+            arc,
+            AutoChroniclerTs.MAX_LOOKBACK_DAYS,
+          );
+
+          this.logger.debug(
+            `Auto-chronicler threshold for ${arc}: ${unchronicledCount}/${maxSize}`,
+          );
+
+          if (unchronicledCount < maxSize) {
+            return false;
+          }
+
+          this.logger.debug(
+            `Auto-chronicling triggered for ${arc}: ${unchronicledCount} unchronicled messages`,
+          );
+
+          try {
+            await this.autoChronicle(mynick, arc);
+          } catch (error) {
+            this.logger.error(`Auto-chronicling failed for ${arc}:`, error);
+          }
+
+          return true;
+        },
       );
-
-      this.logger.debug(
-        `Auto-chronicler threshold for ${arc}: ${unchronicledCount}/${maxSize}`,
-      );
-
-      if (unchronicledCount < maxSize) {
-        return false;
-      }
-
-      this.logger.debug(
-        `Auto-chronicling triggered for ${arc}: ${unchronicledCount} unchronicled messages`,
-      );
-
-      try {
-        await this.autoChronicle(mynick, arc);
-      } catch (error) {
-        this.logger.error(`Auto-chronicling failed for ${arc}:`, error);
-      }
-
-      return true;
     });
   }
 
@@ -144,7 +156,7 @@ export class AutoChroniclerTs implements AutoChronicler {
         ],
       },
       {
-        callType: "autochronicler_append",
+        callType: LLM_CALL_TYPE.AUTOCHRONICLER_APPEND,
         logger: this.logger,
         streamOptions: { maxTokens: 1024 },
       },

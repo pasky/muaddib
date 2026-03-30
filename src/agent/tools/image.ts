@@ -3,6 +3,9 @@ import { Type } from "@sinclair/typebox";
 import { parseModelSpec } from "../../models/model-spec.js";
 import type { ToolContext, MuaddibTool } from "./types.js";
 import { toConfiguredString } from "../../utils/index.js";
+import { recordUsage } from "../../cost/cost-span.js";
+import { LLM_CALL_TYPE } from "../../cost/llm-call-type.js";
+import { emptyUsage } from "../../cost/usage.js";
 
 export interface GenerateImageInput {
   prompt: string;
@@ -130,6 +133,12 @@ export function createDefaultGenerateImageExecutor(
       timeoutMs,
       contentBlocks,
     });
+
+    recordUsage(
+      LLM_CALL_TYPE.GENERATE_IMAGE,
+      configuredModel,
+      extractUsageFromResponse(responsePayload),
+    );
 
     const dataUrls = extractGeneratedImageDataUrls(responsePayload);
     if (dataUrls.length === 0) {
@@ -425,4 +434,30 @@ function extractErrorMessage(value: unknown): string | undefined {
 
 function isAbortError(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && (error as { name?: unknown }).name === "AbortError");
+}
+
+import type { Usage } from "@mariozechner/pi-ai";
+
+function extractUsageFromResponse(payload: unknown): Usage {
+  const usage = emptyUsage();
+  if (!payload || typeof payload !== "object") return usage;
+
+  const raw = (payload as Record<string, unknown>).usage;
+  if (!raw || typeof raw !== "object") return usage;
+
+  const u = raw as Record<string, unknown>;
+  if (typeof u.prompt_tokens === "number") usage.input = u.prompt_tokens;
+  if (typeof u.completion_tokens === "number") usage.output = u.completion_tokens;
+  if (typeof u.total_tokens === "number") usage.totalTokens = u.total_tokens;
+
+  // OpenRouter may report cost directly via native_tokens_cost or total_cost.
+  const nativeCost = u.native_tokens_cost;
+  const totalCost = u.total_cost;
+  if (typeof nativeCost === "number" && nativeCost > 0) {
+    usage.cost.total = nativeCost;
+  } else if (typeof totalCost === "number" && totalCost > 0) {
+    usage.cost.total = totalCost;
+  }
+
+  return usage;
 }

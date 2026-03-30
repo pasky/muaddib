@@ -11,9 +11,12 @@ import {
   createAgentSessionForInvocation,
   type RunnerLogger,
 } from "./session-factory.js";
-import { compactJson, emptyUsage, safeJson, truncateForDebug } from "./debug-utils.js";
+import { compactJson, safeJson, truncateForDebug } from "./debug-utils.js";
+import { sumAssistantUsage } from "../cost/usage.js";
 import type { ToolSet } from "./tools/types.js";
 import type { SessionLimitsConfig } from "../config/muaddib-config.js";
+import { currentCostSpan, recordUsage } from "../cost/cost-span.js";
+import { LLM_CALL_TYPE, isLlmCallType } from "../cost/llm-call-type.js";
 
 const DEFAULT_EMPTY_COMPLETION_RETRY_PROMPT =
   "<meta>No valid text or tool use found in response. Please try again.</meta>";
@@ -239,6 +242,7 @@ export class SessionRunner {
     };
 
     let sessionReturned = false;
+    let usageRecorded = false;
     try {
       const refusalFallbackActivated = await this.promptWithRefusalFallback(
         session,
@@ -288,11 +292,16 @@ export class SessionRunner {
         throw pendingResponseError;
       }
 
+      const usageSummary = sumAssistantUsage(session.messages);
+      const callType = resolveCurrentLlmCallType();
+      recordUsage(callType, this.model, usageSummary.usage);
+      usageRecorded = true;
+
       sessionReturned = true;
       return {
         text,
         stopReason: lastAssistant?.stopReason ?? "stop",
-        ...sumAssistantUsage(session.messages),
+        ...usageSummary,
         iterations,
         toolCallsCount,
         visionFallbackActivated: sessionCtx.getVisionFallbackActivated(),
@@ -310,6 +319,12 @@ export class SessionRunner {
         },
       };
     } finally {
+      if (!usageRecorded) {
+        const usageSummary = sumAssistantUsage(session.messages);
+        if (usageSummary.usage.totalTokens > 0 || usageSummary.usage.cost.total > 0) {
+          recordUsage(resolveCurrentLlmCallType(), this.model, usageSummary.usage);
+        }
+      }
       // Error-path safety: if the session is never returned (exception before return),
       // unsubscribe and ensure toolSet is still cleaned up.  On the success path,
       // both are deferred — the caller triggers them via session.dispose().
@@ -395,34 +410,11 @@ function findLastAssistantMessage(messages: readonly AgentMessage[]): AssistantM
 }
 
 
-function sumAssistantUsage(messages: readonly AgentMessage[]): { usage: Usage; peakTurnInput: number } {
-  const total = emptyUsage();
-  let peakTurnInput = 0;
-
-  for (const message of messages) {
-    if (!isAssistantMessage(message)) {
-      continue;
-    }
-
-    const usage = message.usage;
-    total.input += usage.input;
-    total.output += usage.output;
-    total.cacheRead += usage.cacheRead;
-    total.cacheWrite += usage.cacheWrite;
-    total.totalTokens += usage.totalTokens;
-    total.cost.input += usage.cost.input;
-    total.cost.output += usage.cost.output;
-    total.cost.cacheRead += usage.cost.cacheRead;
-    total.cost.cacheWrite += usage.cost.cacheWrite;
-    total.cost.total += usage.cost.total;
-
-    const turnInput = usage.input + usage.cacheRead + usage.cacheWrite;
-    if (turnInput > peakTurnInput) {
-      peakTurnInput = turnInput;
-    }
-  }
-
-  return { usage: total, peakTurnInput };
+function resolveCurrentLlmCallType() {
+  const spanName = currentCostSpan()?.name;
+  return spanName && isLlmCallType(spanName)
+    ? spanName
+    : LLM_CALL_TYPE.AGENT_RUN;
 }
 
 function renderMessageForDebug(message: unknown, maxChars: number): Record<string, unknown> {

@@ -4,6 +4,7 @@ import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import type { Logger } from "../../app/logging.js";
 import { messageText } from "../../utils/index.js";
 import { responseText } from "../../agent/message.js";
+import { LLM_CALL_TYPE } from "../../cost/llm-call-type.js";
 
 export interface ContextReducerConfig {
   model?: string;
@@ -69,7 +70,7 @@ export class ContextReducerTs implements ContextReducer {
           systemPrompt: this.config.prompt,
         },
         {
-          callType: "contextReducer",
+          callType: LLM_CALL_TYPE.CONTEXT_REDUCER,
           logger: this.logger,
           streamOptions: { maxTokens: 2_048, reasoning: "low" },
         },
