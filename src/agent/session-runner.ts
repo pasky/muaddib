@@ -250,7 +250,9 @@ export class SessionRunner {
       );
 
       const EMPTY_RETRY_DELAYS_MS = [5_000, 20_000, 60_000];
-      let text = extractLastAssistantText(session.messages);
+      // Treat "[internal monologue]" as empty — these are suppressed by
+      // cleanResponseText in command-executor.ts, so the user would see nothing.
+      let text = stripUndeliverableResponse(extractLastAssistantText(session.messages));
       for (let i = 0; i < EMPTY_RETRY_DELAYS_MS.length && !text; i += 1) {
         const emptyMsg = findLastAssistantMessage(session.messages);
         const reason = emptyMsg?.stopReason ?? "unknown";
@@ -262,7 +264,7 @@ export class SessionRunner {
         await new Promise((resolve) => setTimeout(resolve, EMPTY_RETRY_DELAYS_MS[i]));
         await session.prompt(this.emptyCompletionRetryPrompt);
         this.logLlmIo(`after_empty_retry_${i + 1}`, session.messages);
-        text = extractLastAssistantText(session.messages);
+        text = stripUndeliverableResponse(extractLastAssistantText(session.messages));
       }
 
       if (!text) {
@@ -370,6 +372,16 @@ export class SessionRunner {
 function extractLastAssistantText(messages: readonly AgentMessage[]): string {
   const assistant = findLastAssistantMessage(messages);
   return assistant ? responseText(assistant) : "";
+}
+
+/**
+ * Responses that would be suppressed by cleanResponseText (command-executor.ts)
+ * are treated as empty here so the retry loop re-prompts instead of returning
+ * a response the user never sees.
+ */
+function stripUndeliverableResponse(text: string): string {
+  if (text.startsWith("[internal monologue]")) return "";
+  return text;
 }
 
 function findLastAssistantMessage(messages: readonly AgentMessage[]): AssistantMessage | null {

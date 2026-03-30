@@ -1032,6 +1032,10 @@ export class CommandExecutor {
 
   private cleanResponseText(text: string, nick: string): string {
     const cleaned = stripLeadingIrcContextEchoPrefixes(text.trim());
+    // Suppress internal-monologue text from room delivery.  The runner's
+    // stripUndeliverableResponse (session-runner.ts) mirrors this check so
+    // that a final-turn monologue triggers the empty-completion retry loop
+    // instead of silently producing no visible response.
     if (cleaned.startsWith("[internal monologue]")) return "";
     if (!this.overrides?.responseCleaner) {
       return cleaned;
