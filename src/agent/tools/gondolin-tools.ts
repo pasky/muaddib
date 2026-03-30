@@ -134,7 +134,7 @@ function buildSystemPromptSuffix(
   nick?: string,
 ): string {
   const chatHistorySuffix = existsSync(getArcChatHistoryDir(arc))
-    ? " Need exact quotes or fine-grained chronology beyond the current context? Inspect daily JSONL logs in /chat_history/ (read-only), e.g. /chat_history/YYYY-MM-DD.jsonl."
+    ? " For chat chronology lookup and searches beyond the current context or e.g. cost information, read/grep daily logs in /chat_history/ (read-only), e.g. /chat_history/YYYY-MM-DD.jsonl."
     : "";
 
   const skills = loadBundledSkills();

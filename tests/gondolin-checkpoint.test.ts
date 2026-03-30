@@ -1532,7 +1532,6 @@ describe("gondolin — chat history in systemPromptSuffix", () => {
       config: gondolinConfig,
     });
     expect(systemPromptSuffix).toContain("/chat_history/");
-    expect(systemPromptSuffix).toContain("exact quotes");
     expect(systemPromptSuffix).toContain("YYYY-MM-DD.jsonl");
   });
 
