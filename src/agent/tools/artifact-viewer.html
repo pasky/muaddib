@@ -318,6 +318,20 @@
           return;
         }
 
+        const isPdf = contentType.includes("application/pdf") || lower.endsWith(".pdf");
+
+        if (isPdf) {
+          // Render PDF in a near-fullpage iframe using the browser's built-in PDF viewer
+          document.querySelector(".wrap").style.cssText = "max-width:none;margin:0;padding:0;position:fixed;inset:0;top:2.5rem;";
+          var iframe = document.createElement("iframe");
+          iframe.src = rawHref;
+          iframe.style.cssText = "width:100%;height:100%;border:none;";
+          content.style.cssText = "margin:0;height:100%;";
+          content.innerHTML = "";
+          content.appendChild(iframe);
+          return;
+        }
+
         const htmlExts = [".html", ".htm"];
         const isHtml = contentType.includes("text/html") || htmlExts.some(function (ext) { return lower.endsWith(ext); });
 
