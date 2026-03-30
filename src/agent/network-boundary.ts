@@ -47,6 +47,28 @@ export type NetworkAccessApprover = (
   request: NetworkAccessApprovalRequest,
 ) => Promise<NetworkAccessApprovalResult | boolean> | NetworkAccessApprovalResult | boolean;
 
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+export function getRedirectTarget(
+  response: { status: number; headers: { get(name: string): string | null } },
+  currentUrl: string,
+): string | null {
+  const location = response.headers.get("location");
+  if (!location || !REDIRECT_STATUSES.has(response.status)) {
+    return null;
+  }
+
+  try {
+    const redirectUrl = new URL(location, currentUrl);
+    if (redirectUrl.protocol !== "http:" && redirectUrl.protocol !== "https:") {
+      return null;
+    }
+    return redirectUrl.toString();
+  } catch {
+    return null;
+  }
+}
+
 export function canonicalizeNetworkTrustUrl(rawUrl: string): string {
   const parsedUrl = new URL(rawUrl);
   if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {

@@ -8,6 +8,8 @@
  * Delegates execution to CommandExecutor and proactive interjection to ProactiveRunner.
  */
 
+import { randomBytes } from "node:crypto";
+
 import type { Agent } from "@mariozechner/pi-agent-core";
 import { CommandResolver } from "./resolver.js";
 import { buildProactiveConfig, ProactiveRunner } from "./proactive.js";
@@ -55,6 +57,7 @@ interface PendingNetworkApproval {
   threadId?: string;
   canonicalUrl: string;
   resolve: (result: NetworkAccessApprovalResult) => void;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 function parseApprovalCommand(content: string):
@@ -93,12 +96,11 @@ export class RoomMessageHandler {
   private readonly proactiveRunner: ProactiveRunner | null;
   private readonly history: ChatHistoryStore;
   private readonly logger: CommandExecutorLogger;
-  private readonly fallbackNetworkAccessApprover?: NetworkAccessApprover;
+  private readonly overrideNetworkAccessApprover?: NetworkAccessApprover;
 
   /** Active steering functions keyed by session key, with the session's resolved mode. */
   private readonly activeSteers = new Map<string, { steer: (message: RoomMessage) => void; modeKey: string | null }>();
   private readonly pendingNetworkApprovals = new Map<string, PendingNetworkApproval>();
-  private nextNetworkApprovalId = 1;
 
   constructor(
     runtime: MuaddibRuntime,
@@ -109,7 +111,7 @@ export class RoomMessageHandler {
     this.resolver = this.executor.resolver;
     this.history = runtime.history;
     this.logger = runtime.logger.getLogger(`muaddib.rooms.command.${roomName}`);
-    this.fallbackNetworkAccessApprover = runtime.networkAccessApprover;
+    this.overrideNetworkAccessApprover = runtime.networkAccessApprover;
 
     // Proactive interjection setup
     const roomConfig = runtime.config.getRoomConfig(roomName);
@@ -361,25 +363,39 @@ export class RoomMessageHandler {
     sendResponse: SendResponse,
   ): NetworkAccessApprover {
     return async (request) => {
-      if (this.fallbackNetworkAccessApprover) {
-        return await this.fallbackNetworkAccessApprover(request);
+      if (this.overrideNetworkAccessApprover) {
+        return await this.overrideNetworkAccessApprover(request);
       }
 
-      const id = String(this.nextNetworkApprovalId++);
+      const id = this.generateApprovalId();
       const approval = new Promise<NetworkAccessApprovalResult>((resolve) => {
+        const timer = setTimeout(() => {
+          if (this.pendingNetworkApprovals.delete(id)) {
+            resolve({
+              approved: false,
+              message: `Network access request ${id} for ${request.canonicalUrl} timed out.`,
+            });
+          }
+        }, 270_000); // Match Gondolin bashTimeoutSeconds default — just under Anthropic's 5-min cache expiry.
+
         this.pendingNetworkApprovals.set(id, {
           id,
           arc: request.arc,
           threadId: message.threadId,
           canonicalUrl: request.canonicalUrl,
           resolve,
+          timer,
         });
       });
 
       try {
         await sendResponse(this.buildApprovalRequestMessage(id, request));
       } catch (error) {
-        this.pendingNetworkApprovals.delete(id);
+        const entry = this.pendingNetworkApprovals.get(id);
+        if (entry) {
+          clearTimeout(entry.timer);
+          this.pendingNetworkApprovals.delete(id);
+        }
         throw error;
       }
 
@@ -413,6 +429,7 @@ export class RoomMessageHandler {
     }
 
     const approved = parsed.action === "approve";
+    clearTimeout(pending.timer);
     this.pendingNetworkApprovals.delete(parsed.id);
     await sendResponse(
       `${message.nick}: ${approved ? "approved" : "denied"} network access request ${parsed.id} for ${pending.canonicalUrl}.`,
@@ -426,6 +443,15 @@ export class RoomMessageHandler {
         : `Network access denied for ${pending.canonicalUrl}.`,
     });
     return true;
+  }
+
+  private generateApprovalId(): string {
+    for (;;) {
+      const id = randomBytes(4).toString("hex");
+      if (!this.pendingNetworkApprovals.has(id)) {
+        return id;
+      }
+    }
   }
 
   private buildApprovalRequestMessage(id: string, request: NetworkAccessApprovalRequest): string {

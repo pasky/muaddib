@@ -10,6 +10,7 @@ import type { VMOptions } from "@earendil-works/gondolin";
 import type { Logger } from "../../app/logging.js";
 import {
   checkAndAutoApproveUrlInArc,
+  getRedirectTarget,
   recordRedirectTrustEvent,
 } from "../network-boundary.js";
 
@@ -134,7 +135,6 @@ function isIPv4InPrefix(ip: string, prefix: string, length: number): boolean {
 
 export type VmNetworkFetch = NonNullable<VMOptions["fetch"]>;
 type VmNetworkFetchInput = Parameters<VmNetworkFetch>[0];
-type VmNetworkFetchResponse = Awaited<ReturnType<VmNetworkFetch>>;
 
 export interface VmSecretDefinition {
   hosts: string[];
@@ -201,7 +201,7 @@ export async function createVmHttpHooks(opts: CreateVmHttpHooksOptions): Promise
   const trustAwareFetch: VmNetworkFetch = async (input, init) => {
     const response = await fetchImpl(input, init);
     const requestUrl = getFetchInputUrl(input);
-    const redirectTarget = resolveRedirectTarget(response, requestUrl);
+    const redirectTarget = getRedirectTarget(response, requestUrl);
     if (redirectTarget) {
       await recordRedirectTrustEvent(opts.arc, {
         fromUrl: requestUrl,
@@ -222,21 +222,6 @@ function getFetchInputUrl(input: VmNetworkFetchInput): string {
     return input.toString();
   }
   return (input as { url: string }).url;
-}
-
-function resolveRedirectTarget(response: VmNetworkFetchResponse, requestUrl: string): string | null {
-  const location = response.headers.get("location");
-  if (!location) {
-    return null;
-  }
-  if (![301, 302, 303, 307, 308].includes(response.status)) {
-    return null;
-  }
-  const redirectUrl = new URL(location, requestUrl);
-  if (redirectUrl.protocol !== "http:" && redirectUrl.protocol !== "https:") {
-    return null;
-  }
-  return redirectUrl.toString();
 }
 
 function resolveArtifactHostname(artifactsUrl: string | undefined, logger?: Logger): string | undefined {

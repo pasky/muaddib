@@ -5,7 +5,7 @@ import {
   type NetworkAccessApprovalResult,
   recordNetworkTrustEvent,
 } from "../network-boundary.js";
-import { resolveGondolinUrlAllowRegexes } from "../gondolin/env.js";
+import { resolveUrlAllowRegexes } from "../gondolin/env.js";
 import type { MuaddibTool, ToolContext } from "./types.js";
 
 export interface RequestNetworkAccessInput {
@@ -49,7 +49,7 @@ export function createRequestNetworkAccessTool(
 export function createDefaultRequestNetworkAccessExecutor(
   options: ToolContext,
 ): RequestNetworkAccessExecutor {
-  const autoApproveRegexes = resolveGondolinUrlAllowRegexes({
+  const autoApproveRegexes = resolveUrlAllowRegexes({
     config: options.toolsConfig?.gondolin ?? {},
     serverTag: options.serverTag,
     channelName: options.channelName,

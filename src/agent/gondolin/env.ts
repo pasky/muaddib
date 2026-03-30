@@ -31,7 +31,7 @@ interface ResolvedGondolinArcFragments {
   urlAllowRegexes: RegExp[];
 }
 
-export function resolveGondolinUrlAllowRegexes(options: ResolveGondolinArcOptions): RegExp[] {
+export function resolveUrlAllowRegexes(options: ResolveGondolinArcOptions): RegExp[] {
   return resolveGondolinArcFragments(options).urlAllowRegexes;
 }
 

@@ -7,11 +7,12 @@ import type { ToolContext, MuaddibTool } from "./types.js";
 import { resolveLocalArtifactFilePath } from "./url-utils.js";
 import {
   checkAndAutoApproveUrlInArc,
+  getRedirectTarget,
   recordNetworkTrustEvent,
   recordNetworkTrustEvents,
   recordRedirectTrustEvent,
 } from "../network-boundary.js";
-import { resolveGondolinUrlAllowRegexes } from "../gondolin/env.js";
+import { resolveUrlAllowRegexes } from "../gondolin/env.js";
 import { responseText } from "../message.js";
 import { toConfiguredString } from "../../utils/index.js";
 
@@ -175,7 +176,7 @@ function sanitizeExtractedUrlCandidate(value: string): string {
 
 async function ensureVisitUrlTrusted(options: ToolContext, url: string): Promise<void> {
   const trust = await checkAndAutoApproveUrlInArc(options.arc, url, {
-    autoApproveRegexes: resolveGondolinUrlAllowRegexes({
+    autoApproveRegexes: resolveUrlAllowRegexes({
       config: options.toolsConfig?.gondolin ?? {},
       serverTag: options.serverTag,
       channelName: options.channelName,
@@ -188,24 +189,6 @@ async function ensureVisitUrlTrusted(options: ToolContext, url: string): Promise
   throw new Error(
     `Network access denied for ${trust.canonicalUrl}. Use web_search or request_network_access first.`,
   );
-}
-
-function isRedirectStatus(status: number): boolean {
-  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
-}
-
-function getRedirectTarget(response: Response, currentUrl: string): string | null {
-  const location = response.headers.get("location");
-  if (!location || !isRedirectStatus(response.status)) {
-    return null;
-  }
-
-  const redirectUrl = new URL(location, currentUrl);
-  if (redirectUrl.protocol !== "http:" && redirectUrl.protocol !== "https:") {
-    return null;
-  }
-
-  return redirectUrl.toString();
 }
 
 async function fetchVisitResponseWithRedirects(
@@ -308,6 +291,7 @@ export function createDefaultVisitWebpageExecutor(
 
     await ensureVisitUrlTrusted(options, url);
     await visitRateLimiter.waitIfNeeded();
+    await recordNetworkTrustEvent(options.arc, { source: "visit_webpage", rawUrl: url });
 
     const baseRequestHeaders = {
       "User-Agent": "muaddib/1.0",
@@ -355,11 +339,6 @@ export function createDefaultVisitWebpageExecutor(
         );
       }
 
-      await recordNetworkTrustEvent(options.arc, {
-        source: "visit_webpage",
-        rawUrl: url,
-      });
-
       return {
         kind: "image",
         data: imageBytes.toString("base64"),
@@ -395,18 +374,10 @@ export function createDefaultVisitWebpageExecutor(
         const slice = truncated ? data.subarray(0, maxWebContentLength) : data;
         const b64 = slice.toString("base64");
         const suffix = truncated ? " (truncated)" : "";
-        await recordNetworkTrustEvent(options.arc, {
-          source: "visit_webpage",
-          rawUrl: url,
-        });
         return `## Binary content from ${url} (content-type: ${rawContentType})\n\nBase64${suffix}: ${b64}`;
       }
 
       const body = (await response.text()).trim();
-      await recordNetworkTrustEvent(options.arc, {
-        source: "visit_webpage",
-        rawUrl: url,
-      });
 
       if (!body) {
         return `## Content from ${url}\n\n(Empty response)`;
@@ -418,10 +389,6 @@ export function createDefaultVisitWebpageExecutor(
     // Use Jina reader with retry/backoff.
     const readerUrl = `https://r.jina.ai/${url}`;
     const body = await fetchJinaWithRetry(readerUrl, await options.authStorage.getApiKey("jina"), options.logger);
-    await recordNetworkTrustEvent(options.arc, {
-      source: "visit_webpage",
-      rawUrl: url,
-    });
 
     if (!body) {
       return `## Content from ${url}\n\n(Empty response)`;

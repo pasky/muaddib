@@ -617,6 +617,7 @@ describe("core tool executors visit_webpage support", () => {
   });
 
   it("visit_webpage normalizes non-standard image/jpg to image/jpeg", async () => {
+    await trustUrl("https://example.com/photo.jpg");
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "HEAD") {
         return new Response("", { status: 200, headers: { "content-type": "image/jpg" } });
@@ -635,6 +636,7 @@ describe("core tool executors visit_webpage support", () => {
   });
 
   it("visit_webpage treats SVG as text content, not as image", async () => {
+    await trustUrl("https://example.com/bird.svg");
     const svgContent = '<svg xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="40"/></svg>';
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (init?.method === "HEAD") {

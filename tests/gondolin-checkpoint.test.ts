@@ -27,7 +27,7 @@ import {
   closeAllVms,
   getVmSlotState,
 } from "../src/agent/gondolin/vm.js";
-import { resolveGondolinUrlAllowRegexes } from "../src/agent/gondolin/env.js";
+import { resolveUrlAllowRegexes } from "../src/agent/gondolin/env.js";
 
 import {
   loadBundledSkills,
@@ -860,7 +860,7 @@ describe("gondolin per-arc env injection", () => {
   });
 
   it("resolves urlAllowRegexes from gondolin profiles and arc fragments", () => {
-    const regexes = resolveGondolinUrlAllowRegexes({
+    const regexes = resolveUrlAllowRegexes({
       config: {
         ...gondolinConfig,
         profiles: {
