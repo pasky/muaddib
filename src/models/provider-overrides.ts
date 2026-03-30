@@ -128,45 +128,64 @@ function resolveDeepSeekModel(modelId: string): Model<Api> {
   };
 }
 
+/**
+ * Normalize a model ID for OpenRouter lookup.
+ *
+ * Anthropic uses hyphens in version numbers (e.g. `claude-opus-4-6`),
+ * while OpenRouter uses dots (e.g. `anthropic/claude-opus-4.6`).
+ * This converts digit-hyphen-digit sequences to digit-dot-digit.
+ */
+function normalizeOpenRouterModelId(modelId: string): string {
+  return modelId.replace(/(\d)-(\d)/g, "$1.$2");
+}
+
 function resolveOpenRouterModel(modelId: string, providerRouting?: string[]): Model<Api> | undefined {
   const compat: OpenAICompletionsCompat | undefined = providerRouting?.length
     ? { openRouterRouting: { only: providerRouting } }
     : undefined;
 
-  // Prefer the static registry entry if it exists.
-  const known = getModel(OPENROUTER_PROVIDER as KnownProvider, modelId as never) as
-    | Model<Api>
-    | undefined;
-  if (known) {
-    return compat ? { ...known, compat } : known;
-  }
+  // Try exact match first, then normalized version (e.g. hyphens → dots in versions).
+  const normalized = normalizeOpenRouterModelId(modelId);
+  const candidates = normalized !== modelId ? [modelId, normalized] : [modelId];
 
-  // Use live OpenRouter model data if the background fetch has landed.
-  const cached = openRouterModelCache.get(modelId);
-  if (cached) {
-    return {
-      id: modelId,
-      name: modelId,
-      api: "openai-completions",
-      provider: OPENROUTER_PROVIDER,
-      baseUrl: OPENROUTER_BASE_URL,
-      reasoning: cached.reasoning,
-      input: cached.inputModalities.filter((m): m is "text" | "image" => m === "text" || m === "image"),
-      cost: cached.cost,
-      contextWindow: cached.contextWindow,
-      maxTokens: cached.maxTokens,
-      compat,
-    };
+  for (const candidate of candidates) {
+    // Prefer the static registry entry if it exists.
+    const known = getModel(OPENROUTER_PROVIDER as KnownProvider, candidate as never) as
+      | Model<Api>
+      | undefined;
+    if (known) {
+      return compat ? { ...known, compat } : known;
+    }
+
+    // Use live OpenRouter model data if the background fetch has landed.
+    const cached = openRouterModelCache.get(candidate);
+    if (cached) {
+      return {
+        id: candidate,
+        name: candidate,
+        api: "openai-completions",
+        provider: OPENROUTER_PROVIDER,
+        baseUrl: OPENROUTER_BASE_URL,
+        reasoning: cached.reasoning,
+        input: cached.inputModalities.filter((m): m is "text" | "image" => m === "text" || m === "image"),
+        cost: cached.cost,
+        contextWindow: cached.contextWindow,
+        maxTokens: cached.maxTokens,
+        compat,
+      };
+    }
   }
 
   // Cache not yet populated (fetch still in flight on startup) — synthesize a
   // best-effort entry so the call isn't rejected. Cost will be zero.
+  // Use the normalized ID so OpenRouter receives the correct model name.
+  const fallbackId = normalized !== modelId ? normalized : modelId;
   console.warn(
-    `OpenRouter model '${modelId}' not in static registry or live cache yet; using zero-cost fallback.`,
+    `OpenRouter model '${modelId}' not in static registry or live cache yet; using zero-cost fallback (id=${fallbackId}).`,
   );
   return {
-    id: modelId,
-    name: modelId,
+    id: fallbackId,
+    name: fallbackId,
     api: "openai-completions",
     provider: OPENROUTER_PROVIDER,
     baseUrl: OPENROUTER_BASE_URL,

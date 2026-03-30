@@ -53,11 +53,12 @@ describe("PiAiModelAdapter", () => {
 
   it("resolves unknown openrouter model via dynamic fallback (zero-cost if cache not ready)", () => {
     // In tests the background fetch may not have landed; either way the model must resolve.
+    // Note: digit-hyphen-digit normalization converts 3-1 to 3.1 in the fallback ID.
     const resolved = adapter.resolve("openrouter:google/gemini-3-1-pro-preview");
 
     expect(resolved.spec.provider).toBe("openrouter");
     expect(resolved.model.provider).toBe("openrouter");
-    expect(resolved.model.id).toBe("google/gemini-3-1-pro-preview");
+    expect(resolved.model.id).toBe("google/gemini-3.1-pro-preview");
     expect(resolved.model.api).toBe("openai-completions");
     expect(resolved.model.baseUrl).toBe("https://openrouter.ai/api/v1");
   });

@@ -12,6 +12,7 @@ import {
   readQuotaWarningTs,
 } from "../src/cost/cost-policy.js";
 import { remapToOpenRouter } from "../src/cost/model-remap.js";
+import { resolveProviderOverrideModel } from "../src/models/provider-overrides.js";
 import { UserCostLedger } from "../src/cost/user-cost-ledger.js";
 import { UserKeyStore } from "../src/cost/user-key-store.js";
 import { buildArc } from "../src/rooms/message.js";
@@ -34,6 +35,29 @@ describe("remapToOpenRouter", () => {
     expect(remapToOpenRouter("openrouter:anthropic/claude-sonnet-4")).toBe(
       "openrouter:anthropic/claude-sonnet-4",
     );
+  });
+});
+
+describe("resolveProviderOverrideModel normalizes version separators", () => {
+  it("resolves anthropic/claude-opus-4-6 via dot normalization", () => {
+    // The static registry has "anthropic/claude-opus-4.6" (with dot),
+    // but BYOK remap produces "anthropic/claude-opus-4-6" (with hyphen).
+    const model = resolveProviderOverrideModel("openrouter", "anthropic/claude-opus-4-6");
+    expect(model).toBeDefined();
+    expect(model!.id).toBe("anthropic/claude-opus-4.6");
+  });
+
+  it("resolves exact match without normalization", () => {
+    const model = resolveProviderOverrideModel("openrouter", "anthropic/claude-opus-4.6");
+    expect(model).toBeDefined();
+    expect(model!.id).toBe("anthropic/claude-opus-4.6");
+  });
+
+  it("does not mangle non-version hyphens", () => {
+    // gpt-4o-mini has no digit-hyphen-digit, so normalization is a no-op
+    const model = resolveProviderOverrideModel("openrouter", "openai/gpt-4o-mini");
+    expect(model).toBeDefined();
+    expect(model!.id).toBe("openai/gpt-4o-mini");
   });
 });
 
