@@ -10,6 +10,7 @@ import { PiAiModelAdapter } from "./models/pi-ai-model-adapter.js";
 import { MuaddibConfig } from "./config/muaddib-config.js";
 
 export interface MuaddibRuntime {
+  muaddibHome: string;
   config: MuaddibConfig;
   history: ChatHistoryStore;
   modelAdapter: PiAiModelAdapter;
@@ -64,6 +65,7 @@ export async function createMuaddibRuntime(
   }
 
   return {
+    muaddibHome,
     config,
     history,
     modelAdapter,

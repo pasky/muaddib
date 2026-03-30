@@ -72,6 +72,34 @@ describe("CommandResolver", () => {
     expect(parsed.error).toContain("Unknown command");
   });
 
+  it("resolves builtin balance command without normal mode resolution", async () => {
+    const resolver = new CommandResolver(
+      commandConfig as any,
+      async () => "SARCASTIC",
+      "!h",
+      new Set(["!c"]),
+      (model) => String(model),
+    );
+
+    const resolved = await resolver.resolve({
+      message: {
+        serverTag: "libera",
+        channelName: "#test",
+        arc: "libera##test",
+        nick: "user",
+        mynick: "bot",
+        content: "!balance",
+      },
+      context: [],
+      defaultSize: 40,
+    });
+
+    expect(resolved.builtinCommand).toBe("!balance");
+    expect(resolved.modeKey).toBeNull();
+    expect(resolved.runtime).toBeNull();
+    expect(resolved.helpRequested).toBe(false);
+  });
+
   it("resolves explicit trigger command", async () => {
     const resolver = new CommandResolver(
       commandConfig as any,
@@ -194,6 +222,28 @@ describe("CommandResolver", () => {
     });
 
     expect(bypass).toBe(true);
+  });
+
+  it("treats builtin commands as session-breaking steering bypasses", () => {
+    const resolver = new CommandResolver(
+      commandConfig as any,
+      async () => "EASY_SERIOUS",
+      "!h",
+      new Set(["!c"]),
+      (model) => String(model),
+    );
+
+    const message = {
+      serverTag: "libera",
+      channelName: "#general",
+      arc: "libera##general",
+      nick: "user",
+      mynick: "bot",
+      content: "!setkey openrouter sk-or-v1-secret",
+    };
+
+    expect(resolver.shouldBypassSteering(message)).toBe(true);
+    expect(resolver.shouldBreakActiveSession(message)).toBe(true);
   });
 
   it("resolves memoryUpdate from mode config (defaults true, respects false)", async () => {

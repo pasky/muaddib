@@ -98,6 +98,11 @@
     "minPeriodMinutes": 30
   },
 
+  "costPolicy": {
+    "freeTierBudgetUsd": 2.0,
+    "freeTierWindowHours": 72
+  },
+
   "rooms": {
     "common": {
       "promptVars": {

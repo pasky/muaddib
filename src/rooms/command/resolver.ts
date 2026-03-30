@@ -18,6 +18,7 @@ export interface ResolvedCommand {
   modelOverride: string | null;
   selectedLabel: string | null;
   selectedTrigger: string | null;
+  builtinCommand: string | null;
   modeKey: string | null;
   runtime: RuntimeSettings | null;
   error?: string;
@@ -54,6 +55,7 @@ export class CommandResolver {
     private readonly helpToken: string,
     private readonly flagTokens: Set<string>,
     private readonly modelNameFormatter: (value: unknown) => string,
+    private readonly builtinTokens: Set<string> = new Set(["!setkey", "!balance"]),
   ) {
     for (const [modeKey, modeConfig] of Object.entries(commandConfig.modes)) {
       const triggers = modeConfig.triggers;
@@ -126,7 +128,7 @@ export class CommandResolver {
         continue;
       }
 
-      if (this.triggerToMode[token] || token === this.helpToken) {
+      if (this.triggerToMode[token] || token === this.helpToken || this.builtinTokens.has(token)) {
         if (modeToken !== null) {
           error = "Only one mode command allowed.";
           break;
@@ -235,7 +237,8 @@ export class CommandResolver {
       parsed.error ||
       parsed.noContext ||
       parsed.modelOverride !== null ||
-      parsed.modeToken === this.helpToken,
+      parsed.modeToken === this.helpToken ||
+      this.isBuiltinCommandToken(parsed.modeToken),
     );
   }
 
@@ -246,7 +249,7 @@ export class CommandResolver {
       return true;
     }
 
-    if (parsed.modeToken === this.helpToken) {
+    if (parsed.modeToken === this.helpToken || this.isBuiltinCommandToken(parsed.modeToken)) {
       return true;
     }
 
@@ -268,6 +271,10 @@ export class CommandResolver {
     }
 
     return false;
+  }
+
+  isBuiltinCommandToken(token: string | null | undefined): boolean {
+    return token != null && this.builtinTokens.has(token);
   }
 
   buildHelpMessage(serverTag: string, channelName: string): string {
@@ -300,7 +307,7 @@ export class CommandResolver {
 
     return `${
       `default is ${defaultDescription}; modes: ${modeParts}; `
-    }use @modelid to override model; !c disables context`;
+    }use @modelid to override model; !c disables context; !balance shows your budget status; !setkey openrouter <key> saves your BYOK key (omit <key> to clear)`;
   }
 
   async resolve(input: {
@@ -316,6 +323,7 @@ export class CommandResolver {
         modelOverride: parsed.modelOverride,
         selectedLabel: null,
         selectedTrigger: null,
+        builtinCommand: null,
         modeKey: null,
         runtime: null,
         error: parsed.error,
@@ -331,9 +339,25 @@ export class CommandResolver {
         modelOverride: parsed.modelOverride,
         selectedLabel: null,
         selectedTrigger: null,
+        builtinCommand: null,
         modeKey: null,
         runtime: null,
         helpRequested: true,
+        selectedAutomatically: false,
+      };
+    }
+
+    if (this.isBuiltinCommandToken(parsed.modeToken)) {
+      return {
+        noContext: parsed.noContext,
+        queryText: parsed.queryText,
+        modelOverride: parsed.modelOverride,
+        selectedLabel: null,
+        selectedTrigger: null,
+        builtinCommand: parsed.modeToken,
+        modeKey: null,
+        runtime: null,
+        helpRequested: false,
         selectedAutomatically: false,
       };
     }
@@ -346,6 +370,7 @@ export class CommandResolver {
         modelOverride: parsed.modelOverride,
         selectedLabel: parsed.modeToken,
         selectedTrigger: parsed.modeToken,
+        builtinCommand: null,
         modeKey,
         runtime,
         helpRequested: false,
@@ -370,6 +395,7 @@ export class CommandResolver {
           modelOverride: parsed.modelOverride,
           selectedLabel: null,
           selectedTrigger: null,
+          builtinCommand: null,
           modeKey: null,
           runtime: null,
           error: `Unknown channel mode policy '${channelMode}': mode '${constrainedMode}' missing`,
@@ -399,6 +425,7 @@ export class CommandResolver {
         modelOverride: parsed.modelOverride,
         selectedLabel: null,
         selectedTrigger: null,
+        builtinCommand: null,
         modeKey: null,
         runtime: null,
         error: `Unknown channel mode policy '${channelMode}'`,
@@ -416,6 +443,7 @@ export class CommandResolver {
       modelOverride: parsed.modelOverride,
       selectedLabel,
       selectedTrigger,
+      builtinCommand: null,
       modeKey,
       runtime,
       helpRequested: false,

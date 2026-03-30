@@ -21,6 +21,7 @@ import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { type RoomMessage, wrapSteeredMessage } from "../message.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import { formatUtcTime } from "../../utils/index.js";
+import { parseSetKeyArgs } from "../../cost/user-key-store.js";
 
 // Re-export types that external consumers depend on
 export type {
@@ -102,6 +103,7 @@ export class RoomMessageHandler {
     message: RoomMessage,
     options?: { sendResponse?: SendResponse },
   ): Promise<void> {
+    message = this.sanitizeSensitiveCommandMessage(message);
     const sendResponse: SendResponse = options?.sendResponse ?? (async () => {});
     const key = sessionKey(message);
 
@@ -196,7 +198,7 @@ export class RoomMessageHandler {
     // Resolve the mode for this session so we can detect cross-mode steering.
     const parsed = this.resolver.parsePrefix(message.content);
     let sessionModeKey: string | null = null;
-    if (parsed.modeToken && !parsed.error && parsed.modeToken !== "!h") {
+    if (parsed.modeToken && !parsed.error && this.resolver.triggerToMode[parsed.modeToken]) {
       const { modeKey } = this.resolver.runtimeForTrigger(parsed.modeToken);
       sessionModeKey = modeKey;
     }
@@ -259,7 +261,7 @@ export class RoomMessageHandler {
    */
   private warnOnModeMismatch(message: RoomMessage, sessionModeKey: string | null, sendResponse: SendResponse): void {
     const parsed = this.resolver.parsePrefix(message.content);
-    if (!parsed.modeToken || parsed.error) return;
+    if (!parsed.modeToken || parsed.error || !this.resolver.triggerToMode[parsed.modeToken]) return;
 
     const incomingModeKey = this.resolver.runtimeForTrigger(parsed.modeToken).modeKey;
     if (incomingModeKey === sessionModeKey) return;
@@ -268,6 +270,36 @@ export class RoomMessageHandler {
     sendResponse(warning).catch((err) => {
       this.logger.error("Failed to send cross-mode steering warning", String(err));
     });
+  }
+
+  private sanitizeSensitiveCommandMessage(message: RoomMessage): RoomMessage {
+    const parsed = this.resolver.parsePrefix(message.content);
+    if (parsed.modeToken !== "!setkey") {
+      return message;
+    }
+
+    const parsedArgs = parseSetKeyArgs(parsed.queryText);
+    if (!parsedArgs?.key) {
+      return message;
+    }
+
+    const sanitizedQuery = `${parsedArgs.provider} [redacted]`;
+    const sanitizedContent = message.content.replace(parsed.queryText.trim(), sanitizedQuery);
+    const sanitizedOriginalContent = message.originalContent
+      ? message.originalContent.includes(message.content)
+        ? message.originalContent.replace(message.content, sanitizedContent)
+        : sanitizedContent
+      : undefined;
+
+    return {
+      ...message,
+      content: sanitizedContent,
+      originalContent: sanitizedOriginalContent,
+      secrets: {
+        ...(message.secrets ?? {}),
+        setkeyKey: parsedArgs.key,
+      },
+    };
   }
 
   /** Check if any command session is active for the given channel arc (serverTag#channelName). */

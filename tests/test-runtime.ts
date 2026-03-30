@@ -14,16 +14,20 @@ interface CreateTestRuntimeOptions {
   configData?: Record<string, unknown>;
   authStorage: AuthStorage;
   logger?: RuntimeLogWriter;
+  muaddibHome?: string;
 }
 
 export function createTestRuntime(options: CreateTestRuntimeOptions): MuaddibRuntime {
+  const muaddibHome = options.muaddibHome ?? join(tmpdir(), "muaddib-test-runtime");
+
   return {
+    muaddibHome,
     config: MuaddibConfig.inMemory(options.configData ?? {}),
     history: options.history,
     modelAdapter: new PiAiModelAdapter(),
     authStorage: options.authStorage,
     logger: options.logger ?? new RuntimeLogWriter({
-      muaddibHome: join(tmpdir(), "muaddib-test-runtime"),
+      muaddibHome,
       stdout: {
         write: () => true,
       } as unknown as NodeJS.WriteStream,

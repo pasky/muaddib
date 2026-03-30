@@ -315,6 +315,7 @@ export function buildRuntime(
   configData: Record<string, unknown>,
 ): MuaddibRuntime {
   return {
+    muaddibHome: ctx.tmpHome,
     config: MuaddibConfig.inMemory(configData),
     history: ctx.history,
     modelAdapter: new PiAiModelAdapter(),

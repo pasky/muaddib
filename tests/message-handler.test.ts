@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { RuntimeLogWriter } from "../src/app/logging.js";
+import { UserCostLedger } from "../src/cost/user-cost-ledger.js";
 import type { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import {
   RoomMessageHandler,
@@ -14,6 +15,7 @@ import {
 } from "../src/rooms/command/message-handler.js";
 import type { ContextReducer } from "../src/rooms/command/context-reducer.js";
 import type { RoomMessage } from "../src/rooms/message.js";
+import { buildArc } from "../src/rooms/message.js";
 import { createDeferred, createTempHistoryStore, waitForPersistedMessage } from "./test-helpers.js";
 import { createTestRuntime } from "./test-runtime.js";
 
@@ -68,18 +70,21 @@ function createHandler(options: {
   logger?: unknown;
   toolOptions?: unknown;
 
+  authStorage?: AuthStorage;
   modelAdapter?: unknown;
   runtimeLogger?: RuntimeLogWriter;
   configData?: Record<string, unknown>;
+  muaddibHome?: string;
 }): RoomMessageHandler {
   const runtime = createTestRuntime({
-    authStorage: AuthStorage.inMemory(),
+    authStorage: options.authStorage ?? AuthStorage.inMemory(),
     history: options.history,
     configData: {
       ...(options.configData ?? {}),
       rooms: { irc: options.roomConfig ?? roomConfig },
     },
     logger: options.runtimeLogger,
+    muaddibHome: options.muaddibHome,
   });
 
   if (options.autoChronicler || options.chronicleStore) {
@@ -1021,6 +1026,221 @@ describe("RoomMessageHandler", () => {
     expect(sent[0]).toContain("default is");
 
     await history.close();
+  });
+
+  it("stores a user OpenRouter key without persisting the secret to chat history", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+    const muaddibHome = await mkdtemp(join(tmpdir(), "muaddib-setkey-"));
+
+    try {
+      const incoming = makeMessage("!setkey openrouter sk-or-v1-secret", { isDirect: true });
+      const sent: string[] = [];
+
+      const handler = createHandler({
+        roomConfig: roomConfig as any,
+        history,
+        muaddibHome,
+        classifyMode: async () => "EASY_SERIOUS",
+        runnerFactory: () => {
+          throw new Error("runner should not be called for !setkey");
+        },
+      });
+
+      await handler.handleIncomingMessage(incoming, {
+        sendResponse: async (text) => {
+          sent.push(text);
+        },
+      });
+
+      expect(sent[0]).toContain("saved your OpenRouter key");
+      expect(sent[0]).toContain("!setkey openrouter");
+
+      const userArc = buildArc("libera", "alice");
+      const authRaw = await readFile(join(muaddibHome, "users", userArc, "auth.json"), "utf-8");
+      expect(authRaw).toContain("sk-or-v1-secret");
+
+      const rows = await history.getFullHistory("libera##test");
+      expect(rows).toHaveLength(2);
+      expect(rows[0]?.message).toContain("!setkey openrouter [redacted]");
+      expect(rows.map((row) => row.message).join("\n")).not.toContain("sk-or-v1-secret");
+
+      const arcsBase = (history as any).arcsBasePath;
+      const today = new Date().toISOString().slice(0, 10);
+      const jsonlRaw = await readFile(join(arcsBase, "libera##test", "chat_history", `${today}.jsonl`), "utf-8");
+      expect(jsonlRaw).toContain("[redacted]");
+      expect(jsonlRaw).not.toContain("sk-or-v1-secret");
+    } finally {
+      await rm(muaddibHome, { recursive: true, force: true });
+      await history.close();
+    }
+  });
+
+  it("reports the free-tier balance for !balance using shared policy defaults", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+    const muaddibHome = await mkdtemp(join(tmpdir(), "muaddib-balance-"));
+
+    try {
+      const userArc = buildArc("libera", "alice");
+      const ledger = new UserCostLedger(muaddibHome);
+      await ledger.logUserCost(userArc, {
+        ts: new Date().toISOString(),
+        cost: 0.75,
+        byok: false,
+        arc: buildArc("libera", "#test"),
+        model: "openai:gpt-4o-mini",
+      });
+
+      const incoming = makeMessage("!balance", { isDirect: true });
+      const sent: string[] = [];
+      const handler = createHandler({
+        roomConfig: roomConfig as any,
+        history,
+        muaddibHome,
+        configData: {
+          costPolicy: {
+            freeTierBudgetUsd: 2,
+          },
+        },
+        classifyMode: async () => "EASY_SERIOUS",
+        runnerFactory: () => {
+          throw new Error("runner should not be called for !balance");
+        },
+      });
+
+      await handler.handleIncomingMessage(incoming, {
+        sendResponse: async (text) => {
+          sent.push(text);
+        },
+      });
+
+      expect(sent[0]).toContain("free tier");
+      expect(sent[0]).toContain("$0.7500 / $2.00");
+      expect(sent[0]).toContain("last 72h");
+      expect(sent[0]).toContain("!setkey openrouter <key>");
+    } finally {
+      await rm(muaddibHome, { recursive: true, force: true });
+      await history.close();
+    }
+  });
+
+  it("remaps BYOK sessions to OpenRouter, injects the user key, and logs user cost by date", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+    const muaddibHome = await mkdtemp(join(tmpdir(), "muaddib-byok-"));
+
+    try {
+      const userArc = buildArc("libera", "alice");
+      AuthStorage.create(join(muaddibHome, "users", userArc, "auth.json")).set("openrouter", {
+        type: "api_key",
+        key: "sk-or-v1-user",
+      });
+
+      let runnerModel: string | null = null;
+      let runnerOpenRouterKey: string | undefined;
+      let runnerAnthropicKey: string | undefined;
+      const sent: string[] = [];
+
+      const handler = createHandler({
+        roomConfig: roomConfig as any,
+        history,
+        muaddibHome,
+        authStorage: AuthStorage.inMemory({
+          openrouter: { type: "api_key", key: "sk-or-v1-operator" },
+          anthropic: { type: "api_key", key: "sk-ant-operator" },
+        }),
+        classifyMode: async () => "EASY_SERIOUS",
+        runnerFactory: (input) => ({
+          prompt: async () => {
+            runnerModel = input.model;
+            runnerOpenRouterKey = await input.authStorage?.getApiKey("openrouter");
+            runnerAnthropicKey = await input.authStorage?.getApiKey("anthropic");
+            const result = makeRunnerResult("done", {
+              inputTokens: 10,
+              outputTokens: 5,
+              totalCost: 0.05,
+            });
+            await input.onResponse(result.text);
+            return result;
+          },
+        }),
+      });
+
+      await handler.handleIncomingMessage(makeMessage("!s hello", { isDirect: true }), {
+        sendResponse: async (text) => {
+          sent.push(text);
+        },
+      });
+
+      expect(sent).toEqual(["done"]);
+      expect(runnerModel).toBe("openrouter:openai/gpt-4o-mini");
+      expect(runnerOpenRouterKey).toBe("sk-or-v1-user");
+      expect(runnerAnthropicKey).toBe("sk-ant-operator");
+
+      const today = new Date().toISOString().slice(0, 10);
+      const ledgerRaw = await readFile(join(muaddibHome, "users", userArc, "cost", `${today}.jsonl`), "utf-8");
+      const ledgerRows = ledgerRaw.trim().split("\n").map((line) => JSON.parse(line));
+      expect(ledgerRows).toHaveLength(1);
+      expect(ledgerRows[0]).toMatchObject({
+        byok: true,
+        arc: "libera##test",
+        model: "openai:gpt-4o-mini",
+        cost: 0.05,
+      });
+    } finally {
+      await rm(muaddibHome, { recursive: true, force: true });
+      await history.close();
+    }
+  });
+
+  it("refuses over-budget free users before runner creation", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+    const muaddibHome = await mkdtemp(join(tmpdir(), "muaddib-budget-"));
+
+    try {
+      const userArc = buildArc("libera", "alice");
+      const ledger = new UserCostLedger(muaddibHome);
+      await ledger.logUserCost(userArc, {
+        ts: new Date().toISOString(),
+        cost: 2.1,
+        byok: false,
+        arc: buildArc("libera", "#test"),
+        model: "openai:gpt-4o-mini",
+      });
+
+      const sent: string[] = [];
+      const handler = createHandler({
+        roomConfig: roomConfig as any,
+        history,
+        muaddibHome,
+        configData: {
+          costPolicy: {
+            freeTierBudgetUsd: 2,
+            freeTierWindowHours: 72,
+          },
+        },
+        classifyMode: async () => "EASY_SERIOUS",
+        runnerFactory: () => {
+          throw new Error("runner should not be called for over-budget user");
+        },
+      });
+
+      await handler.handleIncomingMessage(makeMessage("!s blocked", { isDirect: true }), {
+        sendResponse: async (text) => {
+          sent.push(text);
+        },
+      });
+
+      expect(sent).toHaveLength(1);
+      expect(sent[0]).toContain("free tier budget is exhausted");
+      expect(sent[0]).toContain("$2.1000 / $2.00");
+      expect(sent[0]).toContain("!setkey openrouter <key>");
+    } finally {
+      await rm(muaddibHome, { recursive: true, force: true });
+      await history.close();
+    }
   });
 
   it("returns rate-limit warning and skips runner when limiter denies request", async () => {

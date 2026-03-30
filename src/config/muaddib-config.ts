@@ -170,6 +170,11 @@ export interface EventsConfig {
   minPeriodMinutes: number;
 }
 
+export interface CostPolicyConfig {
+  freeTierBudgetUsd?: number;
+  freeTierWindowHours?: number;
+}
+
 interface ChroniclerConfig {
   model?: string;
   paragraphsPerChapter?: number;
@@ -260,6 +265,7 @@ export interface RoomConfig {
 interface MuaddibSettings {
   agent?: AgentConfig;
   chronicler?: ChroniclerConfig;
+  costPolicy?: CostPolicyConfig;
   events?: Partial<EventsConfig>;
   rooms?: Record<string, RoomConfig>;
 }
@@ -365,6 +371,10 @@ export class MuaddibConfig {
 
   getChroniclerConfig(): ChroniclerConfig {
     return this.data.chronicler ?? {};
+  }
+
+  getCostPolicyConfig(): CostPolicyConfig | undefined {
+    return this.data.costPolicy;
   }
 
   getRoomConfig(roomName: string): RoomConfig {

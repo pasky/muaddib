@@ -9,6 +9,7 @@
  */
 
 import type { Agent, ThinkingLevel } from "@mariozechner/pi-agent-core";
+import type { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { type Usage } from "@mariozechner/pi-ai";
 
 import { formatUtcTime, messageText } from "../../utils/index.js";
@@ -29,6 +30,19 @@ import type { Message } from "@mariozechner/pi-ai";
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { parseModelSpec } from "../../models/model-spec.js";
+import {
+  checkUserBudget,
+  resolveCostPolicyConfig,
+  type UserBudgetStatus,
+} from "../../cost/cost-policy.js";
+import { remapToOpenRouter } from "../../cost/model-remap.js";
+import {
+  buildUserArc,
+  createOpenRouterAuthStorageOverride,
+  parseSetKeyArgs,
+  UserKeyStore,
+} from "../../cost/user-key-store.js";
+import { UserCostLedger } from "../../cost/user-cost-ledger.js";
 import { ContextReducerTs, type ContextReducer } from "./context-reducer.js";
 import type { RoomMessage } from "../message.js";
 import type { MuaddibRuntime } from "../../runtime.js";
@@ -63,6 +77,7 @@ export interface CommandRunnerFactoryInput {
   model: string;
   systemPrompt: string;
   toolSet: ToolSet;
+  authStorage?: AuthStorage;
   metaReminder?: string;
   progressThresholdSeconds?: number;
   onResponse: (text: string) => void | Promise<void>;
@@ -141,6 +156,8 @@ export class CommandExecutor {
   private readonly eventsWatcher?: ArcEventsWatcher;
 
   private readonly agentConfig: AgentConfig;
+  private readonly userKeyStore: UserKeyStore;
+  private readonly userCostLedger: UserCostLedger;
 
   constructor(runtime: MuaddibRuntime, roomName: string, overrides?: CommandExecutorOverrides) {
     this.runtime = runtime;
@@ -181,7 +198,7 @@ export class CommandExecutor {
           systemPrompt: input.systemPrompt,
           toolSet: input.toolSet,
           modelAdapter: this.modelAdapter,
-          authStorage: runtime.authStorage,
+          authStorage: input.authStorage ?? runtime.authStorage,
           sessionLimits: agentConfig.sessionLimits,
           llmDebugMaxChars: agentConfig.llmDebugMaxChars,
           metaReminder: input.metaReminder,
@@ -214,13 +231,14 @@ export class CommandExecutor {
       });
 
     this.eventsWatcher = overrides?.eventsWatcher;
-
+    this.userKeyStore = new UserKeyStore(runtime.muaddibHome);
+    this.userCostLedger = new UserCostLedger(runtime.muaddibHome);
   }
 
-  private buildToolOptions(): Omit<BaselineToolOptions, "arc"> {
+  private buildToolOptions(authStorage: AuthStorage = this.runtime.authStorage): Omit<BaselineToolOptions, "arc"> {
     return {
       toolsConfig: this.agentConfig.tools,
-      authStorage: this.runtime.authStorage,
+      authStorage,
       modelAdapter: this.modelAdapter,
       logger: this.logger,
       eventsWatcher: this.eventsWatcher,
@@ -285,6 +303,11 @@ export class CommandExecutor {
     if (resolved.helpRequested) {
       logger.debug("Sending help message", `nick=${message.nick}`);
       await deliver(this.resolver.buildHelpMessage(message.serverTag, message.channelName));
+      return null;
+    }
+
+    if (resolved.builtinCommand) {
+      await this.handleBuiltinCommand(message, resolved, deliver);
       return null;
     }
 
@@ -353,6 +376,116 @@ export class CommandExecutor {
     };
   }
 
+  private async handleBuiltinCommand(
+    message: RoomMessage,
+    resolved: import("./resolver.js").ResolvedCommand,
+    deliver: (text: string) => Promise<void>,
+  ): Promise<void> {
+    switch (resolved.builtinCommand) {
+      case "!setkey":
+        await this.handleSetKeyCommand(message, resolved.queryText, deliver);
+        return;
+      case "!balance":
+        await this.handleBalanceCommand(message, deliver);
+        return;
+      default:
+        await deliver(`${message.nick}: Unknown builtin command '${resolved.builtinCommand}'.`);
+    }
+  }
+
+  private async handleSetKeyCommand(
+    message: RoomMessage,
+    queryText: string,
+    deliver: (text: string) => Promise<void>,
+  ): Promise<void> {
+    const args = parseSetKeyArgs(queryText);
+    if (!args || args.provider !== "openrouter") {
+      await deliver(`${message.nick}: usage: !setkey openrouter <key> (omit <key> to clear)`);
+      return;
+    }
+
+    const secretKey = typeof message.secrets?.setkeyKey === "string"
+      ? message.secrets.setkeyKey
+      : undefined;
+    const key = secretKey ?? (args.key === "[redacted]" ? null : args.key);
+    const userArc = buildUserArc(message.serverTag, message.nick);
+
+    if (key) {
+      this.userKeyStore.setOpenRouterKey(userArc, key);
+      await deliver(`${message.nick}: saved your OpenRouter key. Future commands will use OpenRouter on your dime. Use !setkey openrouter with no key to clear it.`);
+      return;
+    }
+
+    this.userKeyStore.clearOpenRouterKey(userArc);
+    await deliver(`${message.nick}: cleared your OpenRouter key. You're back on the free tier.`);
+  }
+
+  private async handleBalanceCommand(
+    message: RoomMessage,
+    deliver: (text: string) => Promise<void>,
+  ): Promise<void> {
+    const userArc = buildUserArc(message.serverTag, message.nick);
+    const costPolicy = this.runtime.config.getCostPolicyConfig();
+    const status = await checkUserBudget({
+      costPolicy,
+      userArc,
+      keyStore: this.userKeyStore,
+      ledger: this.userCostLedger,
+    });
+
+    if (status.state === "byok") {
+      const policy = resolveCostPolicyConfig(costPolicy);
+      if (!policy) {
+        await deliver(`${message.nick}: BYOK is active via OpenRouter. Free-tier budget enforcement is disabled on this bot. Use !setkey openrouter with no key to clear it.`);
+        return;
+      }
+
+      const freeSpend = await this.userCostLedger.getUserCostInWindow(userArc, policy.freeTierWindowHours, { byok: false });
+      const byokSpend = await this.userCostLedger.getUserCostInWindow(userArc, policy.freeTierWindowHours, { byok: true });
+      await deliver(`${message.nick}: BYOK is active via OpenRouter. Free tier usage in the last ${policy.freeTierWindowHours}h: $${freeSpend.toFixed(4)} / $${policy.freeTierBudgetUsd.toFixed(2)}. BYOK usage in the same window: $${byokSpend.toFixed(4)}. Use !setkey openrouter with no key to clear it.`);
+      return;
+    }
+
+    if (status.state === "exempt") {
+      const policy = resolveCostPolicyConfig(costPolicy);
+      if (!policy) {
+        await deliver(`${message.nick}: operator-funded access is enabled for you (exempt), and free-tier budget enforcement is disabled on this bot.`);
+        return;
+      }
+
+      const exemptSpend = await this.userCostLedger.getUserCostInWindow(userArc, policy.freeTierWindowHours, { byok: false });
+      await deliver(`${message.nick}: operator-funded access is enabled for you (exempt from the free tier). Operator-funded usage in the last ${policy.freeTierWindowHours}h: $${exemptSpend.toFixed(4)}.`);
+      return;
+    }
+
+    const policy = resolveCostPolicyConfig(costPolicy);
+    if (!policy) {
+      await deliver(`${message.nick}: free-tier budget enforcement is disabled on this bot. Use !setkey openrouter <key> to bring your own OpenRouter key.`);
+      return;
+    }
+
+    const spent = status.spent ?? 0;
+    const remaining = status.remaining ?? Math.max(0, policy.freeTierBudgetUsd - spent);
+
+    if (status.state === "over_budget") {
+      await deliver(this.formatOverBudgetMessage(message.nick, {
+        ...status,
+        budget: policy.freeTierBudgetUsd,
+        windowHours: policy.freeTierWindowHours,
+      }));
+      return;
+    }
+
+    await deliver(`${message.nick}: free tier usage is $${spent.toFixed(4)} / $${policy.freeTierBudgetUsd.toFixed(2)} in the last ${policy.freeTierWindowHours}h; $${remaining.toFixed(4)} remaining. Use !setkey openrouter <key> to bypass the free-tier limit.`);
+  }
+
+  private formatOverBudgetMessage(nick: string, status: UserBudgetStatus): string {
+    const spent = status.spent ?? 0;
+    const budget = status.budget ?? 0;
+    const windowHours = status.windowHours ?? 0;
+    return `${nick}: your free tier budget is exhausted: $${spent.toFixed(4)} / $${budget.toFixed(2)} in the last ${windowHours}h. Use !setkey openrouter <key> to bring your own OpenRouter key.`;
+  }
+
   /**
    * Execute a command: resolve mode, build context, run agent, process result,
    * persist, and deliver response.
@@ -383,6 +516,25 @@ export class CommandExecutor {
     if (!result) return;
 
     const { modelSpec, modeKey, trigger, runtime: resolvedRuntime, modeConfig, resolved, context } = result;
+    const userArc = buildUserArc(message.serverTag, message.nick);
+    const budgetStatus = await checkUserBudget({
+      costPolicy: this.runtime.config.getCostPolicyConfig(),
+      userArc,
+      keyStore: this.userKeyStore,
+      ledger: this.userCostLedger,
+    });
+    if (budgetStatus.state === "over_budget") {
+      await deliver(this.formatOverBudgetMessage(message.nick, budgetStatus));
+      return;
+    }
+
+    const effectiveAuthStorage =
+      budgetStatus.state === "byok" && budgetStatus.openRouterKey
+        ? createOpenRouterAuthStorageOverride(this.runtime.authStorage, budgetStatus.openRouterKey)
+        : this.runtime.authStorage;
+    const effectiveModelSpec = budgetStatus.state === "byok"
+      ? remapToOpenRouter(modelSpec)
+      : modelSpec;
 
     // ── Build context & invoke agent ──
 
@@ -438,14 +590,22 @@ export class CommandExecutor {
       await deliver(cleaned, { mode: trigger });
     };
 
-    const toolSet = this.selectTools(message, resolvedRuntime.allowedTools, runnerContext, resolvedRuntime.toolsOverrides, resolved.noContext);
+    const toolSet = this.selectTools(
+      message,
+      resolvedRuntime.allowedTools,
+      runnerContext,
+      resolvedRuntime.toolsOverrides,
+      resolved.noContext,
+      effectiveAuthStorage,
+    );
 
     const progressConfig = this.agentConfig.progress;
 
     const runner = this.runnerFactory({
-      model: modelSpec,
+      model: effectiveModelSpec,
       systemPrompt,
       toolSet,
+      authStorage: effectiveAuthStorage,
       metaReminder: modeConfig.promptReminder,
       progressThresholdSeconds: progressConfig?.thresholdSeconds,
       onResponse,
@@ -469,7 +629,7 @@ export class CommandExecutor {
     let ctxStr = peakTurnInput > 0 ? `${Math.round(peakTurnInput / 1000)}k` : "?";
     if (peakTurnInput > 0) {
       try {
-        const ctxWindow = this.modelAdapter.resolve(modelSpec).model.contextWindow;
+        const ctxWindow = this.modelAdapter.resolve(effectiveModelSpec).model.contextWindow;
         if (ctxWindow > 0) {
           ctxStr += `/${Math.round(ctxWindow / 1000)}k(${Math.round((peakTurnInput / ctxWindow) * 100)}%)`;
         }
@@ -486,10 +646,16 @@ export class CommandExecutor {
       await this.history.logLlmCost(message.arc, {
         run: triggerTs,
         call: "agent_run",
-        model: modelSpec,
+        model: effectiveModelSpec,
         inTok: usage.input + usage.cacheRead + usage.cacheWrite,
         outTok: usage.output,
         cost: usage.cost.total,
+      });
+      await this.userCostLedger.logUserCost(userArc, {
+        cost: usage.cost.total,
+        byok: budgetStatus.state === "byok",
+        arc: message.arc,
+        model: modelSpec,
       });
       await this.emitCostFollowups(message, usage, toolCallsCount, deliver);
     }
@@ -909,8 +1075,9 @@ export class CommandExecutor {
     conversationContext?: Message[],
     toolsOverrides?: Record<string, unknown> | null,
     skipMemory?: boolean,
+    authStorage?: AuthStorage,
   ): ToolSet {
-    const baseOptions = this.buildToolOptions();
+    const baseOptions = this.buildToolOptions(authStorage);
     const invocationToolOptions: BaselineToolOptions = {
       ...baseOptions,
       toolsConfig: toolsOverrides
