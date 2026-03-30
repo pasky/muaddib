@@ -2527,6 +2527,73 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("executeEvent suppresses intermediate messages, delivers only the last valid response", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const sent: string[] = [];
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: (input) => ({
+        prompt: async () => {
+          // Simulate intermediate "thinking out loud" then final answer
+          await input.onResponse("Fixing missing dependency, then rerunning the script.");
+          const result = makeRunnerResult("calendar: 20:00 - Meetup", { totalCost: 0.01 });
+          await input.onResponse(result.text);
+          return result;
+        },
+      }),
+    });
+
+    await handler.executeEvent(
+      makeMessage("!s event command", { isDirect: true }),
+      async (text) => { sent.push(text); },
+    );
+
+    // Only the final response should be delivered, not the intermediate one
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("calendar: 20:00 - Meetup");
+    expect(sent.some((s) => s.includes("Fixing missing dependency"))).toBe(false);
+
+    await history.close();
+  });
+
+  it("executeEvent strips trailing NULL from otherwise valid response", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const sent: string[] = [];
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: (input) => ({
+        prompt: async () => {
+          // Agent appends NULL after real content
+          const text = "calendar: 20:00 - Meetup\n\nNULL";
+          const result = makeRunnerResult(text, { totalCost: 0.01 });
+          await input.onResponse(result.text);
+          return result;
+        },
+      }),
+    });
+
+    await handler.executeEvent(
+      makeMessage("!s event command", { isDirect: true }),
+      async (text) => { sent.push(text); },
+    );
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("calendar: 20:00 - Meetup");
+    expect(sent[0]).not.toMatch(/null/iu);
+
+    await history.close();
+  });
+
   it("drops proactive NULL sentinel responses instead of sending them", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();
