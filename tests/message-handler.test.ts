@@ -1118,7 +1118,11 @@ describe("RoomMessageHandler", () => {
       expect(sent[0]).toContain("free tier");
       expect(sent[0]).toContain("$0.7500 / $2.00");
       expect(sent[0]).toContain("last 72h");
-      expect(sent[0]).toContain("!setkey openrouter <key>");
+      expect(sent[0]).toContain("openrouter.ai");
+      expect(sent[0]).toContain("/msg");
+      expect(sent[0]).toContain("!setkey openrouter");
+      expect(sent[0]).toContain("budget limit");
+      expect(sent[0]).toContain("no responsibility");
     } finally {
       await rm(muaddibHome, { recursive: true, force: true });
       await history.close();
@@ -1236,7 +1240,123 @@ describe("RoomMessageHandler", () => {
       expect(sent).toHaveLength(1);
       expect(sent[0]).toContain("free tier budget is exhausted");
       expect(sent[0]).toContain("$2.1000 / $2.00");
-      expect(sent[0]).toContain("!setkey openrouter <key>");
+      expect(sent[0]).toContain("/msg me !balance for more details");
+    } finally {
+      await rm(muaddibHome, { recursive: true, force: true });
+      await history.close();
+    }
+  });
+
+  it("emits a 90% quota warning when free tier usage is high", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+    const muaddibHome = await mkdtemp(join(tmpdir(), "muaddib-warn-"));
+
+    try {
+      const userArc = buildArc("libera", "alice");
+      const ledger = new UserCostLedger(muaddibHome);
+      // Spend $1.85 of $2 budget = 92.5%
+      await ledger.logUserCost(userArc, {
+        ts: new Date().toISOString(),
+        cost: 1.85,
+        byok: false,
+        arc: buildArc("libera", "#test"),
+        model: "openai:gpt-4o-mini",
+      });
+
+      const sent: string[] = [];
+      const handler = createHandler({
+        roomConfig: roomConfig as any,
+        history,
+        muaddibHome,
+        configData: {
+          costPolicy: {
+            freeTierBudgetUsd: 2,
+            freeTierWindowHours: 72,
+          },
+        },
+        classifyMode: async () => "EASY_SERIOUS",
+        runnerFactory: (input) => ({
+          prompt: async () => {
+            const result = makeRunnerResult("response", {
+              inputTokens: 10,
+              outputTokens: 5,
+              totalCost: 0.01,
+            });
+            await input.onResponse(result.text);
+            return result;
+          },
+        }),
+      });
+
+      await handler.handleIncomingMessage(makeMessage("!s hello", { isDirect: true }), {
+        sendResponse: async (text) => { sent.push(text); },
+      });
+
+      // Should have response + quota warning
+      const warningMsg = sent.find((s) => s.includes("heads up"));
+      expect(warningMsg).toBeDefined();
+      expect(warningMsg).toContain("93%");
+      expect(warningMsg).toContain("/msg me !balance for more details");
+    } finally {
+      await rm(muaddibHome, { recursive: true, force: true });
+      await history.close();
+    }
+  });
+
+  it("respects 90% quota warning cooldown", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+    const muaddibHome = await mkdtemp(join(tmpdir(), "muaddib-cooldown-"));
+
+    try {
+      const userArc = buildArc("libera", "alice");
+      const ledger = new UserCostLedger(muaddibHome);
+      await ledger.logUserCost(userArc, {
+        ts: new Date().toISOString(),
+        cost: 1.85,
+        byok: false,
+        arc: buildArc("libera", "#test"),
+        model: "openai:gpt-4o-mini",
+      });
+
+      const makeHandler = () => createHandler({
+        roomConfig: roomConfig as any,
+        history,
+        muaddibHome,
+        configData: {
+          costPolicy: {
+            freeTierBudgetUsd: 2,
+            freeTierWindowHours: 72,
+          },
+        },
+        classifyMode: async () => "EASY_SERIOUS",
+        runnerFactory: (input) => ({
+          prompt: async () => {
+            const result = makeRunnerResult("response", {
+              inputTokens: 10,
+              outputTokens: 5,
+              totalCost: 0.001,
+            });
+            await input.onResponse(result.text);
+            return result;
+          },
+        }),
+      });
+
+      // First invocation: should emit warning
+      const sent1: string[] = [];
+      await makeHandler().handleIncomingMessage(makeMessage("!s first", { isDirect: true }), {
+        sendResponse: async (text) => { sent1.push(text); },
+      });
+      expect(sent1.some((s) => s.includes("heads up"))).toBe(true);
+
+      // Second invocation: cooldown should suppress the warning
+      const sent2: string[] = [];
+      await makeHandler().handleIncomingMessage(makeMessage("!s second", { isDirect: true }), {
+        sendResponse: async (text) => { sent2.push(text); },
+      });
+      expect(sent2.some((s) => s.includes("heads up"))).toBe(false);
     } finally {
       await rm(muaddibHome, { recursive: true, force: true });
       await history.close();

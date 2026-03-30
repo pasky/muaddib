@@ -8,6 +8,8 @@ import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import {
   checkUserBudget,
   resolveCostPolicyConfig,
+  shouldEmitQuotaWarning,
+  readQuotaWarningTs,
 } from "../src/cost/cost-policy.js";
 import { remapToOpenRouter } from "../src/cost/model-remap.js";
 import { UserCostLedger } from "../src/cost/user-cost-ledger.js";
@@ -91,6 +93,48 @@ describe("UserCostLedger", () => {
       await expect(ledger.getUserCostInWindow(userArc, 72, { now, byok: true })).resolves.toBeCloseTo(1.2);
     } finally {
       rmSync(muaddibHome, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("shouldEmitQuotaWarning", () => {
+  it("does not fire below 90% usage", () => {
+    const home = makeTempHome();
+    try {
+      expect(shouldEmitQuotaWarning(home, "libera#alice", 0.89, 72)).toBe(false);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("fires at 90%+ and persists cooldown timestamp", () => {
+    const home = makeTempHome();
+    try {
+      const now = new Date("2026-03-30T12:00:00Z");
+      expect(shouldEmitQuotaWarning(home, "libera#alice", 0.92, 72, now)).toBe(true);
+
+      const ts = readQuotaWarningTs(join(home, "users", "libera#alice", "quota-warning.json"));
+      expect(ts).toBe(now.getTime());
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("respects cooldown period (5% of window)", () => {
+    const home = makeTempHome();
+    try {
+      const t0 = new Date("2026-03-30T12:00:00Z");
+      expect(shouldEmitQuotaWarning(home, "libera#alice", 0.95, 72, t0)).toBe(true);
+
+      // 1h later — within 3.6h cooldown
+      const t1 = new Date("2026-03-30T13:00:00Z");
+      expect(shouldEmitQuotaWarning(home, "libera#alice", 0.96, 72, t1)).toBe(false);
+
+      // 4h later — past 3.6h cooldown
+      const t2 = new Date("2026-03-30T16:00:00Z");
+      expect(shouldEmitQuotaWarning(home, "libera#alice", 0.97, 72, t2)).toBe(true);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
     }
   });
 });

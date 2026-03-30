@@ -1,3 +1,6 @@
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { join, dirname } from "node:path";
+
 import type { CostPolicyConfig } from "../config/muaddib-config.js";
 import { UserCostLedger } from "./user-cost-ledger.js";
 import { UserKeyStore } from "./user-key-store.js";
@@ -12,6 +15,8 @@ export interface UserBudgetStatus {
   spent?: number;
   budget?: number;
   windowHours?: number;
+  /** Fraction of budget used (0..1+), set for free/over_budget states when policy exists. */
+  usageFraction?: number;
 }
 
 export interface ResolvedCostPolicyConfig {
@@ -88,6 +93,7 @@ export async function checkUserBudget(
   );
   const remaining = Math.max(0, policy.freeTierBudgetUsd - spent);
   const allowed = spent < policy.freeTierBudgetUsd;
+  const usageFraction = policy.freeTierBudgetUsd > 0 ? spent / policy.freeTierBudgetUsd : 0;
 
   return {
     allowed,
@@ -96,5 +102,64 @@ export async function checkUserBudget(
     remaining,
     budget: policy.freeTierBudgetUsd,
     windowHours: policy.freeTierWindowHours,
+    usageFraction,
   };
+}
+
+// ── Quota warning cooldown ──
+
+export interface QuotaWarningCooldown {
+  lastWarningTs: string;
+}
+
+/**
+ * Check whether a quota-approaching warning should be emitted, and if so,
+ * update the cooldown timestamp. Returns true if the warning should fire.
+ *
+ * Cooldown period = 5% of the quota window (e.g. 3.6h for a 72h window).
+ */
+export function shouldEmitQuotaWarning(
+  muaddibHome: string,
+  userArc: string,
+  usageFraction: number,
+  windowHours: number,
+  now?: Date,
+): boolean {
+  if (usageFraction < 0.9) return false;
+
+  const cooldownMs = windowHours * 0.05 * 3_600_000;
+  const nowMs = (now ?? new Date()).getTime();
+  const filePath = quotaWarningPath(muaddibHome, userArc);
+
+  const lastTs = readQuotaWarningTs(filePath);
+  if (lastTs !== null && nowMs - lastTs < cooldownMs) {
+    return false;
+  }
+
+  writeQuotaWarningTs(filePath, new Date(nowMs).toISOString());
+  return true;
+}
+
+/**
+ * Read the last warning timestamp. Exported for testing.
+ */
+export function readQuotaWarningTs(filePath: string): number | null {
+  try {
+    const raw = readFileSync(filePath, "utf-8");
+    const data = JSON.parse(raw) as QuotaWarningCooldown;
+    const ms = Date.parse(data.lastWarningTs);
+    return Number.isFinite(ms) ? ms : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeQuotaWarningTs(filePath: string, ts: string): void {
+  const data: QuotaWarningCooldown = { lastWarningTs: ts };
+  mkdirSync(dirname(filePath), { recursive: true });
+  writeFileSync(filePath, JSON.stringify(data) + "\n", "utf-8");
+}
+
+function quotaWarningPath(muaddibHome: string, userArc: string): string {
+  return join(muaddibHome, "users", userArc, "quota-warning.json");
 }

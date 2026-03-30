@@ -33,7 +33,7 @@ import { parseModelSpec } from "../../models/model-spec.js";
 import {
   checkUserBudget,
   resolveCostPolicyConfig,
-  type UserBudgetStatus,
+  shouldEmitQuotaWarning,
 } from "../../cost/cost-policy.js";
 import { remapToOpenRouter } from "../../cost/model-remap.js";
 import {
@@ -412,7 +412,7 @@ export class CommandExecutor {
 
     if (key) {
       this.userKeyStore.setOpenRouterKey(userArc, key);
-      await deliver(`${message.nick}: saved your OpenRouter key. Future commands will use OpenRouter on your dime. Use !setkey openrouter with no key to clear it.`);
+      await deliver(`${message.nick}: saved your OpenRouter key. Future commands will use OpenRouter on your dime. To clear it: /msg me !setkey openrouter`);
       return;
     }
 
@@ -433,16 +433,24 @@ export class CommandExecutor {
       ledger: this.userCostLedger,
     });
 
+    const byokGuide = [
+      "To bring your own OpenRouter key:",
+      "1. Sign up at https://openrouter.ai/ - there is a variety of payment options including Stripe and LN",
+      "2. Go to https://openrouter.ai/keys to create an API key",
+      "3. IMPORTANT: set a tight budget limit on this key (bot operator assumes no responsibility; keys may leak, bot may be buggy, ...)",
+      "4. Send me the key via DM: /msg me !setkey openrouter <your-key>",
+    ].join("\n");
+
     if (status.state === "byok") {
       const policy = resolveCostPolicyConfig(costPolicy);
       if (!policy) {
-        await deliver(`${message.nick}: BYOK is active via OpenRouter. Free-tier budget enforcement is disabled on this bot. Use !setkey openrouter with no key to clear it.`);
+        await deliver(`${message.nick}: BYOK is active via OpenRouter. Free-tier budget enforcement is disabled on this bot. To clear your key: /msg me !setkey openrouter`);
         return;
       }
 
       const freeSpend = await this.userCostLedger.getUserCostInWindow(userArc, policy.freeTierWindowHours, { byok: false });
       const byokSpend = await this.userCostLedger.getUserCostInWindow(userArc, policy.freeTierWindowHours, { byok: true });
-      await deliver(`${message.nick}: BYOK is active via OpenRouter. Free tier usage in the last ${policy.freeTierWindowHours}h: $${freeSpend.toFixed(4)} / $${policy.freeTierBudgetUsd.toFixed(2)}. BYOK usage in the same window: $${byokSpend.toFixed(4)}. Use !setkey openrouter with no key to clear it.`);
+      await deliver(`${message.nick}: BYOK is active via OpenRouter. Free tier usage in the last ${policy.freeTierWindowHours}h: $${freeSpend.toFixed(4)} / $${policy.freeTierBudgetUsd.toFixed(2)}. BYOK usage in the same window: $${byokSpend.toFixed(4)}. To clear your key: /msg me !setkey openrouter`);
       return;
     }
 
@@ -460,7 +468,7 @@ export class CommandExecutor {
 
     const policy = resolveCostPolicyConfig(costPolicy);
     if (!policy) {
-      await deliver(`${message.nick}: free-tier budget enforcement is disabled on this bot. Use !setkey openrouter <key> to bring your own OpenRouter key.`);
+      await deliver(`${message.nick}: free-tier budget enforcement is disabled on this bot.\n${byokGuide}`);
       return;
     }
 
@@ -468,22 +476,11 @@ export class CommandExecutor {
     const remaining = status.remaining ?? Math.max(0, policy.freeTierBudgetUsd - spent);
 
     if (status.state === "over_budget") {
-      await deliver(this.formatOverBudgetMessage(message.nick, {
-        ...status,
-        budget: policy.freeTierBudgetUsd,
-        windowHours: policy.freeTierWindowHours,
-      }));
+      await deliver(`${message.nick}: your free tier budget is exhausted — $${spent.toFixed(4)} / $${policy.freeTierBudgetUsd.toFixed(2)} in the last ${policy.freeTierWindowHours}h. To keep using me, bring your own OpenRouter key:\n${byokGuide}`);
       return;
     }
 
-    await deliver(`${message.nick}: free tier usage is $${spent.toFixed(4)} / $${policy.freeTierBudgetUsd.toFixed(2)} in the last ${policy.freeTierWindowHours}h; $${remaining.toFixed(4)} remaining. Use !setkey openrouter <key> to bypass the free-tier limit.`);
-  }
-
-  private formatOverBudgetMessage(nick: string, status: UserBudgetStatus): string {
-    const spent = status.spent ?? 0;
-    const budget = status.budget ?? 0;
-    const windowHours = status.windowHours ?? 0;
-    return `${nick}: your free tier budget is exhausted: $${spent.toFixed(4)} / $${budget.toFixed(2)} in the last ${windowHours}h. Use !setkey openrouter <key> to bring your own OpenRouter key.`;
+    await deliver(`${message.nick}: free tier usage is $${spent.toFixed(4)} / $${policy.freeTierBudgetUsd.toFixed(2)} in the last ${policy.freeTierWindowHours}h; $${remaining.toFixed(4)} remaining.\n${byokGuide}`);
   }
 
   /**
@@ -524,8 +521,26 @@ export class CommandExecutor {
       ledger: this.userCostLedger,
     });
     if (budgetStatus.state === "over_budget") {
-      await deliver(this.formatOverBudgetMessage(message.nick, budgetStatus));
+      const spent = budgetStatus.spent ?? 0;
+      const budget = budgetStatus.budget ?? 0;
+      const windowHours = budgetStatus.windowHours ?? 0;
+      await deliver(`${message.nick}: your free tier budget is exhausted ($${spent.toFixed(4)} / $${budget.toFixed(2)} in the last ${windowHours}h). /msg me !balance for more details.`);
       return;
+    }
+
+    // ── 90% quota warning ──
+    if (
+      budgetStatus.usageFraction !== undefined &&
+      budgetStatus.windowHours !== undefined &&
+      shouldEmitQuotaWarning(
+        this.runtime.muaddibHome,
+        userArc,
+        budgetStatus.usageFraction,
+        budgetStatus.windowHours,
+      )
+    ) {
+      const pct = Math.round(budgetStatus.usageFraction * 100);
+      await deliver(`${message.nick}: heads up — you've used ${pct}% of your free tier budget ($${(budgetStatus.spent ?? 0).toFixed(4)} / $${(budgetStatus.budget ?? 0).toFixed(2)}). /msg me !balance for more details.`);
     }
 
     const effectiveAuthStorage =
