@@ -307,7 +307,7 @@ export class CommandResolver {
 
     return `${
       `default is ${defaultDescription}; modes: ${modeParts}; `
-    }use @modelid to override model; !c disables context; !balance shows your budget status; !setkey openrouter <key> saves your BYOK key (omit <key> to clear)`;
+    }use @modelid to override model; !c disables context; !balance shows your budget status`;
   }
 
   async resolve(input: {
