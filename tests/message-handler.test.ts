@@ -6,7 +6,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { RuntimeLogWriter } from "../src/app/logging.js";
-import { LLM_CALL_TYPE } from "../src/cost/llm-call-type.js";
+import { currentCostSpan, recordUsage } from "../src/cost/cost-span.js";
+import { LLM_CALL_TYPE, isLlmCallType } from "../src/cost/llm-call-type.js";
 import { UserCostLedger } from "../src/cost/user-cost-ledger.js";
 import type { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import {
@@ -189,6 +190,103 @@ function makeRunner(
       return result;
     },
   });
+}
+
+function makeUsageRecord(inputTokens: number, outputTokens: number, totalCost: number) {
+  return {
+    input: inputTokens,
+    output: outputTokens,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: inputTokens + outputTokens,
+    cost: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      total: totalCost,
+    },
+  };
+}
+
+function recordCurrentSpanUsage(totalCost: number, inputTokens = 1, outputTokens = 1): void {
+  const spanName = currentCostSpan()?.name;
+  const callType = spanName && isLlmCallType(spanName)
+    ? spanName
+    : LLM_CALL_TYPE.AGENT_RUN;
+  recordUsage(callType, "openai:gpt-4o-mini", makeUsageRecord(inputTokens, outputTokens, totalCost));
+}
+
+function makeRunnerWithBlockedBackgroundWork(options: {
+  text?: string;
+  totalCost?: number;
+  toolCallsCount?: number;
+  summaryText?: string;
+} = {}) {
+  const backgroundStarted = createDeferred<void>();
+  const releaseBackground = createDeferred<void>();
+  const backgroundFinished = createDeferred<void>();
+  let backgroundPromptCount = 0;
+
+  const runnerFactory: import("../src/rooms/command/message-handler.js").CommandRunnerFactory = (input) => ({
+    prompt: async () => {
+      const session: any = {
+        messages: [
+          {
+            role: "toolResult",
+            toolName: "web_search",
+            isError: false,
+            content: [{ type: "text", text: "https://example.com/result" }],
+          },
+        ],
+        prompt: vi.fn(async () => {
+          backgroundPromptCount += 1;
+          if (backgroundPromptCount === 1) {
+            backgroundStarted.resolve();
+            await releaseBackground.promise;
+            recordCurrentSpanUsage(0.02, 5, 2);
+            session.messages.push({
+              role: "assistant",
+              content: [{ type: "text", text: "Memory updated." }],
+            });
+            return;
+          }
+
+          recordCurrentSpanUsage(0.03, 7, 4);
+          session.messages.push({
+            role: "assistant",
+            content: [{ type: "text", text: options.summaryText ?? "Summarized tool results." }],
+          });
+        }),
+        dispose: vi.fn(async () => {
+          backgroundFinished.resolve();
+        }),
+      };
+
+      const result = makeRunnerResult(options.text ?? "primary response", {
+        inputTokens: 20,
+        outputTokens: 10,
+        totalCost: options.totalCost ?? 0.35,
+        toolCallsCount: options.toolCallsCount ?? 1,
+      });
+      await input.onResponse(result.text);
+      return {
+        ...result,
+        session,
+        bumpSessionLimits: vi.fn(),
+        muteResponses: vi.fn(),
+      };
+    },
+  });
+
+  return { runnerFactory, backgroundStarted, releaseBackground, backgroundFinished };
+}
+
+async function readRawJsonlLines(history: ChatHistoryStore, arc = "libera##test") {
+  const arcsBase = (history as any).arcsBasePath;
+  const today = new Date().toISOString().slice(0, 10);
+  const jsonlRaw = await readFile(join(arcsBase, arc, "chat_history", `${today}.jsonl`), "utf-8");
+  return jsonlRaw.trim().split("\n").map((l: string) => JSON.parse(l));
 }
 
 describe("RoomMessageHandler", () => {
@@ -1618,6 +1716,53 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("persists background memory/tool-summary costs when cost followup delivery fails", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const { runnerFactory, backgroundStarted, releaseBackground, backgroundFinished } =
+      makeRunnerWithBlockedBackgroundWork();
+
+    const followupAttempted = createDeferred<void>();
+    let sendCount = 0;
+    const execution = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory,
+    }).handleIncomingMessage(makeMessage("!s fail after response", { isDirect: true }), {
+      sendResponse: async () => {
+        sendCount += 1;
+        if (sendCount === 2) {
+          followupAttempted.resolve();
+          throw new Error("cost followup delivery failed");
+        }
+      },
+    });
+
+    await backgroundStarted.promise;
+    await followupAttempted.promise;
+    releaseBackground.resolve();
+
+    await expect(execution).rejects.toThrow("cost followup delivery failed");
+    await backgroundFinished.promise;
+
+    const jsonlLines = await readRawJsonlLines(history);
+    const costRows = jsonlLines.filter((row: any) => row.call);
+    expect(costRows.map((row: any) => row.call)).toEqual([
+      LLM_CALL_TYPE.AGENT_RUN,
+      LLM_CALL_TYPE.MEMORY_UPDATE,
+      LLM_CALL_TYPE.TOOL_SUMMARY,
+    ]);
+    expect(costRows.map((row: any) => row.source)).toEqual([
+      "execute",
+      "execute",
+      "execute",
+    ]);
+
+    await history.close();
+  });
+
   it("converts oversized command responses into artifact links and keeps llm linkage", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();
@@ -2529,6 +2674,52 @@ describe("RoomMessageHandler", () => {
     // Cost followup should NOT be sent despite high cost ($0.50)
     expect(sent.some((s) => s.includes("tool calls"))).toBe(false);
     expect(sent.some((s) => s.includes("cost $"))).toBe(false);
+
+    await history.close();
+  });
+
+  it("persists background costs and rethrows delivery errors in executeEvent quiet mode", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const { runnerFactory, backgroundStarted, releaseBackground, backgroundFinished } =
+      makeRunnerWithBlockedBackgroundWork({ text: "event output here", totalCost: 0.05 });
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory,
+    });
+
+    const deliveryAttempted = createDeferred<void>();
+    const execution = handler.executeEvent(
+      makeMessage("!s event command", { isDirect: true }),
+      async () => {
+        deliveryAttempted.resolve();
+        throw new Error("event delivery failed");
+      },
+    );
+
+    await backgroundStarted.promise;
+    await deliveryAttempted.promise;
+    releaseBackground.resolve();
+
+    await expect(execution).rejects.toThrow("event delivery failed");
+    await backgroundFinished.promise;
+
+    const jsonlLines = await readRawJsonlLines(history);
+    const costRows = jsonlLines.filter((row: any) => row.call);
+    expect(costRows.map((row: any) => row.call)).toEqual([
+      LLM_CALL_TYPE.AGENT_RUN,
+      LLM_CALL_TYPE.MEMORY_UPDATE,
+      LLM_CALL_TYPE.TOOL_SUMMARY,
+    ]);
+    expect(costRows.map((row: any) => row.source)).toEqual([
+      "event",
+      "event",
+      "event",
+    ]);
 
     await history.close();
   });

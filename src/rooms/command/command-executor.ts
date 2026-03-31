@@ -126,8 +126,6 @@ interface PromptRunResult {
   /** Peak single-turn input tokens (input + cacheRead + cacheWrite) — actual context window fill. */
   peakTurnInput: number;
   toolCallsCount: number;
-  /** Deferred work (tool summary, memory update, session dispose) that callers await after sending the response. */
-  backgroundWork?: Promise<void>;
 }
 
 export interface CommandExecutorOverrides {
@@ -656,28 +654,26 @@ export class CommandExecutor {
         userCostLedger: this.userCostLedger,
       },
       async () => {
-        const { usage, peakTurnInput, toolCallsCount, backgroundWork } = await this.invokeAndPostProcess(
+        const { usage, peakTurnInput } = await this.invokeAndPostProcess(
           runner, message, queryLine, runnerContext, toolSet.tools, {
             reasoningEffort: resolvedRuntime.reasoningEffort,
             visionModel: resolvedRuntime.visionModel ?? undefined,
             memoryUpdate: resolvedRuntime.memoryUpdate,
             toolSummary: resolvedRuntime.toolSummary,
             modelSpec: effectiveModelSpec,
-          }, triggerTs,
+          },
+          async ({ usage, toolCallsCount }) => {
+            // Signal that the primary response has been delivered — callers can deregister
+            // steering before the potentially long background work begins.
+            onResponseDelivered?.();
+
+            // Send optional human-readable followups for expensive runs/milestones.
+            if (usage && usage.cost.total > 0) {
+              await this.emitCostFollowups(message, usage, toolCallsCount, deliver);
+            }
+          },
+          triggerTs,
         );
-
-        // Signal that the primary response has been delivered — callers can deregister
-        // steering before the potentially long background work begins.
-        onResponseDelivered?.();
-
-        // Send optional human-readable followups for expensive runs/milestones.
-        if (usage && usage.cost.total > 0) {
-          await this.emitCostFollowups(message, usage, toolCallsCount, deliver);
-        }
-
-        // Await deferred background work (memory update, tool summary, session dispose)
-        // inside the span so their costs are captured and persisted.
-        await backgroundWork;
 
         // Log the completed agent run with cost/context stats.
         const costStr = usage ? `$${usage.cost.total.toFixed(4)}` : "?";
@@ -770,31 +766,42 @@ export class CommandExecutor {
     const queryText = lastMessage ? messageText(lastMessage) : "";
     const userArc = buildUserArc(message.serverTag, message.nick);
 
+    let promptCompleted = false;
     try {
       await withPersistedCostSpan(
         source,
         { arc: message.arc, userArc, trigger },
         { history: this.history, userCostLedger: this.userCostLedger },
         async () => {
-          const result = await this.invokeAndPostProcess(runner, message, queryText, runnerContext, toolSet.tools, {
-            reasoningEffort,
-            modelSpec,
-          });
+          await this.invokeAndPostProcess(
+            runner,
+            message,
+            queryText,
+            runnerContext,
+            toolSet.tools,
+            {
+              reasoningEffort,
+              modelSpec,
+            },
+            async () => {
+              promptCompleted = true;
 
-          // Deliver the last buffered response (if any) now that the agent is done.
-          if (lastValidResponse !== null) {
-            await deliver(`[${modelStrCore(modelSpec)}] ${lastValidResponse}`);
-          } else {
-            logger.info("Agent produced no output in quiet mode", `arc=${message.arc}`);
-          }
-
-          // Await background work inside the span so costs are captured.
-          await result.backgroundWork;
+              // Deliver the last buffered response (if any) now that the agent is done.
+              if (lastValidResponse !== null) {
+                await deliver(`[${modelStrCore(modelSpec)}] ${lastValidResponse}`);
+              } else {
+                logger.info("Agent produced no output in quiet mode", `arc=${message.arc}`);
+              }
+            },
+          );
         },
       );
     } catch (error) {
       logger.error("Error during quiet agent execution", error);
-      return false;
+      if (!promptCompleted) {
+        return false;
+      }
+      throw error;
     }
 
     if (lastValidResponse === null) {
@@ -846,8 +853,9 @@ export class CommandExecutor {
   // ── Shared: prompt invocation + post-processing ──
 
   /**
-   * Invoke the agent runner, persist tool summaries, dispose session,
-   * and post-process the response (refusal annotation, length policy, cleaning).
+   * Invoke the agent runner, run caller-specific post-response work, then
+   * perform in-session maintenance (memory update, tool summary, dispose)
+   * before leaving the persisted cost span.
    */
   private async invokeAndPostProcess(
     runner: { prompt(prompt: string, options?: PromptOptions): Promise<PromptResult> },
@@ -856,6 +864,7 @@ export class CommandExecutor {
     contextMessages: Message[],
     tools: MuaddibTool[],
     opts: { reasoningEffort: string; visionModel?: string; memoryUpdate?: boolean; toolSummary?: boolean; modelSpec?: string },
+    afterResponse: (result: PromptRunResult) => Promise<void>,
     triggerTs?: string,
   ): Promise<PromptRunResult> {
     const agentResult = await runner.prompt(queryText, {
@@ -875,9 +884,20 @@ export class CommandExecutor {
       }
     }
 
-    // Deferred: memory update, tool summary persistence, session dispose.
-    // Callers await this *after* sending the response so the user isn't blocked.
-    const backgroundWork = (async () => {
+    const result: PromptRunResult = {
+      usage: agentResult.usage,
+      peakTurnInput: agentResult.peakTurnInput,
+      toolCallsCount: agentResult.toolCallsCount ?? 0,
+    };
+
+    let thrown: unknown = null;
+    try {
+      await afterResponse(result);
+    } catch (error) {
+      thrown = error;
+    }
+
+    try {
       // Stop delivering text to the channel — anything produced from here on
       // (memory update, tool summary) is internal background work.
       agentResult.muteResponses?.();
@@ -907,14 +927,19 @@ export class CommandExecutor {
       }
 
       agentResult.session?.dispose();
-    })();
+    } catch (error) {
+      if (thrown) {
+        this.logger.error("Background work failed after post-response error", error);
+      } else {
+        thrown = error;
+      }
+    }
 
-    return {
-      usage: agentResult.usage,
-      peakTurnInput: agentResult.peakTurnInput,
-      toolCallsCount: agentResult.toolCallsCount ?? 0,
-      backgroundWork,
-    };
+    if (thrown) {
+      throw thrown;
+    }
+
+    return result;
   }
 
   // ── Cost followups ──
