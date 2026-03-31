@@ -1,3 +1,20 @@
+/**
+ * Execution source — identifies *why* an LLM call happened.
+ * Persisted as the `source` field on cost JSONL rows.
+ */
+export const COST_SOURCE = {
+  /** Direct user command (!s, !c, etc.) */
+  EXECUTE: "execute",
+  /** Event-triggered execution */
+  EVENT: "event",
+  /** Proactive interjection */
+  PROACTIVE: "proactive",
+  /** Background auto-chronicler */
+  AUTOCHRONICLER: "autochronicler",
+} as const;
+
+export type CostSource = (typeof COST_SOURCE)[keyof typeof COST_SOURCE];
+
 export const LLM_CALL_TYPE = {
   MODE_CLASSIFIER: "mode_classifier",
   CONTEXT_REDUCER: "context_reducer",

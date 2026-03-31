@@ -48,6 +48,7 @@ export interface JsonlLine {
   /** Whether the user is trusted per the room's userAllowlist. */
   tr?: boolean;
   run?: string;
+  source?: string;
   call?: string;
   model?: string;
   inTok?: number;
@@ -146,6 +147,7 @@ export class ChatHistoryStore {
     arc: string,
     opts: {
       run?: string;
+      source?: string;
       call: string;
       model: string;
       inTok?: number;
@@ -157,6 +159,7 @@ export class ChatHistoryStore {
       ts: new Date().toISOString(),
     };
     if (opts.run) line.run = opts.run;
+    if (opts.source) line.source = opts.source;
     line.call = opts.call;
     line.model = opts.model;
     if (opts.inTok !== undefined) line.inTok = opts.inTok;

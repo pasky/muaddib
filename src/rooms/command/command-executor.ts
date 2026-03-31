@@ -44,7 +44,7 @@ import {
 } from "../../cost/user-key-store.js";
 import { UserCostLedger } from "../../cost/user-cost-ledger.js";
 import { withPersistedCostSpan, recordUsage, withCostSpan, currentCostSpan } from "../../cost/cost-span.js";
-import { LLM_CALL_TYPE } from "../../cost/llm-call-type.js";
+import { LLM_CALL_TYPE, COST_SOURCE, type CostSource } from "../../cost/llm-call-type.js";
 import { ContextReducerTs, type ContextReducer } from "./context-reducer.js";
 import type { RoomMessage } from "../message.js";
 import type { MuaddibRuntime } from "../../runtime.js";
@@ -101,6 +101,7 @@ export interface QuietExecuteParams {
   modelSpec: string;
   modeKey: string;
   trigger: string;
+  source: CostSource;
   systemPrompt: string;
   historySize: number;
   reasoningEffort: string;
@@ -640,8 +641,8 @@ export class CommandExecutor {
     const queryLine = message.trusted === false
       ? `------------------------------\n[${queryTimestamp}] [UNTRUSTED] <${message.nick}> ${queryContent}[/UNTRUSTED]`
       : `------------------------------\n[${queryTimestamp}] <${message.nick}> ${queryContent}`;
-    const { usage, peakTurnInput, toolCallsCount, backgroundWork } = await withPersistedCostSpan(
-      "execute",
+    await withPersistedCostSpan(
+      COST_SOURCE.EXECUTE,
       {
         arc: message.arc,
         userArc,
@@ -654,49 +655,54 @@ export class CommandExecutor {
         run: triggerTs,
         userCostLedger: this.userCostLedger,
       },
-      async () => await this.invokeAndPostProcess(
-        runner, message, queryLine, runnerContext, toolSet.tools, {
-          reasoningEffort: resolvedRuntime.reasoningEffort,
-          visionModel: resolvedRuntime.visionModel ?? undefined,
-          memoryUpdate: resolvedRuntime.memoryUpdate,
-          toolSummary: resolvedRuntime.toolSummary,
-          modelSpec: effectiveModelSpec,
-        }, triggerTs,
-      ),
-    );
+      async () => {
+        const { usage, peakTurnInput, toolCallsCount, backgroundWork } = await this.invokeAndPostProcess(
+          runner, message, queryLine, runnerContext, toolSet.tools, {
+            reasoningEffort: resolvedRuntime.reasoningEffort,
+            visionModel: resolvedRuntime.visionModel ?? undefined,
+            memoryUpdate: resolvedRuntime.memoryUpdate,
+            toolSummary: resolvedRuntime.toolSummary,
+            modelSpec: effectiveModelSpec,
+          }, triggerTs,
+        );
 
-    // Log the completed agent run with cost/context stats.
-    const costStr = usage ? `$${usage.cost.total.toFixed(4)}` : "?";
-    let ctxStr = peakTurnInput > 0 ? `${Math.round(peakTurnInput / 1000)}k` : "?";
-    if (peakTurnInput > 0) {
-      try {
-        const ctxWindow = this.modelAdapter.resolve(effectiveModelSpec).model.contextWindow;
-        if (ctxWindow > 0) {
-          ctxStr += `/${Math.round(ctxWindow / 1000)}k(${Math.round((peakTurnInput / ctxWindow) * 100)}%)`;
+        // Signal that the primary response has been delivered — callers can deregister
+        // steering before the potentially long background work begins.
+        onResponseDelivered?.();
+
+        // Send optional human-readable followups for expensive runs/milestones.
+        if (usage && usage.cost.total > 0) {
+          await this.emitCostFollowups(message, usage, toolCallsCount, deliver);
         }
-      } catch { /* model resolution may fail for edge cases — keep absolute count */ }
-    }
 
-    // Signal that the primary response has been delivered — callers can deregister
-    // steering before the potentially long background work begins.
-    onResponseDelivered?.();
+        // Await deferred background work (memory update, tool summary, session dispose)
+        // inside the span so their costs are captured and persisted.
+        await backgroundWork;
 
-    // Send optional human-readable followups for expensive runs/milestones.
-    if (usage && usage.cost.total > 0) {
-      await this.emitCostFollowups(message, usage, toolCallsCount, deliver);
-    }
+        // Log the completed agent run with cost/context stats.
+        const costStr = usage ? `$${usage.cost.total.toFixed(4)}` : "?";
+        let ctxStr = peakTurnInput > 0 ? `${Math.round(peakTurnInput / 1000)}k` : "?";
+        if (peakTurnInput > 0) {
+          try {
+            const ctxWindow = this.modelAdapter.resolve(effectiveModelSpec).model.contextWindow;
+            if (ctxWindow > 0) {
+              ctxStr += `/${Math.round(ctxWindow / 1000)}k(${Math.round((peakTurnInput / ctxWindow) * 100)}%)`;
+            }
+          } catch { /* model resolution may fail for edge cases — keep absolute count */ }
+        }
 
-    await backgroundWork;
-    await this.triggerAutoChronicler(message, this.commandConfig.historySize);
-
-    logger.info(
-      "Agent run complete",
-      `arc=${message.arc}`,
-      `mode=${resolved.selectedLabel ?? "n/a"}`,
-      `trigger=${trigger}`,
-      `ctx=${ctxStr}`,
-      `cost=${costStr}`,
+        logger.info(
+          "Agent run complete",
+          `arc=${message.arc}`,
+          `mode=${resolved.selectedLabel ?? "n/a"}`,
+          `trigger=${trigger}`,
+          `ctx=${ctxStr}`,
+          `cost=${costStr}`,
+        );
+      },
     );
+
+    await this.triggerAutoChronicler(message, this.commandConfig.historySize);
   }
 
   // ── Quiet execution (shared by proactive interjection + events) ──
@@ -715,7 +721,7 @@ export class CommandExecutor {
     onAgentCreated?: (agent: Agent) => void,
   ): Promise<boolean> {
     const { logger } = this;
-    const { modelSpec, trigger, systemPrompt, historySize, reasoningEffort, allowedTools, promptReminder } = params;
+    const { modelSpec, trigger, source, systemPrompt, historySize, reasoningEffort, allowedTools, promptReminder } = params;
 
     const context = await this.history.getContextForMessage(message, historySize);
 
@@ -764,31 +770,37 @@ export class CommandExecutor {
     const queryText = lastMessage ? messageText(lastMessage) : "";
     const userArc = buildUserArc(message.serverTag, message.nick);
 
-    let result: PromptRunResult;
     try {
-      result = await withPersistedCostSpan(
-        "execute_quiet",
+      await withPersistedCostSpan(
+        source,
         { arc: message.arc, userArc, trigger },
         { history: this.history, userCostLedger: this.userCostLedger },
-        async () => await this.invokeAndPostProcess(runner, message, queryText, runnerContext, toolSet.tools, {
-          reasoningEffort,
-          modelSpec,
-        }),
+        async () => {
+          const result = await this.invokeAndPostProcess(runner, message, queryText, runnerContext, toolSet.tools, {
+            reasoningEffort,
+            modelSpec,
+          });
+
+          // Deliver the last buffered response (if any) now that the agent is done.
+          if (lastValidResponse !== null) {
+            await deliver(`[${modelStrCore(modelSpec)}] ${lastValidResponse}`);
+          } else {
+            logger.info("Agent produced no output in quiet mode", `arc=${message.arc}`);
+          }
+
+          // Await background work inside the span so costs are captured.
+          await result.backgroundWork;
+        },
       );
     } catch (error) {
       logger.error("Error during quiet agent execution", error);
       return false;
     }
 
-    // Deliver the last buffered response (if any) now that the agent is done.
     if (lastValidResponse === null) {
-      logger.info("Agent produced no output in quiet mode", `arc=${message.arc}`);
-      await result.backgroundWork;
       return false;
     }
 
-    await deliver(`[${modelStrCore(modelSpec)}] ${lastValidResponse}`);
-    await result.backgroundWork;
     await this.triggerAutoChronicler(message, this.commandConfig.historySize);
 
     logger.info(
@@ -822,6 +834,7 @@ export class CommandExecutor {
       modelSpec,
       modeKey,
       trigger,
+      source: COST_SOURCE.EVENT,
       systemPrompt: this.buildSystemPrompt(modeKey, message.mynick, undefined, trigger),
       historySize: resolvedRuntime.historySize,
       reasoningEffort: resolvedRuntime.reasoningEffort,
@@ -879,14 +892,18 @@ export class CommandExecutor {
             toolCallsCount: agentResult.toolCallsCount ?? 0,
             skillsConfig: this.agentConfig.tools?.skills,
           }, message.nick);
-          await agentResult.session.prompt(memoryPrompt);
+          await withCostSpan(LLM_CALL_TYPE.MEMORY_UPDATE, {}, async () => {
+            await agentResult.session!.prompt(memoryPrompt);
+          });
         } catch (err) {
           this.logger.warn("Memory update failed", String(err));
         }
       }
 
       if (opts.toolSummary !== false) {
-        await this.persistGeneratedToolSummary(message, agentResult, tools, triggerTs);
+        await withCostSpan(LLM_CALL_TYPE.TOOL_SUMMARY, {}, async () => {
+          await this.persistGeneratedToolSummary(message, agentResult, tools, triggerTs);
+        });
       }
 
       agentResult.session?.dispose();
@@ -937,8 +954,11 @@ export class CommandExecutor {
       await deliver(costMessage);
     }
 
-    const totalToday = await history.getArcCostToday(arcName);
-    const costBefore = totalToday - totalCost;
+    // The current run's cost may not be persisted yet (we're inside the span),
+    // so add it to the historical total for the milestone check.
+    const historicalToday = await history.getArcCostToday(arcName);
+    const totalToday = historicalToday + totalCost;
+    const costBefore = historicalToday;
     const dollarsBefore = Math.trunc(costBefore);
     const dollarsAfter = Math.trunc(totalToday);
     if (dollarsAfter <= dollarsBefore) {

@@ -174,6 +174,7 @@ export async function persistCostSpan(
   for (const entry of span.allEntries()) {
     await options.history.logLlmCost(arc, {
       ...(options.run ? { run: options.run } : {}),
+      source: span.name,
       call: entry.callType,
       model: entry.model,
       inTok: entry.usage.input + entry.usage.cacheRead + entry.usage.cacheWrite,

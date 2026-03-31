@@ -1546,7 +1546,8 @@ describe("RoomMessageHandler", () => {
 
     // Verify run linkage and structured cost persistence.
     // Line 0 is the seed logLlmCost entry; this run adds trigger/response,
-    // one structured logLlmCost row, then cost followup + milestone messages.
+    // cost followup + milestone messages, then the structured cost row
+    // (persisted when the cost span closes, after the callback completes).
     const arcsBase = (history as any).arcsBasePath;
     const today = new Date().toISOString().slice(0, 10);
     const jsonlRaw = await readFile(join(arcsBase, "libera##test", "chat_history", `${today}.jsonl`), "utf-8");
@@ -1555,15 +1556,16 @@ describe("RoomMessageHandler", () => {
     expect(jsonlLines[1].run).toBe(triggerTs); // trigger: self-referencing run
     expect(jsonlLines[2].run).toBe(triggerTs); // primary response
 
-    expect(jsonlLines[3].call).toBe("agent_run");
-    expect(jsonlLines[3].model).toBe("openai:gpt-4o-mini");
-    expect(jsonlLines[3].run).toBe(triggerTs);
-    expect(jsonlLines[3].inTok).toBe(123);
-    expect(jsonlLines[3].outTok).toBe(45);
-    expect(jsonlLines[3].cost).toBe(0.35);
+    expect(jsonlLines[3].run).toBe(triggerTs); // cost followup
+    expect(jsonlLines[4].run).toBe(triggerTs); // daily milestone
 
-    expect(jsonlLines[4].run).toBe(triggerTs); // cost followup
-    expect(jsonlLines[5].run).toBe(triggerTs); // daily milestone
+    expect(jsonlLines[5].call).toBe("agent_run");
+    expect(jsonlLines[5].model).toBe("openai:gpt-4o-mini");
+    expect(jsonlLines[5].run).toBe(triggerTs);
+    expect(jsonlLines[5].source).toBe("execute");
+    expect(jsonlLines[5].inTok).toBe(123);
+    expect(jsonlLines[5].outTok).toBe(45);
+    expect(jsonlLines[5].cost).toBe(0.35);
 
     await history.close();
   });
@@ -1608,6 +1610,7 @@ describe("RoomMessageHandler", () => {
     expect(jsonlLines[2].call).toBe("agent_run");
     expect(jsonlLines[2].model).toBe("openai:gpt-4o-mini");
     expect(jsonlLines[2].run).toBe(triggerTs);
+    expect(jsonlLines[2].source).toBe("execute");
     expect(jsonlLines[2].inTok).toBe(20);
     expect(jsonlLines[2].outTok).toBe(10);
     expect(jsonlLines[2].cost).toBe(0.05);

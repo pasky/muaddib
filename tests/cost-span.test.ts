@@ -121,6 +121,7 @@ describe("CostSpan", () => {
       expect(historyRows).toHaveLength(2);
       expect(historyRows.map((row) => row.call)).toEqual([LLM_CALL_TYPE.MODE_CLASSIFIER, LLM_CALL_TYPE.ORACLE]);
       expect(historyRows.every((row) => row.run === "run-1")).toBe(true);
+      expect(historyRows.every((row) => row.source === "execute")).toBe(true);
 
       const ledgerFile = join(dir, "users", "libera#alice", "cost", `${today}.jsonl`);
       const ledgerRows = readFileSync(ledgerFile, "utf-8").trim().split("\n").map((line) => JSON.parse(line));

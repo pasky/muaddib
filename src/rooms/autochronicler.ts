@@ -9,7 +9,7 @@ import { responseText } from "../agent/message.js";
 import { ArcLockManager } from "../utils/arc-lock.js";
 import { withPersistedCostSpan } from "../cost/cost-span.js";
 import type { UserCostLedger } from "../cost/user-cost-ledger.js";
-import { LLM_CALL_TYPE } from "../cost/llm-call-type.js";
+import { LLM_CALL_TYPE, COST_SOURCE } from "../cost/llm-call-type.js";
 
 export interface AutoChronicler {
   checkAndChronicle(
@@ -66,7 +66,7 @@ export class AutoChroniclerTs implements AutoChronicler {
 
     return await this.arcLock.run(arc, async () => {
       return await withPersistedCostSpan(
-        "autochronicler",
+        COST_SOURCE.AUTOCHRONICLER,
         { arc, ...(opts?.userArc ? { userArc: opts.userArc } : {}) },
         { history: this.options.history, ...(opts?.userCostLedger ? { userCostLedger: opts.userCostLedger } : {}) },
         async () => {
