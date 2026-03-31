@@ -1021,6 +1021,49 @@ describe("core tool executors visit_webpage exact http_headers support", () => {
     const result = await executors.visitWebpage(targetUrl);
     expect(result).toContain("secret data");
   });
+
+  it("visit_webpage uses direct fetch when a redirect target matches exact http_headers", async () => {
+    const sourceUrl = "https://short.example.com/docs";
+    const targetUrl = "https://secret.example.com/api/data";
+    await trustUrl(sourceUrl);
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = (init?.method ?? "GET").toUpperCase();
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+
+      if (url.startsWith("https://r.jina.ai/")) {
+        throw new Error("Jina reader should not be used when redirect target requires auth headers");
+      }
+
+      if (url === sourceUrl && method === "HEAD") {
+        return new Response("", { status: 302, headers: { location: targetUrl } });
+      }
+      if (url === targetUrl && method === "HEAD") {
+        expect(headers["X-Secret-Key"]).toBe("redirect-key");
+        return new Response("", { status: 200, headers: { "content-type": "text/plain" } });
+      }
+      if (url === sourceUrl && method === "GET") {
+        return new Response("", { status: 302, headers: { location: targetUrl } });
+      }
+      if (url === targetUrl && method === "GET") {
+        expect(headers["X-Secret-Key"]).toBe("redirect-key");
+        return new Response("redirected secret data", { status: 200, headers: { "content-type": "text/plain" } });
+      }
+
+      throw new Error(`Unexpected URL: ${url} (${method})`);
+    });
+
+    const executors = createDefaultToolExecutors({ secrets: {
+        http_headers: {
+          [targetUrl]: { "X-Secret-Key": "redirect-key" },
+        },
+      },
+    });
+
+    const result = await executors.visitWebpage(sourceUrl);
+    expect(result).toContain("redirected secret data");
+  });
 });
 
 describe("core tool executors visit_webpage binary content support", () => {

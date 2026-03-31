@@ -428,6 +428,11 @@ export class RoomMessageHandler {
       return true;
     }
 
+    if (message.trusted === false) {
+      await sendResponse(`${message.nick}: Only trusted users may approve or deny network access requests.`);
+      return true;
+    }
+
     const approved = parsed.action === "approve";
     clearTimeout(pending.timer);
     this.pendingNetworkApprovals.delete(parsed.id);

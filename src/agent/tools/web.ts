@@ -174,6 +174,12 @@ function sanitizeExtractedUrlCandidate(value: string): string {
   return value.replace(/[),.;:]+$/u, "");
 }
 
+function hasNonUserAgentHeaders(headers: Record<string, string>): boolean {
+  return Object.entries(headers).some(
+    ([key, value]) => key.toLowerCase() !== "user-agent" && String(value).trim().length > 0,
+  );
+}
+
 async function ensureVisitUrlTrusted(options: ToolContext, url: string): Promise<void> {
   const trust = await checkAndAutoApproveUrlInArc(options.arc, url, {
     autoApproveRegexes: resolveUrlAllowRegexes({
@@ -191,23 +197,32 @@ async function ensureVisitUrlTrusted(options: ToolContext, url: string): Promise
   );
 }
 
+interface VisitResponseWithRedirectsResult {
+  response: Response;
+  sawAuthHeaders: boolean;
+}
+
 async function fetchVisitResponseWithRedirects(
   options: ToolContext,
   startUrl: string,
   init: Omit<RequestInit, "headers" | "redirect"> & { headers?: Record<string, string> },
-): Promise<Response> {
+): Promise<VisitResponseWithRedirectsResult> {
   let currentUrl = startUrl;
+  let sawAuthHeaders = false;
 
   for (let redirectCount = 0; redirectCount <= MAX_VISIT_REDIRECTS; redirectCount += 1) {
+    const requestHeaders = buildVisitHeaders(options, currentUrl, init.headers);
+    sawAuthHeaders ||= hasNonUserAgentHeaders(requestHeaders);
+
     const response = await diagnosticFetch(currentUrl, {
       ...init,
-      headers: buildVisitHeaders(options, currentUrl, init.headers),
+      headers: requestHeaders,
       redirect: "manual",
     });
 
     const redirectTarget = getRedirectTarget(response, currentUrl);
     if (!redirectTarget) {
-      return response;
+      return { response, sawAuthHeaders };
     }
 
     if (response.body) {
@@ -297,13 +312,15 @@ export function createDefaultVisitWebpageExecutor(
       "User-Agent": "muaddib/1.0",
     };
     const initialRequestHeaders = buildVisitHeaders(options, url, baseRequestHeaders);
+    let hasAuthHeaders = hasNonUserAgentHeaders(initialRequestHeaders);
 
     let contentType = "";
     try {
-      const headResponse = await fetchVisitResponseWithRedirects(options, url, {
+      const { response: headResponse, sawAuthHeaders } = await fetchVisitResponseWithRedirects(options, url, {
         method: "HEAD",
         headers: baseRequestHeaders,
       });
+      hasAuthHeaders ||= sawAuthHeaders;
       options.logger?.debug(`HEAD ${url} → ${headResponse.status} content-type=${headResponse.headers.get("content-type") ?? "(none)"}`);
       if (headResponse.ok) {
         contentType = (headResponse.headers.get("content-type") ?? "").toLowerCase();
@@ -321,7 +338,7 @@ export function createDefaultVisitWebpageExecutor(
     }
 
     if (contentType.startsWith("image/") && !contentType.includes("svg")) {
-      const imageResponse = await fetchVisitResponseWithRedirects(options, url, {
+      const { response: imageResponse } = await fetchVisitResponseWithRedirects(options, url, {
         headers: baseRequestHeaders,
       });
       if (!imageResponse.ok) {
@@ -346,12 +363,8 @@ export function createDefaultVisitWebpageExecutor(
       };
     }
 
-    const hasAuthHeaders = Object.entries(initialRequestHeaders).some(
-      ([key, value]) => key.toLowerCase() !== "user-agent" && String(value).trim().length > 0,
-    );
-
     if (hasAuthHeaders) {
-      const response = await fetchVisitResponseWithRedirects(options, url, {
+      const { response } = await fetchVisitResponseWithRedirects(options, url, {
         headers: baseRequestHeaders,
       });
 

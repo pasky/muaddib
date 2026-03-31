@@ -932,9 +932,24 @@ describe("RoomMessageHandler", () => {
     ]);
     expect(runCompleted).toBe(false);
 
+    const untrustedReplies: string[] = [];
+    await handler.handleIncomingMessage(
+      makeMessage(`!approve ${requestId}`, { isDirect: false, threadId: "thread-1", nick: "mallory", trusted: false }),
+      {
+        sendResponse: async (text) => {
+          untrustedReplies.push(text);
+        },
+      },
+    );
+
+    expect(untrustedReplies).toEqual([
+      "mallory: Only trusted users may approve or deny network access requests.",
+    ]);
+    expect(runCompleted).toBe(false);
+
     const approvalReplies: string[] = [];
     await handler.handleIncomingMessage(
-      makeMessage(`!approve ${requestId}`, { isDirect: false, threadId: "thread-1", nick: "bob" }),
+      makeMessage(`!approve ${requestId}`, { isDirect: false, threadId: "thread-1", nick: "bob", trusted: true }),
       {
         sendResponse: async (text) => {
           approvalReplies.push(text);
