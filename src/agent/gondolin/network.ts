@@ -8,11 +8,8 @@
 import type { VMOptions } from "@earendil-works/gondolin";
 
 import type { Logger } from "../../app/logging.js";
-import {
-  checkAndAutoApproveUrlInArc,
-  getRedirectTarget,
-  recordRedirectTrustEvent,
-} from "../network-boundary.js";
+import { NetworkBoundaryService } from "../network-boundary-service.js";
+import { getRedirectTarget } from "../network-boundary.js";
 
 // ── CIDR / IP math ─────────────────────────────────────────────────────────
 
@@ -157,6 +154,8 @@ export interface VmHttpHooksResult {
   fetch: VmNetworkFetch;
 }
 
+const networkBoundary = new NetworkBoundaryService();
+
 /**
  * Build the `httpHooks` option for Gondolin's VM constructor.
  *
@@ -178,12 +177,14 @@ export async function createVmHttpHooks(opts: CreateVmHttpHooksOptions): Promise
     allowedHosts,
     secrets: opts.secrets,
     blockInternalRanges: false,
-    isRequestAllowed: async (request) => {
-      const trust = await checkAndAutoApproveUrlInArc(opts.arc, request.url, {
-        autoApproveRegexes: opts.autoApproveRegexes,
-      });
-      return trust.trusted;
-    },
+    isRequestAllowed: async (request) =>
+      await networkBoundary.isRequestAllowed(
+        {
+          arc: opts.arc,
+          autoApproveRegexes: opts.autoApproveRegexes,
+        },
+        request.url,
+      ),
     isIpAllowed: (info) => {
       const isArtifact =
         artifactHostname !== undefined && info.hostname.toLowerCase() === artifactHostname;
@@ -203,10 +204,13 @@ export async function createVmHttpHooks(opts: CreateVmHttpHooksOptions): Promise
     const requestUrl = getFetchInputUrl(input);
     const redirectTarget = getRedirectTarget(response, requestUrl);
     if (redirectTarget) {
-      await recordRedirectTrustEvent(opts.arc, {
-        fromUrl: requestUrl,
-        rawUrl: redirectTarget,
-      });
+      await networkBoundary.recordRedirect(
+        { arc: opts.arc },
+        {
+          fromUrl: requestUrl,
+          rawUrl: redirectTarget,
+        },
+      );
     }
     return response;
   };

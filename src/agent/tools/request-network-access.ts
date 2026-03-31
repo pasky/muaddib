@@ -1,11 +1,6 @@
 import { Type } from "@sinclair/typebox";
 
-import {
-  checkAndAutoApproveUrlInArc,
-  type NetworkAccessApprovalResult,
-  recordNetworkTrustEvent,
-} from "../network-boundary.js";
-import { resolveUrlAllowRegexes } from "../gondolin/env.js";
+import { NetworkBoundaryService } from "../network-boundary-service.js";
 import type { MuaddibTool, ToolContext } from "./types.js";
 
 export interface RequestNetworkAccessInput {
@@ -14,6 +9,8 @@ export interface RequestNetworkAccessInput {
 }
 
 export type RequestNetworkAccessExecutor = (input: RequestNetworkAccessInput) => Promise<string>;
+
+const networkBoundary = new NetworkBoundaryService();
 
 export function createRequestNetworkAccessTool(
   executors: { requestNetworkAccess: RequestNetworkAccessExecutor },
@@ -49,59 +46,17 @@ export function createRequestNetworkAccessTool(
 export function createDefaultRequestNetworkAccessExecutor(
   options: ToolContext,
 ): RequestNetworkAccessExecutor {
-  const autoApproveRegexes = resolveUrlAllowRegexes({
-    config: options.toolsConfig?.gondolin ?? {},
-    serverTag: options.serverTag,
-    channelName: options.channelName,
-  });
-
   return async (input: RequestNetworkAccessInput): Promise<string> => {
-    const trust = await checkAndAutoApproveUrlInArc(options.arc, input.url, {
-      autoApproveRegexes,
-    });
-    if (trust.trusted) {
-      return trust.autoApproved
-        ? `Network access auto-approved by config for ${trust.canonicalUrl}.`
-        : `Network access already trusted for ${trust.canonicalUrl}.`;
-    }
-
-    const approver = options.networkAccessApprover;
-    if (!approver) {
-      throw new Error("request_network_access requires a harness-provided networkAccessApprover.");
-    }
-
-    const approval = normalizeApprovalResult(await approver({
-      arc: options.arc,
-      url: input.url,
-      canonicalUrl: trust.canonicalUrl,
-      reason: input.reason,
-    }));
-
-    if (!approval.approved) {
-      return approval.message ?? `Network access denied for ${trust.canonicalUrl}.`;
-    }
-
-    await recordNetworkTrustEvent(options.arc, {
-      source: "approval",
-      rawUrl: input.url,
-    });
-
-    return approval.message ?? `Network access approved for ${trust.canonicalUrl}.`;
+    const result = await networkBoundary.requestAccess(
+      {
+        arc: options.arc,
+        serverTag: options.serverTag,
+        channelName: options.channelName,
+        gondolinConfig: options.toolsConfig?.gondolin ?? {},
+        approver: options.networkAccessApprover,
+      },
+      input,
+    );
+    return result.message;
   };
-}
-
-function normalizeApprovalResult(value: NetworkAccessApprovalResult | boolean): NetworkAccessApprovalResult {
-  if (typeof value === "boolean") {
-    return { approved: value };
-  }
-
-  if (!value || typeof value !== "object" || typeof value.approved !== "boolean") {
-    throw new Error(`Invalid network access approval result: ${JSON.stringify(value)}`);
-  }
-
-  if (value.message !== undefined && typeof value.message !== "string") {
-    throw new Error(`Invalid network access approval message: ${JSON.stringify(value.message)}`);
-  }
-
-  return value;
 }

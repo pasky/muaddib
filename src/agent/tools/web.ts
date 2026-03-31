@@ -5,14 +5,8 @@ import { Type } from "@sinclair/typebox";
 
 import type { ToolContext, MuaddibTool } from "./types.js";
 import { resolveLocalArtifactFilePath } from "./url-utils.js";
-import {
-  checkAndAutoApproveUrlInArc,
-  getRedirectTarget,
-  recordNetworkTrustEvent,
-  recordNetworkTrustEvents,
-  recordRedirectTrustEvent,
-} from "../network-boundary.js";
-import { resolveUrlAllowRegexes } from "../gondolin/env.js";
+import { NetworkBoundaryService } from "../network-boundary-service.js";
+import { getRedirectTarget } from "../network-boundary.js";
 import { responseText } from "../message.js";
 import { toConfiguredString } from "../../utils/index.js";
 
@@ -32,6 +26,8 @@ const DEFAULT_IMAGE_LIMIT = 3_500_000;
 
 /** Jina reader retry config. Mutable for test override. */
 export const jinaRetryConfig = { delaysMs: [0, 30_000, 90_000] };
+
+const networkBoundary = new NetworkBoundaryService();
 
 /**
  * Wrap a fetch call to surface the `.cause` from Node's opaque "fetch failed" TypeError.
@@ -181,19 +177,14 @@ function hasNonUserAgentHeaders(headers: Record<string, string>): boolean {
 }
 
 async function ensureVisitUrlTrusted(options: ToolContext, url: string): Promise<void> {
-  const trust = await checkAndAutoApproveUrlInArc(options.arc, url, {
-    autoApproveRegexes: resolveUrlAllowRegexes({
-      config: options.toolsConfig?.gondolin ?? {},
+  await networkBoundary.ensureUrlTrustedForVisit(
+    {
+      arc: options.arc,
       serverTag: options.serverTag,
       channelName: options.channelName,
-    }),
-  });
-  if (trust.trusted) {
-    return;
-  }
-
-  throw new Error(
-    `Network access denied for ${trust.canonicalUrl}. Use web_search or request_network_access first.`,
+      gondolinConfig: options.toolsConfig?.gondolin ?? {},
+    },
+    url,
   );
 }
 
@@ -232,10 +223,13 @@ async function fetchVisitResponseWithRedirects(
         // ignore cancellation failures on redirect hops
       }
     }
-    await recordRedirectTrustEvent(options.arc, {
-      fromUrl: currentUrl,
-      rawUrl: redirectTarget,
-    });
+    await networkBoundary.recordRedirect(
+      { arc: options.arc },
+      {
+        fromUrl: currentUrl,
+        rawUrl: redirectTarget,
+      },
+    );
     currentUrl = redirectTarget;
   }
 
@@ -276,10 +270,7 @@ export function createDefaultWebSearchExecutor(
     }
 
     const resultUrls = extractSearchResultUrls(body);
-    await recordNetworkTrustEvents(
-      options.arc,
-      resultUrls.map((rawUrl) => ({ source: "web_search" as const, rawUrl })),
-    );
+    await networkBoundary.recordSearchResultUrls({ arc: options.arc }, resultUrls);
 
     return `## Search Results\n\n${body}`;
   };
@@ -306,7 +297,7 @@ export function createDefaultVisitWebpageExecutor(
 
     await ensureVisitUrlTrusted(options, url);
     await visitRateLimiter.waitIfNeeded();
-    await recordNetworkTrustEvent(options.arc, { source: "visit_webpage", rawUrl: url });
+    await networkBoundary.recordVisit({ arc: options.arc }, url);
 
     const baseRequestHeaders = {
       "User-Agent": "muaddib/1.0",

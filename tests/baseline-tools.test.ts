@@ -33,6 +33,7 @@ import {
   isUrlTrustedInArc,
   recordNetworkTrustEvent,
 } from "../src/agent/network-boundary.js";
+import { NetworkBoundaryService } from "../src/agent/network-boundary-service.js";
 import { buildArc } from "../src/rooms/message.js";
 
 const tempDirs: string[] = [];
@@ -433,6 +434,37 @@ describe("network boundary shared module", () => {
     const ledger = await readFile(getArcNetworkTrustLedgerPath("arc-one"), "utf-8");
     expect(ledger).toContain('"source":"approval"');
     expect(ledger).toContain('"canonicalUrl":"https://example.com/path"');
+  });
+
+  it("requestAccess auto-approves matching gondolin arc regexes", async () => {
+    const service = new NetworkBoundaryService();
+
+    const result = await service.requestAccess(
+      {
+        arc: "service-arc",
+        serverTag: "slack:Corp",
+        channelName: "#release",
+        gondolinConfig: {
+          arcs: {
+            "slack:Corp##release": {
+              urlAllowRegexes: ["^https://example\\.com/.*$"],
+            },
+          },
+        },
+      },
+      {
+        url: "https://Example.com/docs?page=1",
+        reason: "Need docs",
+      },
+    );
+
+    expect(result).toEqual({
+      canonicalUrl: "https://example.com/docs",
+      approved: true,
+      autoApproved: true,
+      message: "Network access auto-approved by config for https://example.com/docs.",
+    });
+    expect(await isUrlTrustedInArc("service-arc", "https://example.com/docs?section=2")).toBe(true);
   });
 });
 
