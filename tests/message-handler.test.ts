@@ -432,6 +432,28 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("strips bare command-dispatch prefix without angle brackets", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const incoming = makeMessage("!s hi");
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: makeRunner("!d caster: answer follows"),
+    });
+
+    const sent: string[] = [];
+    incoming.isDirect = true;
+    await handler.handleIncomingMessage(incoming, { sendResponse: async (text) => { sent.push(text); } });
+
+    expect(sent[0]).toBe("answer follows");
+
+    await history.close();
+  });
+
   it("logs direct command lifecycle to injected logger", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();
