@@ -1195,6 +1195,17 @@ describe("buildMemoryUpdatePrompt", () => {
     expect(prompt).toContain("/workspace/users/bob.md");
   });
 
+  it("warns when per-user memory nears its half-limit", () => {
+    const arc = "memory-user-capacity-arc";
+    const workspacePath = getArcWorkspacePath(arc);
+    mkdirSync(join(workspacePath, "users"), { recursive: true });
+    writeFileSync(join(workspacePath, "users", "carol.md"), "x".repeat(170));
+
+    const prompt = buildMemoryUpdatePrompt(arc, { charLimit: 400 }, undefined, "carol");
+    expect(prompt).toContain("Per-user memory for carol (170/200 chars");
+    expect(prompt).toContain("you must consolidate existing entries if you add something");
+  });
+
   it("omits per-user memory when nick is not provided", () => {
     const prompt = buildMemoryUpdatePrompt("nonexistent-memory-arc");
     expect(prompt).not.toContain("<user-memory");
