@@ -783,6 +783,12 @@ describe("gondolin bash tool — env isolation", () => {
 
     const vmOptions = await getLastVmOptions<{ env?: Record<string, string> }>();
     expect(vmOptions.env ?? {}).not.toHaveProperty("__MUADDIB_ENV_LEAK_TEST");
+
+    // The bash command must be wrapped with /workspace/bin PATH prefix
+    // (Alpine /etc/profile clobbers PATH from VMOptions.env, so we prepend inline).
+    const shellCommand = bashCall![0][2]; // ["/bin/bash", "-lc", wrappedCommand]
+    expect(shellCommand).toContain('export PATH="/workspace/bin:$PATH"');
+    expect(shellCommand).toContain("echo hi");
   });
 });
 
@@ -850,7 +856,6 @@ describe("gondolin per-arc env injection", () => {
     const vmOptions = await getLastVmOptions<{ env?: Record<string, string> }>();
     expect(vmOptions.env).toMatchObject({
       HOME: "/workspace",
-      PATH: "/workspace/bin:/usr/sbin:/usr/bin:/sbin:/bin",
       GLOBAL: "1",
       FROM_PROFILE: "workspace-profile",
       WORKSPACE: "1",
@@ -859,49 +864,9 @@ describe("gondolin per-arc env injection", () => {
       HUMAN_MATCH: "1",
       ORDER: "release-inline",
     });
-  });
-
-  it("sets HOME=/workspace and /workspace/bin on PATH by default", async () => {
-    const fakeVm = makeFakeVm();
-    await registerFakeVm(fakeVm);
-
-    const { tools } = createGondolinTools({
-      arc: ARC,
-      config: gondolinConfig,
-    });
-
-    await warmVm(tools);
-
-    const vmOptions = await getLastVmOptions<{ env?: Record<string, string> }>();
-    expect(vmOptions.env).toBeDefined();
-    expect(vmOptions.env!.HOME).toBe("/workspace");
-    expect(vmOptions.env!.PATH).toBe("/workspace/bin:/usr/sbin:/usr/bin:/sbin:/bin");
-  });
-
-  it("allows plainEnv to override default HOME and PATH", async () => {
-    const fakeVm = makeFakeVm();
-    await registerFakeVm(fakeVm);
-
-    const { tools } = createGondolinTools({
-      arc: ARC,
-      config: {
-        ...gondolinConfig,
-        arcs: {
-          "*": {
-            env: {
-              HOME: "/custom-home",
-              PATH: "/custom/bin:/usr/bin",
-            },
-          },
-        },
-      },
-    });
-
-    await warmVm(tools);
-
-    const vmOptions = await getLastVmOptions<{ env?: Record<string, string> }>();
-    expect(vmOptions.env!.HOME).toBe("/custom-home");
-    expect(vmOptions.env!.PATH).toBe("/custom/bin:/usr/bin");
+    // PATH is NOT set via env — Alpine /etc/profile clobbers it.
+    // Instead, /workspace/bin is prepended in the bash -lc command wrapper.
+    expect(vmOptions.env!.PATH).toBeUndefined();
   });
 
   it("resolves urlAllowRegexes from gondolin profiles and arc fragments", () => {

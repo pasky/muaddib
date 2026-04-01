@@ -407,7 +407,9 @@ async function ensureVm(opts: VmSessionOptions): Promise<VM> {
 
       const combinedEnv = {
         HOME: "/workspace",
-        PATH: "/workspace/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        // NOTE: PATH is intentionally NOT set here — Alpine's /etc/profile
+        // hard-codes `export PATH=…` which clobbers VMOptions.env.  Instead,
+        // /workspace/bin is prepended in the bash -lc command wrapper below.
         ...plainEnv,
         ...placeholderEnv,
       };
@@ -571,7 +573,11 @@ export function createVmBashOps(getVm: () => Promise<VM>, defaultTimeoutSeconds:
           : undefined;
 
       try {
-        const proc = vm.exec(["/bin/bash", "-lc", command], {
+        // Wrap the command so /workspace/bin is on PATH even after /etc/profile
+        // resets it (Alpine's /etc/profile hard-codes export PATH=…, clobbering
+        // the env var set via VMOptions.env).
+        const wrappedCommand = `export PATH="/workspace/bin:$PATH"; ${command}`;
+        const proc = vm.exec(["/bin/bash", "-lc", wrappedCommand], {
           cwd,
           signal: ac.signal,
           stdout: "pipe",
