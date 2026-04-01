@@ -294,6 +294,7 @@ export class ChatHistoryStore {
    * Append an edit line. On context read, the latest line per pid wins.
    */
   async appendEdit(arc: string, pid: string, content: string, nick: string, role?: ChatRole): Promise<void> {
+    const tid = await this.lookupThreadId(arc, pid);
     const line: JsonlLine = {
       ts: new Date().toISOString(),
       n: nick,
@@ -302,7 +303,21 @@ export class ChatHistoryStore {
       pid,
       edit: true,
     };
+    if (tid) line.tid = tid;
     this.appendLine(arc, line);
+  }
+
+  /**
+   * Find the thread ID for a given platform ID by scanning history.
+   * Returns the `tid` of the first (newest) line matching the given `pid`.
+   */
+  private async lookupThreadId(arc: string, pid: string): Promise<string | undefined> {
+    for await (const line of this.streamNewestFirst(arc)) {
+      if (line.pid === pid && line.tid) {
+        return line.tid;
+      }
+    }
+    return undefined;
   }
 
   // ── Internal I/O ──

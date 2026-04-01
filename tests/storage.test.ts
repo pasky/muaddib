@@ -131,7 +131,7 @@ describe("ChatHistoryStore", () => {
 
     const arc = buildArc("slack:test", "general");
 
-    // Bot sends initial response
+    // Bot sends initial response in a thread
     await store.addMessage({
       serverTag: "slack:test",
       channelName: "general",
@@ -140,18 +140,108 @@ describe("ChatHistoryStore", () => {
       mynick: "muaddib",
       content: "bot reply",
       platformId: "5555.0000",
+      threadId: "4444.0000",
+      responseThreadId: "4444.0000",
     });
 
-    // Cost followup coalesced via edit — combined content replaces original
+    // Cost followup coalesced via edit — appendEdit looks up threadId from the original line
     await store.appendEdit(arc, "5555.0000", "bot reply\n(cost $0.50)", "muaddib", "assistant");
 
-    const context = await store.getContext(arc, 10);
+    const context = await store.getContext(arc, 10, "4444.0000");
 
     // Dedup keeps the edit — one message with combined content
     expect(context).toHaveLength(1);
     expect(context[0].role).toBe("assistant");
     expect((context[0] as any).content[0].text).toContain("bot reply");
     expect((context[0] as any).content[0].text).toContain("cost $0.50");
+
+    await store.close();
+  });
+
+  it("appendEdit with threadId does not leak into other thread contexts", async () => {
+    const store = createTempHistoryStore(20);
+    await store.initialize();
+
+    const arc = buildArc("slack:test", "general");
+
+    // Thread A: user asks about MRs
+    await store.addMessage({
+      serverTag: "slack:test",
+      channelName: "general",
+      arc,
+      nick: "alice",
+      mynick: "muaddib",
+      content: "how many MRs?",
+      platformId: "1000.0000",
+      threadId: "1000.0000",
+      responseThreadId: "1000.0000",
+    });
+    await store.addMessage({
+      serverTag: "slack:test",
+      channelName: "general",
+      arc,
+      nick: "muaddib",
+      mynick: "muaddib",
+      content: "42 MRs",
+      platformId: "1001.0000",
+      threadId: "1000.0000",
+      responseThreadId: "1000.0000",
+    });
+    // Bot message coalesced via edit — appendEdit looks up threadId from the original line
+    await store.appendEdit(arc, "1001.0000", "42 MRs\n(cost $0.21)", "muaddib", "assistant");
+
+    // Thread B: user asks about weather (new top-level message, auto-threaded)
+    await store.addMessage({
+      serverTag: "slack:test",
+      channelName: "general",
+      arc,
+      nick: "alice",
+      mynick: "muaddib",
+      content: "what's the weather?",
+      platformId: "2000.0000",
+      threadId: "2000.0000",
+      responseThreadId: "2000.0000",
+    });
+
+    // Thread B context should NOT contain Thread A's edit
+    const contextB = await store.getContext(arc, 20, "2000.0000");
+    const texts = contextB.map((m) =>
+      typeof m.content === "string" ? m.content : (m.content as any)[0]?.text ?? "",
+    );
+    expect(texts.some((t) => t.includes("what's the weather?"))).toBe(true);
+    expect(texts.some((t) => t.includes("42 MRs"))).toBe(false);
+    expect(texts.some((t) => t.includes("how many MRs?"))).toBe(false);
+
+    await store.close();
+  });
+
+  it("appendEdit without threadId leaks into unrelated thread context (pre-fix behavior guard)", async () => {
+    // Documents that appendEdit WITHOUT threadId still works for non-threaded edits
+    const store = createTempHistoryStore(20);
+    await store.initialize();
+
+    const arc = buildArc("slack:test", "general");
+
+    // Main channel message (no thread)
+    await store.addMessage({
+      serverTag: "slack:test",
+      channelName: "general",
+      arc,
+      nick: "alice",
+      mynick: "muaddib",
+      content: "original msg",
+      platformId: "500.0000",
+    });
+    await store.appendEdit(arc, "500.0000", "edited msg", "alice");
+
+    // Main context should show the edit
+    const mainContext = await store.getContext(arc, 20);
+    const mainTexts = mainContext.map((m) =>
+      typeof m.content === "string" ? m.content : (m.content as any)[0]?.text ?? "",
+    );
+    expect(mainTexts.some((t) => t.includes("edited msg"))).toBe(true);
+    // Original is deduped away
+    expect(mainTexts.filter((t) => t.includes("original msg")).length).toBe(0);
 
     await store.close();
   });
