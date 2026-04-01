@@ -79,7 +79,13 @@
             }
           },
           "slack:AmazingB2BSaaS#*": {
-            "use": ["corp-confluence", "corp-glab"]
+            "use": ["corp-confluence", "corp-glab"],
+            "urlAllowRegexes": [
+              "^https://registry\\.npmjs\\.org/.*$",
+              "^https://www\\.npmjs\\.com/package/.*$",
+              "^https://pypi\\.org/.*$",
+              "^https://files\\.pythonhosted\\.org/.*$"
+            ]
           },
           "libera##ops": {
             "use": ["corp-glab"]
@@ -157,8 +163,8 @@
               "!a": {
                 "autoReduceContext": true,
                 "reasoningEffort": "medium",
-		"model": "anthropic:claude-opus-4-6",
-		"visionModel": "anthropic:claude-opus-4-6"
+                "model": "anthropic:claude-opus-4-6",
+                "visionModel": "anthropic:claude-opus-4-6"
               }
             }
           },
