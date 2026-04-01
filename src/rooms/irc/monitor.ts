@@ -364,7 +364,8 @@ function normalizeSenderAndMessage(nick: string, message: string): [string, stri
     return [nick, message];
   }
 
-  const match = message.match(/^\s*<([^>\n]+)>\s*(.*)$/s);
+  // Match both <nick> and nick> formats (some bridges omit the opening <)
+  const match = message.match(/^\s*<?([^>\s][^>\n]*)>\s+(.*)$/s);
   if (!match) {
     return [nick, message];
   }

@@ -289,6 +289,47 @@ describe("IrcRoomMonitor", () => {
     await history.close();
   });
 
+  it("normalizes bridge nick without leading angle bracket (nick> format)", async () => {
+    const history = createTempHistoryStore(20);
+    await history.initialize();
+
+    const sender = new FakeSender();
+    const seenNicks: string[] = [];
+    const seenContents: string[] = [];
+
+    const monitor = new IrcRoomMonitor({
+      roomConfig: {
+        varlink: {
+          socketPath: "/tmp/varlink.sock",
+        },
+      },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async (message) => {
+          seenNicks.push(message.nick);
+          seenContents.push(message.content);
+        },
+      },
+      varlinkEvents: new FakeEventsClient(),
+      varlinkSender: sender,
+    });
+
+    // Bridge using nick> format (no leading <), e.g. hprmbridge
+    await monitor.processMessageEvent({
+      type: "message",
+      subtype: "public",
+      server: "libera",
+      target: "#test",
+      nick: "hprmbridge",
+      message: "badschemata> muaddib: What about RAM prices?",
+    });
+
+    expect(seenNicks).toEqual(["badschemata"]);
+    expect(seenContents).toEqual(["What about RAM prices?"]);
+
+    await history.close();
+  });
+
   it("ignores passive public messages when not addressed directly", async () => {
     const history = createTempHistoryStore(20);
     await history.initialize();
