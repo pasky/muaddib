@@ -3,10 +3,15 @@ set -euo pipefail
 
 # Build a custom Gondolin guest image for Muaddib.
 #
-# The image includes Python 3 (pip, numpy, matplotlib), Node.js, npm (upgraded),
-# uv, Chromium, Playwright, poppler-utils, jq, git, imagemagick, a uv venv with
-# pip (created on first boot), and a 4 GB rootfs so the agent has room to install
-# additional packages at runtime.
+# The image includes Python 3 (pip, numpy, matplotlib), Node.js, npm (upgraded
+# at build time — Alpine 3.23's is broken), uv, Chromium, Playwright,
+# poppler-utils, jq, git, imagemagick, and a 4 GB rootfs.
+#
+# postBuild.commands (run in chroot via container.force) handle npm upgrade,
+# Playwright install, and Chromium symlinks at image build time.
+# On first boot (checkpoint miss), the init script only creates a uv venv at
+# /workspace/.venv (persists across image rebuilds since /workspace is a
+# host-mounted FUSE directory unavailable at build time).
 #
 # Alpine 3.23 ships Node.js 24 in its main repo, so no version manager is needed.
 #
@@ -77,6 +82,25 @@ for BIN in sandboxd sandboxfs sandboxssh sandboxingress; do
 done
 echo "Extracted: sandboxd, sandboxfs, sandboxssh, sandboxingress"
 
+# Helper script to wire Playwright to system Chromium (copied into rootfs,
+# executed by postBuild.commands, then deleted).
+cat > "$BIN_TMPDIR/wire-playwright-chromium.sh" << 'PWEOF'
+#!/bin/sh
+set -eu
+for p in $(node -e '
+  const { registry } = require("playwright-core/lib/server");
+  for (const name of ["chromium", "chromium-headless-shell"]) {
+    const exe = registry.findExecutable(name);
+    if (exe) console.log(exe.executablePath("linux"));
+  }
+'); do
+  [ -e "$p" ] && continue
+  mkdir -p "$(dirname "$p")"
+  ln -sf /usr/bin/chromium-browser "$p"
+done
+PWEOF
+chmod +x "$BIN_TMPDIR/wire-playwright-chromium.sh"
+
 # Create an lz4 shim if the lz4 CLI tool is not available.
 # gondolin uses `lz4 -l -c` to compress the initramfs in lz4 legacy format.
 # The Debian package `lz4` provides the CLI, but python3-lz4 (part of Debian's
@@ -120,40 +144,12 @@ ARCH=$(node -e "console.log(process.arch === 'arm64' ? 'aarch64' : 'x86_64')")
 
 INIT_EXTRA=$(mktemp /tmp/gondolin-init-extra-XXXXXX.sh)
 cat > "$INIT_EXTRA" << 'INITEOF'
-# ── Boot-time fixups (idempotent) ──────────────────────────────────────────
-# These steps run during image build AND on every fresh boot (checkpoint miss).
-# Each step is guarded so that a transient network failure during fresh boot
-# cannot crash init — the artifacts are already baked into the rootfs.
+# ── Boot-time setup (idempotent, runs under set -eu from parent init) ─────
+# npm, Playwright, and Chromium symlinks are pre-installed at image build time
+# via postBuild.commands.  The only boot-time task is creating the uv venv in
+# /workspace (a host-mounted FUSE directory, unavailable at build time).
 
-# Upgrade npm — Alpine 3.23's bundled version is broken.
-if ! npm --version 2>/dev/null | grep -q '^11\.'; then
-  rm -rf /usr/lib/node_modules/npm
-  mkdir -p /usr/lib/node_modules/npm
-  curl -fsSL https://registry.npmjs.org/npm/-/npm-11.2.0.tgz \
-    | tar -xz -C /usr/lib/node_modules/npm --strip-components=1
-fi
-
-# Create uv venv with system site-packages
-[ -d /opt/venv ] || uv venv --system-site-packages --seed /opt/venv
-
-# Install Playwright and wire it to system Chromium.
-if ! node -e "require('playwright-core')" 2>/dev/null; then
-  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install -g playwright
-fi
-
-# Discover the paths Playwright will probe for chromium / headless-shell and
-# symlink them to the Alpine system Chromium.
-node -e '
-  const { registry } = require("playwright-core/lib/server");
-  for (const name of ["chromium", "chromium-headless-shell"]) {
-    const exe = registry.findExecutable(name);
-    if (exe) console.log(exe.executablePath("linux"));
-  }
-' 2>/dev/null | while read -r p; do
-  [ -e "$p" ] && continue
-  mkdir -p "$(dirname "$p")"
-  ln -sf /usr/bin/chromium-browser "$p"
-done
+[ -d /workspace/.venv ] || uv venv --system-site-packages --seed /workspace/.venv
 INITEOF
 
 BUILD_CONFIG=$(mktemp /tmp/gondolin-build-XXXXXX.json)
@@ -179,8 +175,13 @@ cat > "$BUILD_CONFIG" << EOF
       "rng-tools",
       "bash",
       "ca-certificates",
+      "coreutils",
       "curl",
+      "diffutils",
       "file",
+      "findutils",
+      "gawk",
+      "grep",
       "python3",
       "py3-pip",
       "py3-numpy",
@@ -190,6 +191,8 @@ cat > "$BUILD_CONFIG" << EOF
       "uv",
       "openssh",
       "poppler-utils",
+      "sed",
+      "tar",
       "chromium",
       "font-noto",
       "jq",
@@ -201,12 +204,26 @@ cat > "$BUILD_CONFIG" << EOF
     "label": "gondolin-root",
     "sizeMb": 4096
   },
+  "container": {
+    "force": true
+  },
+  "postBuild": {
+    "copy": [
+      {"src": "$BIN_TMPDIR/wire-playwright-chromium.sh", "dest": "/tmp/wire-playwright-chromium.sh"}
+    ],
+    "commands": [
+      "rm -rf /usr/lib/node_modules/npm && mkdir -p /usr/lib/node_modules/npm && curl -fsSL https://registry.npmjs.org/npm/-/npm-11.2.0.tgz | tar -xz -C /usr/lib/node_modules/npm --strip-components=1",
+      "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install -g playwright",
+      "sh /tmp/wire-playwright-chromium.sh && rm -f /tmp/wire-playwright-chromium.sh"
+    ]
+  },
   "init": {
     "rootfsInitExtra": "$INIT_EXTRA"
   },
   "env": {
-    "VIRTUAL_ENV": "/opt/venv",
-    "PATH": "/opt/venv/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "HOME": "/workspace",
+    "VIRTUAL_ENV": "/workspace/.venv",
+    "PATH": "/workspace/bin:/workspace/.venv/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
     "CHROME_BIN": "/usr/bin/chromium-browser"
   }
 }

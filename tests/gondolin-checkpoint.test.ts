@@ -784,10 +784,7 @@ describe("gondolin bash tool — env isolation", () => {
     const vmOptions = await getLastVmOptions<{ env?: Record<string, string> }>();
     expect(vmOptions.env ?? {}).not.toHaveProperty("__MUADDIB_ENV_LEAK_TEST");
 
-    // The bash command must be wrapped with /workspace/bin PATH prefix
-    // (Alpine /etc/profile clobbers PATH from VMOptions.env, so we prepend inline).
-    const shellCommand = bashCall![0][2]; // ["/bin/bash", "-lc", wrappedCommand]
-    expect(shellCommand).toContain('export PATH="/workspace/bin:$PATH"');
+    const shellCommand = bashCall![0][2]; // ["/bin/bash", "-lc", command]
     expect(shellCommand).toContain("echo hi");
   });
 });
@@ -855,7 +852,6 @@ describe("gondolin per-arc env injection", () => {
 
     const vmOptions = await getLastVmOptions<{ env?: Record<string, string> }>();
     expect(vmOptions.env).toMatchObject({
-      HOME: "/workspace",
       GLOBAL: "1",
       FROM_PROFILE: "workspace-profile",
       WORKSPACE: "1",
@@ -864,8 +860,8 @@ describe("gondolin per-arc env injection", () => {
       HUMAN_MATCH: "1",
       ORDER: "release-inline",
     });
-    // PATH is NOT set via env — Alpine /etc/profile clobbers it.
-    // Instead, /workspace/bin is prepended in the bash -lc command wrapper.
+    // HOME, PATH, VIRTUAL_ENV are set by the image's /etc/profile.d script,
+    // not via VMOptions.env — only arc-level config vars should appear here.
     expect(vmOptions.env!.PATH).toBeUndefined();
   });
 

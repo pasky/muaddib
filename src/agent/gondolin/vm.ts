@@ -406,10 +406,10 @@ async function ensureVm(opts: VmSessionOptions): Promise<VM> {
       };
 
       const combinedEnv = {
-        HOME: "/workspace",
-        // NOTE: PATH is intentionally NOT set here — Alpine's /etc/profile
-        // hard-codes `export PATH=…` which clobbers VMOptions.env.  Instead,
-        // /workspace/bin is prepended in the bash -lc command wrapper below.
+        // NOTE: HOME, PATH, VIRTUAL_ENV are intentionally NOT set here —
+        // they are baked into /etc/profile.d/gondolin-image-env.sh by the
+        // image build config (scripts/build-gondolin-image.sh), which is
+        // sourced after Alpine's /etc/profile PATH clobber.
         ...plainEnv,
         ...placeholderEnv,
       };
@@ -573,10 +573,10 @@ export function createVmBashOps(getVm: () => Promise<VM>, defaultTimeoutSeconds:
           : undefined;
 
       try {
-        // Wrap the command so /workspace/bin is on PATH even after /etc/profile
-        // resets it (Alpine's /etc/profile hard-codes export PATH=…, clobbering
-        // the env var set via VMOptions.env).
-        const wrappedCommand = `export PATH="/workspace/bin:$PATH"; ${command}`;
+        // No PATH/env wrapper needed — HOME, PATH, VIRTUAL_ENV are all set
+        // by /etc/profile.d/gondolin-image-env.sh (baked into the image),
+        // which is sourced after Alpine's /etc/profile PATH clobber.
+        const wrappedCommand = command;
         const proc = vm.exec(["/bin/bash", "-lc", wrappedCommand], {
           cwd,
           signal: ac.signal,
