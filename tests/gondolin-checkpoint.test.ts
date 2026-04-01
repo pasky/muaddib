@@ -849,6 +849,8 @@ describe("gondolin per-arc env injection", () => {
 
     const vmOptions = await getLastVmOptions<{ env?: Record<string, string> }>();
     expect(vmOptions.env).toMatchObject({
+      HOME: "/workspace",
+      PATH: "/workspace/bin:/usr/sbin:/usr/bin:/sbin:/bin",
       GLOBAL: "1",
       FROM_PROFILE: "workspace-profile",
       WORKSPACE: "1",
@@ -857,6 +859,49 @@ describe("gondolin per-arc env injection", () => {
       HUMAN_MATCH: "1",
       ORDER: "release-inline",
     });
+  });
+
+  it("sets HOME=/workspace and /workspace/bin on PATH by default", async () => {
+    const fakeVm = makeFakeVm();
+    await registerFakeVm(fakeVm);
+
+    const { tools } = createGondolinTools({
+      arc: ARC,
+      config: gondolinConfig,
+    });
+
+    await warmVm(tools);
+
+    const vmOptions = await getLastVmOptions<{ env?: Record<string, string> }>();
+    expect(vmOptions.env).toBeDefined();
+    expect(vmOptions.env!.HOME).toBe("/workspace");
+    expect(vmOptions.env!.PATH).toBe("/workspace/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+  });
+
+  it("allows plainEnv to override default HOME and PATH", async () => {
+    const fakeVm = makeFakeVm();
+    await registerFakeVm(fakeVm);
+
+    const { tools } = createGondolinTools({
+      arc: ARC,
+      config: {
+        ...gondolinConfig,
+        arcs: {
+          "*": {
+            env: {
+              HOME: "/custom-home",
+              PATH: "/custom/bin:/usr/bin",
+            },
+          },
+        },
+      },
+    });
+
+    await warmVm(tools);
+
+    const vmOptions = await getLastVmOptions<{ env?: Record<string, string> }>();
+    expect(vmOptions.env!.HOME).toBe("/custom-home");
+    expect(vmOptions.env!.PATH).toBe("/custom/bin:/usr/bin");
   });
 
   it("resolves urlAllowRegexes from gondolin profiles and arc fragments", () => {
