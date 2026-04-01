@@ -349,8 +349,12 @@ export class IrcRoomMonitor {
   }
 }
 
+// IRC nick chars per RFC 2812: letter | digit | special (_ - \ [ ] { } ^ ` |)
+// Bridge relays may prefix with mode chars (@ +) inside angle brackets.
+const IRC_NICK_CHAR = "[a-zA-Z0-9_\\\\\\[\\]{}^`|@+\\-]";
+
 function inputMatchForMynick(mynick: string, message: string): RegExpMatchArray | null {
-  const pattern = new RegExp(`^\\s*(?<nick><?.*?>\\s*)?${escapeRegExp(mynick)}[,:]\\s*(?<content>.*)$`, "i");
+  const pattern = new RegExp(`^\\s*(?<nick><${IRC_NICK_CHAR}+>\\s*)?${escapeRegExp(mynick)}[,:]\\s*(?<content>.*)$`, "i");
   return message.match(pattern);
 }
 

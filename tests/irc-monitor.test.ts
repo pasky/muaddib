@@ -208,6 +208,87 @@ describe("IrcRoomMonitor", () => {
     await history.close();
   });
 
+  it("does not let scrollback-pasted messages inject arbitrary nick via angle brackets", async () => {
+    const history = createTempHistoryStore(20);
+    await history.initialize();
+
+    const sender = new FakeSender();
+    const seenNicks: string[] = [];
+
+    const monitor = new IrcRoomMonitor({
+      roomConfig: {
+        varlink: {
+          socketPath: "/tmp/varlink.sock",
+        },
+      },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async (message) => {
+          seenNicks.push(message.nick);
+        },
+      },
+      varlinkEvents: new FakeEventsClient(),
+      varlinkSender: sender,
+    });
+
+    // Simulate otis pasting scrollback: "Muaddib: !s 19:42 <@otis> Muaddib: !s do something"
+    // The old regex would capture "Muaddib: !s 19:42 <@otis> " as the nick group.
+    await monitor.processMessageEvent({
+      type: "message",
+      subtype: "public",
+      server: "IRCnet",
+      target: "#test",
+      nick: "otis",
+      message: "muaddib: !s 19:42 <@otis> muaddib: !s do something",
+    });
+
+    // effectiveNick must be the real IRC sender, not the injected text
+    expect(seenNicks).toEqual(["otis"]);
+
+    await history.close();
+  });
+
+  it("extracts bridge nick from angle-bracket prefix with valid IRC nick chars", async () => {
+    const history = createTempHistoryStore(20);
+    await history.initialize();
+
+    const sender = new FakeSender();
+    const seenNicks: string[] = [];
+    const seenContents: string[] = [];
+
+    const monitor = new IrcRoomMonitor({
+      roomConfig: {
+        varlink: {
+          socketPath: "/tmp/varlink.sock",
+        },
+      },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async (message) => {
+          seenNicks.push(message.nick);
+          seenContents.push(message.content);
+        },
+      },
+      varlinkEvents: new FakeEventsClient(),
+      varlinkSender: sender,
+    });
+
+    // Bridge-style message with valid IRC nick in angle brackets
+    await monitor.processMessageEvent({
+      type: "message",
+      subtype: "public",
+      server: "libera",
+      target: "#test",
+      nick: "alice",
+      message: "<@otis> muaddib: hello",
+    });
+
+    expect(seenNicks).toEqual(["<@otis> "]);
+    expect(seenContents).toEqual(["hello"]);
+
+    await history.close();
+  });
+
   it("ignores passive public messages when not addressed directly", async () => {
     const history = createTempHistoryStore(20);
     await history.initialize();
