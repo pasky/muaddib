@@ -57,8 +57,8 @@ vi.mock("@mariozechner/pi-coding-agent", () => ({
       getApiKey: vi.fn(async () => "test-key"),
     }),
   },
-  ModelRegistry: class {
-    constructor(_authStorage: unknown) {}
+  ModelRegistry: {
+    inMemory: (_authStorage: unknown) => ({}),
   },
   SessionManager: { inMemory: vi.fn(() => ({ type: "sessionManager" })) },
   SettingsManager: { inMemory: vi.fn(() => ({ type: "settingsManager" })) },

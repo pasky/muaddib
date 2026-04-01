@@ -158,7 +158,6 @@ const EMPTY_RESOURCE_LOADER_BASE: Omit<ResourceLoader, "getExtensions" | "getSys
   getThemes: () => ({ themes: [], diagnostics: [] }),
   getAgentsFiles: () => ({ agentsFiles: [] }),
   getAppendSystemPrompt: () => [],
-  getPathMetadata: () => new Map(),
   extendResources: () => {},
   reload: async () => {},
 };
@@ -206,7 +205,7 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
     getSystemPrompt: () => input.systemPrompt,
   };
 
-  const modelRegistry = new ModelRegistry(input.authStorage);
+  const modelRegistry = ModelRegistry.inMemory(input.authStorage);
   const llmDebugMaxChars = Math.max(500, Math.floor(input.llmDebugMaxChars ?? 120_000));
 
   // Mutable vision-fallback state: when activated, the streamFn will override

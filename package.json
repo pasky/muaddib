@@ -61,16 +61,16 @@
   },
   "dependencies": {
     "@earendil-works/gondolin": "^0.7.0",
-    "@mariozechner/pi-agent-core": "^0.61.1",
-    "@mariozechner/pi-ai": "^0.61.1",
-    "@mariozechner/pi-coding-agent": "^0.61.1",
+    "@mariozechner/pi-agent-core": "^0.64.0",
+    "@mariozechner/pi-ai": "^0.64.0",
+    "@mariozechner/pi-coding-agent": "^0.64.0",
     "@sinclair/typebox": "^0.34.48",
     "@slack/bolt": "^4.6.0",
     "croner": "^10.0.1",
     "discord.js": "^14.25.1"
   },
   "overrides": {
-    "fast-xml-parser": "5.3.6"
+    "fast-xml-parser": "5.5.9"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
