@@ -250,7 +250,6 @@ export class IrcRoomMonitor {
     const isPrivate = event.subtype !== "public";
     const isDirect = Boolean(inputMatch) || isPrivate;
 
-    const effectiveNick = inputMatch?.groups?.nick ?? normalizedNick;
     const cleanedMessage = inputMatch?.groups?.content ?? normalizedMessage;
 
     const userAllowlist = this.options.roomConfig.userAllowlist;
@@ -262,7 +261,7 @@ export class IrcRoomMonitor {
       serverTag: server,
       channelName,
       arc: buildArc(server, channelName),
-      nick: effectiveNick,
+      nick: normalizedNick,
       mynick,
       content: isDirect ? cleanedMessage : normalizedMessage,
       isDirect,
@@ -288,12 +287,12 @@ export class IrcRoomMonitor {
 
     const arc = roomMessage.arc;
     const runDirectMessage = async (): Promise<void> => {
-      this.logger.debug("Processing direct IRC message", `arc=${arc}`, `nick=${effectiveNick}`);
+      this.logger.debug("Processing direct IRC message", `arc=${arc}`, `nick=${normalizedNick}`);
       await handleIncoming();
     };
 
     if (this.logWriter) {
-      await this.logWriter.withMessageContext({ arc, nick: effectiveNick, message: normalizedMessage }, runDirectMessage);
+      await this.logWriter.withMessageContext({ arc, nick: normalizedNick, message: normalizedMessage }, runDirectMessage);
     } else {
       await runDirectMessage();
     }
@@ -352,9 +351,10 @@ export class IrcRoomMonitor {
 // IRC nick chars per RFC 2812: letter | digit | special (_ - \ [ ] { } ^ ` |)
 // Bridge relays may prefix with mode chars (@ +) inside angle brackets.
 const IRC_NICK_CHAR = "[a-zA-Z0-9_\\\\\\[\\]{}^`|@+\\-]";
+const IRC_NICK_RE = new RegExp(`^${IRC_NICK_CHAR}+$`);
 
 function inputMatchForMynick(mynick: string, message: string): RegExpMatchArray | null {
-  const pattern = new RegExp(`^\\s*(?<nick><${IRC_NICK_CHAR}+>\\s*)?${escapeRegExp(mynick)}[,:]\\s*(?<content>.*)$`, "i");
+  const pattern = new RegExp(`^\\s*(?:<${IRC_NICK_CHAR}+>\\s*)?${escapeRegExp(mynick)}[,:]\\s*(?<content>.*)$`, "i");
   return message.match(pattern);
 }
 
@@ -372,7 +372,7 @@ function normalizeSenderAndMessage(nick: string, message: string): [string, stri
 
   const bridgedNick = match[1].trim();
   const bridgedContent = match[2].trim();
-  if (!bridgedNick || !bridgedContent) {
+  if (!bridgedNick || !bridgedContent || !IRC_NICK_RE.test(bridgedNick)) {
     return [nick, message];
   }
 

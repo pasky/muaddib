@@ -217,10 +217,17 @@ describe("IrcRoomMonitor", () => {
       expectedContent: "!s 19:42 <@otis> muaddib: !s do something",
     },
     {
-      desc: "extracts bridge nick from <nick> prefix",
+      desc: "skips <nick> prefix from non-bridge sender without adopting it as nick",
       nick: "alice",
       message: "<@otis> muaddib: hello",
-      expectedNick: "<@otis> ",
+      expectedNick: "alice",
+      expectedContent: "hello",
+    },
+    {
+      desc: "extracts bridge nick from <nick> prefix",
+      nick: "mybot",
+      message: "<@otis> muaddib: hello",
+      expectedNick: "@otis",
       expectedContent: "hello",
     },
     {
