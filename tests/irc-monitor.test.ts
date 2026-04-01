@@ -208,88 +208,29 @@ describe("IrcRoomMonitor", () => {
     await history.close();
   });
 
-  it("does not let scrollback-pasted messages inject arbitrary nick via angle brackets", async () => {
-    const history = createTempHistoryStore(20);
-    await history.initialize();
-
-    const sender = new FakeSender();
-    const seenNicks: string[] = [];
-
-    const monitor = new IrcRoomMonitor({
-      roomConfig: {
-        varlink: {
-          socketPath: "/tmp/varlink.sock",
-        },
-      },
-      history,
-      commandHandler: {
-        handleIncomingMessage: async (message) => {
-          seenNicks.push(message.nick);
-        },
-      },
-      varlinkEvents: new FakeEventsClient(),
-      varlinkSender: sender,
-    });
-
-    // Simulate otis pasting scrollback: "Muaddib: !s 19:42 <@otis> Muaddib: !s do something"
-    // The old regex would capture "Muaddib: !s 19:42 <@otis> " as the nick group.
-    await monitor.processMessageEvent({
-      type: "message",
-      subtype: "public",
-      server: "IRCnet",
-      target: "#test",
+  it.each([
+    {
+      desc: "rejects scrollback-pasted message with injected nick",
       nick: "otis",
       message: "muaddib: !s 19:42 <@otis> muaddib: !s do something",
-    });
-
-    // effectiveNick must be the real IRC sender, not the injected text
-    expect(seenNicks).toEqual(["otis"]);
-
-    await history.close();
-  });
-
-  it("extracts bridge nick from angle-bracket prefix with valid IRC nick chars", async () => {
-    const history = createTempHistoryStore(20);
-    await history.initialize();
-
-    const sender = new FakeSender();
-    const seenNicks: string[] = [];
-    const seenContents: string[] = [];
-
-    const monitor = new IrcRoomMonitor({
-      roomConfig: {
-        varlink: {
-          socketPath: "/tmp/varlink.sock",
-        },
-      },
-      history,
-      commandHandler: {
-        handleIncomingMessage: async (message) => {
-          seenNicks.push(message.nick);
-          seenContents.push(message.content);
-        },
-      },
-      varlinkEvents: new FakeEventsClient(),
-      varlinkSender: sender,
-    });
-
-    // Bridge-style message with valid IRC nick in angle brackets
-    await monitor.processMessageEvent({
-      type: "message",
-      subtype: "public",
-      server: "libera",
-      target: "#test",
+      expectedNick: "otis",
+      expectedContent: "!s 19:42 <@otis> muaddib: !s do something",
+    },
+    {
+      desc: "extracts bridge nick from <nick> prefix",
       nick: "alice",
       message: "<@otis> muaddib: hello",
-    });
-
-    expect(seenNicks).toEqual(["<@otis> "]);
-    expect(seenContents).toEqual(["hello"]);
-
-    await history.close();
-  });
-
-  it("normalizes bridge nick without leading angle bracket (nick> format)", async () => {
+      expectedNick: "<@otis> ",
+      expectedContent: "hello",
+    },
+    {
+      desc: "normalizes bridge nick> format (no leading <)",
+      nick: "hprmbridge",
+      message: "badschemata> muaddib: What about RAM prices?",
+      expectedNick: "badschemata",
+      expectedContent: "What about RAM prices?",
+    },
+  ])("$desc", async ({ nick, message, expectedNick, expectedContent }) => {
     const history = createTempHistoryStore(20);
     await history.initialize();
 
@@ -305,27 +246,26 @@ describe("IrcRoomMonitor", () => {
       },
       history,
       commandHandler: {
-        handleIncomingMessage: async (message) => {
-          seenNicks.push(message.nick);
-          seenContents.push(message.content);
+        handleIncomingMessage: async (msg) => {
+          seenNicks.push(msg.nick);
+          seenContents.push(msg.content);
         },
       },
       varlinkEvents: new FakeEventsClient(),
       varlinkSender: sender,
     });
 
-    // Bridge using nick> format (no leading <), e.g. hprmbridge
     await monitor.processMessageEvent({
       type: "message",
       subtype: "public",
       server: "libera",
       target: "#test",
-      nick: "hprmbridge",
-      message: "badschemata> muaddib: What about RAM prices?",
+      nick,
+      message,
     });
 
-    expect(seenNicks).toEqual(["badschemata"]);
-    expect(seenContents).toEqual(["What about RAM prices?"]);
+    expect(seenNicks).toEqual([expectedNick]);
+    expect(seenContents).toEqual([expectedContent]);
 
     await history.close();
   });
