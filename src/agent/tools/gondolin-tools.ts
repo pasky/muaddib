@@ -158,8 +158,8 @@ function buildSystemPromptSuffix(
       : "";
 
   return (
-    `Filesystem: /workspace persists across sessions; ${sessionDir} is your working directory (last 8 session dirs in /workspace/.sessions/ are kept).` +
-    " Environment: Alpine Linux, uv venv is active (use `uv pip install` + `uv run`)." +
+    `Filesystem: $HOME=/workspace persists across sessions; ${sessionDir} is your working directory (last 8 session dirs in /workspace/.sessions/ are kept).` +
+    " Environment: Alpine Linux, /workspace/bin is first on $PATH, uv venv is active (use `uv pip install` + `uv run`)." +
     arcSuffix +
     chatHistorySuffix +
     skillsSection +

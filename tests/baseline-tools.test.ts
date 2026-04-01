@@ -526,23 +526,16 @@ describe("createVmHttpHooks network trust policy", () => {
     });
 
     expect(
-      await Promise.resolve(httpHooks.isRequestAllowed?.({
-        method: "GET",
-        url: "https://example.com/path?x=1",
-        headers: {},
-        body: null,
-      })),
+      await Promise.resolve(httpHooks.isRequestAllowed?.(new Request("https://example.com/path?x=1"))),
     ).toBe(false);
 
     await trustUrl("https://example.com/path?seed=1", "sandbox-arc");
 
     expect(
-      await Promise.resolve(httpHooks.isRequestAllowed?.({
+      await Promise.resolve(httpHooks.isRequestAllowed?.(new Request("https://example.com/path?x=2", {
         method: "POST",
-        url: "https://example.com/path?x=2",
         headers: { "content-type": "application/json" },
-        body: null,
-      })),
+      }))),
     ).toBe(true);
   });
 
@@ -554,12 +547,7 @@ describe("createVmHttpHooks network trust policy", () => {
     });
 
     expect(
-      await Promise.resolve(httpHooks.isRequestAllowed?.({
-        method: "GET",
-        url: "https://Example.com/allowed?token=1",
-        headers: {},
-        body: null,
-      })),
+      await Promise.resolve(httpHooks.isRequestAllowed?.(new Request("https://Example.com/allowed?token=1"))),
     ).toBe(true);
     expect(await isUrlTrustedInArc("sandbox-allow-arc", "https://example.com/allowed?x=2")).toBe(true);
   });
@@ -587,12 +575,7 @@ describe("createVmHttpHooks network trust policy", () => {
 
     expect(await isUrlTrustedInArc("redirect-arc", "https://cdn.example.com/final?other=1")).toBe(true);
     expect(
-      await Promise.resolve(httpHooks.isRequestAllowed?.({
-        method: "GET",
-        url: "https://cdn.example.com/final?other=2",
-        headers: {},
-        body: null,
-      })),
+      await Promise.resolve(httpHooks.isRequestAllowed?.(new Request("https://cdn.example.com/final?other=2"))),
     ).toBe(true);
   });
 });

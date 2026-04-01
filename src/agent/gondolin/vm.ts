@@ -406,6 +406,8 @@ async function ensureVm(opts: VmSessionOptions): Promise<VM> {
       };
 
       const combinedEnv = {
+        HOME: "/workspace",
+        PATH: "/workspace/bin:/usr/sbin:/usr/bin:/sbin:/bin",
         ...plainEnv,
         ...placeholderEnv,
       };
