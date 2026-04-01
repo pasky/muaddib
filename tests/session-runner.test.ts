@@ -180,6 +180,45 @@ describe("SessionRunner", () => {
     }
   });
 
+  it("retries when final response is [internal monologue]", async () => {
+    vi.useFakeTimers();
+    try {
+      const ctx = makeMockSession({
+        promptImpl: async (c) => {
+          const promptText = c.session.prompt.mock.lastCall?.[0] as string ?? "";
+          if (promptText.includes("No valid text")) {
+            c.session.messages.push({
+              role: "assistant", content: [{ type: "text", text: "real answer" }],
+              usage: makeUsage(), stopReason: "stop",
+            });
+            c.callbacks.forEach((cb) => cb({ type: "message_end", message: c.session.messages.at(-1) }));
+            c.callbacks.forEach((cb) => cb({ type: "turn_end" }));
+            return;
+          }
+          c.session.messages.push({
+            role: "assistant",
+            content: [{ type: "text", text: "[internal monologue] thinking about stuff" }],
+            usage: makeUsage(), stopReason: "stop",
+          });
+          c.callbacks.forEach((cb) => cb({ type: "message_end", message: c.session.messages.at(-1) }));
+          c.callbacks.forEach((cb) => cb({ type: "turn_end" }));
+        },
+      });
+
+      const runner = makeRunner();
+      const promise = runner.prompt("hello");
+      await vi.runAllTimersAsync();
+      const result = await promise;
+
+      expect(result.text).toBe("real answer");
+      // Should have retried at least once
+      expect(ctx.session.prompt.mock.calls.length).toBeGreaterThan(1);
+      await result.session!.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("switches to refusal fallback model when refusal error is detected", async () => {
     const ctx = makeMockSession();
     ctx.session.prompt

@@ -208,6 +208,75 @@ describe("IrcRoomMonitor", () => {
     await history.close();
   });
 
+  it.each([
+    {
+      desc: "rejects scrollback-pasted message with injected nick",
+      nick: "otis",
+      message: "muaddib: !s 19:42 <@otis> muaddib: !s do something",
+      expectedNick: "otis",
+      expectedContent: "!s 19:42 <@otis> muaddib: !s do something",
+    },
+    {
+      desc: "skips <nick> prefix from non-bridge sender without adopting it as nick",
+      nick: "alice",
+      message: "<@otis> muaddib: hello",
+      expectedNick: "alice",
+      expectedContent: "hello",
+    },
+    {
+      desc: "extracts bridge nick from <nick> prefix",
+      nick: "mybot",
+      message: "<@otis> muaddib: hello",
+      expectedNick: "@otis",
+      expectedContent: "hello",
+    },
+    {
+      desc: "normalizes bridge nick> format (no leading <)",
+      nick: "hprmbridge",
+      message: "badschemata> muaddib: What about RAM prices?",
+      expectedNick: "badschemata",
+      expectedContent: "What about RAM prices?",
+    },
+  ])("$desc", async ({ nick, message, expectedNick, expectedContent }) => {
+    const history = createTempHistoryStore(20);
+    await history.initialize();
+
+    const sender = new FakeSender();
+    const seenNicks: string[] = [];
+    const seenContents: string[] = [];
+
+    const monitor = new IrcRoomMonitor({
+      roomConfig: {
+        varlink: {
+          socketPath: "/tmp/varlink.sock",
+        },
+      },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async (msg) => {
+          seenNicks.push(msg.nick);
+          seenContents.push(msg.content);
+        },
+      },
+      varlinkEvents: new FakeEventsClient(),
+      varlinkSender: sender,
+    });
+
+    await monitor.processMessageEvent({
+      type: "message",
+      subtype: "public",
+      server: "libera",
+      target: "#test",
+      nick,
+      message,
+    });
+
+    expect(seenNicks).toEqual([expectedNick]);
+    expect(seenContents).toEqual([expectedContent]);
+
+    await history.close();
+  });
+
   it("ignores passive public messages when not addressed directly", async () => {
     const history = createTempHistoryStore(20);
     await history.initialize();

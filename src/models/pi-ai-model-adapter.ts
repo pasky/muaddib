@@ -14,6 +14,8 @@ import type { AuthStorage } from "@mariozechner/pi-coding-agent";
 
 import type { Logger } from "../app/logging.js";
 import { stripBinaryContent } from "../agent/debug-utils.js";
+import { recordUsage } from "../cost/cost-span.js";
+import type { LlmCallType } from "../cost/llm-call-type.js";
 import { parseModelSpec, type ModelSpec } from "./model-spec.js";
 import {
   getOverriddenProviders,
@@ -37,7 +39,7 @@ export interface ResolvedPiAiModel {
 }
 
 export interface CompleteSimpleOptions {
-  callType?: string;
+  callType: LlmCallType;
   logger?: Logger;
   maxChars?: number;
   streamOptions?: Omit<SimpleStreamOptions, "apiKey" | "onPayload">;
@@ -98,9 +100,9 @@ export class PiAiModelAdapter {
     return { spec, model };
   }
 
-  async completeSimple(modelSpec: string, context: Context, options: CompleteSimpleOptions = {}): Promise<AssistantMessage> {
+  async completeSimple(modelSpec: string, context: Context, options: CompleteSimpleOptions): Promise<AssistantMessage> {
     const resolved = this.resolve(modelSpec);
-    const callType = options.callType ?? "llm_call";
+    const callType = options.callType;
     const logger = options.logger;
     const maxChars = Math.max(500, Math.floor(options.maxChars ?? 120_000));
 
@@ -120,6 +122,7 @@ export class PiAiModelAdapter {
       );
 
       logger?.debug(`llm_io response ${callType}`, truncateJson(response, maxChars));
+      recordUsage(callType, modelSpec, response.usage);
       return response;
     } catch (error) {
       logger?.error(`llm_io error ${callType}`, truncateJson({ error: String(error) }, maxChars));

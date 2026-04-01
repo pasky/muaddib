@@ -113,28 +113,8 @@ describe("E2E: Refusal → fallback → annotated response", () => {
     expect(fallbackMessage!.message).toContain("[refusal fallback to");
   }, 30_000);
 
-  it("filters out responses starting with [internal monologue]", async () => {
-    // Script LLM response that starts with [internal monologue]
-    mockState.responses = [
-      textStream("[internal monologue] I'm thinking about the user's question..."),
-    ];
-
-    const runtime = buildRuntime(ctx, e2eConfig());
-    const monitor = buildIrcMonitor(runtime, ctx.sender);
-
-    await monitor.processMessageEvent({
-      type: "message",
-      subtype: "public",
-      server: "libera",
-      target: "#test",
-      nick: "alice",
-      message: "muaddib: !s What is the meaning of life?",
-    });
-
-    // The response starting with [internal monologue] should be filtered out
-    const monologueResponses = ctx.sender.sent.filter((s: any) =>
-      s.message.includes("[internal monologue]"),
-    );
-    expect(monologueResponses).toHaveLength(0);
-  }, 30_000);
+  // [internal monologue] retry behaviour is covered by the unit-level
+  // "retries when final response is [internal monologue]" test in
+  // session-runner.test.ts.  E2E validation was removed because the retry
+  // delays (5 s / 20 s / 60 s) make a real-timer e2e test impractical.
 });

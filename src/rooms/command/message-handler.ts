@@ -29,6 +29,7 @@ import type {
 } from "../../agent/network-boundary.js";
 import { formatUtcTime } from "../../utils/index.js";
 import { parseSetKeyArgs } from "../../cost/user-key-store.js";
+import { UserCostLedger } from "../../cost/user-cost-ledger.js";
 
 // Re-export types that external consumers depend on
 export type {
@@ -124,6 +125,7 @@ export class RoomMessageHandler {
         executor: this.executor,
         resolver: this.resolver,
         logger: this.logger,
+        userCostLedger: new UserCostLedger(runtime.muaddibHome),
       });
     } else {
       this.proactiveRunner = null;

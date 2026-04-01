@@ -13,6 +13,7 @@ import {
   isUrlTrustedInArc,
   recordNetworkTrustEvent,
 } from "../src/agent/network-boundary.js";
+import { LLM_CALL_TYPE } from "../src/cost/llm-call-type.js";
 import { PiAiModelAdapter } from "../src/models/pi-ai-model-adapter.js";
 import { resetWebRateLimiters, jinaRetryConfig } from "../src/agent/tools/web.js";
 const tempDirs: string[] = [];
@@ -872,7 +873,7 @@ describe("core tool executors visit_webpage LLM transcription", () => {
     expect(context.systemPrompt).toContain("web content transcriber");
     expect(context.systemPrompt).toContain("NEVER fabricate");
     expect(context.messages[0].content).toContain("Actual content");
-    expect(options.callType).toBe("webTranscript");
+    expect(options.callType).toBe(LLM_CALL_TYPE.VISIT_WEBPAGE);
   });
 
   it("visit_webpage appends query to system prompt when provided", async () => {
@@ -1373,6 +1374,17 @@ describe("buildMemoryUpdatePrompt", () => {
     expect(prompt).toContain('<user-memory nick="bob"');
     expect(prompt).toContain("(empty - not yet created)");
     expect(prompt).toContain("/workspace/users/bob.md");
+  });
+
+  it("warns when per-user memory nears its half-limit", () => {
+    const arc = "memory-user-capacity-arc";
+    const workspacePath = getArcWorkspacePath(arc);
+    mkdirSync(join(workspacePath, "users"), { recursive: true });
+    writeFileSync(join(workspacePath, "users", "carol.md"), "x".repeat(170));
+
+    const prompt = buildMemoryUpdatePrompt(arc, { charLimit: 400 }, undefined, "carol");
+    expect(prompt).toContain("Per-user memory for carol (170/200 chars");
+    expect(prompt).toContain("you must consolidate existing entries if you add something");
   });
 
   it("omits per-user memory when nick is not provided", () => {

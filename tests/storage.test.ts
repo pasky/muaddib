@@ -10,6 +10,8 @@ import { describe, expect, it, vi, afterEach } from "vitest";
 import { CONSOLE_LOGGER } from "../src/app/logging.js";
 import { ChronicleStore } from "../src/chronicle/chronicle-store.js";
 import { ChronicleLifecycleTs } from "../src/chronicle/lifecycle.js";
+import { recordUsage } from "../src/cost/cost-span.js";
+import { COST_SOURCE, LLM_CALL_TYPE } from "../src/cost/llm-call-type.js";
 import { AutoChroniclerTs } from "../src/rooms/autochronicler.js";
 import { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { buildArc } from "../src/rooms/message.js";
@@ -819,7 +821,19 @@ describe("AutoChroniclerTs", () => {
       logger: CONSOLE_LOGGER,
     });
 
-    const modelAdapter = { completeSimple: vi.fn(async () => makeAssistantText("Auto chronicled paragraph.")) } as any;
+    const modelAdapter = {
+      completeSimple: vi.fn(async () => {
+        recordUsage(LLM_CALL_TYPE.AUTOCHRONICLER_APPEND, "openai:gpt-4o-mini", {
+          input: 6,
+          output: 3,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 9,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.04 },
+        });
+        return makeAssistantText("Auto chronicled paragraph.");
+      }),
+    } as any;
 
     const autoChronicler = new AutoChroniclerTs({
       history,
@@ -846,6 +860,18 @@ describe("AutoChroniclerTs", () => {
     const currentChapter = await chronicleStore.getOrOpenCurrentChapter("libera##test");
     const paragraphs = await chronicleStore.readChapter(currentChapter.number, "libera##test");
     expect(paragraphs.some((p) => p.includes("Auto chronicled paragraph."))).toBe(true);
+
+    const today = new Date().toISOString().slice(0, 10);
+    const historyFile = join((history as any).arcsBasePath, "libera##test", "chat_history", `${today}.jsonl`);
+    const historyRows = readFileSync(historyFile, "utf-8").trim().split("\n").map((line) => JSON.parse(line));
+    const costRows = historyRows.filter((row) => row.call);
+    expect(costRows).toHaveLength(1);
+    expect(costRows[0]).toMatchObject({
+      call: LLM_CALL_TYPE.AUTOCHRONICLER_APPEND,
+      source: COST_SOURCE.AUTOCHRONICLER,
+      model: "openai:gpt-4o-mini",
+      cost: 0.04,
+    });
 
     await history.close();
     await chronicleStore.close();

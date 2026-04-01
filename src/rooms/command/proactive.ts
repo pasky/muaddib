@@ -25,7 +25,12 @@ import type {
 } from "./command-executor.js";
 import { pickModeModel } from "./command-executor.js";
 import { type RoomMessage, wrapSteeredMessage } from "../message.js";
+import { buildUserArc } from "../../cost/user-key-store.js";
+import { COST_SOURCE } from "../../cost/llm-call-type.js";
 import { sleep } from "../../utils/index.js";
+import { withPersistedCostSpan } from "../../cost/cost-span.js";
+import type { UserCostLedger } from "../../cost/user-cost-ledger.js";
+import { LLM_CALL_TYPE } from "../../cost/llm-call-type.js";
 
 // ── ProactiveConfig (resolved, all fields required) ──
 
@@ -115,6 +120,7 @@ export class ProactiveRunner {
   private readonly logger: CommandExecutorLogger;
   private readonly executor: CommandExecutor;
   private readonly resolver: CommandResolver;
+  private readonly userCostLedger?: UserCostLedger;
   /** Channel keys with an active debounce wait — prevents duplicate proactive sessions. */
   private readonly activeDebounces = new Set<string>();
   /** Active proactive agents keyed by channel key — any passive message can steer into these. */
@@ -128,6 +134,7 @@ export class ProactiveRunner {
     logger: CommandExecutorLogger;
     executor: CommandExecutor;
     resolver: CommandResolver;
+    userCostLedger?: UserCostLedger;
   }) {
     this.config = opts.config;
     this.channels = new Set(opts.config.interjecting);
@@ -136,6 +143,7 @@ export class ProactiveRunner {
     this.logger = opts.logger;
     this.executor = opts.executor;
     this.resolver = opts.resolver;
+    this.userCostLedger = opts.userCostLedger;
   }
 
   /**
@@ -267,14 +275,21 @@ export class ProactiveRunner {
       this.config.historySize,
     );
 
-    const evalResult = await evaluateProactiveInterjection(
-      this.config,
-      context,
-      {
-        modelAdapter: this.runtime.modelAdapter,
-        mynick: message.mynick,
-        logger: this.logger,
-      },
+    const userArc = buildUserArc(message.serverTag, message.nick);
+
+    const evalResult = await withPersistedCostSpan(
+      COST_SOURCE.PROACTIVE,
+      { arc: message.arc, userArc },
+      { history: this.runtime.history, userCostLedger: this.userCostLedger },
+      async () => await evaluateProactiveInterjection(
+        this.config,
+        context,
+        {
+          modelAdapter: this.runtime.modelAdapter,
+          mynick: message.mynick,
+          logger: this.logger,
+        },
+      ),
     );
 
     if (!evalResult.shouldInterject) {
@@ -323,6 +338,7 @@ export class ProactiveRunner {
         modelSpec: this.config.models.serious,
         modeKey: "serious",
         trigger: classifiedTrigger,
+        source: COST_SOURCE.PROACTIVE,
         systemPrompt: this.executor.buildSystemPrompt("serious", message.mynick)
           + " " + this.config.prompts.seriousExtra,
         historySize: this.config.historySize,
@@ -371,7 +387,7 @@ export async function evaluateProactiveInterjection(
           systemPrompt: prompt,
         },
         {
-          callType: "proactive_validation",
+          callType: LLM_CALL_TYPE.PROACTIVE_VALIDATION,
           logger: logger ?? { debug() {}, info() {}, warn() {}, error() {} },
           streamOptions: { reasoning: "minimal" },
         },

@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { RuntimeLogWriter } from "../src/app/logging.js";
+import { currentCostSpan, recordUsage } from "../src/cost/cost-span.js";
+import { LLM_CALL_TYPE, isLlmCallType } from "../src/cost/llm-call-type.js";
 import { UserCostLedger } from "../src/cost/user-cost-ledger.js";
 import type { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import {
@@ -206,6 +208,103 @@ function makeRunner(
   });
 }
 
+function makeUsageRecord(inputTokens: number, outputTokens: number, totalCost: number) {
+  return {
+    input: inputTokens,
+    output: outputTokens,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: inputTokens + outputTokens,
+    cost: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      total: totalCost,
+    },
+  };
+}
+
+function recordCurrentSpanUsage(totalCost: number, inputTokens = 1, outputTokens = 1): void {
+  const spanName = currentCostSpan()?.name;
+  const callType = spanName && isLlmCallType(spanName)
+    ? spanName
+    : LLM_CALL_TYPE.AGENT_RUN;
+  recordUsage(callType, "openai:gpt-4o-mini", makeUsageRecord(inputTokens, outputTokens, totalCost));
+}
+
+function makeRunnerWithBlockedBackgroundWork(options: {
+  text?: string;
+  totalCost?: number;
+  toolCallsCount?: number;
+  summaryText?: string;
+} = {}) {
+  const backgroundStarted = createDeferred<void>();
+  const releaseBackground = createDeferred<void>();
+  const backgroundFinished = createDeferred<void>();
+  let backgroundPromptCount = 0;
+
+  const runnerFactory: import("../src/rooms/command/message-handler.js").CommandRunnerFactory = (input) => ({
+    prompt: async () => {
+      const session: any = {
+        messages: [
+          {
+            role: "toolResult",
+            toolName: "web_search",
+            isError: false,
+            content: [{ type: "text", text: "https://example.com/result" }],
+          },
+        ],
+        prompt: vi.fn(async () => {
+          backgroundPromptCount += 1;
+          if (backgroundPromptCount === 1) {
+            backgroundStarted.resolve();
+            await releaseBackground.promise;
+            recordCurrentSpanUsage(0.02, 5, 2);
+            session.messages.push({
+              role: "assistant",
+              content: [{ type: "text", text: "Memory updated." }],
+            });
+            return;
+          }
+
+          recordCurrentSpanUsage(0.03, 7, 4);
+          session.messages.push({
+            role: "assistant",
+            content: [{ type: "text", text: options.summaryText ?? "Summarized tool results." }],
+          });
+        }),
+        dispose: vi.fn(async () => {
+          backgroundFinished.resolve();
+        }),
+      };
+
+      const result = makeRunnerResult(options.text ?? "primary response", {
+        inputTokens: 20,
+        outputTokens: 10,
+        totalCost: options.totalCost ?? 0.35,
+        toolCallsCount: options.toolCallsCount ?? 1,
+      });
+      await input.onResponse(result.text);
+      return {
+        ...result,
+        session,
+        bumpSessionLimits: vi.fn(),
+        muteResponses: vi.fn(),
+      };
+    },
+  });
+
+  return { runnerFactory, backgroundStarted, releaseBackground, backgroundFinished };
+}
+
+async function readRawJsonlLines(history: ChatHistoryStore, arc = "libera##test") {
+  const arcsBase = (history as any).arcsBasePath;
+  const today = new Date().toISOString().slice(0, 10);
+  const jsonlRaw = await readFile(join(arcsBase, arc, "chat_history", `${today}.jsonl`), "utf-8");
+  return jsonlRaw.trim().split("\n").map((l: string) => JSON.parse(l));
+}
+
 describe("RoomMessageHandler", () => {
   it("routes command to runner without duplicating trigger message and propagates reasoning level", async () => {
     const history = createTempHistoryStore(40);
@@ -345,6 +444,28 @@ describe("RoomMessageHandler", () => {
     await handler.handleIncomingMessage(incoming, { sendResponse: async (text) => { sent.push(text); } });
 
     expect(sent[0]).toBe("hey pasky, o/ what's up?");
+
+    await history.close();
+  });
+
+  it("strips bare command-dispatch prefix without angle brackets", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const incoming = makeMessage("!s hi");
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: makeRunner("!d caster: answer follows"),
+    });
+
+    const sent: string[] = [];
+    incoming.isDirect = true;
+    await handler.handleIncomingMessage(incoming, { sendResponse: async (text) => { sent.push(text); } });
+
+    expect(sent[0]).toBe("answer follows");
 
     await history.close();
   });
@@ -1621,6 +1742,7 @@ describe("RoomMessageHandler", () => {
       "libera",
       "#test",
       40,
+      expect.objectContaining({ userArc: "libera#alice" }),
     );
     expect(autoChronicler.checkAndChronicle).toHaveBeenNthCalledWith(
       2,
@@ -1628,6 +1750,7 @@ describe("RoomMessageHandler", () => {
       "libera",
       "#test",
       40,
+      undefined,
     );
 
     const rateLimitedAutoChronicler = {
@@ -1738,7 +1861,8 @@ describe("RoomMessageHandler", () => {
 
     // Verify run linkage and structured cost persistence.
     // Line 0 is the seed logLlmCost entry; this run adds trigger/response,
-    // one structured logLlmCost row, then cost followup + milestone messages.
+    // cost followup + milestone messages, then the structured cost row
+    // (persisted when the cost span closes, after the callback completes).
     const arcsBase = (history as any).arcsBasePath;
     const today = new Date().toISOString().slice(0, 10);
     const jsonlRaw = await readFile(join(arcsBase, "libera##test", "chat_history", `${today}.jsonl`), "utf-8");
@@ -1747,15 +1871,16 @@ describe("RoomMessageHandler", () => {
     expect(jsonlLines[1].run).toBe(triggerTs); // trigger: self-referencing run
     expect(jsonlLines[2].run).toBe(triggerTs); // primary response
 
-    expect(jsonlLines[3].call).toBe("agent_run");
-    expect(jsonlLines[3].model).toBe("openai:gpt-4o-mini");
-    expect(jsonlLines[3].run).toBe(triggerTs);
-    expect(jsonlLines[3].inTok).toBe(123);
-    expect(jsonlLines[3].outTok).toBe(45);
-    expect(jsonlLines[3].cost).toBe(0.35);
+    expect(jsonlLines[3].run).toBe(triggerTs); // cost followup
+    expect(jsonlLines[4].run).toBe(triggerTs); // daily milestone
 
-    expect(jsonlLines[4].run).toBe(triggerTs); // cost followup
-    expect(jsonlLines[5].run).toBe(triggerTs); // daily milestone
+    expect(jsonlLines[5].call).toBe("agent_run");
+    expect(jsonlLines[5].model).toBe("openai:gpt-4o-mini");
+    expect(jsonlLines[5].run).toBe(triggerTs);
+    expect(jsonlLines[5].source).toBe("execute");
+    expect(jsonlLines[5].inTok).toBe(123);
+    expect(jsonlLines[5].outTok).toBe(45);
+    expect(jsonlLines[5].cost).toBe(0.35);
 
     await history.close();
   });
@@ -1800,9 +1925,57 @@ describe("RoomMessageHandler", () => {
     expect(jsonlLines[2].call).toBe("agent_run");
     expect(jsonlLines[2].model).toBe("openai:gpt-4o-mini");
     expect(jsonlLines[2].run).toBe(triggerTs);
+    expect(jsonlLines[2].source).toBe("execute");
     expect(jsonlLines[2].inTok).toBe(20);
     expect(jsonlLines[2].outTok).toBe(10);
     expect(jsonlLines[2].cost).toBe(0.05);
+
+    await history.close();
+  });
+
+  it("persists background memory/tool-summary costs when cost followup delivery fails", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const { runnerFactory, backgroundStarted, releaseBackground, backgroundFinished } =
+      makeRunnerWithBlockedBackgroundWork();
+
+    const followupAttempted = createDeferred<void>();
+    let sendCount = 0;
+    const execution = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory,
+    }).handleIncomingMessage(makeMessage("!s fail after response", { isDirect: true }), {
+      sendResponse: async () => {
+        sendCount += 1;
+        if (sendCount === 2) {
+          followupAttempted.resolve();
+          throw new Error("cost followup delivery failed");
+        }
+      },
+    });
+
+    await backgroundStarted.promise;
+    await followupAttempted.promise;
+    releaseBackground.resolve();
+
+    await expect(execution).rejects.toThrow("cost followup delivery failed");
+    await backgroundFinished.promise;
+
+    const jsonlLines = await readRawJsonlLines(history);
+    const costRows = jsonlLines.filter((row: any) => row.call);
+    expect(costRows.map((row: any) => row.call)).toEqual([
+      LLM_CALL_TYPE.AGENT_RUN,
+      LLM_CALL_TYPE.MEMORY_UPDATE,
+      LLM_CALL_TYPE.TOOL_SUMMARY,
+    ]);
+    expect(costRows.map((row: any) => row.source)).toEqual([
+      "execute",
+      "execute",
+      "execute",
+    ]);
 
     await history.close();
   });
@@ -2498,7 +2671,7 @@ describe("RoomMessageHandler", () => {
     const agentReady = createDeferred<void>();
     const releaseAgent = createDeferred<void>();
     // Gate that blocks triggerAutoChronicler — this runs AFTER
-    // onResponseDelivered and after backgroundWork in execute().
+    // onResponseDelivered and after post-response maintenance in execute().
     const chroniclerStarted = createDeferred<void>();
     const releaseChronicler = createDeferred<void>();
 
@@ -2552,7 +2725,7 @@ describe("RoomMessageHandler", () => {
 
     // Wait until triggerAutoChronicler starts — by this point execute()
     // has completed delivering the response and called onResponseDelivered
-    // (deregistering steering), and awaited backgroundWork. But execute()
+    // (deregistering steering), and awaited post-response maintenance. But execute()
     // itself hasn't returned yet because triggerAutoChronicler is blocked.
     await chroniclerStarted.promise;
 
@@ -2722,6 +2895,119 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("persists background costs and rethrows delivery errors in executeEvent quiet mode", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const { runnerFactory, backgroundStarted, releaseBackground, backgroundFinished } =
+      makeRunnerWithBlockedBackgroundWork({ text: "event output here", totalCost: 0.05 });
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory,
+    });
+
+    const deliveryAttempted = createDeferred<void>();
+    const execution = handler.executeEvent(
+      makeMessage("!s event command", { isDirect: true }),
+      async () => {
+        deliveryAttempted.resolve();
+        throw new Error("event delivery failed");
+      },
+    );
+
+    await backgroundStarted.promise;
+    await deliveryAttempted.promise;
+    releaseBackground.resolve();
+
+    await expect(execution).rejects.toThrow("event delivery failed");
+    await backgroundFinished.promise;
+
+    const jsonlLines = await readRawJsonlLines(history);
+    const costRows = jsonlLines.filter((row: any) => row.call);
+    expect(costRows.map((row: any) => row.call)).toEqual([
+      LLM_CALL_TYPE.AGENT_RUN,
+      LLM_CALL_TYPE.MEMORY_UPDATE,
+      LLM_CALL_TYPE.TOOL_SUMMARY,
+    ]);
+    expect(costRows.map((row: any) => row.source)).toEqual([
+      "event",
+      "event",
+      "event",
+    ]);
+
+    await history.close();
+  });
+
+  it("executeEvent suppresses intermediate messages, delivers only the last valid response", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const sent: string[] = [];
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: (input) => ({
+        prompt: async () => {
+          // Simulate intermediate "thinking out loud" then final answer
+          await input.onResponse("Fixing missing dependency, then rerunning the script.");
+          const result = makeRunnerResult("calendar: 20:00 - Meetup", { totalCost: 0.01 });
+          await input.onResponse(result.text);
+          return result;
+        },
+      }),
+    });
+
+    await handler.executeEvent(
+      makeMessage("!s event command", { isDirect: true }),
+      async (text) => { sent.push(text); },
+    );
+
+    // Only the final response should be delivered, not the intermediate one
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("calendar: 20:00 - Meetup");
+    expect(sent.some((s) => s.includes("Fixing missing dependency"))).toBe(false);
+
+    await history.close();
+  });
+
+  it("executeEvent strips trailing NULL from otherwise valid response", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const sent: string[] = [];
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: (input) => ({
+        prompt: async () => {
+          // Agent appends NULL after real content
+          const text = "calendar: 20:00 - Meetup\n\nNULL";
+          const result = makeRunnerResult(text, { totalCost: 0.01 });
+          await input.onResponse(result.text);
+          return result;
+        },
+      }),
+    });
+
+    await handler.executeEvent(
+      makeMessage("!s event command", { isDirect: true }),
+      async (text) => { sent.push(text); },
+    );
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("calendar: 20:00 - Meetup");
+    expect(sent[0]).not.toMatch(/null/iu);
+
+    await history.close();
+  });
+
   it("drops proactive NULL sentinel responses instead of sending them", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();
@@ -2762,7 +3048,7 @@ describe("RoomMessageHandler", () => {
       }),
       modelAdapter: {
         completeSimple: async (_model: string, _payload: unknown, callOptions?: { callType?: string }) => {
-          if (callOptions?.callType === "modeClassifier") {
+          if (callOptions?.callType === LLM_CALL_TYPE.MODE_CLASSIFIER) {
             return { content: [{ type: "text", text: "EASY_SERIOUS" }] };
           }
           return { content: [{ type: "text", text: "Score: 9/10" }] };

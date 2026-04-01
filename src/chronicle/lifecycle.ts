@@ -7,6 +7,8 @@ import {
   ChronicleStore,
   type Chapter,
 } from "./chronicle-store.js";
+import { withCostSpan } from "../cost/cost-span.js";
+import { LLM_CALL_TYPE } from "../cost/llm-call-type.js";
 
 export interface ChronicleLifecycleConfig {
   model: string;
@@ -88,36 +90,38 @@ export class ChronicleLifecycleTs implements ChronicleLifecycle {
   }
 
   private async generateChapterSummary(arc: string, chapterParagraphs: string[]): Promise<string> {
-    const modelSpec = this.resolveSummaryModelSpec(arc);
+    return await withCostSpan(LLM_CALL_TYPE.CHAPTER_SUMMARY, { arc }, async () => {
+      const modelSpec = this.resolveSummaryModelSpec(arc);
 
-    const response = await this.modelAdapter.completeSimple(
-      modelSpec,
-      {
-        systemPrompt: CHAPTER_SUMMARY_PROMPT,
-        messages: [
-          {
-            role: "user",
-            content: chapterParagraphs.join("\n\n"),
-            timestamp: Date.now(),
-          },
-        ],
-      },
-      {
-        callType: "chronicler_summary",
-        logger: this.logger,
-        streamOptions: {
-          maxTokens: 1024,
+      const response = await this.modelAdapter.completeSimple(
+        modelSpec,
+        {
+          systemPrompt: CHAPTER_SUMMARY_PROMPT,
+          messages: [
+            {
+              role: "user",
+              content: chapterParagraphs.join("\n\n"),
+              timestamp: Date.now(),
+            },
+          ],
         },
-      },
-    );
+        {
+          callType: LLM_CALL_TYPE.CHAPTER_SUMMARY,
+          logger: this.logger,
+          streamOptions: {
+            maxTokens: 1024,
+          },
+        },
+      );
 
-    const summary = responseText(response);
+      const summary = responseText(response);
 
-    if (!summary) {
-      throw new Error("Chronicler chapter summary model returned empty response.");
-    }
+      if (!summary) {
+        throw new Error("Chronicler chapter summary model returned empty response.");
+      }
 
-    return summary;
+      return summary;
+    });
   }
 
   private resolveSummaryModelSpec(arc: string): string {
