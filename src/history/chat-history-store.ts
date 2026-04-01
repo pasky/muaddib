@@ -41,6 +41,8 @@ export function createStubAssistantFields(): Pick<AssistantMessage, "api" | "pro
 
 /** A single JSONL line — bag of optional fields, no type discriminator. */
 export interface JsonlLine {
+  /** Transient: thread reply count, set during context reads for thread starters shown as channel context. */
+  _threadReplies?: number;
   ts: string;
   n?: string;
   r?: ChatRole;
@@ -379,15 +381,24 @@ export class ChatHistoryStore {
 
   /**
    * Read main-channel context lines (oldest-first), deduped by (pid, role).
-   * Skips lines with tid (thread lines) and non-message lines.
+   * Includes non-threaded lines and thread starters (pid === tid).
+   * Thread starters are annotated with `_threadReplies` counts.
    */
   private async readMainContext(arc: string, limit: number): Promise<JsonlLine[]> {
     const seen = new Set<string>();
     const collected: JsonlLine[] = [];
+    const threadReplyCounts = new Map<string, number>();
 
     for await (const line of this.streamNewestFirst(arc)) {
-      // Only message lines, not threaded
-      if (line.m === undefined || line.tid) continue;
+      if (line.m === undefined) continue;
+
+      // Track reply counts for all threaded lines we scan past.
+      if (line.tid) {
+        threadReplyCounts.set(line.tid, (threadReplyCounts.get(line.tid) ?? 0) + 1);
+      }
+
+      // Include: non-threaded lines OR thread starters (pid === tid).
+      if (line.tid && !(line.pid && line.pid === line.tid)) continue;
 
       // Dedup by (pid, role): first occurrence newest-first = latest version
       if (line.pid) {
@@ -400,6 +411,15 @@ export class ChatHistoryStore {
       if (collected.length >= limit) break;
     }
 
+    // Annotate thread starters with reply counts (subtract 1 for the starter itself).
+    for (const line of collected) {
+      if (line.pid && line.tid && line.pid === line.tid) {
+        const total = threadReplyCounts.get(line.tid) ?? 0;
+        const replies = total > 1 ? total - 1 : 0;
+        if (replies > 0) line._threadReplies = replies;
+      }
+    }
+
     return collected.reverse();
   }
 
@@ -408,8 +428,10 @@ export class ChatHistoryStore {
    *
    * Phase 1 (before starter found): collect thread replies (tid === threadId)
    *   and watch for the starter: line.pid === threadId && (!line.tid || line.tid === line.pid)
-   * Phase 2 (after starter found): collect pre-starter main-channel lines (!tid, m only)
-   *   until total collected >= limit.
+   * Phase 2 (after starter found): collect pre-starter channel context:
+   *   non-threaded lines (!tid) and thread starters from OTHER threads
+   *   (pid === tid, pid !== threadId). Thread starters are annotated with
+   *   `_threadReplies` counts.
    *
    * The starter line itself is counted in the total.
    */
@@ -417,6 +439,7 @@ export class ChatHistoryStore {
     const seen = new Set<string>();
     const collected: JsonlLine[] = [];
     let foundStarter = false;
+    const threadReplyCounts = new Map<string, number>();
 
     const deduped = (line: JsonlLine): boolean => {
       if (!line.pid) return false; // no dedup needed
@@ -450,15 +473,29 @@ export class ChatHistoryStore {
       } else {
         // Phase 2: collect pre-starter context lines
         if (line.m !== undefined) {
+          // Track reply counts for threaded lines in phase 2.
+          if (line.tid) {
+            threadReplyCounts.set(line.tid, (threadReplyCounts.get(line.tid) ?? 0) + 1);
+          }
+
           if (line.tid === threadId) {
             // Older thread member below the starter (e.g. root user message in Slack auto-thread
             // where both user root and bot root share pid===tid===threadId).
             if (!deduped(line)) collected.push(line);
-          } else if (!line.tid) {
-            // Pre-starter main-channel message
+          } else if (!line.tid || (line.pid && line.pid === line.tid)) {
+            // Non-threaded line or thread starter from a different thread.
             if (!deduped(line)) collected.push(line);
           }
         }
+      }
+    }
+
+    // Annotate other-thread starters with reply counts (subtract 1 for the starter itself).
+    for (const line of collected) {
+      if (line.pid && line.tid && line.pid === line.tid && line.pid !== threadId) {
+        const total = threadReplyCounts.get(line.tid) ?? 0;
+        const replies = total > 1 ? total - 1 : 0;
+        if (replies > 0) line._threadReplies = replies;
       }
     }
 
@@ -478,7 +515,10 @@ export class ChatHistoryStore {
         ? `[UNTRUSTED] <${nick}> ${content}[/UNTRUSTED]`
         : `<${nick}> ${content}`;
       const modePrefix = line.r === "assistant" && line.mode ? this.modeToPrefix(line.mode) : "";
-      const text = `${modePrefix}[${timeOnly}] ${formatted}`;
+      const threadMeta = line._threadReplies
+        ? `\n<meta>(Thread with ${line._threadReplies} ${line._threadReplies === 1 ? "reply" : "replies"}, context omitted.)</meta>`
+        : "";
+      const text = `${modePrefix}[${timeOnly}] ${formatted}${threadMeta}`;
       const timestamp = new Date(line.ts).getTime() || 0;
 
       if (line.r === "assistant") {

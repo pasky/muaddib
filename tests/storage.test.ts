@@ -158,13 +158,13 @@ describe("ChatHistoryStore", () => {
     await store.close();
   });
 
-  it("appendEdit with threadId does not leak into other thread contexts", async () => {
+  it("thread context shows other thread starters as pre-context with reply counts", async () => {
     const store = createTempHistoryStore(20);
     await store.initialize();
 
     const arc = buildArc("slack:test", "general");
 
-    // Thread A: user asks about MRs
+    // Thread A: user asks about MRs (thread starter + 2 replies)
     await store.addMessage({
       serverTag: "slack:test",
       channelName: "general",
@@ -203,14 +203,18 @@ describe("ChatHistoryStore", () => {
       responseThreadId: "2000.0000",
     });
 
-    // Thread B context should NOT contain Thread A's edit
+    // Thread B context: should see Thread A's STARTER as pre-context (with reply annotation),
+    // but NOT Thread A's replies or edits.
     const contextB = await store.getContext(arc, 20, "2000.0000");
     const texts = contextB.map((m) =>
       typeof m.content === "string" ? m.content : (m.content as any)[0]?.text ?? "",
     );
     expect(texts.some((t) => t.includes("what's the weather?"))).toBe(true);
+    // Thread A starter appears as pre-context with reply annotation
+    expect(texts.some((t) => t.includes("how many MRs?"))).toBe(true);
+    expect(texts.some((t) => t.includes("<meta>(Thread with"))).toBe(true);
+    // Thread A's reply content does NOT appear
     expect(texts.some((t) => t.includes("42 MRs"))).toBe(false);
-    expect(texts.some((t) => t.includes("how many MRs?"))).toBe(false);
 
     await store.close();
   });
