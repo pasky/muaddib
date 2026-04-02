@@ -53,6 +53,7 @@ So is Slack - including threads:
 - **Continuous Learning**: AI agent maintains short-term memory (smart context engineering), mid-term memory (a scratchpad), and long-term memory both episodic (a continuous chronicle of events and experiences) and procedural (automatically maintained skills)
 - **Command System**: Automatic model routing (to balance cost, speed and intelligence) plus multiple, extensible "command modes" based on specific prefixes
 - **Proactive Interjecting**: Lurk-by-default with a opt-in automatic participation in relevant conversations
+- **Semi-Secure Enclaves**: Hardening for environments with secrets (Gondolin-based tokens injection without sandbox exposure) and opt-in manual network access approval mechanism
 
 Muaddib has been **battle-tested since July 2025** in a (slightly) hostile IRC environment, lurking at a variety of [libera.chat](https://libera.chat/) channels.  However, bugs are possible (no warranty etc.) and LLM usage carries some inherent risks (e.g. a code execution sandbox with your API keys preloaded *plus* an access to the internet [*can* be fooled](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/) by a highly crafted malicious website that the agent visits to upload these API keys somewhere).
 
@@ -131,6 +132,8 @@ Manual for IRC ("bring your own irssi"):
 
 - `mynick: message` - Automatic mode
 - `mynick: !h` - Show help and info about other modes
+- `!balance / !setkey` - Manage per-user spending and custom openrouter keys
+- `!approve / !deny` - Approve/deny a blocked untrusted network request
 
 ## Architecture
 
