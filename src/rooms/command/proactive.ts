@@ -275,6 +275,17 @@ export class ProactiveRunner {
       this.config.historySize,
     );
 
+    // If the last message in context is from the bot (assistant), there's
+    // nothing new from a user to react to — skip evaluation entirely.
+    const lastMsg = context[context.length - 1];
+    if (lastMsg?.role === "assistant") {
+      this.logger.debug(
+        "Proactive skipped — last context message is assistant",
+        `arc=${message.arc}`,
+      );
+      return;
+    }
+
     const userArc = buildUserArc(message.serverTag, message.nick);
 
     const evalResult = await withPersistedCostSpan(
@@ -367,6 +378,12 @@ export async function evaluateProactiveInterjection(
 
   if (!context.length) {
     return { shouldInterject: false, reason: "No context provided" };
+  }
+
+  // If the last message is from the assistant (bot), there is nothing new
+  // from a user to react to — the bot would be interjecting on its own output.
+  if (context[context.length - 1].role === "assistant") {
+    return { shouldInterject: false, reason: "Last message is from the bot" };
   }
 
   const currentMessage = extractCurrentMessage(context[context.length - 1]);
