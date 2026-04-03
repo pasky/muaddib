@@ -1342,7 +1342,7 @@ export function buildMemoryUpdatePrompt(
 
   const displayContent = content.trim() || "(empty - not yet created)";
 
-  let prompt = `<meta>Session complete. DO NOT RESPOND ANYMORE.\n\nWrap-up task: Here is your current shared memory (${chars}/${charLimit} chars${capacityWarning}):\n<memory file="/workspace/MEMORY.md">\n${displayContent}\n</memory>\nUse /workspace/MEMORY.md for shared knowledge (project decisions, big lessons, channel-wide facts).`;
+  let prompt = `<meta>Session complete. DO NOT RESPOND ANYMORE.\n\nWrap-up task: Here is your current shared memory (${chars}/${charLimit} chars${capacityWarning}):\n<memory file="/workspace/MEMORY.md">\n${displayContent}\n</memory>\nMEMORY.md is for behavioral directives (how to act, what to verify, communication rules) and factual corrections (things your training data gets wrong). This memory gets injected into every single session - therefore, you do not need to re-record what you said or found out (already captured in /chat_history) or what happenned (already captured in /chronicle). Prefer positive actionable rules ("verify before quoting") over prohibitions ("never fabricate"). If the current memory block doesn't conform to these instructions, adjust/prune it as needed.`;
 
   // Per-user memory section
   if (nick) {
@@ -1353,10 +1353,10 @@ export function buildMemoryUpdatePrompt(
       ? " - you must consolidate existing entries if you add something"
       : "";
     const userDisplayContent = userContent.trim() || "(empty - not yet created)";
-    prompt += `\n\nPer-user memory for ${nick} (${userChars}/${userCharLimit} chars${userCapacityWarning}):\n<user-memory nick="${nick}" file="/workspace/users/${nick}.md">\n${userDisplayContent}\n</user-memory>\nUse /workspace/users/${nick}.md for user-specific notes (preferences, personal context, interaction style).`;
+    prompt += `\n\nPer-user memory for ${nick} (${userChars}/${userCharLimit} chars${userCapacityWarning}):\n<user-memory nick="${nick}" file="/workspace/users/${nick}.md">\n${userDisplayContent}\n</user-memory>\nUse /workspace/users/${nick}.md for how to interact with this user (communication preferences, corrections they have made, interaction style, critical personal context to keep in mind for most interactions). Not for logging what was discussed — that is in chat history or chronicle.`;
   }
 
-  prompt += `\n\nIf you learned something worth persisting for the long term (beyond the continuously moving chronicle), update the appropriate memory file using the edit or write tool. Keep entries concise. If nothing worth saving, do nothing.`;
+  prompt += `\n\nIf this session revealed a behavioral correction or a factual error worth persisting, update the appropriate memory file using the edit or write tool. Keep entries concise and actionable. If nothing worth saving (almost always!), do nothing.`;
 
   // Skill creation section - appended when session was complex enough
   const toolCallsCount = options?.toolCallsCount ?? 0;
