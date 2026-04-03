@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -170,6 +170,25 @@ describe("shouldEmitQuotaWarning", () => {
       expect(shouldEmitQuotaWarning(home, "libera#alice", 0.97, 72, t2)).toBe(true);
     } finally {
       rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("UserKeyStore", () => {
+  it("throws on corrupt auth.json instead of silently ignoring exempt status", () => {
+    const muaddibHome = makeTempHome();
+    const userArc = buildArc("libera", "alice");
+    const keyStore = new UserKeyStore(muaddibHome);
+
+    try {
+      const authDir = join(muaddibHome, "users", userArc);
+      mkdirSync(authDir, { recursive: true });
+      writeFileSync(join(authDir, "auth.json"), '{"exempt": {"type": "api_key", "key": "true"}');
+
+      expect(() => keyStore.isExempt(userArc)).toThrow(/Failed to load/);
+      expect(() => keyStore.getOpenRouterKey(userArc)).toThrow(/Failed to load/);
+    } finally {
+      rmSync(muaddibHome, { recursive: true, force: true });
     }
   });
 });

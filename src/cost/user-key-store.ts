@@ -38,7 +38,9 @@ export class UserKeyStore {
   constructor(private readonly muaddibHome: string) {}
 
   getOpenRouterKey(userArc: string): string | null {
-    const credential = this.storageFor(userArc).get("openrouter");
+    const storage = this.storageFor(userArc);
+    this.throwOnLoadErrors(storage, userArc);
+    const credential = storage.get("openrouter");
     if (!credential) {
       return null;
     }
@@ -49,7 +51,9 @@ export class UserKeyStore {
   }
 
   isExempt(userArc: string): boolean {
-    const credential = this.storageFor(userArc).get("exempt");
+    const storage = this.storageFor(userArc);
+    this.throwOnLoadErrors(storage, userArc);
+    const credential = storage.get("exempt");
     if (!credential) {
       return false;
     }
@@ -72,6 +76,13 @@ export class UserKeyStore {
 
   private storageFor(userArc: string): AuthStorage {
     return AuthStorage.create(join(this.muaddibHome, "users", userArc, "auth.json"));
+  }
+
+  private throwOnLoadErrors(storage: AuthStorage, userArc: string): void {
+    const errors = storage.drainErrors();
+    if (errors.length > 0) {
+      throw new Error(`Failed to load users/${userArc}/auth.json: ${errors[0].message}`);
+    }
   }
 }
 
