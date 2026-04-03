@@ -337,7 +337,8 @@ export class SlackRoomMonitor {
     }
 
     const files = event.files ?? [];
-    if (!event.text && files.length === 0) {
+    const sharedMessages = event.sharedMessages ?? [];
+    if (!event.text && files.length === 0 && sharedMessages.length === 0) {
       return;
     }
 
@@ -355,7 +356,7 @@ export class SlackRoomMonitor {
       ? normalizeDirectContent(event.text, event.mynick, event.botUserId)
       : event.text.trim();
     const attachmentBlock = buildSlackAttachmentBlock(files);
-    const sharedMessageBlock = buildSlackSharedMessageBlock(event.sharedMessages ?? []);
+    const sharedMessageBlock = buildSlackSharedMessageBlock(sharedMessages);
     const cleanedContent = appendAttachmentBlock(
       appendAttachmentBlock(textContent, attachmentBlock),
       sharedMessageBlock,

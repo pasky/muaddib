@@ -343,6 +343,45 @@ describe("SlackRoomMonitor", () => {
     await history.close();
   });
 
+  it("processes shared-message-only events with no text", async () => {
+    const history = createTempHistoryStore(20);
+
+    let seenText = "";
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async (message) => {
+          seenText = message.content;
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      workspaceId: "T123",
+      channelId: "C123",
+      username: "pasky",
+      text: "",
+      mynick: "muaddib",
+      sharedMessages: [
+        {
+          authorName: "VaclavRut",
+          text: "If the field is required it should say so",
+          fallback: "[Mar 31st] VaclavRut: If the field is required",
+          fromUrl: "https://workspace.slack.com/archives/C0EXAMPLE/p5678",
+        },
+      ],
+    });
+
+    expect(seenText).toContain("[Forwarded Messages]");
+    expect(seenText).toContain("From: VaclavRut");
+    expect(seenText).toContain("If the field is required it should say so");
+    expect(seenText).toContain("[/Forwarded Messages]");
+
+    await history.close();
+  });
+
   it("normalizes repeated leading mention prefixes using Slack bot id + bot nick", async () => {
     const history = createTempHistoryStore(20);
 
