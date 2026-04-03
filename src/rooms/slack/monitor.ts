@@ -36,6 +36,14 @@ export interface SlackFileAttachment {
   urlPrivateDownload?: string;
 }
 
+/** A forwarded / shared message attachment from Slack (not a file upload). */
+export interface SlackSharedMessageAttachment {
+  authorName?: string;
+  text?: string;
+  fallback?: string;
+  fromUrl?: string;
+}
+
 export interface SlackMessageEvent {
   kind?: "message";
   workspaceId: string;
@@ -48,6 +56,8 @@ export interface SlackMessageEvent {
   text: string;
   mynick: string;
   files?: SlackFileAttachment[];
+  /** Forwarded / shared message attachments (not file uploads). */
+  sharedMessages?: SlackSharedMessageAttachment[];
   secrets?: Record<string, unknown>;
   botUserId?: string;
   messageTs?: string;
@@ -345,7 +355,11 @@ export class SlackRoomMonitor {
       ? normalizeDirectContent(event.text, event.mynick, event.botUserId)
       : event.text.trim();
     const attachmentBlock = buildSlackAttachmentBlock(files);
-    const cleanedContent = appendAttachmentBlock(textContent, attachmentBlock);
+    const sharedMessageBlock = buildSlackSharedMessageBlock(event.sharedMessages ?? []);
+    const cleanedContent = appendAttachmentBlock(
+      appendAttachmentBlock(textContent, attachmentBlock),
+      sharedMessageBlock,
+    );
 
     if (!cleanedContent) {
       return;
@@ -554,6 +568,28 @@ function buildSlackAttachmentBlock(files: SlackFileAttachment[]): string {
   }
 
   return ["[Attachments]", ...lines, "[/Attachments]"].join("\n");
+}
+
+function buildSlackSharedMessageBlock(sharedMessages: SlackSharedMessageAttachment[]): string {
+  if (sharedMessages.length === 0) {
+    return "";
+  }
+
+  const lines = sharedMessages.map((msg, index) => {
+    const parts: string[] = [];
+    if (msg.authorName) {
+      parts.push(`From: ${msg.authorName}`);
+    }
+    // Prefer the rich text, fall back to the plain-text fallback.
+    const body = msg.text || msg.fallback || "(no content)";
+    parts.push(body);
+    if (msg.fromUrl) {
+      parts.push(`Source: ${msg.fromUrl}`);
+    }
+    return `${index + 1}. ${parts.join("\n   ")}`;
+  });
+
+  return ["[Forwarded Messages]", ...lines, "[/Forwarded Messages]"].join("\n");
 }
 
 function resolveReplyThreadTs(

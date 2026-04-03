@@ -301,6 +301,48 @@ describe("SlackRoomMonitor", () => {
     await history.close();
   });
 
+  it("includes forwarded/shared Slack messages in content", async () => {
+    const history = createTempHistoryStore(20);
+
+    let seenText = "";
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async (message) => {
+          seenText = message.content;
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      workspaceId: "T123",
+      channelId: "C123",
+      username: "pasky",
+      text: "muaddib: make a draft MR",
+      mynick: "muaddib",
+      mentionsBot: true,
+      sharedMessages: [
+        {
+          authorName: "Jira Cloud",
+          text: "PROJ-42 Fix login button alignment\nStatus: Backlog",
+          fallback: "[April 3rd] @alice created PROJ-42",
+          fromUrl: "https://workspace.slack.com/archives/C0EXAMPLE/p1234",
+        },
+      ],
+    });
+
+    expect(seenText).toContain("make a draft MR");
+    expect(seenText).toContain("[Forwarded Messages]");
+    expect(seenText).toContain("From: Jira Cloud");
+    expect(seenText).toContain("PROJ-42 Fix login button alignment");
+    expect(seenText).toContain("Source: https://workspace.slack.com/archives/C0EXAMPLE/p1234");
+    expect(seenText).toContain("[/Forwarded Messages]");
+
+    await history.close();
+  });
+
   it("normalizes repeated leading mention prefixes using Slack bot id + bot nick", async () => {
     const history = createTempHistoryStore(20);
 
@@ -1280,6 +1322,141 @@ describe("SlackSocketTransport debug logging", () => {
         }),
       }),
     );
+  });
+});
+
+describe("SlackSocketTransport shared message extraction", () => {
+  it("extracts forwarded/shared message attachments from Slack events", async () => {
+    const { SlackSocketTransport } = await import("../src/rooms/slack/transport.js");
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const transport = new SlackSocketTransport({
+      appToken: "xapp-test",
+      botToken: "xoxb-test",
+      workspaceId: "T123",
+      logger,
+    });
+
+    const result = await (transport as any).mapMessage({
+      channel: "C123",
+      user: "U123",
+      text: "make a draft MR",
+      channel_type: "channel",
+      ts: "1775209937.562219",
+      attachments: [
+        {
+          is_share: true,
+          is_msg_unfurl: true,
+          author_name: "Jira Cloud",
+          text: "PROJ-42 Fix login button alignment",
+          fallback: "[April 3rd] @alice created PROJ-42",
+          from_url: "https://workspace.slack.com/archives/C0EXAMPLE/p1234",
+        },
+      ],
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.sharedMessages).toHaveLength(1);
+    expect(result!.sharedMessages![0]).toEqual({
+      authorName: "Jira Cloud",
+      text: "PROJ-42 Fix login button alignment",
+      fallback: "[April 3rd] @alice created PROJ-42",
+      fromUrl: "https://workspace.slack.com/archives/C0EXAMPLE/p1234",
+    });
+  });
+
+  it("ignores non-shared attachments (link unfurls without is_share)", async () => {
+    const { SlackSocketTransport } = await import("../src/rooms/slack/transport.js");
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const transport = new SlackSocketTransport({
+      appToken: "xapp-test",
+      botToken: "xoxb-test",
+      workspaceId: "T123",
+      logger,
+    });
+
+    const result = await (transport as any).mapMessage({
+      channel: "C123",
+      user: "U123",
+      text: "check this out https://example.com",
+      channel_type: "channel",
+      ts: "1775209937.562219",
+      attachments: [
+        {
+          text: "Example Domain",
+          title: "Example",
+          title_link: "https://example.com",
+        },
+      ],
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.sharedMessages).toBeUndefined();
+  });
+
+  it("maps event with only a shared message and no text to a valid event", async () => {
+    const { SlackSocketTransport } = await import("../src/rooms/slack/transport.js");
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const transport = new SlackSocketTransport({
+      appToken: "xapp-test",
+      botToken: "xoxb-test",
+      workspaceId: "T123",
+      logger,
+    });
+
+    const result = await (transport as any).mapMessage({
+      channel: "C123",
+      user: "U123",
+      text: "",
+      channel_type: "channel",
+      ts: "1775209937.562219",
+      attachments: [
+        {
+          is_share: true,
+          author_name: "alice",
+          text: "forwarded content",
+          from_url: "https://slack.com/archives/C123/p456",
+        },
+      ],
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.sharedMessages).toHaveLength(1);
+  });
+
+  it("normalizes Slack entities and user mentions in shared message text", async () => {
+    const { SlackSocketTransport } = await import("../src/rooms/slack/transport.js");
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const transport = new SlackSocketTransport({
+      appToken: "xapp-test",
+      botToken: "xoxb-test",
+      workspaceId: "T123",
+      logger,
+    });
+
+    // Pre-populate the user cache so we don't need a real Slack API
+    (transport as any).userDisplayNameCache.set("U999", "bob");
+
+    const result = await (transport as any).mapMessage({
+      channel: "C123",
+      user: "U123",
+      text: "check this",
+      channel_type: "channel",
+      ts: "1775209937.562219",
+      attachments: [
+        {
+          is_share: true,
+          author_name: "Jira Cloud",
+          text: "<@U999> created a ticket &amp; assigned it",
+          fallback: "[April 3rd] <@U999> created PROJ-42",
+          from_url: "https://workspace.slack.com/archives/C0EXAMPLE/p1234",
+        },
+      ],
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.sharedMessages).toHaveLength(1);
+    expect(result!.sharedMessages![0].text).toBe("@bob created a ticket & assigned it");
+    expect(result!.sharedMessages![0].fallback).toBe("[April 3rd] @bob created PROJ-42");
   });
 });
 

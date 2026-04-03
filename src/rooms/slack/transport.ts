@@ -9,6 +9,7 @@ import type {
   SlackIncomingEvent,
   SlackMessageEditEvent,
   SlackMessageEvent,
+  SlackSharedMessageAttachment,
   SlackSendOptions,
   SlackSendResult,
   SlackSender,
@@ -297,28 +298,39 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
     const channelId = typeof event.channel === "string" ? event.channel : "";
     const userId = typeof event.user === "string" ? event.user : "";
     const files = mapSlackFiles(event.files);
+    const rawSharedMessages = mapSlackSharedMessages(event.attachments);
     const attachmentCount = Array.isArray(event.attachments) ? event.attachments.length : 0;
     const blockCount = Array.isArray(event.blocks) ? event.blocks.length : 0;
 
     if (attachmentCount > 0 || blockCount > 0) {
-      this.logger.debug(
-        rawText || files.length > 0
-          ? "Slack message event contains rich payload beyond text/files"
-          : "Slack message event contains rich payload but no mapped text/files; current mapper will drop it",
-        {
-          subtype: typeof event.subtype === "string" ? event.subtype : undefined,
-          channelId,
-          userId,
-          hasText: rawText.length > 0,
-          fileCount: files.length,
-          attachmentCount,
-          blockCount,
-          event,
-        },
-      );
+      // Skip the debug log when all rich-payload elements are accounted for:
+      // shared messages are already extracted, and rich_text blocks are just
+      // standard Slack formatting of the message text itself.
+      const unmappedAttachments = attachmentCount - rawSharedMessages.length;
+      const nonRichTextBlocks = Array.isArray(event.blocks)
+        ? (event.blocks as Array<Record<string, unknown>>).filter((b) => b.type !== "rich_text").length
+        : 0;
+      if (unmappedAttachments > 0 || nonRichTextBlocks > 0) {
+        this.logger.debug(
+          rawText || files.length > 0 || rawSharedMessages.length > 0
+            ? "Slack message event contains rich payload beyond text/files"
+            : "Slack message event contains rich payload but no mapped text/files; current mapper will drop it",
+          {
+            subtype: typeof event.subtype === "string" ? event.subtype : undefined,
+            channelId,
+            userId,
+            hasText: rawText.length > 0,
+            fileCount: files.length,
+            attachmentCount,
+            sharedMessageCount: rawSharedMessages.length,
+            blockCount,
+            event,
+          },
+        );
+      }
     }
 
-    if (!channelId || !userId || (!rawText && files.length === 0)) {
+    if (!channelId || !userId || (!rawText && files.length === 0 && rawSharedMessages.length === 0)) {
       return null;
     }
 
@@ -329,6 +341,16 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
     const normalizedText = await this.normalizeIncomingText(rawText);
 
     const channelName = await this.resolveChannelName(channelId, isDirectMessage, username, userId);
+
+    // Normalize shared message text (decode entities, resolve @mentions) the
+    // same way we normalize the main message text.
+    const sharedMessages: SlackSharedMessageAttachment[] = await Promise.all(
+      rawSharedMessages.map(async (msg) => ({
+        ...msg,
+        text: msg.text ? await this.normalizeIncomingText(msg.text) : undefined,
+        fallback: msg.fallback ? await this.normalizeIncomingText(msg.fallback) : undefined,
+      })),
+    );
 
     return {
       kind: "message",
@@ -342,6 +364,7 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
       text: normalizedText,
       mynick: this.botDisplayName ?? this.options.botNameFallback ?? "muaddib",
       files,
+      sharedMessages: sharedMessages.length > 0 ? sharedMessages : undefined,
       secrets: buildSlackFileSecrets(files, this.options.botToken),
       botUserId: this.botUserId ?? undefined,
       messageTs: typeof event.ts === "string" ? event.ts : undefined,
@@ -504,6 +527,25 @@ function mapSlackFiles(value: unknown): SlackFileAttachment[] {
       urlPrivateDownload:
         typeof entry.url_private_download === "string" ? entry.url_private_download : undefined,
     }));
+}
+
+function mapSlackSharedMessages(value: unknown): SlackSharedMessageAttachment[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry) => asRecord(entry))
+    .filter((entry): entry is Record<string, unknown> => entry !== null)
+    // Only include entries that look like shared/forwarded messages (not link unfurls, etc.)
+    .filter((entry) => entry.is_share === true || entry.is_msg_unfurl === true || entry.is_reply_unfurl === true)
+    .map((entry) => ({
+      authorName: typeof entry.author_name === "string" ? entry.author_name : undefined,
+      text: typeof entry.text === "string" ? entry.text : undefined,
+      fallback: typeof entry.fallback === "string" ? entry.fallback : undefined,
+      fromUrl: typeof entry.from_url === "string" ? entry.from_url : undefined,
+    }))
+    .filter((msg) => Boolean(msg.text || msg.fallback));
 }
 
 function buildSlackFileSecrets(
