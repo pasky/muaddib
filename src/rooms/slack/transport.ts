@@ -71,12 +71,41 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
       token: this.options.botToken,
       appToken: this.options.appToken,
       socketMode: true,
+      logger: {
+        debug: (..._msgs: unknown[]) => { /* suppress bolt debug noise */ },
+        info: (...msgs: unknown[]) => { this.logger.info("[bolt]", ...msgs.map(String)); },
+        warn: (...msgs: unknown[]) => { this.logger.warn("[bolt]", ...msgs.map(String)); },
+        error: (...msgs: unknown[]) => { this.logger.error("[bolt]", ...msgs.map(String)); },
+        getLevel: () => "DEBUG" as any,
+        setLevel: () => {},
+        setName: () => {},
+      } as any,
     });
 
     this.app.event("message", async ({ event }) => {
-      const mapped = await this.mapEvent(event as unknown as Record<string, unknown>);
-      if (mapped) {
-        this.queue.push(mapped);
+      try {
+        const raw = event as unknown as Record<string, unknown>;
+        this.logger.debug("Incoming Slack message event", {
+          subtype: raw.subtype,
+          user: raw.user,
+          channel: raw.channel,
+          ts: raw.ts,
+          thread_ts: raw.thread_ts,
+          hasText: typeof raw.text === "string" && raw.text.length > 0,
+          fileCount: Array.isArray(raw.files) ? raw.files.length : 0,
+          attachmentCount: Array.isArray(raw.attachments) ? raw.attachments.length : 0,
+          blockCount: Array.isArray(raw.blocks) ? raw.blocks.length : 0,
+        });
+        const mapped = await this.mapEvent(raw);
+        if (mapped) {
+          this.queue.push(mapped);
+        }
+      } catch (error) {
+        this.logger.error(
+          "Failed to map Slack message event",
+          String(error),
+          { event },
+        );
       }
     });
 
