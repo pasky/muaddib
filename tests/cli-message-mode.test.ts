@@ -116,6 +116,176 @@ describe("runCliMessageMode", () => {
     expect(arcLogs.length).toBeGreaterThan(0);
   });
 
+  it("runs in a specific arc when --arc is provided", async () => {
+    const dir = await createTempHome();
+
+    const configPath = join(dir, "config.json");
+    const config = {
+      rooms: {
+        common: {
+          command: {
+            historySize: 40,
+            defaultMode: "classifier:serious",
+            modes: {
+              serious: {
+                model: "openai:gpt-4o-mini",
+                prompt: "You are {mynick}",
+                triggers: {
+                  "!s": {},
+                },
+              },
+            },
+            modeClassifier: {
+              model: "openai:gpt-4o-mini",
+              labels: {
+                EASY_SERIOUS: "!s",
+              },
+              fallbackLabel: "EASY_SERIOUS",
+            },
+          },
+        },
+        irc: {
+          command: {
+            historySize: 40,
+          },
+        },
+      },
+    };
+
+    await writeFile(configPath, JSON.stringify(config), "utf-8");
+
+    const result = await runCliMessageMode({
+      configPath,
+      message: "!s hi",
+      arc: "libera##mychannel",
+      runnerFactory: (input) => ({
+        prompt: async () => {
+          await input.onResponse("arc ok");
+          return {
+            assistantMessage: {
+              role: "assistant",
+              content: [{ type: "text", text: "arc ok" }],
+              api: "openai-completions",
+              provider: "openai",
+              model: "gpt-4o-mini",
+              usage: {
+                input: 1,
+                output: 1,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 2,
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+              },
+              stopReason: "stop",
+              timestamp: Date.now(),
+            },
+            text: "arc ok",
+            stopReason: "stop",
+            peakTurnInput: 1,
+            usage: {
+              input: 1,
+              output: 1,
+              cacheRead: 0,
+              cacheWrite: 0,
+              totalTokens: 2,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+            },
+          };
+        },
+      }),
+    });
+
+    expect(result.response).toBe("arc ok");
+
+    // Logs should be under the real arc name, not testserver##testchannel
+    const date = new Date().toISOString().slice(0, 10);
+    const arcLogDir = join(dir, "logs", date, "libera##mychannel");
+    const arcLogs = await readdir(arcLogDir);
+    expect(arcLogs.length).toBeGreaterThan(0);
+  });
+
+  it("derives roomName from arc serverTag prefix", async () => {
+    const dir = await createTempHome();
+
+    const configPath = join(dir, "config.json");
+    const config = {
+      rooms: {
+        common: {
+          command: {
+            historySize: 40,
+            defaultMode: "classifier:serious",
+            modes: {
+              serious: {
+                model: "openai:gpt-4o-mini",
+                prompt: "You are {mynick}",
+                triggers: {
+                  "!s": {},
+                },
+              },
+            },
+            modeClassifier: {
+              model: "openai:gpt-4o-mini",
+              labels: {
+                EASY_SERIOUS: "!s",
+              },
+              fallbackLabel: "EASY_SERIOUS",
+            },
+          },
+        },
+        discord: {
+          command: {
+            historySize: 40,
+          },
+        },
+      },
+    };
+
+    await writeFile(configPath, JSON.stringify(config), "utf-8");
+
+    const result = await runCliMessageMode({
+      configPath,
+      message: "!s hi",
+      arc: "discord:guild-1#general",
+      runnerFactory: (input) => ({
+        prompt: async () => {
+          await input.onResponse("discord ok");
+          return {
+            assistantMessage: {
+              role: "assistant",
+              content: [{ type: "text", text: "discord ok" }],
+              api: "openai-completions",
+              provider: "openai",
+              model: "gpt-4o-mini",
+              usage: {
+                input: 1,
+                output: 1,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 2,
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+              },
+              stopReason: "stop",
+              timestamp: Date.now(),
+            },
+            text: "discord ok",
+            stopReason: "stop",
+            peakTurnInput: 1,
+            usage: {
+              input: 1,
+              output: 1,
+              cacheRead: 0,
+              cacheWrite: 0,
+              totalTokens: 2,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+            },
+          };
+        },
+      }),
+    });
+
+    expect(result.response).toBe("discord ok");
+  });
+
   it("wires request_network_access through runtime and command execution", async () => {
     const dir = await createTempHome();
 

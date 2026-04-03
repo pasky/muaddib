@@ -7,6 +7,7 @@ import {
 import { type RoomMessage, buildArc } from "../rooms/message.js";
 import { createMuaddibRuntime, shutdownRuntime } from "../runtime.js";
 import type { NetworkAccessApprover } from "../agent/network-boundary.js";
+import { parseArc } from "../rooms/room-gateway.js";
 
 export interface CliMessageModeOptions {
   message: string;
@@ -17,6 +18,8 @@ export interface CliMessageModeOptions {
   nick?: string;
   mynick?: string;
   arcsPath?: string;
+  /** Target arc name (e.g. "libera##foo"). Derives serverTag, channelName, and roomName. */
+  arc?: string;
   runnerFactory?: CommandRunnerFactory;
   networkAccessApprover?: NetworkAccessApprover;
 }
@@ -33,7 +36,23 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
   const muaddibHome = getMuaddibHome();
   const runtimeLogger = new RuntimeLogWriter({ muaddibHome });
 
-  const roomName = options.roomName ?? "irc";
+  // When --arc is given, derive serverTag/channelName/roomName from it.
+  let serverTag = options.serverTag;
+  let channelName = options.channelName;
+  let roomName = options.roomName;
+  if (options.arc) {
+    const parsed = parseArc(options.arc);
+    serverTag ??= parsed.serverTag;
+    channelName ??= parsed.channelName;
+    if (!roomName) {
+      if (parsed.serverTag.startsWith("discord:")) roomName = "discord";
+      else if (parsed.serverTag.startsWith("slack:")) roomName = "slack";
+      else roomName = "irc";
+    }
+  }
+  serverTag ??= "testserver";
+  channelName ??= "#testchannel";
+  roomName ??= "irc";
 
   const runtime = await createMuaddibRuntime({
     configPath: options.configPath,
@@ -52,8 +71,6 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
       runnerFactory: options.runnerFactory,
     });
 
-    const serverTag = options.serverTag ?? "testserver";
-    const channelName = options.channelName ?? "#testchannel";
     const message: RoomMessage = {
       serverTag,
       channelName,
