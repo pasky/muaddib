@@ -35,11 +35,11 @@ export interface CheckUserBudgetInput {
 export function resolveCostPolicyConfig(
   config: CostPolicyConfig | undefined,
 ): ResolvedCostPolicyConfig | null {
-  if (config === undefined) {
+  if (config === undefined || config.freeTierBudgetUsd === undefined) {
     return null;
   }
 
-  const freeTierBudgetUsd = config.freeTierBudgetUsd ?? 2.0;
+  const freeTierBudgetUsd = config.freeTierBudgetUsd;
   if (typeof freeTierBudgetUsd !== "number" || !Number.isFinite(freeTierBudgetUsd) || freeTierBudgetUsd < 0) {
     throw new Error("costPolicy.freeTierBudgetUsd must be a finite number >= 0.");
   }

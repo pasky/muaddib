@@ -63,14 +63,19 @@ describe("resolveProviderOverrideModel normalizes version separators", () => {
 });
 
 describe("resolveCostPolicyConfig", () => {
-  it("applies defaults only when costPolicy exists", () => {
+  it("returns null when costPolicy is undefined or has no explicit budget", () => {
     expect(resolveCostPolicyConfig(undefined)).toBeNull();
+    expect(resolveCostPolicyConfig({})).toBeNull();
+    expect(resolveCostPolicyConfig({ freeTierWindowHours: 24 })).toBeNull();
+  });
+
+  it("resolves when freeTierBudgetUsd is explicitly set", () => {
     expect(resolveCostPolicyConfig({ freeTierBudgetUsd: 3 })).toEqual({
       freeTierBudgetUsd: 3,
       freeTierWindowHours: 72,
     });
-    expect(resolveCostPolicyConfig({ freeTierWindowHours: 24 })).toEqual({
-      freeTierBudgetUsd: 2,
+    expect(resolveCostPolicyConfig({ freeTierBudgetUsd: 5, freeTierWindowHours: 24 })).toEqual({
+      freeTierBudgetUsd: 5,
       freeTierWindowHours: 24,
     });
   });
