@@ -109,7 +109,7 @@ export class IrcRoomMonitor {
     if (options?.gateway) {
       const logWriter = runtime.logger;
       options.gateway.register("irc", {
-        inject: async (serverTag, channelName, content) => {
+        inject: async (serverTag, channelName, content, _options) => {
           await monitor.ready;
           const mynick = await varlinkSender.getServerNick(serverTag);
           if (!mynick) {

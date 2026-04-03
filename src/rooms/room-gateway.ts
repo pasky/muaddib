@@ -8,9 +8,14 @@
  * to a specific transport.
  */
 
+export interface InjectOptions {
+  /** Thread to reply into (e.g. Slack thread_ts). */
+  threadId?: string;
+}
+
 export interface TransportHandler {
   /** Inject a synthetic direct command into the command pipeline. */
-  inject(serverTag: string, channelName: string, content: string): Promise<void>;
+  inject(serverTag: string, channelName: string, content: string, options?: InjectOptions): Promise<void>;
   /** Send a message to a channel (like sendResponse). */
   send(serverTag: string, channelName: string, text: string): Promise<void>;
 }
@@ -44,14 +49,14 @@ export class RoomGateway {
     this.transports.set(transport, handler);
   }
 
-  async inject(arc: string, content: string): Promise<void> {
+  async inject(arc: string, content: string, options?: InjectOptions): Promise<void> {
     const { serverTag, channelName } = parseArc(arc);
     const transportName = transportForServerTag(serverTag);
     const handler = this.transports.get(transportName);
     if (!handler) {
       throw new Error(`No transport registered for "${transportName}" (arc: ${arc})`);
     }
-    await handler.inject(serverTag, channelName, content);
+    await handler.inject(serverTag, channelName, content, options);
   }
 
   async send(arc: string, text: string): Promise<void> {

@@ -141,10 +141,11 @@ export class DiscordRoomMonitor {
     if (options?.gateway) {
       const logWriter = runtime.logger;
       options.gateway.register("discord", {
-        inject: async (serverTag, channelName, content) => {
+        inject: async (serverTag, channelName, content, options) => {
           const guildName = serverTag.replace(/^discord:/, "");
           const channelId = await transport.resolveChannelId(channelName, guildName);
           const arc = buildArc(serverTag, channelName);
+          const threadId = options?.threadId;
           const message: RoomMessage = {
             serverTag,
             channelName,
@@ -153,10 +154,13 @@ export class DiscordRoomMonitor {
             mynick: roomConfig.botName ?? "Muaddib",
             content,
             isDirect: true,
+            threadId,
           };
+          // If the event targets a thread, send to the thread channel directly.
+          const targetChannelId = threadId ?? channelId;
           const run = async (): Promise<void> => {
             await commandHandler.executeEvent(message, async (text) => {
-              await transport.sendMessage(channelId, text);
+              await transport.sendMessage(targetChannelId, text);
             });
           };
           await logWriter.withMessageContext({ arc, nick: "event", message: content }, run);

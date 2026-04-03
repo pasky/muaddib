@@ -28,16 +28,16 @@ function createTempHome(): string {
 /** Default options: 30min min period, heartbeat disabled. */
 const defaultOpts: ArcEventsWatcherOptions = { minPeriodMs: 30 * 60 * 1000, heartbeatIntervalMs: 0 };
 
-function createMockGateway(): RoomGateway & { injected: Array<{ arc: string; content: string }> } {
-  const injected: Array<{ arc: string; content: string }> = [];
+function createMockGateway(): RoomGateway & { injected: Array<{ arc: string; content: string; options?: { threadId?: string } }> } {
+  const injected: Array<{ arc: string; content: string; options?: { threadId?: string } }> = [];
   return {
     injected,
     register: vi.fn(),
-    inject: vi.fn(async (arc: string, content: string) => {
-      injected.push({ arc, content });
+    inject: vi.fn(async (arc: string, content: string, options?: { threadId?: string }) => {
+      injected.push({ arc, content, options });
     }),
     send: vi.fn(async () => {}),
-  } as unknown as RoomGateway & { injected: Array<{ arc: string; content: string }> };
+  } as unknown as RoomGateway & { injected: Array<{ arc: string; content: string; options?: { threadId?: string } }> };
 }
 
 beforeEach(() => {
@@ -106,6 +106,28 @@ describe("parseEventFile", () => {
   it("rejects invalid date in one-shot", () => {
     const raw = JSON.stringify({ type: "one-shot", text: "hello", at: "not-a-date" });
     expect(() => _parseEventFile(raw, "test.json")).toThrow('invalid "at" date');
+  });
+
+  it("parses threadId from one-shot event", () => {
+    const raw = JSON.stringify({
+      type: "one-shot",
+      text: "Remind me",
+      at: "2026-03-01T09:00:00+01:00",
+      threadId: "1234567890.123456",
+    });
+    const event = _parseEventFile(raw, "test.json");
+    expect(event.threadId).toBe("1234567890.123456");
+  });
+
+  it("parses threadId from periodic event", () => {
+    const raw = JSON.stringify({
+      type: "periodic",
+      text: "Check inbox",
+      schedule: "0 9 * * 1-5",
+      threadId: "1234567890.123456",
+    });
+    const event = _parseEventFile(raw, "test.json");
+    expect(event.threadId).toBe("1234567890.123456");
   });
 });
 
@@ -295,6 +317,63 @@ describe("ArcEventsWatcher", () => {
     // This should not throw or schedule anything
     watcher.onFileWritten("arc", "readme.txt");
     watcher.onFileDeleted("arc", "readme.txt");
+
+    watcher.stop();
+  });
+
+  it("fires one-shot event with threadId from event file", async () => {
+    const gateway = createMockGateway();
+    const watcher = new ArcEventsWatcher(gateway, undefined, defaultOpts);
+
+    const arc = "test-arc";
+    const eventsDir = getArcEventsDir(arc);
+    mkdirSync(eventsDir, { recursive: true });
+
+    const futureDate = new Date(Date.now() + 5000).toISOString();
+    writeFileSync(join(eventsDir, "threaded.json"), JSON.stringify({
+      type: "one-shot",
+      text: "Thread reminder",
+      at: futureDate,
+      threadId: "1234567890.123456",
+    }));
+
+    watcher.onFileWritten(arc, "threaded.json");
+
+    vi.advanceTimersByTime(6000);
+
+    await vi.waitFor(() => {
+      expect(gateway.injected.length).toBe(1);
+    });
+
+    expect(gateway.injected[0]!.options?.threadId).toBe("1234567890.123456");
+
+    watcher.stop();
+  });
+
+  it("fires without threadId when event file has none", async () => {
+    const gateway = createMockGateway();
+    const watcher = new ArcEventsWatcher(gateway, undefined, defaultOpts);
+
+    const arc = "test-arc";
+    const eventsDir = getArcEventsDir(arc);
+    mkdirSync(eventsDir, { recursive: true });
+
+    const futureDate = new Date(Date.now() + 5000).toISOString();
+    writeFileSync(join(eventsDir, "no-thread.json"), JSON.stringify({
+      type: "one-shot",
+      text: "No thread",
+      at: futureDate,
+    }));
+
+    watcher.onFileWritten(arc, "no-thread.json");
+
+    vi.advanceTimersByTime(6000);
+
+    await vi.waitFor(() => {
+      expect(gateway.injected.length).toBe(1);
+    });
+
+    expect(gateway.injected[0]!.options?.threadId).toBeUndefined();
 
     watcher.stop();
   });

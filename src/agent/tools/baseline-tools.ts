@@ -87,6 +87,9 @@ export interface BaselineToolOptions extends ToolContext {
 
   /** Nick of the user who triggered this session (for per-user memory). */
   nick?: string;
+
+  /** Thread identifier (e.g. Slack thread_ts) — passed through to Gondolin as $MUADDIB_THREAD_ID. */
+  threadId?: string;
 }
 
 type ExecutorBackedToolFactory = (executors: BaselineToolExecutors, options: BaselineToolOptions) => MuaddibTool;
@@ -146,6 +149,7 @@ export function createBaselineAgentTools(options: BaselineToolOptions): ToolSet 
     eventsWatcher: options.eventsWatcher,
     skipMemory: options.skipMemory,
     nick: options.nick,
+    threadId: options.threadId,
   });
 
   const tools = [

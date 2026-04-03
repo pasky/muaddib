@@ -23,6 +23,17 @@ Past files auto-delete.
 
 The file persists until you delete it.
 
+## Thread context
+
+When running inside a thread, `$MUADDIB_THREAD_ID` is set in your shell
+environment. Include it as `"threadId"` in the event JSON so the follow-up
+fires back into the same thread instead of the main channel.
+
+Example: `echo $MUADDIB_THREAD_ID` to get the value, then include it:
+```json
+{"type": "one-shot", "text": "Check status", "at": "2026-03-01T09:00:00Z", "threadId": "1234567890.123456"}
+```
+
 ## Mode selection
 
 The event text is processed like a normal message by you as an AI agent.

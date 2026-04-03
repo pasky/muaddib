@@ -26,6 +26,7 @@ interface OneShotEvent {
   type: "one-shot";
   text: string;
   at: string; // ISO 8601
+  threadId?: string;
 }
 
 interface PeriodicEvent {
@@ -33,6 +34,7 @@ interface PeriodicEvent {
   text: string;
   schedule: string; // cron expression
   timezone?: string;
+  threadId?: string;
 }
 
 type ParsedEvent = OneShotEvent | PeriodicEvent;
@@ -84,6 +86,8 @@ interface ScheduledJob {
   type: "one-shot" | "periodic";
   /** setTimeout id for one-shot, or Cron instance for periodic. */
   handle: ReturnType<typeof setTimeout> | Cron;
+  /** Thread to reply into when firing (Slack thread_ts, etc.). */
+  threadId?: string;
 }
 
 function cancelJob(job: ScheduledJob): void {
@@ -299,6 +303,7 @@ export class ArcEventsWatcher {
         return;
       }
 
+      const threadId = event.threadId;
       const timer = setTimeout(() => detach(() => {
         this.jobs.delete(key);
         this.fire(arc, filename, event);
@@ -307,7 +312,7 @@ export class ArcEventsWatcher {
 
       // Don't keep the process alive just for event timers.
       if (timer.unref) timer.unref();
-      this.jobs.set(key, { type: "one-shot", handle: timer });
+      this.jobs.set(key, { type: "one-shot", handle: timer, threadId });
       this.logger?.info(`Events: scheduled one-shot ${key} at ${event.at} (${Math.round(delayMs / 1000)}s)`);
     } else {
       // periodic
@@ -325,7 +330,7 @@ export class ArcEventsWatcher {
         this.fire(arc, filename, event);
       }));
 
-      this.jobs.set(key, { type: "periodic", handle: cron });
+      this.jobs.set(key, { type: "periodic", handle: cron, threadId: event.threadId });
       this.logger?.info(`Events: scheduled periodic ${key} [${event.schedule}]`);
     }
   }
@@ -333,7 +338,7 @@ export class ArcEventsWatcher {
   private fire(arc: string, filename: string, event: ParsedEvent): void {
     const content = buildEventMessage(`/events/${filename}`, event);
     this.logger?.info(`Events: firing ${event.type} ${arc}/${filename}`);
-    this.gateway.inject(arc, content).catch((err) => {
+    this.gateway.inject(arc, content, { threadId: event.threadId }).catch((err) => {
       this.logger?.error(`Events: failed to inject event ${arc}/${filename}`, String(err));
     });
   }
@@ -359,7 +364,7 @@ function parseEventFile(raw: string, filename: string): ParsedEvent {
 
   const { type } = obj;
   if (type === "one-shot") {
-    const { text, at } = obj;
+    const { text, at, threadId } = obj;
     if (typeof text !== "string" || !text.trim()) {
       throw new Error(`${filename}: one-shot event missing "text"`);
     }
@@ -370,7 +375,11 @@ function parseEventFile(raw: string, filename: string): ParsedEvent {
     if (Number.isNaN(new Date(at).getTime())) {
       throw new Error(`${filename}: invalid "at" date: ${at}`);
     }
-    return { type: "one-shot", text: text.trim(), at };
+    const result: OneShotEvent = { type: "one-shot", text: text.trim(), at };
+    if (typeof threadId === "string" && threadId.trim()) {
+      result.threadId = threadId.trim();
+    }
+    return result;
   }
 
   if (type === "periodic") {
@@ -392,6 +401,9 @@ function parseEventFile(raw: string, filename: string): ParsedEvent {
     const result: PeriodicEvent = { type: "periodic", text: text.trim(), schedule };
     if (typeof timezone === "string" && timezone.trim()) {
       result.timezone = timezone.trim();
+    }
+    if (typeof obj.threadId === "string" && obj.threadId.trim()) {
+      result.threadId = obj.threadId.trim();
     }
     return result;
   }

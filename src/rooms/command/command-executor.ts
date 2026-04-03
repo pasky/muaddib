@@ -1281,6 +1281,7 @@ export class CommandExecutor {
       secrets: message.secrets,
       skipMemory,
       nick: message.nick,
+      threadId: message.threadId,
     };
 
     const toolSet = createBaselineAgentTools({

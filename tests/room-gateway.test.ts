@@ -72,7 +72,7 @@ describe("RoomGateway", () => {
     const arc = buildArc("irc.libera.chat", "#test");
     await gateway.inject(arc, "hello");
 
-    expect(handler.inject).toHaveBeenCalledWith("irc.libera.chat", "#test", "hello");
+    expect(handler.inject).toHaveBeenCalledWith("irc.libera.chat", "#test", "hello", undefined);
   });
 
   it("routes Discord arcs to the discord transport", async () => {
@@ -96,7 +96,19 @@ describe("RoomGateway", () => {
     const arc = buildArc("slack:MyWorkspace", "random");
     await gateway.inject(arc, "hello");
 
-    expect(handler.inject).toHaveBeenCalledWith("slack:MyWorkspace", "random", "hello");
+    expect(handler.inject).toHaveBeenCalledWith("slack:MyWorkspace", "random", "hello", undefined);
+  });
+
+  it("passes threadId through inject options", async () => {
+    const { buildArc } = await import("../src/rooms/message.js");
+    const gateway = new RoomGateway();
+    const handler = createMockHandler();
+    gateway.register("slack", handler);
+
+    const arc = buildArc("slack:MyWorkspace", "random");
+    await gateway.inject(arc, "hello", { threadId: "1234567890.123456" });
+
+    expect(handler.inject).toHaveBeenCalledWith("slack:MyWorkspace", "random", "hello", { threadId: "1234567890.123456" });
   });
 
   it("throws when no transport is registered", async () => {

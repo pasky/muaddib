@@ -211,10 +211,11 @@ export class SlackRoomMonitor {
       const firstTransport = monitors[0]!.transport;
       const logWriter = runtime.logger;
       options.gateway.register("slack", {
-        inject: async (serverTag, channelName, content) => {
+        inject: async (serverTag, channelName, content, options) => {
           const rawName = channelName.replace(/^#/, "");
           const channelId = await firstTransport.resolveChannelId(rawName);
           const arc = buildArc(serverTag, channelName);
+          const threadId = options?.threadId;
           const message: RoomMessage = {
             serverTag,
             channelName,
@@ -223,10 +224,14 @@ export class SlackRoomMonitor {
             mynick: "Muaddib",
             content,
             isDirect: true,
+            threadId,
+            responseThreadId: threadId,
           };
           const run = async (): Promise<void> => {
             await commandHandler.executeEvent(message, async (text) => {
-              await firstTransport.sendMessage(channelId, text);
+              await firstTransport.sendMessage(channelId, text, {
+                threadTs: threadId,
+              });
             });
           };
           await logWriter.withMessageContext({ arc, nick: "event", message: content }, run);

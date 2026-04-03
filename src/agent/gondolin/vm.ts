@@ -549,7 +549,11 @@ export function createVmEditOps(getVm: () => Promise<VM>, opTimeoutMs: number, l
   };
 }
 
-export function createVmBashOps(getVm: () => Promise<VM>, defaultTimeoutSeconds: number): BashOperations {
+export function createVmBashOps(
+  getVm: () => Promise<VM>,
+  defaultTimeoutSeconds: number,
+  sessionEnv?: Record<string, string>,
+): BashOperations {
   return {
     exec: async (command, cwd, { onData, signal, timeout }) => {
       const vm = await getVm();
@@ -573,15 +577,14 @@ export function createVmBashOps(getVm: () => Promise<VM>, defaultTimeoutSeconds:
           : undefined;
 
       try {
-        // No PATH/env wrapper needed — HOME, PATH, VIRTUAL_ENV are all set
-        // by /etc/profile.d/gondolin-image-env.sh (baked into the image),
-        // which is sourced after Alpine's /etc/profile PATH clobber.
+        // HOME, PATH, VIRTUAL_ENV are set by the gondolin image profile.
         const wrappedCommand = command;
         const proc = vm.exec(["/bin/bash", "-lc", wrappedCommand], {
           cwd,
           signal: ac.signal,
           stdout: "pipe",
           stderr: "pipe",
+          ...(sessionEnv ? { env: sessionEnv } : {}),
         });
 
         let totalBytes = 0;

@@ -61,6 +61,8 @@ export interface GondolinToolsOptions {
   skipMemory?: boolean;
   /** Nick of the user who triggered this session (for per-user memory). */
   nick?: string;
+  /** Thread identifier (e.g. Slack thread_ts) — exposed as $MUADDIB_THREAD_ID in bash. */
+  threadId?: string;
 }
 
 /**
@@ -95,7 +97,9 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
   const piReadTool = createReadTool(sessionDir, { operations: createVmReadOps(getVm, vmOpTimeoutMs, logger) });
   const piWriteTool = createWriteTool(sessionDir, { operations: createVmWriteOps(getVm, vmOpTimeoutMs) });
   const piEditTool = createEditTool(sessionDir, { operations: createVmEditOps(getVm, vmOpTimeoutMs, logger) });
-  const piBashTool = createBashTool(sessionDir, { operations: createVmBashOps(getVm, bashTimeoutSeconds) });
+  const sessionEnv: Record<string, string> = {};
+  if (options.threadId) sessionEnv.MUADDIB_THREAD_ID = options.threadId;
+  const piBashTool = createBashTool(sessionDir, { operations: createVmBashOps(getVm, bashTimeoutSeconds, Object.keys(sessionEnv).length > 0 ? sessionEnv : undefined) });
 
   // share_artifact reads files from the VM and publishes them to the artifact store.
   const sandboxReadFile: SandboxReadFile = async (absolutePath: string): Promise<Buffer> => {
