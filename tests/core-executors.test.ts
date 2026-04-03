@@ -127,9 +127,8 @@ describe("core tool executors artifact support", () => {
 });
 
 describe("core tool executors webpage secret header support", () => {
-  it("visit_webpage uses direct fetch with configured auth headers for matching URL prefixes", async () => {
+  it("visit_webpage auto-trusts URLs with harness-provided auth headers (no prior trust needed)", async () => {
     const privateUrl = "https://files.slack.com/files-pri/T123/F456/report.txt";
-    await trustUrl(privateUrl);
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);

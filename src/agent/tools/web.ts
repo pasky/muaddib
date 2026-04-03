@@ -6,7 +6,7 @@ import { Type } from "@sinclair/typebox";
 import type { ToolContext, MuaddibTool } from "./types.js";
 import { resolveLocalArtifactFilePath } from "./url-utils.js";
 import { NetworkBoundaryService } from "../network-boundary-service.js";
-import { getRedirectTarget } from "../network-boundary.js";
+import { getRedirectTarget, recordNetworkTrustEvent } from "../network-boundary.js";
 import { responseText } from "../message.js";
 import { LLM_CALL_TYPE } from "../../cost/llm-call-type.js";
 import { toConfiguredString } from "../../utils/index.js";
@@ -178,6 +178,13 @@ function hasNonUserAgentHeaders(headers: Record<string, string>): boolean {
 }
 
 async function ensureVisitUrlTrusted(options: ToolContext, url: string): Promise<void> {
+  // Auto-trust URLs the harness provided auth headers for (e.g. Slack file URLs).
+  const hasHarnessAuth = Object.keys(resolveHttpHeaderPrefixes(options.secrets)).some((p) => url.startsWith(p));
+  if (hasHarnessAuth) {
+    await recordNetworkTrustEvent(options.arc, { source: "approval", rawUrl: url });
+    return;
+  }
+
   await networkBoundary.ensureUrlTrustedForVisit(
     {
       arc: options.arc,
