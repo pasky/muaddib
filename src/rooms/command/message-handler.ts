@@ -147,7 +147,7 @@ export class RoomMessageHandler {
 
   async handleIncomingMessage(
     message: RoomMessage,
-    options?: { sendResponse?: SendResponse },
+    options?: { sendResponse?: SendResponse; onSteered?: () => void },
   ): Promise<void> {
     message = this.sanitizeSensitiveCommandMessage(message);
     const sendResponse: SendResponse = options?.sendResponse ?? (async () => {});
@@ -174,6 +174,7 @@ export class RoomMessageHandler {
         // Regular follow-up (mode tokens, plain messages, passives) — steer
         // into the active session without blocking on history persistence.
         existingEntry.steer(message);
+        options?.onSteered?.();
         this.history.addMessage(message).catch((err) => {
           this.logger.error("Failed to persist steered message to history", String(err));
         });

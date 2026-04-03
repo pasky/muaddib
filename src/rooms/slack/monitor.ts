@@ -21,7 +21,7 @@ import type { ArcEventsWatcher } from "../../events/watcher.js";
 interface CommandLike {
   handleIncomingMessage(
     message: RoomMessage,
-    options?: { sendResponse?: (text: string) => Promise<{ platformId?: string } | void> },
+    options?: { sendResponse?: (text: string) => Promise<{ platformId?: string } | void>; onSteered?: () => void },
   ): Promise<void>;
   cancelProactive?(): void;
 }
@@ -406,8 +406,13 @@ export class SlackRoomMonitor {
 
     const artifactsConfig = this.options.artifactsConfig;
 
+    const breakEditChain = () => {
+      lastReplyAtSeconds = undefined;
+    };
+
     const handleIncoming = async (): Promise<void> => {
       await this.options.commandHandler.handleIncomingMessage(message, {
+        onSteered: breakEditChain,
         sendResponse: sender
           ? async (text) => {
               let formattedText = sender.formatOutgoingMentions

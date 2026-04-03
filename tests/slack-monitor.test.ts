@@ -699,6 +699,66 @@ describe("SlackRoomMonitor", () => {
     await history.close();
   });
 
+  it("breaks edit chain when onSteered is called between replies", async () => {
+    const history = createTempHistoryStore(20);
+
+    const sendCalls: Array<{ text: string; threadTs?: string }> = [];
+    const updateCalls: Array<{ messageTs: string; text: string }> = [];
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true, replyEditDebounceSeconds: 15 },
+      history,
+      sender: {
+        sendMessage: async (_channelId, text, options) => {
+          sendCalls.push({ text, threadTs: options?.threadTs });
+          return {
+            messageTs: `17000000.${sendCalls.length}`,
+          };
+        },
+        updateMessage: async (_channelId, messageTs, text) => {
+          updateCalls.push({ messageTs, text });
+          return { messageTs };
+        },
+      },
+      commandHandler: {
+        handleIncomingMessage: async (_message, options) => {
+          // First reply — sent as new message
+          await options?.sendResponse?.("first");
+          // Simulate a steering message arriving and breaking the edit chain
+          options?.onSteered?.();
+          // Second reply — should be a NEW message, not an edit
+          await options?.sendResponse?.("second");
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      workspaceId: "T123",
+      channelId: "C123",
+      channelName: "#general",
+      username: "alice",
+      text: "muaddib: hello",
+      mynick: "muaddib",
+      messageTs: "1700000000.2000",
+      channelType: "channel",
+      mentionsBot: true,
+    });
+
+    // Both should be new messages, no edits
+    expect(updateCalls).toEqual([]);
+    expect(sendCalls).toHaveLength(2);
+    expect(sendCalls[0]).toEqual({
+      text: "first",
+      threadTs: "1700000000.2000",
+    });
+    expect(sendCalls[1]).toEqual({
+      text: "second",
+      threadTs: "1700000000.2000",
+    });
+
+    await history.close();
+  });
+
   it("formats outgoing Slack mentions before sending replies", async () => {
     const history = createTempHistoryStore(20);
 

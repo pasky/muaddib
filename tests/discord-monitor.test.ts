@@ -498,6 +498,70 @@ describe("DiscordRoomMonitor", () => {
     await history.close();
   });
 
+  it("breaks edit chain when onSteered is called between replies", async () => {
+    const history = createTempHistoryStore(20);
+
+    const sendCalls: Array<{ text: string; options?: { replyToMessageId?: string; mentionAuthor?: boolean } }> = [];
+    const editCalls: Array<{ messageId: string; text: string }> = [];
+
+    const monitor = new DiscordRoomMonitor({
+      roomConfig: { enabled: true, replyEditDebounceSeconds: 15 },
+      history,
+      sender: {
+        sendMessage: async (_channelId, text, options) => {
+          sendCalls.push({ text, options });
+          return {
+            messageId: `bot-reply-${sendCalls.length}`,
+          };
+        },
+        editMessage: async (_channelId, messageId, text) => {
+          editCalls.push({ messageId, text });
+          return { messageId };
+        },
+      },
+      commandHandler: {
+        handleIncomingMessage: async (_message, options) => {
+          // First reply — sent as new message
+          await options?.sendResponse?.("first");
+          // Simulate a steering message arriving and breaking the edit chain
+          options?.onSteered?.();
+          // Second reply — should be a NEW message, not an edit
+          await options?.sendResponse?.("second");
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      guildId: "123456789",
+      channelId: "chan-1",
+      messageId: "msg-42",
+      username: "alice",
+      content: "muaddib: hello",
+      mynick: "muaddib",
+      mentionsBot: true,
+    });
+
+    // Both should be new messages, no edits
+    expect(editCalls).toEqual([]);
+    expect(sendCalls).toHaveLength(2);
+    expect(sendCalls[0]).toEqual({
+      text: "first",
+      options: {
+        replyToMessageId: "msg-42",
+        mentionAuthor: true,
+      },
+    });
+    expect(sendCalls[1]).toEqual({
+      text: "second",
+      options: {
+        replyToMessageId: "bot-reply-1",
+        mentionAuthor: false,
+      },
+    });
+
+    await history.close();
+  });
+
   it("updates edited Discord message content by platform id", async () => {
     const history = createTempHistoryStore(20);
 
