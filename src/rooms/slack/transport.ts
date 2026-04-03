@@ -331,6 +331,16 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
     }
 
     if (!channelId || !userId || (!rawText && files.length === 0 && rawSharedMessages.length === 0)) {
+      if (channelId && userId && (attachmentCount > 0 || blockCount > 0)) {
+        this.logger.warn("Dropping Slack message: has attachments/blocks but no mapped content", {
+          channelId,
+          userId,
+          messageTs: typeof event.ts === "string" ? event.ts : undefined,
+          attachmentCount,
+          blockCount,
+          event,
+        });
+      }
       return null;
     }
 
