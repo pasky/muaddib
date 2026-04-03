@@ -85,6 +85,7 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
     this.app.event("message", async ({ event }) => {
       try {
         const raw = event as unknown as Record<string, unknown>;
+        const attachments = Array.isArray(raw.attachments) ? raw.attachments as Record<string, unknown>[] : [];
         this.logger.debug("Incoming Slack message event", {
           subtype: raw.subtype,
           user: raw.user,
@@ -93,8 +94,18 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
           thread_ts: raw.thread_ts,
           hasText: typeof raw.text === "string" && raw.text.length > 0,
           fileCount: Array.isArray(raw.files) ? raw.files.length : 0,
-          attachmentCount: Array.isArray(raw.attachments) ? raw.attachments.length : 0,
+          attachmentCount: attachments.length,
           blockCount: Array.isArray(raw.blocks) ? raw.blocks.length : 0,
+          attachmentKeys: attachments.map((a) => ({
+            is_share: a.is_share,
+            is_msg_unfurl: a.is_msg_unfurl,
+            is_reply_unfurl: a.is_reply_unfurl,
+            msg_subtype: a.msg_subtype,
+            hasText: typeof a.text === "string" && a.text.length > 0,
+            hasFallback: typeof a.fallback === "string" && a.fallback.length > 0,
+            author_name: a.author_name,
+            from_url: typeof a.from_url === "string",
+          })),
         });
         const mapped = await this.mapEvent(raw);
         if (mapped) {
