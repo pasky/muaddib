@@ -4,6 +4,9 @@ import { join, dirname } from "node:path";
 import type { CostPolicyConfig } from "../config/muaddib-config.js";
 import { UserCostLedger } from "./user-cost-ledger.js";
 import { UserKeyStore } from "./user-key-store.js";
+import { UserPolicyStore, type UserPolicyOverride } from "./user-policy-store.js";
+
+export type { UserPolicyOverride } from "./user-policy-store.js";
 
 export type UserBudgetState = "byok" | "exempt" | "free" | "over_budget";
 
@@ -28,6 +31,7 @@ export interface CheckUserBudgetInput {
   costPolicy?: CostPolicyConfig;
   userArc: string;
   keyStore: UserKeyStore;
+  policyStore: UserPolicyStore;
   ledger: UserCostLedger;
   now?: Date;
 }
@@ -59,6 +63,17 @@ export function resolveCostPolicyConfig(
   };
 }
 
+export function applyUserPolicyOverride(
+  global: ResolvedCostPolicyConfig,
+  override: UserPolicyOverride | null,
+): ResolvedCostPolicyConfig {
+  if (!override) return global;
+  return {
+    freeTierBudgetUsd: override.freeTierBudgetUsd ?? global.freeTierBudgetUsd,
+    freeTierWindowHours: override.freeTierWindowHours ?? global.freeTierWindowHours,
+  };
+}
+
 export async function checkUserBudget(
   input: CheckUserBudgetInput,
 ): Promise<UserBudgetStatus> {
@@ -71,20 +86,23 @@ export async function checkUserBudget(
     };
   }
 
-  if (input.keyStore.isExempt(input.userArc)) {
+  if (input.policyStore.isExempt(input.userArc)) {
     return {
       allowed: true,
       state: "exempt",
     };
   }
 
-  const policy = resolveCostPolicyConfig(input.costPolicy);
-  if (!policy) {
+  const globalPolicy = resolveCostPolicyConfig(input.costPolicy);
+  if (!globalPolicy) {
     return {
       allowed: true,
       state: "free",
     };
   }
+
+  const userOverride = input.policyStore.getBudgetOverride(input.userArc);
+  const policy = applyUserPolicyOverride(globalPolicy, userOverride);
 
   const spent = await input.ledger.getUserCostInWindow(
     input.userArc,

@@ -10,6 +10,7 @@ interface ParsedArgs {
   configPath: string;
   roomName?: string;
   arcsPath?: string;
+  arcs: string[];
   help: boolean;
 }
 
@@ -18,6 +19,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   let configPath = "./config.json";
   let roomName: string | undefined;
   let arcsPath: string | undefined;
+  const arcs: string[] = [];
   let help = false;
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -50,9 +52,15 @@ function parseArgs(argv: string[]): ParsedArgs {
       i += 1;
       continue;
     }
+
+    if (arg === "--arc" && argv[i + 1]) {
+      arcs.push(argv[i + 1]);
+      i += 1;
+      continue;
+    }
   }
 
-  return { message, configPath, roomName, arcsPath, help };
+  return { message, configPath, roomName, arcsPath, arcs, help };
 }
 
 async function main(): Promise<void> {
@@ -61,7 +69,7 @@ async function main(): Promise<void> {
   if (args.help || !args.message) {
     // eslint-disable-next-line no-console
     console.log(
-      "Usage: node dist/cli/main.js --message \"...\" [--config /path/to/config.json] [--room irc|discord|slack] [--arcs-path /path/to/arcs]",
+      "Usage: node dist/cli/main.js --message \"...\" [--config /path/to/config.json] [--room irc|discord|slack] [--arcs-path /path/to/arcs] [--arc <arc-name> ...]",
     );
     if (!args.help && !args.message) {
       process.exitCode = 2;
@@ -69,16 +77,24 @@ async function main(): Promise<void> {
     return;
   }
 
-  const result = await runCliMessageMode({
-    message: args.message,
-    configPath: args.configPath,
-    roomName: args.roomName,
-    arcsPath: args.arcsPath,
-  });
+  const arcs = args.arcs.length > 0 ? args.arcs : [undefined];
+  for (const arc of arcs) {
+    if (arc) {
+      // eslint-disable-next-line no-console
+      console.log(`\n=== Arc: ${arc} ===`);
+    }
+    const result = await runCliMessageMode({
+      message: args.message,
+      configPath: args.configPath,
+      roomName: args.roomName,
+      arcsPath: args.arcsPath,
+      arc,
+    });
 
-  if (result.response) {
-    // eslint-disable-next-line no-console
-    console.log(result.response);
+    if (result.response) {
+      // eslint-disable-next-line no-console
+      console.log(result.response);
+    }
   }
 }
 

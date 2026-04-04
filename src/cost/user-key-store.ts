@@ -50,19 +50,6 @@ export class UserKeyStore {
     return credential.key;
   }
 
-  isExempt(userArc: string): boolean {
-    const storage = this.storageFor(userArc);
-    this.throwOnLoadErrors(storage, userArc);
-    const credential = storage.get("exempt");
-    if (!credential) {
-      return false;
-    }
-    if (credential.type !== "api_key") {
-      throw new Error(`users/${userArc}/auth.json exempt credential must be an api_key.`);
-    }
-    return credential.key === "true";
-  }
-
   setOpenRouterKey(userArc: string, key: string): void {
     this.storageFor(userArc).set("openrouter", {
       type: "api_key",

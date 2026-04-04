@@ -1,9 +1,9 @@
 ---
 name: chronicle-read
-description: Reconstruct prior context (decisions, commitments, timelines) from /chronicle chapter summaries and timestamped paragraphs when long-term continuity matters
+description: Reconstruct high-level past events (decisions, commitments, timelines) from /chronicle chapters. Use for longer-term recall beyond what <context_summary> paragraphs cover — arc of past discussions, decisions made, what happened last week(s).
 ---
 
-Chronicle files in the `/chronicle/` directory (read-only, auto-maintained) are numbered chapter files (`000001.md`, `000002.md`, etc.) with YAML frontmatter and timestamped paragraphs:
+Chronicle files in `/chronicle/` (read-only, auto-maintained) are numbered chapter files (`000001.md`, `000002.md`, etc.) with YAML frontmatter and timestamped narrative paragraphs:
 
 ```markdown
 ---
@@ -17,7 +17,16 @@ summary: "Brief summary of the chapter."
 [2026-02-20T14:35] Second paragraph content.
 ```
 
+## What's already in your context
+- Current chapter paragraphs are auto-prepended as `<context_summary>` messages
+- These cover only most recent history — older chapters require explicit lookup
+
+## When to use chronicle vs chat_history
+- **Chronicle**: narrative summaries — good for "what was discussed about X", "what decisions were made", longer-term arcs
+- **chat_history**: raw JSONL transcript logs — good for specific quotes, artifact URLs, exact tool calls, who said what
+
+## How to use
 - `closedAt` absent = current (open) chapter
-- Previous chapter summary and current chapter paragraphs were auto-prepended to your context as `<context_summary>` messages
-- The chronicle is continuously written by your scaffold automatically, based on `/chat_history` chatter
-- Use `read` tool on `/chronicle/NNNNNN.md` for older chapters
+- Grep `summary:` lines across chapters to find relevant periods
+- `read /chronicle/NNNNNN.md` for full chapter content
+- The chronicle is written automatically from `/chat_history/` chatter
