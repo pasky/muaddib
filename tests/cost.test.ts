@@ -4,18 +4,19 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import {
   checkUserBudget,
   resolveCostPolicyConfig,
   shouldEmitQuotaWarning,
   readQuotaWarningTs,
+  applyUserPolicyOverride,
 } from "../src/cost/cost-policy.js";
 import { remapToOpenRouter } from "../src/cost/model-remap.js";
 import { resolveProviderOverrideModel } from "../src/models/provider-overrides.js";
 import { LLM_CALL_TYPE, isLlmCallType } from "../src/cost/llm-call-type.js";
 import { UserCostLedger } from "../src/cost/user-cost-ledger.js";
 import { UserKeyStore } from "../src/cost/user-key-store.js";
+import { UserPolicyStore } from "../src/cost/user-policy-store.js";
 import { buildArc } from "../src/rooms/message.js";
 
 function makeTempHome(): string {
@@ -175,7 +176,7 @@ describe("shouldEmitQuotaWarning", () => {
 });
 
 describe("UserKeyStore", () => {
-  it("throws on corrupt auth.json instead of silently ignoring exempt status", () => {
+  it("throws on corrupt auth.json", () => {
     const muaddibHome = makeTempHome();
     const userArc = buildArc("libera", "alice");
     const keyStore = new UserKeyStore(muaddibHome);
@@ -183,12 +184,93 @@ describe("UserKeyStore", () => {
     try {
       const authDir = join(muaddibHome, "users", userArc);
       mkdirSync(authDir, { recursive: true });
-      writeFileSync(join(authDir, "auth.json"), '{"exempt": {"type": "api_key", "key": "true"}');
+      writeFileSync(join(authDir, "auth.json"), '{"openrouter": {"type": "api_key", "key": "x"}');
 
-      expect(() => keyStore.isExempt(userArc)).toThrow(/Failed to load/);
       expect(() => keyStore.getOpenRouterKey(userArc)).toThrow(/Failed to load/);
     } finally {
       rmSync(muaddibHome, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("UserPolicyStore", () => {
+  it("returns false for exempt when no policy.json exists", () => {
+    const home = makeTempHome();
+    try {
+      const store = new UserPolicyStore(home);
+      expect(store.isExempt("libera#alice")).toBe(false);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("reads exempt from policy.json", () => {
+    const home = makeTempHome();
+    const userArc = "libera#alice";
+    try {
+      const dir = join(home, "users", userArc);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "policy.json"), JSON.stringify({ exempt: true }));
+      const store = new UserPolicyStore(home);
+      expect(store.isExempt(userArc)).toBe(true);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("reads budget overrides from policy.json", () => {
+    const home = makeTempHome();
+    const userArc = "libera#alice";
+    try {
+      const dir = join(home, "users", userArc);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "policy.json"), JSON.stringify({ freeTierBudgetUsd: 10, freeTierWindowHours: 48 }));
+      const store = new UserPolicyStore(home);
+      expect(store.getBudgetOverride(userArc)).toEqual({ freeTierBudgetUsd: 10, freeTierWindowHours: 48 });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("returns null for budget override on empty object", () => {
+    const home = makeTempHome();
+    const userArc = "libera#alice";
+    try {
+      const dir = join(home, "users", userArc);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "policy.json"), "{}");
+      const store = new UserPolicyStore(home);
+      expect(store.getBudgetOverride(userArc)).toBeNull();
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("throws on invalid freeTierBudgetUsd", () => {
+    const home = makeTempHome();
+    const userArc = "libera#alice";
+    try {
+      const dir = join(home, "users", userArc);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "policy.json"), JSON.stringify({ freeTierBudgetUsd: -1 }));
+      const store = new UserPolicyStore(home);
+      expect(() => store.getBudgetOverride(userArc)).toThrow(/freeTierBudgetUsd/);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("throws on non-boolean exempt", () => {
+    const home = makeTempHome();
+    const userArc = "libera#alice";
+    try {
+      const dir = join(home, "users", userArc);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "policy.json"), JSON.stringify({ exempt: "yes" }));
+      const store = new UserPolicyStore(home);
+      expect(() => store.isExempt(userArc)).toThrow(/exempt must be a boolean/);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
     }
   });
 });
@@ -198,6 +280,7 @@ describe("checkUserBudget", () => {
     const muaddibHome = makeTempHome();
     const userArc = buildArc("libera", "alice");
     const keyStore = new UserKeyStore(muaddibHome);
+    const policyStore = new UserPolicyStore(muaddibHome);
     const ledger = new UserCostLedger(muaddibHome);
 
     try {
@@ -206,6 +289,7 @@ describe("checkUserBudget", () => {
         costPolicy: { freeTierBudgetUsd: -1 },
         userArc,
         keyStore,
+        policyStore,
         ledger,
       })).resolves.toMatchObject({
         allowed: true,
@@ -214,14 +298,14 @@ describe("checkUserBudget", () => {
       });
 
       keyStore.clearOpenRouterKey(userArc);
-      AuthStorage.create(join(muaddibHome, "users", userArc, "auth.json")).set("exempt", {
-        type: "api_key",
-        key: "true",
-      });
+      const policyDir = join(muaddibHome, "users", userArc);
+      mkdirSync(policyDir, { recursive: true });
+      writeFileSync(join(policyDir, "policy.json"), JSON.stringify({ exempt: true }));
       await expect(checkUserBudget({
         costPolicy: { freeTierWindowHours: 0 },
         userArc,
         keyStore,
+        policyStore,
         ledger,
       })).resolves.toMatchObject({
         allowed: true,
@@ -230,5 +314,127 @@ describe("checkUserBudget", () => {
     } finally {
       rmSync(muaddibHome, { recursive: true, force: true });
     }
+  });
+
+  it("uses per-user policy.json overrides over global costPolicy", async () => {
+    const muaddibHome = makeTempHome();
+    const userArc = buildArc("libera", "alice");
+    const keyStore = new UserKeyStore(muaddibHome);
+    const policyStore = new UserPolicyStore(muaddibHome);
+    const ledger = new UserCostLedger(muaddibHome);
+    const now = new Date("2026-03-30T15:00:00Z");
+
+    try {
+      // Log $1.50 of spending
+      await ledger.logUserCost(userArc, {
+        ts: "2026-03-30T10:00:00Z",
+        cost: 1.5,
+        byok: false,
+        arc: buildArc("libera", "#test"),
+        model: "openai:gpt-4o-mini",
+      });
+
+      // Global policy: $1.00 budget → over budget
+      const overBudget = await checkUserBudget({
+        costPolicy: { freeTierBudgetUsd: 1.0, freeTierWindowHours: 72 },
+        userArc,
+        keyStore,
+        policyStore,
+        ledger,
+        now,
+      });
+      expect(overBudget.state).toBe("over_budget");
+      expect(overBudget.allowed).toBe(false);
+
+      // Write per-user policy with higher budget → allowed
+      const policyDir = join(muaddibHome, "users", userArc);
+      mkdirSync(policyDir, { recursive: true });
+      writeFileSync(
+        join(policyDir, "policy.json"),
+        JSON.stringify({ freeTierBudgetUsd: 5.0 }),
+      );
+
+      const allowed = await checkUserBudget({
+        costPolicy: { freeTierBudgetUsd: 1.0, freeTierWindowHours: 72 },
+        userArc,
+        keyStore,
+        policyStore,
+        ledger,
+        now,
+      });
+      expect(allowed.state).toBe("free");
+      expect(allowed.allowed).toBe(true);
+      expect(allowed.budget).toBe(5.0);
+      expect(allowed.windowHours).toBe(72);
+    } finally {
+      rmSync(muaddibHome, { recursive: true, force: true });
+    }
+  });
+
+  it("per-user policy.json can override windowHours independently", async () => {
+    const muaddibHome = makeTempHome();
+    const userArc = buildArc("libera", "bob");
+    const keyStore = new UserKeyStore(muaddibHome);
+    const policyStore = new UserPolicyStore(muaddibHome);
+    const ledger = new UserCostLedger(muaddibHome);
+    const now = new Date("2026-03-30T15:00:00Z");
+
+    try {
+      // Log $0.50 spending 25h ago
+      await ledger.logUserCost(userArc, {
+        ts: "2026-03-29T14:00:00Z",
+        cost: 0.5,
+        byok: false,
+        arc: buildArc("libera", "#test"),
+        model: "openai:gpt-4o-mini",
+      });
+
+      // Global: 72h window → spending visible, over budget
+      const global72h = await checkUserBudget({
+        costPolicy: { freeTierBudgetUsd: 0.4, freeTierWindowHours: 72 },
+        userArc,
+        keyStore,
+        policyStore,
+        ledger,
+        now,
+      });
+      expect(global72h.state).toBe("over_budget");
+
+      // Per-user override: 24h window → spending outside window
+      const policyDir = join(muaddibHome, "users", userArc);
+      mkdirSync(policyDir, { recursive: true });
+      writeFileSync(
+        join(policyDir, "policy.json"),
+        JSON.stringify({ freeTierWindowHours: 24 }),
+      );
+
+      const narrow = await checkUserBudget({
+        costPolicy: { freeTierBudgetUsd: 0.4, freeTierWindowHours: 72 },
+        userArc,
+        keyStore,
+        policyStore,
+        ledger,
+        now,
+      });
+      expect(narrow.state).toBe("free");
+      expect(narrow.windowHours).toBe(24);
+    } finally {
+      rmSync(muaddibHome, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("applyUserPolicyOverride", () => {
+  it("returns global when override is null", () => {
+    const global = { freeTierBudgetUsd: 2, freeTierWindowHours: 72 };
+    expect(applyUserPolicyOverride(global, null)).toBe(global);
+  });
+
+  it("selectively overrides fields", () => {
+    const global = { freeTierBudgetUsd: 2, freeTierWindowHours: 72 };
+    expect(applyUserPolicyOverride(global, { freeTierBudgetUsd: 10 })).toEqual({
+      freeTierBudgetUsd: 10,
+      freeTierWindowHours: 72,
+    });
   });
 });

@@ -42,6 +42,7 @@ import {
   parseSetKeyArgs,
   UserKeyStore,
 } from "../../cost/user-key-store.js";
+import { UserPolicyStore } from "../../cost/user-policy-store.js";
 import { UserCostLedger } from "../../cost/user-cost-ledger.js";
 import { withPersistedCostSpan, recordUsage, withCostSpan, currentCostSpan } from "../../cost/cost-span.js";
 import { LLM_CALL_TYPE, COST_SOURCE, type CostSource } from "../../cost/llm-call-type.js";
@@ -159,6 +160,7 @@ export class CommandExecutor {
 
   private readonly agentConfig: AgentConfig;
   private readonly userKeyStore: UserKeyStore;
+  private readonly userPolicyStore: UserPolicyStore;
   private readonly userCostLedger: UserCostLedger;
 
   constructor(runtime: MuaddibRuntime, roomName: string, overrides?: CommandExecutorOverrides) {
@@ -270,6 +272,7 @@ export class CommandExecutor {
 
     this.eventsWatcher = overrides?.eventsWatcher;
     this.userKeyStore = new UserKeyStore(runtime.muaddibHome);
+    this.userPolicyStore = new UserPolicyStore(runtime.muaddibHome);
     this.userCostLedger = new UserCostLedger(runtime.muaddibHome);
   }
 
@@ -469,6 +472,7 @@ export class CommandExecutor {
       costPolicy,
       userArc,
       keyStore: this.userKeyStore,
+      policyStore: this.userPolicyStore,
       ledger: this.userCostLedger,
     });
 
@@ -563,6 +567,7 @@ export class CommandExecutor {
       costPolicy: this.runtime.config.getCostPolicyConfig(),
       userArc,
       keyStore: this.userKeyStore,
+      policyStore: this.userPolicyStore,
       ledger: this.userCostLedger,
     });
     if (budgetStatus.state === "over_budget") {
