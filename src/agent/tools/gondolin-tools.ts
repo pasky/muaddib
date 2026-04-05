@@ -33,6 +33,7 @@ import {
 } from "../skills/load-skills.js";
 
 import type { ArcEventsWatcher } from "../../events/watcher.js";
+import { runWithThreadId } from "../../events/thread-context.js";
 
 import {
   getArcChatHistoryDir,
@@ -61,7 +62,7 @@ export interface GondolinToolsOptions {
   skipMemory?: boolean;
   /** Nick of the user who triggered this session (for per-user memory). */
   nick?: string;
-  /** Thread identifier (e.g. Slack thread_ts) — exposed as $MUADDIB_THREAD_ID in bash. */
+  /** Thread identifier (e.g. Slack thread_ts) — auto-injected into events written to /events/. */
   threadId?: string;
 }
 
@@ -95,11 +96,27 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
   });
 
   const piReadTool = createReadTool(sessionDir, { operations: createVmReadOps(getVm, vmOpTimeoutMs, logger) });
-  const piWriteTool = createWriteTool(sessionDir, { operations: createVmWriteOps(getVm, vmOpTimeoutMs) });
-  const piEditTool = createEditTool(sessionDir, { operations: createVmEditOps(getVm, vmOpTimeoutMs, logger) });
-  const sessionEnv: Record<string, string> = {};
-  if (options.threadId) sessionEnv.MUADDIB_THREAD_ID = options.threadId;
-  const piBashTool = createBashTool(sessionDir, { operations: createVmBashOps(getVm, bashTimeoutSeconds, Object.keys(sessionEnv).length > 0 ? sessionEnv : undefined) });
+
+  // Wrap write/edit operations so that VFS writes run within the threadId
+  // async context.  This lets ArcEventsWatcher auto-populate threadId on
+  // event files without the agent having to specify it explicitly.
+  const rawWriteOps = createVmWriteOps(getVm, vmOpTimeoutMs);
+  const threadAwareWriteOps = {
+    ...rawWriteOps,
+    writeFile: (path: string, content: string) =>
+      runWithThreadId(options.threadId, () => rawWriteOps.writeFile(path, content)),
+  };
+  const piWriteTool = createWriteTool(sessionDir, { operations: threadAwareWriteOps });
+
+  const rawEditOps = createVmEditOps(getVm, vmOpTimeoutMs, logger);
+  const threadAwareEditOps = {
+    ...rawEditOps,
+    writeFile: (path: string, content: string) =>
+      runWithThreadId(options.threadId, () => rawEditOps.writeFile(path, content)),
+  };
+  const piEditTool = createEditTool(sessionDir, { operations: threadAwareEditOps });
+
+  const piBashTool = createBashTool(sessionDir, { operations: createVmBashOps(getVm, bashTimeoutSeconds) });
 
   // share_artifact reads files from the VM and publishes them to the artifact store.
   const sandboxReadFile: SandboxReadFile = async (absolutePath: string): Promise<Buffer> => {

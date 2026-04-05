@@ -10,7 +10,7 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { readFileSync, readdirSync, unlinkSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, unlinkSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { Cron } from "croner";
@@ -19,6 +19,7 @@ import type { Logger } from "../app/logging.js";
 import { getMuaddibHome } from "../config/paths.js";
 import { getArcEventsDir } from "../agent/gondolin/fs.js";
 import type { RoomGateway } from "../rooms/room-gateway.js";
+import { getCurrentThreadId } from "./thread-context.js";
 
 // ── Event schema ────────────────────────────────────────────────────────
 
@@ -143,6 +144,17 @@ export class ArcEventsWatcher {
       // Re-throw so the error propagates back through NotifyingProvider
       // to the write tool, letting the agent see the validation failure.
       throw err;
+    }
+
+    // Auto-populate threadId from the calling session's async context
+    // so the agent doesn't need to specify it manually in the JSON.
+    // Write it back to the file so the threadId survives service restarts.
+    if (!event.threadId) {
+      const contextThreadId = getCurrentThreadId();
+      if (contextThreadId) {
+        event.threadId = contextThreadId;
+        writeFileSync(filePath, JSON.stringify(event, null, 2), "utf8");
+      }
     }
 
     this.scheduleEvent(arc, filename, event);

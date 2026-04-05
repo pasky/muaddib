@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -12,6 +12,7 @@ import {
   getArcEventsDir,
 } from "../src/events/watcher.js";
 import type { RoomGateway } from "../src/rooms/room-gateway.js";
+import { runWithThreadId } from "../src/events/thread-context.js";
 
 // Mock getMuaddibHome to use a temp dir
 let muaddibHome: string;
@@ -350,7 +351,7 @@ describe("ArcEventsWatcher", () => {
     watcher.stop();
   });
 
-  it("fires without threadId when event file has none", async () => {
+  it("fires without threadId when event file has none and no async context", async () => {
     const gateway = createMockGateway();
     const watcher = new ArcEventsWatcher(gateway, undefined, defaultOpts);
 
@@ -374,6 +375,78 @@ describe("ArcEventsWatcher", () => {
     });
 
     expect(gateway.injected[0]!.options?.threadId).toBeUndefined();
+
+    watcher.stop();
+  });
+
+  it("auto-populates threadId from async context when not in event JSON", async () => {
+    const gateway = createMockGateway();
+    const watcher = new ArcEventsWatcher(gateway, undefined, defaultOpts);
+
+    const arc = "test-arc";
+    const eventsDir = getArcEventsDir(arc);
+    mkdirSync(eventsDir, { recursive: true });
+
+    const futureDate = new Date(Date.now() + 5000).toISOString();
+    writeFileSync(join(eventsDir, "auto-thread.json"), JSON.stringify({
+      type: "one-shot",
+      text: "Auto thread",
+      at: futureDate,
+    }));
+
+    // Simulate the agent session's threadId async context
+    runWithThreadId("auto-999.111", () => {
+      watcher.onFileWritten(arc, "auto-thread.json");
+    });
+
+    // Verify threadId was written back to the JSON file for restart persistence
+    const patched = JSON.parse(readFileSync(join(eventsDir, "auto-thread.json"), "utf8"));
+    expect(patched).toEqual({
+      type: "one-shot",
+      text: "Auto thread",
+      at: futureDate,
+      threadId: "auto-999.111",
+    });
+
+    vi.advanceTimersByTime(6000);
+
+    await vi.waitFor(() => {
+      expect(gateway.injected.length).toBe(1);
+    });
+
+    expect(gateway.injected[0]!.options?.threadId).toBe("auto-999.111");
+
+    watcher.stop();
+  });
+
+  it("does not override explicit threadId with async context", async () => {
+    const gateway = createMockGateway();
+    const watcher = new ArcEventsWatcher(gateway, undefined, defaultOpts);
+
+    const arc = "test-arc";
+    const eventsDir = getArcEventsDir(arc);
+    mkdirSync(eventsDir, { recursive: true });
+
+    const futureDate = new Date(Date.now() + 5000).toISOString();
+    writeFileSync(join(eventsDir, "explicit-thread.json"), JSON.stringify({
+      type: "one-shot",
+      text: "Explicit thread",
+      at: futureDate,
+      threadId: "explicit-123.456",
+    }));
+
+    runWithThreadId("context-999.111", () => {
+      watcher.onFileWritten(arc, "explicit-thread.json");
+    });
+
+    vi.advanceTimersByTime(6000);
+
+    await vi.waitFor(() => {
+      expect(gateway.injected.length).toBe(1);
+    });
+
+    // Explicit threadId from the JSON should win over context
+    expect(gateway.injected[0]!.options?.threadId).toBe("explicit-123.456");
 
     watcher.stop();
   });

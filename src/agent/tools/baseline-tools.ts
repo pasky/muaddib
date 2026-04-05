@@ -88,7 +88,7 @@ export interface BaselineToolOptions extends ToolContext {
   /** Nick of the user who triggered this session (for per-user memory). */
   nick?: string;
 
-  /** Thread identifier (e.g. Slack thread_ts) — passed through to Gondolin as $MUADDIB_THREAD_ID. */
+  /** Thread identifier (e.g. Slack thread_ts) — auto-injected into events written to /events/. */
   threadId?: string;
 }
 
