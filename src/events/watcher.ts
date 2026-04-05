@@ -139,7 +139,7 @@ export class ArcEventsWatcher {
       const raw = readFileSync(filePath, "utf8");
       event = parseEventFile(raw, filename);
     } catch (err) {
-      this.logger?.warn(`Events: failed to parse ${filePath}`, String(err));
+      this.logger?.warn(`Events: failed to parse ${filePath} (you must read the skill!)`, String(err));
       // Re-throw so the error propagates back through NotifyingProvider
       // to the write tool, letting the agent see the validation failure.
       throw err;
