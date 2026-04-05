@@ -388,8 +388,8 @@ describe("ArcEventsWatcher", () => {
 
     writeFileSync(join(eventsDir, "bad.json"), "not json");
 
-    // Should not throw
-    watcher.onFileWritten(arc, "bad.json");
+    // Should throw so the error propagates back to the write tool
+    expect(() => watcher.onFileWritten(arc, "bad.json")).toThrow();
     expect(gateway.injected.length).toBe(0);
 
     watcher.stop();

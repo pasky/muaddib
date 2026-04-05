@@ -140,7 +140,9 @@ export class ArcEventsWatcher {
       event = parseEventFile(raw, filename);
     } catch (err) {
       this.logger?.warn(`Events: failed to parse ${filePath}`, String(err));
-      return;
+      // Re-throw so the error propagates back through NotifyingProvider
+      // to the write tool, letting the agent see the validation failure.
+      throw err;
     }
 
     this.scheduleEvent(arc, filename, event);
