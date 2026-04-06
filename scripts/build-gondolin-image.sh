@@ -9,9 +9,10 @@ set -euo pipefail
 #
 # postBuild.commands (run in chroot via container.force) handle npm upgrade,
 # Playwright install, and Chromium symlinks at image build time.
-# On first boot (checkpoint miss), the init script only creates a uv venv at
+# On first boot (checkpoint miss), the init script creates a uv venv at
 # /workspace/.venv (persists across image rebuilds since /workspace is a
-# host-mounted FUSE directory unavailable at build time).
+# host-mounted FUSE directory unavailable at build time) and imports the
+# Gondolin MITM CA certificate into an NSS database so Chromium trusts it.
 #
 # Alpine 3.23 ships Node.js 24 in its main repo, so no version manager is needed.
 #
@@ -150,6 +151,26 @@ cat > "$INIT_EXTRA" << 'INITEOF'
 # /workspace (a host-mounted FUSE directory, unavailable at build time).
 
 [ -d /workspace/.venv ] || uv venv --system-site-packages --seed /workspace/.venv
+
+# Import Gondolin MITM CA into NSS database so Chromium trusts it.
+# Chromium uses NSS for cert verification, not the OpenSSL CA bundle.
+# HOME is /workspace (set by gondolin env), so Chromium reads ~/.pki/nssdb.
+# The NSS DB persists across checkpoints on /workspace, so we skip the
+# import when the cert hasn't changed (compared via sha256 stamp file).
+mitm_ca_cert="/etc/gondolin/mitm/ca.crt"
+if [ -r "${mitm_ca_cert}" ] && command -v certutil > /dev/null 2>&1; then
+  nssdb_dir="${HOME}/.pki/nssdb"
+  stamp_file="${nssdb_dir}/.mitm-ca-sha256"
+  current_hash=$(sha256sum "${mitm_ca_cert}" | cut -d' ' -f1)
+  stored_hash=$(cat "${stamp_file}" 2>/dev/null || true)
+  if [ "${current_hash}" != "${stored_hash}" ]; then
+    mkdir -p "${nssdb_dir}"
+    certutil -d "sql:${nssdb_dir}" -N --empty-password 2>/dev/null || true
+    certutil -d "sql:${nssdb_dir}" -D -n "gondolin-mitm-ca" 2>/dev/null || true
+    certutil -d "sql:${nssdb_dir}" -A -t "C,," -n "gondolin-mitm-ca" -i "${mitm_ca_cert}" 2>/dev/null || true
+    printf '%s' "${current_hash}" > "${stamp_file}"
+  fi
+fi
 INITEOF
 
 BUILD_CONFIG=$(mktemp /tmp/gondolin-build-XXXXXX.json)
@@ -197,7 +218,8 @@ cat > "$BUILD_CONFIG" << EOF
       "font-noto",
       "jq",
       "git",
-      "imagemagick"
+      "imagemagick",
+      "nss-tools"
     ]
   },
   "rootfs": {
