@@ -143,6 +143,8 @@ export interface SessionLimitsConfig {
   maxContextLength?: number;
   /** Max cumulative cost in USD across all turns. Default: 1.0. */
   maxCostUsd?: number;
+  /** Cost threshold in USD above which a per-session cost warning is emitted. Default: 0.2. */
+  warnCostUsd?: number;
 }
 
 /**

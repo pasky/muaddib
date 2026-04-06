@@ -1933,6 +1933,38 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("respects configurable warnCostUsd threshold for cost followup", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const incoming = makeMessage("!s moderate response", { isDirect: true });
+    const sent: string[] = [];
+
+    // Cost of 0.35 would normally trigger the default 0.2 threshold,
+    // but raising warnCostUsd to 0.5 should suppress the followup.
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: makeRunner("primary response", {
+        inputTokens: 100,
+        outputTokens: 40,
+        totalCost: 0.35,
+        toolCallsCount: 2,
+      }),
+      configData: { agent: { sessionLimits: { warnCostUsd: 0.5 } } },
+    });
+
+    await handler.handleIncomingMessage(incoming, {
+      sendResponse: async (text) => { sent.push(text); },
+    });
+
+    // No cost followup because 0.35 <= 0.5 threshold.
+    expect(sent).toEqual(["primary response"]);
+
+    await history.close();
+  });
+
   it("persists background memory/tool-summary costs when cost followup delivery fails", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();

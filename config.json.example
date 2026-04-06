@@ -6,7 +6,8 @@
     "refusalFallbackModel": "deepseek:deepseek-reasoner",
     "sessionLimits": {
       "maxContextLength": 100000,
-      "maxCostUsd": 1.0
+      "maxCostUsd": 1.0,
+      "warnCostUsd": 0.2
     },
     "progress": {
       "thresholdSeconds": 10

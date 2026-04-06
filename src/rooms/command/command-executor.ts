@@ -1033,7 +1033,8 @@ export class CommandExecutor {
       return;
     }
 
-    if (totalCost > 0.2) {
+    const warnCostUsd = this.agentConfig.sessionLimits?.warnCostUsd ?? 0.2;
+    if (totalCost > warnCostUsd) {
       const inTok = usage.input + usage.cacheRead + usage.cacheWrite;
       const outTok = usage.output;
       const costMessage = `(${[
@@ -1050,10 +1051,11 @@ export class CommandExecutor {
     // so add it to the historical total for the milestone check.
     const historicalToday = await history.getArcCostToday(arcName);
     const totalToday = historicalToday + totalCost;
+    const milestoneStep = warnCostUsd * 5;
     const costBefore = historicalToday;
-    const dollarsBefore = Math.trunc(costBefore);
-    const dollarsAfter = Math.trunc(totalToday);
-    if (dollarsAfter <= dollarsBefore) {
+    const stepsBefore = Math.trunc(costBefore / milestoneStep);
+    const stepsAfter = Math.trunc(totalToday / milestoneStep);
+    if (stepsAfter <= stepsBefore) {
       return;
     }
 
