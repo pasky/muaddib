@@ -1556,7 +1556,7 @@ describe("RoomMessageHandler", () => {
       expect(sent).toHaveLength(1);
       expect(sent[0]).toContain("free tier budget is exhausted");
       expect(sent[0]).toContain("$2.1000 / $2.00");
-      expect(sent[0]).toContain("/msg me !balance for more details");
+      expect(sent[0]).toContain("/msg <me> !balance for more details");
     } finally {
       await rm(muaddibHome, { recursive: true, force: true });
       await history.close();
@@ -1613,7 +1613,7 @@ describe("RoomMessageHandler", () => {
       const warningMsg = sent.find((s) => s.includes("heads up"));
       expect(warningMsg).toBeDefined();
       expect(warningMsg).toContain("93%");
-      expect(warningMsg).toContain("/msg me !balance for more details");
+      expect(warningMsg).toContain("/msg <me> !balance for more details");
     } finally {
       await rm(muaddibHome, { recursive: true, force: true });
       await history.close();
