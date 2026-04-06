@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import type { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { buildArc } from "../src/rooms/message.js";
-import { SlackRoomMonitor, findArtifactUrls, replaceArtifactUrlsWithUploads } from "../src/rooms/slack/monitor.js";
+import { SlackRoomMonitor, findArtifactUrls, replaceArtifactUrlsWithUploads, postProcessOutgoingSlackMessage } from "../src/rooms/slack/monitor.js";
 import { createDeferred, createTempHistoryStore } from "./test-helpers.js";
 import { createTestRuntime } from "./test-runtime.js";
 
@@ -1805,5 +1805,40 @@ describe("SlackRoomMonitor artifact URL replacement integration", () => {
     expect(uploaded[0].content).toBe("full response text here");
 
     await history.close();
+  });
+});
+
+describe("postProcessOutgoingSlackMessage", () => {
+  it("applies formatOutgoingMentions and artifact replacement", async () => {
+    const dir = join(tmpdir(), `slack-postproc-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "aBcD1234.png"), Buffer.from("fake-png"));
+
+    const uploaded: Array<{ filename: string }> = [];
+    const sender = {
+      sendMessage: async () => {},
+      formatOutgoingMentions: async (text: string) => text.replace(/@alice/g, "<@U999>"),
+      uploadFile: async (_ch: string, _content: Buffer | string, opts: { filename: string }) => {
+        uploaded.push({ filename: opts.filename });
+      },
+    };
+
+    const result = await postProcessOutgoingSlackMessage(
+      "@alice here: https://art.example.com/?aBcD1234.png",
+      "C123",
+      "1700000000.0000",
+      sender,
+      { path: dir, url: "https://art.example.com" },
+    );
+
+    expect(result).toBe("<@U999> here: [attachment 1: aBcD1234.png]");
+    expect(uploaded).toHaveLength(1);
+    expect(uploaded[0].filename).toBe("aBcD1234.png");
+  });
+
+  it("works without formatOutgoingMentions or artifactsConfig", async () => {
+    const sender = { sendMessage: async () => {} };
+    const result = await postProcessOutgoingSlackMessage("plain text", "C123", undefined, sender, undefined);
+    expect(result).toBe("plain text");
   });
 });

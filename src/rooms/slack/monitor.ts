@@ -227,9 +227,11 @@ export class SlackRoomMonitor {
             threadId,
             responseThreadId: threadId,
           };
+          const eventLogger = runtime.logger.getLogger("muaddib.rooms.slack.gateway");
           const run = async (): Promise<void> => {
             await commandHandler.executeEvent(message, async (text) => {
-              await firstTransport.sendMessage(channelId, text, {
+              const outText = await postProcessOutgoingSlackMessage(text, channelId, threadId, firstTransport, artifactsConfig, eventLogger);
+              await firstTransport.sendMessage(channelId, outText, {
                 threadTs: threadId,
               });
             });
@@ -420,21 +422,7 @@ export class SlackRoomMonitor {
         onSteered: breakEditChain,
         sendResponse: sender
           ? async (text) => {
-              let formattedText = sender.formatOutgoingMentions
-                ? await sender.formatOutgoingMentions(text)
-                : text;
-
-              // Replace artifact URLs with Slack file uploads.
-              if (artifactsConfig) {
-                formattedText = await replaceArtifactUrlsWithUploads(
-                  formattedText,
-                  event.channelId,
-                  responseThreadId,
-                  artifactsConfig,
-                  sender,
-                  this.logger,
-                );
-              }
+              const formattedText = await postProcessOutgoingSlackMessage(text, event.channelId, responseThreadId, sender, artifactsConfig, this.logger);
 
               const nowSeconds = nowMonotonicSeconds();
 
@@ -704,6 +692,39 @@ export function findArtifactUrls(text: string, artifactsBaseUrl: string): Artifa
 
 function escapeRegExpLocal(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Post-process an outgoing Slack message: format @-mentions into Slack
+ * user-ID links, then replace artifact viewer URLs with file uploads.
+ *
+ * Both the `processMessageEvent` sendResponse callback and the gateway
+ * inject handler call this so the logic isn't duplicated.
+ */
+export async function postProcessOutgoingSlackMessage(
+  text: string,
+  channelId: string,
+  threadTs: string | undefined,
+  sender: SlackSender,
+  artifactsConfig: ArtifactsConfig | undefined,
+  logger?: Logger,
+): Promise<string> {
+  let result = sender.formatOutgoingMentions
+    ? await sender.formatOutgoingMentions(text)
+    : text;
+
+  if (artifactsConfig) {
+    result = await replaceArtifactUrlsWithUploads(
+      result,
+      channelId,
+      threadTs,
+      artifactsConfig,
+      sender,
+      logger,
+    );
+  }
+
+  return result;
 }
 
 /**
