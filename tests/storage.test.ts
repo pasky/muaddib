@@ -988,4 +988,34 @@ describe("ChatHistoryStore – in-flight trigger annotation", () => {
     expect(quickMsg).toBeDefined();
     expect(quickMsg!.content).toContain("<meta>");
   });
+
+  it("excludes current trigger from annotation via excludeRunTs", async () => {
+    const store = createTempHistoryStore();
+    await store.initialize();
+
+    await store.addMessage(roomMsg("alice", "first question"), { selfRun: true });
+    await tick();
+    const ts2 = await store.addMessage(roomMsg("bob", "second question"), { selfRun: true });
+
+    // Without exclusion: both annotated
+    const ctxAll = await store.getContext("test###test");
+    const allAnnotated = ctxAll.filter(
+      (m) => typeof m.content === "string" && m.content.includes("<meta>"),
+    );
+    expect(allAnnotated).toHaveLength(2);
+
+    // With exclusion: only alice annotated, bob (the current trigger) is not
+    const ctxExcluded = await store.getContext("test###test", undefined, undefined, {
+      excludeRunTs: ts2,
+    });
+    const aliceMsg = ctxExcluded.find(
+      (m) => typeof m.content === "string" && m.content.includes("alice"),
+    );
+    expect(aliceMsg!.content).toContain("<meta>");
+
+    const bobMsg = ctxExcluded.find(
+      (m) => typeof m.content === "string" && m.content.includes("bob"),
+    );
+    expect(bobMsg!.content).not.toContain("<meta>");
+  });
 });

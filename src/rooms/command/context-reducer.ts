@@ -100,6 +100,7 @@ export class ContextReducerTs implements ContextReducer {
 
     lines.push("");
     lines.push("## CONVERSATION HISTORY TO CONDENSE");
+    lines.push("(Preserve any <meta>...</meta> annotations verbatim in the output — they are machine-readable signals.)");
 
     for (const message of context.slice(0, -1)) {
       const role = message.role === "assistant" ? "ASSISTANT" : "USER";

@@ -300,6 +300,7 @@ export class CommandExecutor {
   async resolveForExecution(
     message: RoomMessage,
     deliver: (text: string) => Promise<void>,
+    options?: { triggerTs?: string },
   ): Promise<ResolvedExecution | null> {
     const { commandConfig, logger } = this;
     const defaultSize = commandConfig.historySize;
@@ -325,7 +326,9 @@ export class CommandExecutor {
 
     // ── Resolve command ──
 
-    const context = await this.history.getContextForMessage(message, maxSize);
+    const context = await this.history.getContextForMessage(message, maxSize, {
+      excludeRunTs: options?.triggerTs,
+    });
 
     const resolved = await this.resolver.resolve({
       message,
@@ -561,7 +564,7 @@ export class CommandExecutor {
       });
     };
 
-    const result = await this.resolveForExecution(message, (text) => deliver(text));
+    const result = await this.resolveForExecution(message, (text) => deliver(text), { triggerTs });
     if (!result) return;
 
     const { modelSpec, modeKey, trigger, runtime: resolvedRuntime, modeConfig, resolved, context } = result;
@@ -917,11 +920,11 @@ export class CommandExecutor {
     sendResponse: SendResponse,
   ): Promise<void> {
     // Persist trigger so it appears in history context.
-    await this.history.addMessage(message, { selfRun: true });
+    const triggerTs = await this.history.addMessage(message, { selfRun: true });
 
     const result = await this.resolveForExecution(message, async (text) => {
       this.logger.warn("Event resolution early return", `arc=${message.arc}`, `response=${text}`);
-    });
+    }, { triggerTs });
     if (!result) return;
 
     const { modelSpec, modeKey, trigger, runtime: resolvedRuntime, modeConfig } = result;

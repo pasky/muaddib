@@ -78,6 +78,46 @@ describe("createModeClassifier", () => {
     expect(seenMessages[2].role).toBe("user");
   });
 
+  it("strips <meta> annotations before extracting current message", async () => {
+    let seenSystemPrompt = "";
+
+    const modelAdapter = {
+      completeSimple: vi.fn(async (_modelSpec: string, context: { systemPrompt?: string }) => {
+        seenSystemPrompt = context.systemPrompt ?? "";
+        return {
+          role: "assistant",
+          content: [{ type: "text", text: "EASY_SERIOUS" }],
+          api: "openai-completions",
+          provider: "openai",
+          model: "gpt-4o-mini",
+          usage: {
+            input: 1,
+            output: 1,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 2,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          stopReason: "stop",
+          timestamp: Date.now(),
+        };
+      }),
+    } as any;
+
+    const classifier = createModeClassifier(commandConfig as any, {
+      modelAdapter,
+    });
+
+    await classifier([
+      userMsg("<nick> some earlier msg"),
+      userMsg("[19:07] <IceToCool> I might get DangerGirl to help me!\n<meta>(My response to this message is already in progress.)</meta>"),
+    ]);
+
+    // Should extract IceToCool's actual message, not the <meta> content
+    expect(seenSystemPrompt).toContain("I might get DangerGirl to help me!");
+    expect(seenSystemPrompt).not.toContain("already in progress");
+  });
+
   it("uses configured classifier prompt with message substitution", async () => {
     let seenSystemPrompt = "";
 

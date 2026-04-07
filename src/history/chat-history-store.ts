@@ -174,20 +174,22 @@ export class ChatHistoryStore {
   async getContextForMessage(
     message: RoomMessage,
     limit?: number,
+    options?: { excludeRunTs?: string },
   ): Promise<Message[]> {
-    return this.getContext(message.arc, limit, message.threadId);
+    return this.getContext(message.arc, limit, message.threadId, options);
   }
 
   async getContext(
     arc: string,
     limit?: number,
     threadId?: string,
+    options?: { excludeRunTs?: string },
   ): Promise<Message[]> {
     const inferenceLimit = limit ?? this.inferenceLimit;
     const lines = threadId
       ? await this.readThreadContext(arc, threadId, inferenceLimit)
       : await this.readMainContext(arc, inferenceLimit);
-    return this.formatContextLines(this.annotateInFlightTriggers(lines));
+    return this.formatContextLines(this.annotateInFlightTriggers(lines, options?.excludeRunTs));
   }
 
   async getFullHistory(
@@ -586,7 +588,7 @@ export class ChatHistoryStore {
    * (e.g. a different mode) get annotated correctly.  The current trigger
    * message is not in the context (it's sliced off and sent as the query).
    */
-  private annotateInFlightTriggers(lines: JsonlLine[]): JsonlLine[] {
+  private annotateInFlightTriggers(lines: JsonlLine[], excludeRunTs?: string): JsonlLine[] {
     // Collect all `run` values that have a matching assistant response.
     const resolvedRuns = new Set<string>();
     for (const line of lines) {
@@ -600,7 +602,8 @@ export class ChatHistoryStore {
         line.r !== "user" ||
         !line.run ||
         line.run !== line.ts ||
-        resolvedRuns.has(line.run)
+        resolvedRuns.has(line.run) ||
+        line.ts === excludeRunTs
       ) {
         return line;
       }
