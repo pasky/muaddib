@@ -42,7 +42,8 @@ export function createDeepResearchTool(executors: { deepResearch: DeepResearchEx
     description:
       `Launch a web researcher ${modelClause} - a fast agent ` +
       "equipped with web_search and visit_webpage tools. Rule of thumb: use it any time you would expect to chain web_search + visit_webpage tools yourself. Advisory: results are best-effort and " +
-      "may require an additional validation on challenging or nuanced questions.",
+      "may require an additional validation on challenging or nuanced questions. " +
+      "If you are going to call this tool, also send the user a very short one-line note at the same moment.",
     parameters: Type.Object({
       query: Type.String({
         description:
