@@ -8,13 +8,17 @@
  * duplicated across ~10 files.
  */
 
-import type { AssistantMessage, TextContent, ToolCall } from "@mariozechner/pi-ai";
+import type { AssistantMessage, TextContent, ToolCall, ToolResultMessage } from "@mariozechner/pi-ai";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 
 // ── Type guards ──
 
 export function isAssistantMessage(msg: AgentMessage): msg is AssistantMessage {
   return (msg as { role: string }).role === "assistant";
+}
+
+export function isToolResultMessage(msg: AgentMessage): msg is ToolResultMessage {
+  return (msg as { role: string }).role === "toolResult";
 }
 
 export function isTextContent(block: { type: string }): block is TextContent {

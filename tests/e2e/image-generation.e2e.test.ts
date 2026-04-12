@@ -114,8 +114,10 @@ describe("E2E: Image generation pipeline", () => {
 
     // Script LLM responses:
     // 1. Tool call: generate_image
-    // 2. Final text response with artifact URL placeholder (agent sees actual URL from tool result)
-    // 3. In-session tool summary follow-up (internal monologue)
+    // 2. Final text response (missing the real artifact URL — triggers retry)
+    // 3. Retry response — extract the real artifact URL from the retry prompt
+    //    (the session runner injects it via <meta>) and echo it back.
+    // 4. In-session tool summary follow-up (internal monologue)
     mockState.responses = [
       toolCallStream({
         type: "toolCall",
@@ -123,7 +125,19 @@ describe("E2E: Image generation pipeline", () => {
         name: "generate_image",
         arguments: { prompt: "a red pixel" },
       }),
-      textStream(`Here is your image: ${artifactsUrl}/?generated.png`),
+      textStream(`Here is your image!`),
+      // Dynamic: read the retry prompt from the last streamSimple call's context
+      () => {
+        const lastCall = mockState.calls[mockState.calls.length - 1];
+        const messages = (lastCall?.context as any)?.messages ?? [];
+        const lastMsg = messages[messages.length - 1];
+        const text = typeof lastMsg?.content === "string"
+          ? lastMsg.content
+          : lastMsg?.content?.map((p: any) => p.text ?? "").join("") ?? "";
+        const urlMatch = text.match(/https?:\/\/\S+/);
+        const url = urlMatch ? urlMatch[0].replace(/[.<>)]+$/, "") : `${artifactsUrl}/?fallback.png`;
+        return textStream(`Here is your image: ${url}`)();
+      },
       textStream("Used generate_image to create a red pixel and stored the artifact URL."),
     ];
 
@@ -165,13 +179,15 @@ describe("E2E: Image generation pipeline", () => {
     expect(pngFiles.length).toBeGreaterThanOrEqual(1);
 
     // ── Verify FakeSender got response containing artifact URL ──
+    // The first response may lack the URL (triggering an artifact-URL retry),
+    // so check that *some* sent message contains the artifact URL.
     expect(ctx.sender.sent.length).toBeGreaterThanOrEqual(1);
-    const mainResponse = ctx.sender.sent[0];
-    expect(mainResponse.target).toBe("#test");
-    expect(mainResponse.server).toBe("libera");
-    expect(mainResponse.message).toContain(artifactsUrl);
+    const hasArtifactUrl = ctx.sender.sent.some(
+      (msg) => msg.target === "#test" && msg.server === "libera" && msg.message.includes(artifactsUrl),
+    );
+    expect(hasArtifactUrl).toBe(true);
 
-    // ── Verify streamSimple was called three times (tool call + final response + summary) ──
-    expect(mockState.calls).toHaveLength(3);
+    // ── Verify streamSimple was called four times (tool call + response + artifact-URL retry + summary) ──
+    expect(mockState.calls).toHaveLength(4);
   }, 30_000);
 });
