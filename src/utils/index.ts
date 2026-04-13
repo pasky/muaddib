@@ -185,7 +185,13 @@ export function stripLeadingMention(
     cleaned = nameMatch[1]?.trim() ?? "";
   }
 
-  return cleaned || content.trim();
+  // Note: an empty result is a legitimate outcome (e.g. a DM that is just
+  // "@botname" with an attachment); callers handle empty content via the
+  // attachment block / shared-message block. Do NOT fall back to the
+  // original content here — that would re-introduce the leading mention
+  // and cause the command resolver to misinterpret "@botname" as a model
+  // override token.
+  return cleaned;
 }
 
 /** Combine message content with an attachment block, handling empty cases. */

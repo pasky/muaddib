@@ -441,6 +441,51 @@ describe("SlackRoomMonitor", () => {
     await history.close();
   });
 
+  it("strips a bare @botname mention when only attachments are present", async () => {
+    // Regression: a DM/channel message whose text is just the bot mention
+    // (e.g. "@Muaddib" + an image) used to leak the literal "@Muaddib"
+    // back into the resolved content, which the command resolver then
+    // interpreted as a `@<model>` override token.
+    const history = createTempHistoryStore(20);
+
+    let seenText = "";
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async (message) => {
+          seenText = message.content;
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      workspaceId: "T123",
+      channelId: "C123",
+      username: "alice",
+      text: "@Muaddib",
+      mynick: "Muaddib",
+      mentionsBot: true,
+      files: [
+        {
+          mimetype: "image/png",
+          name: "image.png",
+          size: 98510,
+          urlPrivate: "https://files.slack.com/files-pri/T123-F456/image.png",
+        },
+      ],
+    });
+
+    // The leading mention must be gone; only the attachment block should remain.
+    expect(seenText.startsWith("@Muaddib")).toBe(false);
+    expect(seenText.startsWith("@")).toBe(false);
+    expect(seenText).toContain("[Attachments]");
+    expect(seenText).toContain("image.png");
+
+    await history.close();
+  });
+
   it("decodes HTML entities in Slack message text", async () => {
     const history = createTempHistoryStore(20);
 
