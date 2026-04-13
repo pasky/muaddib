@@ -759,6 +759,57 @@ describe("SlackRoomMonitor", () => {
     await history.close();
   });
 
+  it("sends new message when forceNewMessage option is set despite edit debounce window", async () => {
+    const history = createTempHistoryStore(20);
+
+    const sendCalls: Array<{ text: string; threadTs?: string }> = [];
+    const updateCalls: Array<{ messageTs: string; text: string }> = [];
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true, replyEditDebounceSeconds: 15 },
+      history,
+      sender: {
+        sendMessage: async (_channelId, text, options) => {
+          sendCalls.push({ text, threadTs: options?.threadTs });
+          return {
+            messageTs: `17000000.${sendCalls.length}`,
+          };
+        },
+        updateMessage: async (_channelId, messageTs, text) => {
+          updateCalls.push({ messageTs, text });
+          return { messageTs };
+        },
+      },
+      commandHandler: {
+        handleIncomingMessage: async (_message, options) => {
+          await options?.sendResponse?.("first");
+          // Second message forces a new message (e.g. network access approval request)
+          await options?.sendResponse?.("approval request", { forceNewMessage: true });
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      workspaceId: "T123",
+      channelId: "C123",
+      channelName: "#general",
+      username: "alice",
+      text: "muaddib: hello",
+      mynick: "muaddib",
+      messageTs: "1700000000.2000",
+      channelType: "channel",
+      mentionsBot: true,
+    });
+
+    // forceNewMessage skips the edit path — both are new messages
+    expect(updateCalls).toEqual([]);
+    expect(sendCalls).toHaveLength(2);
+    expect(sendCalls[0].text).toBe("first");
+    expect(sendCalls[1].text).toBe("approval request");
+
+    await history.close();
+  });
+
   it("formats outgoing Slack mentions before sending replies", async () => {
     const history = createTempHistoryStore(20);
 

@@ -74,8 +74,13 @@ export interface SendResult {
   combinedContent?: string;
 }
 
+export interface SendResponseOptions {
+  /** When true, always send as a new message instead of editing/coalescing into the previous one. */
+  forceNewMessage?: boolean;
+}
+
 /** Callback for sending a message to the room. May return the outbound platform ID. */
-export type SendResponse = (text: string) => Promise<SendResult | void>;
+export type SendResponse = (text: string, options?: SendResponseOptions) => Promise<SendResult | void>;
 
 export interface CommandRunnerFactoryInput {
   model: string;

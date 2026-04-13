@@ -562,6 +562,55 @@ describe("DiscordRoomMonitor", () => {
     await history.close();
   });
 
+  it("sends new message when forceNewMessage option is set despite edit debounce window", async () => {
+    const history = createTempHistoryStore(20);
+
+    const sendCalls: Array<{ text: string; options?: { replyToMessageId?: string; mentionAuthor?: boolean } }> = [];
+    const editCalls: Array<{ messageId: string; text: string }> = [];
+
+    const monitor = new DiscordRoomMonitor({
+      roomConfig: { enabled: true, replyEditDebounceSeconds: 15 },
+      history,
+      sender: {
+        sendMessage: async (_channelId, text, options) => {
+          sendCalls.push({ text, options });
+          return {
+            messageId: `bot-reply-${sendCalls.length}`,
+          };
+        },
+        editMessage: async (_channelId, messageId, text) => {
+          editCalls.push({ messageId, text });
+          return { messageId };
+        },
+      },
+      commandHandler: {
+        handleIncomingMessage: async (_message, options) => {
+          await options?.sendResponse?.("first");
+          // Second message forces a new message (e.g. network access approval request)
+          await options?.sendResponse?.("approval request", { forceNewMessage: true });
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      guildId: "123456789",
+      channelId: "chan-1",
+      messageId: "msg-42",
+      username: "alice",
+      content: "muaddib: hello",
+      mynick: "muaddib",
+      mentionsBot: true,
+    });
+
+    // forceNewMessage skips the edit path — both are new messages
+    expect(editCalls).toEqual([]);
+    expect(sendCalls).toHaveLength(2);
+    expect(sendCalls[0].text).toBe("first");
+    expect(sendCalls[1].text).toBe("approval request");
+
+    await history.close();
+  });
+
   it("updates edited Discord message content by platform id", async () => {
     const history = createTempHistoryStore(20);
 

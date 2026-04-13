@@ -38,6 +38,7 @@ export type {
   CommandRateLimiter,
   CommandExecutorOverrides,
   SendResponse,
+  SendResponseOptions,
   SendResult,
 } from "./command-executor.js";
 
@@ -392,7 +393,7 @@ export class RoomMessageHandler {
       });
 
       try {
-        await sendResponse(this.buildApprovalRequestMessage(id, request));
+        await sendResponse(this.buildApprovalRequestMessage(id, request), { forceNewMessage: true });
       } catch (error) {
         const entry = this.pendingNetworkApprovals.get(id);
         if (entry) {

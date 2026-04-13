@@ -18,7 +18,7 @@ import type { ArcEventsWatcher } from "../../events/watcher.js";
 interface CommandLike {
   handleIncomingMessage(
     message: RoomMessage,
-    options?: { sendResponse?: (text: string) => Promise<{ platformId?: string } | void>; onSteered?: () => void },
+    options?: { sendResponse?: (text: string, options?: { forceNewMessage?: boolean }) => Promise<{ platformId?: string } | void>; onSteered?: () => void },
   ): Promise<void>;
   cancelProactive?(): void;
 }
@@ -349,10 +349,11 @@ export class DiscordRoomMonitor {
       await this.options.commandHandler.handleIncomingMessage(message, {
         onSteered: breakEditChain,
         sendResponse: sender
-          ? async (text) => {
+          ? async (text, sendOptions) => {
               const nowSeconds = nowMonotonicSeconds();
 
               if (
+                !sendOptions?.forceNewMessage &&
                 sender.editMessage &&
                 lastReplyMessageId &&
                 lastReplyAtSeconds !== undefined &&
