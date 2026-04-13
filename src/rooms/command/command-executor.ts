@@ -109,6 +109,9 @@ export interface QuietExecuteParams {
   reasoningEffort: string;
   allowedTools: string[] | null;
   promptReminder?: string;
+  /** When true, extract <thinking> tags from responses and persist them
+   *  as [internal monologue] history entries instead of sending to room. */
+  persistThinking?: boolean;
 }
 
 /** Result returned by resolveForExecution when resolution succeeds. */
@@ -297,6 +300,7 @@ export class CommandExecutor {
   async resolveForExecution(
     message: RoomMessage,
     deliver: (text: string) => Promise<void>,
+    options?: { triggerTs?: string },
   ): Promise<ResolvedExecution | null> {
     const { commandConfig, logger } = this;
     const defaultSize = commandConfig.historySize;
@@ -322,7 +326,9 @@ export class CommandExecutor {
 
     // ── Resolve command ──
 
-    const context = await this.history.getContextForMessage(message, maxSize);
+    const context = await this.history.getContextForMessage(message, maxSize, {
+      excludeRunTs: options?.triggerTs,
+    });
 
     const resolved = await this.resolver.resolve({
       message,
@@ -558,7 +564,7 @@ export class CommandExecutor {
       });
     };
 
-    const result = await this.resolveForExecution(message, (text) => deliver(text));
+    const result = await this.resolveForExecution(message, (text) => deliver(text), { triggerTs });
     if (!result) return;
 
     const { modelSpec, modeKey, trigger, runtime: resolvedRuntime, modeConfig, resolved, context } = result;
@@ -777,7 +783,7 @@ export class CommandExecutor {
     onAgentCreated?: (agent: Agent) => void,
   ): Promise<boolean> {
     const { logger } = this;
-    const { modelSpec, trigger, source, systemPrompt, historySize, reasoningEffort, allowedTools, promptReminder } = params;
+    const { modelSpec, trigger, source, systemPrompt, historySize, reasoningEffort, allowedTools, promptReminder, persistThinking } = params;
 
     const context = await this.history.getContextForMessage(message, historySize);
 
@@ -798,14 +804,32 @@ export class CommandExecutor {
     // after the agent finishes.  This prevents intermediate "thinking out loud"
     // messages (e.g. "fixing dependency…") from leaking to the room.
     let lastValidResponse: string | null = null;
+    let bufferedThinking: string | null = null;
+    const thinkingRe = /<thinking>[\s\S]*?<\/thinking>/g;
     const onResponse = async (text: string): Promise<void> => {
-      let cleaned = this.cleanResponseText(text, message.nick);
+      let raw = text;
+
+      // Extract <thinking> blocks from the raw text *before* response
+      // cleaning, which would mangle the tags (the IRC nick-strip regex
+      // matches `<thinking>` as if it were `<SomeUser>`).
+      if (persistThinking) {
+        const matches = raw.match(thinkingRe);
+        if (matches) {
+          const extracted = matches.map(m => m.replace(/<\/?thinking>/g, "")).join("\n").trim();
+          if (extracted) bufferedThinking = bufferedThinking ? `${bufferedThinking}\n${extracted}` : extracted;
+          raw = raw.replace(thinkingRe, "").trim();
+          if (!raw) return;
+        }
+      }
+
+      let cleaned = this.cleanResponseText(raw, message.nick);
       cleaned = await this.applyResponseLengthPolicy(cleaned, message.arc);
       if (!cleaned || isNullSentinel(cleaned) || cleaned.startsWith("Error: ")) return;
       // Strip trailing NULL sentinel from otherwise valid content (agent
       // sometimes appends "NULL" after real output in event responses).
       cleaned = cleaned.replace(/\n["'`]?\s*null\s*["'`]?\s*$/iu, "").trim();
       if (!cleaned) return;
+
       lastValidResponse = cleaned;
     };
 
@@ -845,6 +869,14 @@ export class CommandExecutor {
             },
             async () => {
               promptCompleted = true;
+
+              // Persist any extracted <thinking> as internal monologue
+              // so the model can introspect later, without room delivery.
+              if (bufferedThinking) {
+                await this.persistBotResponse(message.arc, message, `[internal monologue] ${bufferedThinking}`, undefined, {
+                  mode: trigger,
+                });
+              }
 
               // Deliver the last buffered response (if any) now that the agent is done.
               if (lastValidResponse !== null) {
@@ -888,11 +920,11 @@ export class CommandExecutor {
     sendResponse: SendResponse,
   ): Promise<void> {
     // Persist trigger so it appears in history context.
-    await this.history.addMessage(message, { selfRun: true });
+    const triggerTs = await this.history.addMessage(message, { selfRun: true });
 
     const result = await this.resolveForExecution(message, async (text) => {
       this.logger.warn("Event resolution early return", `arc=${message.arc}`, `response=${text}`);
-    });
+    }, { triggerTs });
     if (!result) return;
 
     const { modelSpec, modeKey, trigger, runtime: resolvedRuntime, modeConfig } = result;
@@ -907,6 +939,7 @@ export class CommandExecutor {
       reasoningEffort: resolvedRuntime.reasoningEffort,
       allowedTools: resolvedRuntime.allowedTools,
       promptReminder: modeConfig.promptReminder,
+      persistThinking: true,
     });
   }
 

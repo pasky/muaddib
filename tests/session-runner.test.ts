@@ -523,6 +523,144 @@ describe("SessionRunner", () => {
     }
   });
 
+  it("retries when share_artifact URL is missing from response", async () => {
+    let promptCount = 0;
+    const artifactUrl = "https://example.com/artifacts/?abc123.csv";
+    makeMockSession({
+      promptImpl: async (c) => {
+        promptCount += 1;
+        if (promptCount === 1) {
+          c.session.messages.push({
+            role: "toolResult", toolCallId: "tc1", toolName: "share_artifact",
+            content: [{ type: "text", text: `Artifact shared: ${artifactUrl}` }],
+            isError: false, timestamp: Date.now(),
+          });
+          emitAssistantResponse(c, "Here is your report.");
+        } else {
+          emitAssistantResponse(c, `Here is your report: ${artifactUrl}`);
+        }
+      },
+    });
+
+    const runner = makeRunner();
+    const result = await runner.prompt("generate report");
+
+    expect(result.text).toBe(`Here is your report: ${artifactUrl}`);
+    expect(promptCount).toBe(2);
+    const retryCall = (result.session!.prompt as any).mock.calls[1];
+    expect(retryCall[0]).toContain(artifactUrl);
+    expect(retryCall[0]).toContain("Missing URL");
+    await result.session!.dispose();
+  });
+
+  it("retries when generate_image URL is missing from response", async () => {
+    let promptCount = 0;
+    const artifactUrl = "https://example.com/artifacts/?img42.png";
+    makeMockSession({
+      promptImpl: async (c) => {
+        promptCount += 1;
+        if (promptCount === 1) {
+          c.session.messages.push({
+            role: "toolResult", toolCallId: "tc1", toolName: "generate_image",
+            content: [{ type: "text", text: `Generated image: ${artifactUrl} (you must mention to the user explicitly)` }],
+            isError: false, timestamp: Date.now(),
+          });
+          emitAssistantResponse(c, "I generated an image for you!");
+        } else {
+          emitAssistantResponse(c, `Here is the image: ${artifactUrl}`);
+        }
+      },
+    });
+
+    const runner = makeRunner();
+    const result = await runner.prompt("draw a cat");
+
+    expect(result.text).toBe(`Here is the image: ${artifactUrl}`);
+    expect(promptCount).toBe(2);
+    await result.session!.dispose();
+  });
+
+  it("only enforces the last artifact URL, not earlier ones", async () => {
+    let promptCount = 0;
+    const firstUrl = "https://example.com/artifacts/?first.csv";
+    const lastUrl = "https://example.com/artifacts/?last.png";
+    makeMockSession({
+      promptImpl: async (c) => {
+        promptCount += 1;
+        c.session.messages.push(
+          {
+            role: "toolResult", toolCallId: "tc1", toolName: "share_artifact",
+            content: [{ type: "text", text: `Artifact shared: ${firstUrl}` }],
+            isError: false, timestamp: Date.now(),
+          },
+          {
+            role: "toolResult", toolCallId: "tc2", toolName: "generate_image",
+            content: [{ type: "text", text: `Generated image: ${lastUrl} (you must mention to the user explicitly)` }],
+            isError: false, timestamp: Date.now(),
+          },
+        );
+        // Response includes only the last URL, not the first — should be fine
+        emitAssistantResponse(c, `Here is the image: ${lastUrl}`);
+      },
+    });
+
+    const runner = makeRunner();
+    const result = await runner.prompt("generate stuff");
+
+    expect(result.text).toBe(`Here is the image: ${lastUrl}`);
+    expect(promptCount).toBe(1); // No retry needed
+    await result.session!.dispose();
+  });
+
+  it("does not retry when share_artifact URL is already in response", async () => {
+    let promptCount = 0;
+    const artifactUrl = "https://example.com/artifacts/?xyz789.txt";
+    makeMockSession({
+      promptImpl: async (c) => {
+        promptCount += 1;
+        c.session.messages.push({
+          role: "toolResult", toolCallId: "tc1", toolName: "share_artifact",
+          content: [{ type: "text", text: `Artifact shared: ${artifactUrl}` }],
+          isError: false, timestamp: Date.now(),
+        });
+        emitAssistantResponse(c, `Here is your file: ${artifactUrl}`);
+      },
+    });
+
+    const runner = makeRunner();
+    const result = await runner.prompt("get file");
+
+    expect(result.text).toBe(`Here is your file: ${artifactUrl}`);
+    expect(promptCount).toBe(1);
+    await result.session!.dispose();
+  });
+
+  it("keeps original response when artifact URL retry produces empty text", async () => {
+    let promptCount = 0;
+    const artifactUrl = "https://example.com/artifacts/?def456.png";
+    makeMockSession({
+      promptImpl: async (c) => {
+        promptCount += 1;
+        if (promptCount === 1) {
+          c.session.messages.push({
+            role: "toolResult", toolCallId: "tc1", toolName: "share_artifact",
+            content: [{ type: "text", text: `Artifact shared: ${artifactUrl}` }],
+            isError: false, timestamp: Date.now(),
+          });
+          emitAssistantResponse(c, "Here is the image.");
+        } else {
+          emitAssistantResponse(c, "   ");
+        }
+      },
+    });
+
+    const runner = makeRunner();
+    const result = await runner.prompt("generate image");
+
+    expect(result.text).toBe("Here is the image.");
+    await result.session!.dispose();
+  });
+
   it.each([
     { response: "NULL", expected: "NULL", desc: "NULL sentinel is not decorated" },
     { response: "Here is the analysis.", expected: "Here is the analysis. [vision fallback to kimi-k2.5]", desc: "normal response gets suffix" },

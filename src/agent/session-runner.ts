@@ -2,7 +2,7 @@ import { type Agent, type AgentMessage, type AgentTool, type ThinkingLevel } fro
 import type { AgentSession, AuthStorage } from "@mariozechner/pi-coding-agent";
 import type { AssistantMessage, Message, Usage } from "@mariozechner/pi-ai";
 
-import { isAssistantMessage, isTextContent, isToolCall, responseText } from "./message.js";
+import { isAssistantMessage, isTextContent, isToolCall, isToolResultMessage, responseText } from "./message.js";
 import { detectRefusalSignal } from "./refusal-detection.js";
 import { stringifyError } from "../utils/index.js";
 import { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
@@ -273,6 +273,22 @@ export class SessionRunner {
 
       if (!text) {
         throw new Error(`Agent produced empty completion after ${EMPTY_RETRY_DELAYS_MS.length} retries.`);
+      }
+
+      // Reject responses that created an artifact but omitted its URL.
+      const ARTIFACT_TOOLS = new Set(["share_artifact", "generate_image"]);
+      const lastArtifactUrl = session.messages
+        .filter((m) => isToolResultMessage(m) && ARTIFACT_TOOLS.has(m.toolName) && !m.isError)
+        .flatMap((m) => isToolResultMessage(m) ? m.content.filter(isTextContent).flatMap((b) => [...b.text.matchAll(/(?:Artifact shared|Generated image):\s+(https?:\/\/\S+)/g)].map((x) => x[1])) : [])
+        .at(-1);
+      if (lastArtifactUrl && !text.includes(lastArtifactUrl)) {
+        this.logger.warn("Response missing last artifact URL, retrying", `url=${lastArtifactUrl}`);
+        const retryPrompt = `<meta>Your response must include the artifact URL you created so the user can access it. Missing URL: ${lastArtifactUrl}. Please respond again and include the URL in your answer.</meta>`;
+        await session.prompt(retryPrompt);
+        const retryText = stripUndeliverableResponse(extractLastAssistantText(session.messages));
+        if (retryText) {
+          text = retryText;
+        }
       }
 
       const lastAssistant = findLastAssistantMessage(session.messages);

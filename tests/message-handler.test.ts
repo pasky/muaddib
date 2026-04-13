@@ -3040,6 +3040,50 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("executeEvent extracts <thinking> tags and persists them as internal monologue", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const sent: string[] = [];
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: (input) => ({
+        prompt: async () => {
+          // First response: thinking only, no visible output
+          await input.onResponse("<thinking>Checking if there are events today...</thinking>");
+          // Final response: thinking + visible output
+          const text = "<thinking>Let me check the calendar...</thinking>calendar: 20:00 - Meetup";
+          const result = makeRunnerResult(text, { totalCost: 0.01 });
+          await input.onResponse(result.text);
+          return result;
+        },
+      }),
+    });
+
+    await handler.executeEvent(
+      makeMessage("!s event command", { isDirect: true }),
+      async (text) => { sent.push(text); },
+    );
+
+    // Room should only see the stripped text, no <thinking> tags
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("calendar: 20:00 - Meetup");
+    expect(sent[0]).not.toContain("<thinking>");
+    expect(sent[0]).not.toContain("Let me check the calendar");
+
+    // History should contain the internal monologue entry
+    const rows = await history.getFullHistory("libera##test");
+    const monologue = rows.find((r: any) => r.message.includes("[internal monologue]"));
+    expect(monologue).toBeDefined();
+    expect(monologue!.message).toContain("Checking if there are events today");
+    expect(monologue!.message).toContain("Let me check the calendar");
+
+    await history.close();
+  });
+
   it("drops proactive NULL sentinel responses instead of sending them", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();

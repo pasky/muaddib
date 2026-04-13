@@ -152,7 +152,7 @@ describe("buildEventMessage", () => {
       schedule: "0 9 * * 1-5",
     });
     expect(msg).toContain("----------\n");
-    expect(msg).toContain("Finish with string NULL");
+    expect(msg).toContain("send \"NULL\" instead");
     expect(msg).toContain("[EVENT:/events/check.json:periodic:0 9 * * 1-5] Check inbox");
   });
 });

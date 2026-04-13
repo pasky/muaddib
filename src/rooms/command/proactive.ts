@@ -25,7 +25,6 @@ import type {
 } from "./command-executor.js";
 import { pickModeModel } from "./command-executor.js";
 import { type RoomMessage, wrapSteeredMessage } from "../message.js";
-import { buildUserArc } from "../../cost/user-key-store.js";
 import { COST_SOURCE } from "../../cost/llm-call-type.js";
 import { sleep } from "../../utils/index.js";
 import { withPersistedCostSpan } from "../../cost/cost-span.js";
@@ -286,11 +285,9 @@ export class ProactiveRunner {
       return;
     }
 
-    const userArc = buildUserArc(message.serverTag, message.nick);
-
     const evalResult = await withPersistedCostSpan(
       COST_SOURCE.PROACTIVE,
-      { arc: message.arc, userArc },
+      { arc: message.arc },
       { history: this.runtime.history, userCostLedger: this.userCostLedger },
       async () => await evaluateProactiveInterjection(
         this.config,

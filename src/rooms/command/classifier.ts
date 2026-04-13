@@ -88,6 +88,8 @@ export function createModeClassifier(
 
 function extractCurrentMessage(message: Message): string {
   const text = messageText(message);
-  const match = text.match(/<[^>]+>\s*(.*)$/);
-  return match ? match[1].trim() : text;
+  // Strip <meta>...</meta> annotations before extracting the IRC nick payload.
+  const cleaned = text.replace(/\n?<meta>.*?<\/meta>/gs, "");
+  const match = cleaned.match(/<[^>]+>\s*(.*)$/);
+  return match ? match[1].trim() : cleaned;
 }

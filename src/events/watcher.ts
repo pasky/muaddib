@@ -68,9 +68,9 @@ function buildEventMessage(path: string, event: ParsedEvent): string {
     const meta =
       `<meta>The above was current conversation context, which may or may not be relevant at all to the task at hand - ` +
       `you have just been launched asynchronously to handle a pre-scheduled instruction. Anything you write will be ` +
-      `seen outside as 'out of the blue' so keep your chatter to only relevant notices it's important to share - ` +
+      `seen outside as 'out of the blue' so carefully enclose anything but the final message to share in <thinking>..</thinking> and keep your in-progress chatter to only relevant notices it's important to share - ` +
       `likely, you will not say anything at all, unlikely it was explicitly asked for below. ` +
-      `Finish with string NULL once done if no notification needs to be sent.</meta>`;
+      `If no notification needs to be sent out, you may send "NULL" instead.</meta>`;
     return `${separator}\n${meta}\n[EVENT:${path}:periodic:${event.schedule}] ${event.text}`;
   }
   // one-shot
