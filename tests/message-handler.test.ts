@@ -1034,7 +1034,7 @@ describe("RoomMessageHandler", () => {
     await requestPrompted.promise;
 
     expect(sent[0]).toContain("Network access request");
-    expect(sent[0]).toContain("Reply !approve");
+    expect(sent[0]).toContain("Reply `!approve");
     const requestId = sent[0].match(/request\s+(\S+)\s+for/u)?.[1];
     expect(requestId).toBeTruthy();
 

@@ -464,7 +464,7 @@ export class RoomMessageHandler {
 
   private buildApprovalRequestMessage(id: string, request: NetworkAccessApprovalRequest): string {
     const reasonSuffix = request.reason ? ` Reason: ${request.reason}` : "";
-    return `Network access request ${id} for ${request.canonicalUrl}.${reasonSuffix} Reply !approve ${id} or !deny ${id}.`;
+    return `Network access request ${id} for ${request.canonicalUrl}.${reasonSuffix} Reply \`!approve ${id}\` or \`!deny ${id}\`.`;
   }
 
   /** Check if any command session is active for the given channel arc (serverTag#channelName). */
