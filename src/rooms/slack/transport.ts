@@ -415,7 +415,18 @@ export class SlackSocketTransport implements SlackEventSource, SlackSender {
       mynick: this.botDisplayName ?? this.options.botNameFallback ?? "muaddib",
       files,
       sharedMessages: sharedMessages.length > 0 ? sharedMessages : undefined,
-      secrets: buildSlackFileSecrets(files, this.options.botToken),
+      // The Slack bot token is an arc/workspace-level credential. Always advertise the
+      // files.slack.com Authorization header here (even when this particular message has
+      // no attachments) so visit_webpage's harness-auth auto-trust path in
+      // ensureVisitUrlTrusted() can fetch any files.slack.com URL that appeared earlier in
+      // the conversation without forcing the agent to call request_network_access.
+      secrets: {
+        http_header_prefixes: {
+          "https://files.slack.com/": {
+            Authorization: `Bearer ${this.options.botToken}`,
+          },
+        },
+      },
       botUserId: this.botUserId ?? undefined,
       messageTs: typeof event.ts === "string" ? event.ts : undefined,
       threadTs: typeof event.thread_ts === "string" ? event.thread_ts : undefined,
@@ -596,27 +607,6 @@ function mapSlackSharedMessages(value: unknown): SlackSharedMessageAttachment[] 
       fromUrl: typeof entry.from_url === "string" ? entry.from_url : undefined,
     }))
     .filter((msg) => Boolean(msg.text || msg.fallback));
-}
-
-function buildSlackFileSecrets(
-  _files: SlackFileAttachment[],
-  botToken: string,
-): Record<string, unknown> | undefined {
-  // Always advertise the Slack file Authorization header for this workspace, even when the
-  // current message has no attachments. The agent often visits files.slack.com URLs that
-  // appeared in earlier messages of the conversation, and the harness-auth path in
-  // ensureVisitUrlTrusted() relies on these secrets being present to auto-trust the URL.
-  if (!botToken) {
-    return undefined;
-  }
-
-  return {
-    http_header_prefixes: {
-      "https://files.slack.com/": {
-        Authorization: `Bearer ${botToken}`,
-      },
-    },
-  };
 }
 
 function isSlackTransportSignal(
