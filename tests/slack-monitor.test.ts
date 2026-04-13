@@ -1475,6 +1475,36 @@ describe("SlackSocketTransport debug logging", () => {
   });
 });
 
+describe("SlackSocketTransport file Authorization secrets", () => {
+  it("always advertises the files.slack.com Authorization header, even for messages without files", async () => {
+    const { SlackSocketTransport } = await import("../src/rooms/slack/transport.js");
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const transport = new SlackSocketTransport({
+      appToken: "xapp-test",
+      botToken: "xoxb-test",
+      workspaceId: "T123",
+      logger,
+    });
+
+    const result = await (transport as any).mapMessage({
+      channel: "C123",
+      user: "U123",
+      text: "plain follow-up, no files attached",
+      channel_type: "channel",
+      ts: "1775209937.562219",
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.secrets).toEqual({
+      http_header_prefixes: {
+        "https://files.slack.com/": {
+          Authorization: "Bearer xoxb-test",
+        },
+      },
+    });
+  });
+});
+
 describe("SlackSocketTransport shared message extraction", () => {
   it("extracts forwarded/shared message attachments from Slack events", async () => {
     const { SlackSocketTransport } = await import("../src/rooms/slack/transport.js");

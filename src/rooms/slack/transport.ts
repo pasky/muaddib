@@ -599,20 +599,14 @@ function mapSlackSharedMessages(value: unknown): SlackSharedMessageAttachment[] 
 }
 
 function buildSlackFileSecrets(
-  files: SlackFileAttachment[],
+  _files: SlackFileAttachment[],
   botToken: string,
 ): Record<string, unknown> | undefined {
-  if (files.length === 0) {
-    return undefined;
-  }
-
-  const hasPrivateSlackUrl = files.some(
-    (file) =>
-      (file.urlPrivate && file.urlPrivate.startsWith("https://files.slack.com/")) ||
-      (file.urlPrivateDownload && file.urlPrivateDownload.startsWith("https://files.slack.com/")),
-  );
-
-  if (!hasPrivateSlackUrl) {
+  // Always advertise the Slack file Authorization header for this workspace, even when the
+  // current message has no attachments. The agent often visits files.slack.com URLs that
+  // appeared in earlier messages of the conversation, and the harness-auth path in
+  // ensureVisitUrlTrusted() relies on these secrets being present to auto-trust the URL.
+  if (!botToken) {
     return undefined;
   }
 
