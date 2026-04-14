@@ -981,6 +981,69 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("breaks session owner's edit chain on steer, not the follow-up's", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const incoming: RoomMessage = {
+      ...makeMessage("!s start"),
+      threadId: "thread-ec",
+    };
+
+    const firstStarted = createDeferred<void>();
+    const releaseFirst = createDeferred<void>();
+
+    const steerCalls: any[] = [];
+    const mockAgent = {
+      steer: (msg: any) => { steerCalls.push(msg); },
+    };
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: (input) => ({
+        prompt: async (_prompt) => {
+          input.onAgentCreated?.(mockAgent as any);
+          firstStarted.resolve();
+          await releaseFirst.promise;
+          const result = makeRunnerResult("done");
+          await input.onResponse(result.text);
+          return result;
+        },
+      }),
+    });
+
+    let sessionOnSteeredCalled = false;
+    let followupOnSteeredCalled = false;
+
+    incoming.isDirect = true;
+    const resultPromise = handler.handleIncomingMessage(incoming, {
+      sendResponse: async (_text) => {},
+      onSteered: () => { sessionOnSteeredCalled = true; },
+    });
+
+    await firstStarted.promise;
+
+    const followup: RoomMessage = {
+      ...makeMessage("!s follow up"),
+      threadId: "thread-ec",
+    };
+    followup.isDirect = true;
+    await handler.handleIncomingMessage(followup, {
+      sendResponse: async () => {},
+      onSteered: () => { followupOnSteeredCalled = true; },
+    });
+
+    // The SESSION owner's onSteered must be called, not the follow-up's.
+    expect(sessionOnSteeredCalled).toBe(true);
+    expect(followupOnSteeredCalled).toBe(false);
+
+    releaseFirst.resolve();
+    await resultPromise;
+    await history.close();
+  });
+
   it("intercepts !approve and resumes pending network access in the same thread only", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();

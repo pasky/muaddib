@@ -101,7 +101,7 @@ export class RoomMessageHandler {
   private readonly overrideNetworkAccessApprover?: NetworkAccessApprover;
 
   /** Active steering functions keyed by session key, with the session's resolved mode. */
-  private readonly activeSteers = new Map<string, { steer: (message: RoomMessage) => void; modeKey: string | null }>();
+  private readonly activeSteers = new Map<string, { steer: (message: RoomMessage) => void; modeKey: string | null; onSteered?: () => void }>();
   private readonly pendingNetworkApprovals = new Map<string, PendingNetworkApproval>();
 
   constructor(
@@ -185,8 +185,10 @@ export class RoomMessageHandler {
 
         // Regular follow-up (mode tokens, plain messages, passives) — steer
         // into the active session without blocking on history persistence.
+        // Break the SESSION's edit chain (not the incoming message's) so the
+        // next response starts a new platform message.
+        existingEntry.onSteered?.();
         existingEntry.steer(message);
-        options?.onSteered?.();
         this.history.addMessage(message).catch((err) => {
           this.logger.error("Failed to persist steered message to history", String(err));
         });
@@ -242,7 +244,7 @@ export class RoomMessageHandler {
         return;
       }
 
-      await this.handleCommandMessage(message, triggerTs, sendResponse, networkAccessApprover);
+      await this.handleCommandMessage(message, triggerTs, sendResponse, networkAccessApprover, options?.onSteered);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       this.logger.error("Agent execution failed", `nick=${message.nick}`, `error=${errorMsg}`);
@@ -260,6 +262,7 @@ export class RoomMessageHandler {
     triggerTs: string,
     sendResponse: SendResponse,
     networkAccessApprover: NetworkAccessApprover,
+    onSteered?: () => void,
   ): Promise<void> {
     const key = sessionKey(message);
 
@@ -274,7 +277,7 @@ export class RoomMessageHandler {
     // Register a buffering steer function immediately so messages arriving
     // before the agent is created are captured and flushed once it's ready.
     const pending: RoomMessage[] = [];
-    this.activeSteers.set(key, { steer: (msg) => { pending.push(msg); }, modeKey: sessionModeKey });
+    this.activeSteers.set(key, { steer: (msg) => { pending.push(msg); }, modeKey: sessionModeKey, onSteered });
 
     try {
       await this.executor.execute(message, triggerTs, sendResponse, {
@@ -285,7 +288,7 @@ export class RoomMessageHandler {
             this.steerAgent(agent, buffered);
           }
           pending.length = 0;
-          this.activeSteers.set(key, { steer: (msg) => { this.steerAgent(agent, msg); }, modeKey: sessionModeKey });
+          this.activeSteers.set(key, { steer: (msg) => { this.steerAgent(agent, msg); }, modeKey: sessionModeKey, onSteered });
         },
         onResponseDelivered: () => {
           // Deregister steering as soon as the response is delivered, before
