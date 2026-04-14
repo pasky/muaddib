@@ -48,6 +48,7 @@
         "bashTimeoutSeconds": 270,
         "maxConcurrentVms": 8,
         "workspaceSizeMb": 4096,
+        "vmMemoryMb": 1024,
         "profiles": {
           "corp-confluence": {
             "urlAllowRegexes": ["^https://api\\.atlassian\\.com/.*$"],
