@@ -2696,6 +2696,37 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("rejects direct messages from untrusted users without running agent", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    let runnerCalled = false;
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: () => ({
+        prompt: async () => {
+          runnerCalled = true;
+          return makeRunnerResult("should not happen");
+        },
+      }),
+    });
+
+    const replies: string[] = [];
+    await handler.handleIncomingMessage(
+      makeMessage("!s hello", { isDirect: true, trusted: false, nick: "mallory" }),
+      { sendResponse: async (text) => { replies.push(text); } },
+    );
+
+    expect(runnerCalled).toBe(false);
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toContain("mallory");
+    expect(replies[0]).toContain("whitelisted");
+
+    await history.close();
+  });
+
   it("deregisters steering after response delivery before background work completes", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();

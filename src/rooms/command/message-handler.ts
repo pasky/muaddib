@@ -156,6 +156,17 @@ export class RoomMessageHandler {
       return;
     }
 
+    // ── Reject direct commands from untrusted users when an allowlist is active ──
+    if (message.isDirect && message.trusted === false) {
+      this.logger.info(
+        "Rejecting direct message from untrusted user",
+        `arc=${message.arc}`,
+        `nick=${message.nick}`,
+      );
+      await sendResponse(`${message.nick}: Sorry, only whitelisted users can interact with me.`);
+      return;
+    }
+
     const key = sessionKey(message);
 
     // ── Active session steering fast-path ──
