@@ -11,11 +11,9 @@ const mockState = vi.hoisted(() => ({
 
 vi.mock("@mariozechner/pi-agent-core", () => ({
   Agent: class {
-    public replaceMessages = vi.fn();
-    public setModel = vi.fn();
+    public state: any = { model: null, messages: [], systemPrompt: "" };
     public steer = vi.fn();
     public hasQueuedMessages = vi.fn(() => false);
-    public setSystemPrompt = vi.fn();
 
     constructor(public readonly config: any) {}
   },
@@ -161,8 +159,8 @@ describe("createAgentSessionForInvocation", () => {
     });
 
     const agent = ctx.agent as any;
-    expect(agent.replaceMessages).toHaveBeenCalledTimes(1);
-    const [messages] = agent.replaceMessages.mock.calls[0];
+    const messages = agent.state.messages;
+    expect(messages.length).toBe(2);
     expect(messages[0].role).toBe("user");
     expect(messages[1].role).toBe("assistant");
   });
@@ -230,7 +228,7 @@ describe("createAgentSessionForInvocation", () => {
     const agent = ctx.agent as any;
 
     session.emit({ type: "tool_execution_end", isError: false, result: { nested: [{ kind: "image" }] } });
-    expect(agent.setModel).toHaveBeenCalledWith(visionModel);
+    expect(agent.state.model).toEqual(visionModel);
     expect(ctx.getVisionFallbackActivated()).toBe(true);
 
     // After vision fallback activates, the streamFn should use the vision model
