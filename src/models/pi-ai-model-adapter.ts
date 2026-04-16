@@ -21,11 +21,6 @@ import {
   getOverriddenProviders,
   resolveProviderOverrideModel,
 } from "./provider-overrides.js";
-import { installAnthropicAdaptiveThinkingPatch } from "./anthropic-adaptive-thinking-patch.js";
-
-// Install the Anthropic adaptive-thinking monkeypatch before any streamSimple call
-// dispatches on the 'anthropic-messages' provider. Safe to call multiple times.
-installAnthropicAdaptiveThinkingPatch();
 
 export class PiAiModelResolutionError extends Error {
   constructor(message: string) {
