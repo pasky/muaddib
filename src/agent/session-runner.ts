@@ -387,7 +387,7 @@ export class SessionRunner {
 
     const fallbackModel = this.modelAdapter.resolve(refusalFallbackModel);
     await ensureProviderKey(fallbackModel.spec.provider);
-    agent.setModel(fallbackModel.model);
+    agent.state.model = fallbackModel.model;
     addSuffix(`[refusal fallback to ${fallbackModel.spec.modelId}]`);
     await session.prompt(prompt);
     return true;

@@ -37,7 +37,7 @@ function makeUsage(multiplier = 1): Usage {
 interface MockSessionCtx {
   session: any;
   callbacks: Array<(event: any) => void>;
-  agent: { setModel: ReturnType<typeof vi.fn> };
+  agent: { state: { model: any } };
   ensureProviderKey: ReturnType<typeof vi.fn>;
 }
 
@@ -55,7 +55,7 @@ function makeMockSession(opts: {
     prompt: vi.fn(),
   };
   if (opts.dispose) session.dispose = opts.dispose;
-  const agent = { setModel: vi.fn() };
+  const agent = { state: { model: null as any } };
   const ensureProviderKey = vi.fn(async () => {});
   const ctx: MockSessionCtx = { session, callbacks, agent, ensureProviderKey };
 
@@ -235,7 +235,7 @@ describe("SessionRunner", () => {
     expect(result.refusalFallbackActivated).toBe(true);
     expect(result.refusalFallbackModel).toBe("anthropic:claude-sonnet-4");
     expect(ctx.ensureProviderKey).toHaveBeenCalledWith("anthropic");
-    expect(ctx.agent.setModel).toHaveBeenCalledWith({ provider: "anthropic", id: "claude-sonnet-4" });
+    expect(ctx.agent.state.model).toEqual({ provider: "anthropic", id: "claude-sonnet-4" });
   });
 
   it("defers toolSet.dispose to session.dispose on success", async () => {

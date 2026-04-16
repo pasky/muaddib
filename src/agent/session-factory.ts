@@ -256,7 +256,7 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
   });
 
   if (input.contextMessages) {
-    agent.replaceMessages(convertContextToAgentMessages(input.contextMessages, resolvedModel));
+    agent.state.messages = convertContextToAgentMessages(input.contextMessages, resolvedModel);
   }
 
   const session = new AgentSession({
@@ -315,7 +315,7 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
         // setModel ensures correctness for subsequent session.prompt() calls
         // (e.g. empty-completion retry), but won't help the current loop
         // iteration — the streamFn override handles that.
-        agent.setModel(visionFallbackModel.model);
+        agent.state.model = visionFallbackModel.model;
       }
     }
   });
@@ -346,7 +346,7 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
 }
 
 function applySystemPromptOverrideToSession(session: AgentSession, override: string): void {
-  session.agent.setSystemPrompt(override);
+  session.agent.state.systemPrompt = override;
   const state = session as unknown as {
     _baseSystemPrompt: string;
     _rebuildSystemPrompt: () => string;
