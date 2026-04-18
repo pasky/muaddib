@@ -10,6 +10,7 @@ import {
   checkUserBudget,
   resolveCostPolicyConfig,
 } from "../../cost/cost-policy.js";
+import type { CostPolicyConfig } from "../../config/muaddib-config.js";
 import {
   buildUserArc,
   parseSetKeyArgs,
@@ -18,35 +19,12 @@ import {
 import type { UserPolicyStore, TriggerModelEntry } from "../../cost/user-policy-store.js";
 import type { UserCostLedger } from "../../cost/user-cost-ledger.js";
 import type { RoomMessage } from "../message.js";
-import type { MuaddibConfig } from "../../config/muaddib-config.js";
-import { pickModeModel } from "./command-executor.js";
-import type { CommandConfig } from "./resolver.js";
-
-// ── Types ──
-
-export interface ByokDeps {
-  config: MuaddibConfig;
-  userKeyStore: UserKeyStore;
-  userPolicyStore: UserPolicyStore;
-  userCostLedger: UserCostLedger;
-  commandConfig: CommandConfig;
-  /** Maps trigger (e.g. "!s") → mode key. */
-  triggerToMode: Record<string, string>;
-  /** Per-trigger runtime overrides from config. */
-  triggerOverrides: Record<string, Record<string, unknown>>;
-}
-
-export interface ByokRemapResult {
-  /** The (potentially remapped) model spec to use. */
-  remappedModelSpec: string;
-  /** Optional drift warning to deliver to the user after the agent run. */
-  driftWarning: string | null;
-}
+import { pickModeModel, type CommandConfig } from "./resolver.js";
 
 // ── Builtin command handlers ──
 
 export async function handleSetKeyCommand(
-  deps: ByokDeps,
+  userKeyStore: UserKeyStore,
   message: RoomMessage,
   queryText: string,
   deliver: (text: string) => Promise<void>,
@@ -64,28 +42,33 @@ export async function handleSetKeyCommand(
   const userArc = buildUserArc(message.serverTag, message.nick);
 
   if (key) {
-    deps.userKeyStore.setOpenRouterKey(userArc, key);
+    userKeyStore.setOpenRouterKey(userArc, key);
     await deliver(`${message.nick}: saved your OpenRouter key. Future commands will use OpenRouter on your dime. To clear it: /msg <me> !setkey openrouter`);
     return;
   }
 
-  deps.userKeyStore.clearOpenRouterKey(userArc);
+  userKeyStore.clearOpenRouterKey(userArc);
   await deliver(`${message.nick}: cleared your OpenRouter key. You're back on the free tier.`);
 }
 
 export async function handleBalanceCommand(
-  deps: ByokDeps,
+  input: {
+    costPolicy: CostPolicyConfig | undefined;
+    keyStore: UserKeyStore;
+    policyStore: UserPolicyStore;
+    ledger: UserCostLedger;
+  },
   message: RoomMessage,
   deliver: (text: string) => Promise<void>,
 ): Promise<void> {
   const userArc = buildUserArc(message.serverTag, message.nick);
-  const costPolicy = deps.config.getCostPolicyConfig();
+  const { costPolicy, keyStore, policyStore, ledger } = input;
   const status = await checkUserBudget({
     costPolicy,
     userArc,
-    keyStore: deps.userKeyStore,
-    policyStore: deps.userPolicyStore,
-    ledger: deps.userCostLedger,
+    keyStore,
+    policyStore,
+    ledger,
   });
 
   const byokGuide = [
@@ -103,8 +86,8 @@ export async function handleBalanceCommand(
       return;
     }
 
-    const freeSpend = await deps.userCostLedger.getUserCostInWindow(userArc, policy.freeTierWindowHours, { byok: false });
-    const byokSpend = await deps.userCostLedger.getUserCostInWindow(userArc, policy.freeTierWindowHours, { byok: true });
+    const freeSpend = await ledger.getUserCostInWindow(userArc, policy.freeTierWindowHours, { byok: false });
+    const byokSpend = await ledger.getUserCostInWindow(userArc, policy.freeTierWindowHours, { byok: true });
     await deliver(`${message.nick}: BYOK is active via OpenRouter. Free tier usage in the last ${policy.freeTierWindowHours}h: $${freeSpend.toFixed(4)} / $${policy.freeTierBudgetUsd.toFixed(2)}. BYOK usage in the same window: $${byokSpend.toFixed(4)}. To clear your key: /msg <me> !setkey openrouter`);
     return;
   }
@@ -116,7 +99,7 @@ export async function handleBalanceCommand(
       return;
     }
 
-    const exemptSpend = await deps.userCostLedger.getUserCostInWindow(userArc, policy.freeTierWindowHours, { byok: false });
+    const exemptSpend = await ledger.getUserCostInWindow(userArc, policy.freeTierWindowHours, { byok: false });
     await deliver(`${message.nick}: operator-funded access is enabled for you (exempt from the free tier). Operator-funded usage in the last ${policy.freeTierWindowHours}h: $${exemptSpend.toFixed(4)}.`);
     return;
   }
@@ -139,20 +122,29 @@ export async function handleBalanceCommand(
 }
 
 export async function handleSetModelCommand(
-  deps: ByokDeps,
+  input: {
+    costPolicy: CostPolicyConfig | undefined;
+    keyStore: UserKeyStore;
+    policyStore: UserPolicyStore;
+    ledger: UserCostLedger;
+    commandConfig: CommandConfig;
+    triggerToMode: Record<string, string>;
+    triggerOverrides: Record<string, Record<string, unknown>>;
+  },
   message: RoomMessage,
   queryText: string,
   deliver: (text: string) => Promise<void>,
 ): Promise<void> {
+  const { costPolicy, keyStore, policyStore, ledger, commandConfig, triggerToMode, triggerOverrides } = input;
   const userArc = buildUserArc(message.serverTag, message.nick);
 
   // Require BYOK-active
   const budgetStatus = await checkUserBudget({
-    costPolicy: deps.config.getCostPolicyConfig(),
+    costPolicy,
     userArc,
-    keyStore: deps.userKeyStore,
-    policyStore: deps.userPolicyStore,
-    ledger: deps.userCostLedger,
+    keyStore,
+    policyStore,
+    ledger,
   });
   if (budgetStatus.state !== "byok") {
     await deliver(`${message.nick}: !setmodel requires an active BYOK key. Set one first with !setkey openrouter <key>.`);
@@ -163,13 +155,13 @@ export async function handleSetModelCommand(
 
   // No args: list current remaps
   if (tokens.length === 0) {
-    await handleSetModelList(deps, userArc, message.nick, deliver);
+    await listTriggerModels(policyStore, triggerToMode, triggerOverrides, commandConfig, userArc, message.nick, deliver);
     return;
   }
 
   // "clear" — clear all remaps
   if (tokens.length === 1 && tokens[0] === "clear") {
-    const count = deps.userPolicyStore.clearAllTriggerModels(userArc);
+    const count = policyStore.clearAllTriggerModels(userArc);
     if (count === 0) {
       await deliver(`${message.nick}: no model remaps to clear.`);
     } else {
@@ -181,15 +173,15 @@ export async function handleSetModelCommand(
   const trigger = tokens[0];
 
   // Validate trigger
-  if (!deps.triggerToMode[trigger]) {
-    const validTriggers = Object.keys(deps.triggerToMode).join(", ");
+  if (!triggerToMode[trigger]) {
+    const validTriggers = Object.keys(triggerToMode).join(", ");
     await deliver(`${message.nick}: unknown trigger '${trigger}'. Valid triggers: ${validTriggers}`);
     return;
   }
 
   // Single trigger arg: clear that remap
   if (tokens.length === 1) {
-    const existed = deps.userPolicyStore.clearTriggerModel(userArc, trigger);
+    const existed = policyStore.clearTriggerModel(userArc, trigger);
     if (existed) {
       await deliver(`${message.nick}: cleared model remap for ${trigger}. Back to operator default.`);
     } else {
@@ -208,11 +200,11 @@ export async function handleSetModelCommand(
   }
 
   // Compute operator default for this trigger
-  const modeKey = deps.triggerToMode[trigger];
-  const modeConfig = deps.commandConfig.modes[modeKey];
-  const triggerOverrides = deps.triggerOverrides[trigger] ?? {};
+  const modeKey = triggerToMode[trigger];
+  const modeConfig = commandConfig.modes[modeKey];
+  const overrides = triggerOverrides[trigger] ?? {};
   const operatorDefault =
-    (triggerOverrides.model as string | undefined) ??
+    (overrides.model as string | undefined) ??
     pickModeModel(modeConfig.model) ??
     "(none)";
 
@@ -221,19 +213,22 @@ export async function handleSetModelCommand(
     systemDefaultAtSet: operatorDefault,
     setAt: new Date().toISOString(),
   };
-  deps.userPolicyStore.setTriggerModel(userArc, trigger, entry);
+  policyStore.setTriggerModel(userArc, trigger, entry);
   await deliver(
     `${message.nick}: ${trigger} remapped to ${modelInput} (operator default: ${operatorDefault}). Clear with: !setmodel ${trigger}`,
   );
 }
 
-async function handleSetModelList(
-  deps: ByokDeps,
+async function listTriggerModels(
+  policyStore: UserPolicyStore,
+  triggerToMode: Record<string, string>,
+  triggerOverrides: Record<string, Record<string, unknown>>,
+  commandConfig: CommandConfig,
   userArc: string,
   nick: string,
   deliver: (text: string) => Promise<void>,
 ): Promise<void> {
-  const models = deps.userPolicyStore.listTriggerModels(userArc);
+  const models = policyStore.listTriggerModels(userArc);
   const entries = Object.entries(models);
   if (entries.length === 0) {
     await deliver(`${nick}: no model remaps set. Use !setmodel <trigger> <model> to remap a prefix (e.g. !setmodel !s openrouter:x-ai/grok-4). Use !h to see operator defaults.`);
@@ -241,11 +236,11 @@ async function handleSetModelList(
   }
 
   const lines = entries.map(([trigger, entry]) => {
-    const modeKey = deps.triggerToMode[trigger];
-    const modeConfig = modeKey ? deps.commandConfig.modes[modeKey] : undefined;
-    const triggerOverrides = deps.triggerOverrides[trigger] ?? {};
+    const modeKey = triggerToMode[trigger];
+    const modeConfig = modeKey ? commandConfig.modes[modeKey] : undefined;
+    const overrides = triggerOverrides[trigger] ?? {};
     const currentDefault =
-      (triggerOverrides.model as string | undefined) ??
+      (overrides.model as string | undefined) ??
       pickModeModel(modeConfig?.model) ??
       "(none)";
 
@@ -259,12 +254,22 @@ async function handleSetModelList(
   await deliver(`${nick}: your BYOK model remaps:\n${lines.join("\n")}\nTo clear: !setmodel <trigger>. To see operator defaults: !h`);
 }
 
+// ── Model remap resolution ──
+
+export interface ByokRemapResult {
+  /** The (potentially remapped) model spec to use. */
+  remappedModelSpec: string;
+  /** Optional drift warning to deliver to the user after the agent run. */
+  driftWarning: string | null;
+}
+
 /**
  * Resolve BYOK user model remap for the given trigger.
  * Returns the (potentially remapped) model spec and an optional drift warning.
  */
 export function resolveByokRemap(
-  deps: ByokDeps,
+  policyStore: UserPolicyStore,
+  triggerOverrides: Record<string, Record<string, unknown>>,
   userArc: string,
   nick: string,
   trigger: string,
@@ -272,7 +277,7 @@ export function resolveByokRemap(
   modeConfig: { model?: string | string[] },
   logger?: { debug: (...args: string[]) => void },
 ): ByokRemapResult {
-  const userRemap = deps.userPolicyStore.getTriggerModel(userArc, trigger);
+  const userRemap = policyStore.getTriggerModel(userArc, trigger);
   if (!userRemap) {
     return { remappedModelSpec: modelSpec, driftWarning: null };
   }
@@ -286,16 +291,16 @@ export function resolveByokRemap(
   );
 
   // Check for operator default drift
-  const triggerOverrides = deps.triggerOverrides[trigger] ?? {};
+  const overrides = triggerOverrides[trigger] ?? {};
   const currentOperatorDefault =
-    (triggerOverrides.model as string | undefined) ??
+    (overrides.model as string | undefined) ??
     pickModeModel(modeConfig.model) ??
     "(none)";
 
   let driftWarning: string | null = null;
   if (currentOperatorDefault !== userRemap.systemDefaultAtSet) {
     driftWarning = `${nick}: heads up \u2014 operator changed default for ${trigger} from ${userRemap.systemDefaultAtSet} to ${currentOperatorDefault}. Your remap ${userRemap.model} is still active. Clear with: /msg <me> !setmodel ${trigger}`;
-    deps.userPolicyStore.markSystemDefaultNotified(userArc, trigger, currentOperatorDefault);
+    policyStore.markSystemDefaultNotified(userArc, trigger, currentOperatorDefault);
   }
 
   return { remappedModelSpec, driftWarning };

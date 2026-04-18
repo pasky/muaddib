@@ -52,6 +52,7 @@ import { createModeClassifier } from "./classifier.js";
 import { RateLimiter } from "./rate-limiter.js";
 import {
   CommandResolver,
+  pickModeModel,
   type CommandConfig,
 } from "./resolver.js";
 import { generateToolSummaryFromSession } from "./tool-summary.js";
@@ -64,7 +65,6 @@ import {
   handleBalanceCommand,
   handleSetModelCommand,
   resolveByokRemap,
-  type ByokDeps,
 } from "./byok.js";
 
 // ── Public types ──
@@ -434,33 +434,35 @@ export class CommandExecutor {
     };
   }
 
-  private getByokDeps(): ByokDeps {
-    return {
-      config: this.runtime.config,
-      userKeyStore: this.userKeyStore,
-      userPolicyStore: this.userPolicyStore,
-      userCostLedger: this.userCostLedger,
-      commandConfig: this.commandConfig,
-      triggerToMode: this.resolver.triggerToMode,
-      triggerOverrides: this.resolver.triggerOverrides,
-    };
-  }
-
   private async handleBuiltinCommand(
     message: RoomMessage,
     resolved: import("./resolver.js").ResolvedCommand,
     deliver: (text: string) => Promise<void>,
   ): Promise<void> {
-    const deps = this.getByokDeps();
+    const costPolicy = this.runtime.config.getCostPolicyConfig();
     switch (resolved.builtinCommand) {
       case "!setkey":
-        await handleSetKeyCommand(deps, message, resolved.queryText, deliver);
+        await handleSetKeyCommand(this.userKeyStore, message, resolved.queryText, deliver);
         return;
       case "!balance":
-        await handleBalanceCommand(deps, message, deliver);
+        await handleBalanceCommand(
+          { costPolicy, keyStore: this.userKeyStore, policyStore: this.userPolicyStore, ledger: this.userCostLedger },
+          message, deliver,
+        );
         return;
       case "!setmodel":
-        await handleSetModelCommand(deps, message, resolved.queryText, deliver);
+        await handleSetModelCommand(
+          {
+            costPolicy,
+            keyStore: this.userKeyStore,
+            policyStore: this.userPolicyStore,
+            ledger: this.userCostLedger,
+            commandConfig: this.commandConfig,
+            triggerToMode: this.resolver.triggerToMode,
+            triggerOverrides: this.resolver.triggerOverrides,
+          },
+          message, resolved.queryText, deliver,
+        );
         return;
       default:
         await deliver(`${message.nick}: Unknown builtin command '${resolved.builtinCommand}'.`);
@@ -544,7 +546,8 @@ export class CommandExecutor {
     let driftWarning: string | null = null;
     if (budgetStatus.state === "byok" && !resolved.modelOverride && trigger) {
       const remap = resolveByokRemap(
-        this.getByokDeps(), userArc, message.nick, trigger, modelSpec, modeConfig, logger,
+        this.userPolicyStore, this.resolver.triggerOverrides,
+        userArc, message.nick, trigger, modelSpec, modeConfig, logger,
       );
       remappedModelSpec = remap.remappedModelSpec;
       driftWarning = remap.driftWarning;
@@ -1303,15 +1306,7 @@ export function modelStrCore(model: unknown): string {
   return String(model).replace(/(?:[-.\w]*:)?(?:[-.\w]*\/)?([-.\w]+)(?:#[-\w,/]*)?/, "$1");
 }
 
-export function pickModeModel(model: string | string[] | undefined): string | null {
-  if (!model) {
-    return null;
-  }
-  if (Array.isArray(model)) {
-    return model[0] ?? null;
-  }
-  return model;
-}
+
 
 function isNullSentinel(text: string): boolean {
   const trimmed = text.trim();

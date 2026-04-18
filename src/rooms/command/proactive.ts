@@ -14,8 +14,7 @@ import { formatUtcTime, messageText } from "../../utils/index.js";
 import { responseText } from "../../agent/message.js";
 import type { ProactiveRoomConfig } from "../../config/muaddib-config.js";
 import type { MuaddibRuntime } from "../../runtime.js";
-import type { CommandConfig } from "./resolver.js";
-import { CommandResolver } from "./resolver.js";
+import { type CommandConfig, CommandResolver, pickModeModel } from "./resolver.js";
 import { RateLimiter } from "./rate-limiter.js";
 import type {
   CommandExecutor,
@@ -23,7 +22,6 @@ import type {
   CommandExecutorLogger,
   SendResponse,
 } from "./command-executor.js";
-import { pickModeModel } from "./command-executor.js";
 import { type RoomMessage, wrapSteeredMessage } from "../message.js";
 import { COST_SOURCE } from "../../cost/llm-call-type.js";
 import { sleep } from "../../utils/index.js";
