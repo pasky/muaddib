@@ -1577,6 +1577,249 @@ describe("RoomMessageHandler", () => {
     }
   });
 
+  it("!setmodel requires BYOK-active key", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+    const muaddibHome = await mkdtemp(join(tmpdir(), "muaddib-setmodel-"));
+
+    try {
+      const sent: string[] = [];
+      const handler = createHandler({
+        roomConfig: roomConfig as any,
+        history,
+        muaddibHome,
+        classifyMode: async () => "EASY_SERIOUS",
+        runnerFactory: () => { throw new Error("runner should not be called"); },
+      });
+
+      await handler.handleIncomingMessage(makeMessage("!setmodel !s openrouter:x-ai/grok-4", { isDirect: true }), {
+        sendResponse: async (text) => { sent.push(text); },
+      });
+
+      expect(sent[0]).toContain("requires an active BYOK key");
+    } finally {
+      await rm(muaddibHome, { recursive: true, force: true });
+      await history.close();
+    }
+  });
+
+  it("!setmodel sets and lists trigger model remaps for BYOK users", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+    const muaddibHome = await mkdtemp(join(tmpdir(), "muaddib-setmodel-"));
+
+    try {
+      const userArc = buildArc("libera", "alice");
+      AuthStorage.create(join(muaddibHome, "users", userArc, "auth.json")).set("openrouter", {
+        type: "api_key",
+        key: "sk-or-v1-user",
+      });
+
+      const sent: string[] = [];
+      const handler = createHandler({
+        roomConfig: roomConfig as any,
+        history,
+        muaddibHome,
+        classifyMode: async () => "EASY_SERIOUS",
+        runnerFactory: () => { throw new Error("runner should not be called"); },
+      });
+
+      // Set a remap
+      await handler.handleIncomingMessage(makeMessage("!setmodel !s openrouter:x-ai/grok-4", { isDirect: true }), {
+        sendResponse: async (text) => { sent.push(text); },
+      });
+      expect(sent[0]).toContain("remapped to openrouter:x-ai/grok-4");
+      expect(sent[0]).toContain("operator default: openai:gpt-4o-mini");
+
+      // List remaps
+      sent.length = 0;
+      await handler.handleIncomingMessage(makeMessage("!setmodel", { isDirect: true }), {
+        sendResponse: async (text) => { sent.push(text); },
+      });
+      expect(sent[0]).toContain("!s");
+      expect(sent[0]).toContain("openrouter:x-ai/grok-4");
+
+      // Clear remap
+      sent.length = 0;
+      await handler.handleIncomingMessage(makeMessage("!setmodel !s", { isDirect: true }), {
+        sendResponse: async (text) => { sent.push(text); },
+      });
+      expect(sent[0]).toContain("cleared model remap");
+    } finally {
+      await rm(muaddibHome, { recursive: true, force: true });
+      await history.close();
+    }
+  });
+
+  it("!setmodel rejects unknown triggers", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+    const muaddibHome = await mkdtemp(join(tmpdir(), "muaddib-setmodel-"));
+
+    try {
+      const userArc = buildArc("libera", "alice");
+      AuthStorage.create(join(muaddibHome, "users", userArc, "auth.json")).set("openrouter", {
+        type: "api_key",
+        key: "sk-or-v1-user",
+      });
+
+      const sent: string[] = [];
+      const handler = createHandler({
+        roomConfig: roomConfig as any,
+        history,
+        muaddibHome,
+        classifyMode: async () => "EASY_SERIOUS",
+        runnerFactory: () => { throw new Error("runner should not be called"); },
+      });
+
+      await handler.handleIncomingMessage(makeMessage("!setmodel !z openrouter:x-ai/grok-4", { isDirect: true }), {
+        sendResponse: async (text) => { sent.push(text); },
+      });
+      expect(sent[0]).toContain("unknown trigger");
+    } finally {
+      await rm(muaddibHome, { recursive: true, force: true });
+      await history.close();
+    }
+  });
+
+  it("!setmodel rejects invalid model specs", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+    const muaddibHome = await mkdtemp(join(tmpdir(), "muaddib-setmodel-"));
+
+    try {
+      const userArc = buildArc("libera", "alice");
+      AuthStorage.create(join(muaddibHome, "users", userArc, "auth.json")).set("openrouter", {
+        type: "api_key",
+        key: "sk-or-v1-user",
+      });
+
+      const sent: string[] = [];
+      const handler = createHandler({
+        roomConfig: roomConfig as any,
+        history,
+        muaddibHome,
+        classifyMode: async () => "EASY_SERIOUS",
+        runnerFactory: () => { throw new Error("runner should not be called"); },
+      });
+
+      await handler.handleIncomingMessage(makeMessage("!setmodel !s badmodel", { isDirect: true }), {
+        sendResponse: async (text) => { sent.push(text); },
+      });
+      expect(sent[0]).toContain("invalid model spec");
+    } finally {
+      await rm(muaddibHome, { recursive: true, force: true });
+      await history.close();
+    }
+  });
+
+  it("BYOK user remap overrides the mode model in agent invocation", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+    const muaddibHome = await mkdtemp(join(tmpdir(), "muaddib-byok-remap-"));
+
+    try {
+      const userArc = buildArc("libera", "alice");
+      AuthStorage.create(join(muaddibHome, "users", userArc, "auth.json")).set("openrouter", {
+        type: "api_key",
+        key: "sk-or-v1-user",
+      });
+
+      // Pre-set a trigger model remap
+      const { UserPolicyStore } = await import("../src/cost/user-policy-store.js");
+      const policyStore = new UserPolicyStore(muaddibHome);
+      policyStore.setTriggerModel(userArc, "!s", {
+        model: "openrouter:x-ai/grok-4",
+        systemDefaultAtSet: "openai:gpt-4o-mini",
+        setAt: "2026-04-16T12:00:00Z",
+      });
+
+      let runnerModel: string | null = null;
+      const sent: string[] = [];
+
+      const handler = createHandler({
+        roomConfig: roomConfig as any,
+        history,
+        muaddibHome,
+        authStorage: AuthStorage.inMemory({
+          openrouter: { type: "api_key", key: "sk-or-v1-operator" },
+        }),
+        classifyMode: async () => "EASY_SERIOUS",
+        runnerFactory: (input) => ({
+          prompt: async () => {
+            runnerModel = input.model;
+            const result = makeRunnerResult("done");
+            await input.onResponse(result.text);
+            return result;
+          },
+        }),
+      });
+
+      await handler.handleIncomingMessage(makeMessage("!s hello", { isDirect: true }), {
+        sendResponse: async (text) => { sent.push(text); },
+      });
+
+      // The remap model should be used (via OpenRouter remap)
+      expect(runnerModel).toBe("openrouter:x-ai/grok-4");
+    } finally {
+      await rm(muaddibHome, { recursive: true, force: true });
+      await history.close();
+    }
+  });
+
+  it("@model override takes precedence over BYOK trigger remap", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+    const muaddibHome = await mkdtemp(join(tmpdir(), "muaddib-byok-at-"));
+
+    try {
+      const userArc = buildArc("libera", "alice");
+      AuthStorage.create(join(muaddibHome, "users", userArc, "auth.json")).set("openrouter", {
+        type: "api_key",
+        key: "sk-or-v1-user",
+      });
+
+      const { UserPolicyStore } = await import("../src/cost/user-policy-store.js");
+      const policyStore = new UserPolicyStore(muaddibHome);
+      policyStore.setTriggerModel(userArc, "!s", {
+        model: "openrouter:x-ai/grok-4",
+        systemDefaultAtSet: "openai:gpt-4o-mini",
+        setAt: "2026-04-16T12:00:00Z",
+      });
+
+      let runnerModel: string | null = null;
+      const sent: string[] = [];
+
+      const handler = createHandler({
+        roomConfig: roomConfig as any,
+        history,
+        muaddibHome,
+        authStorage: AuthStorage.inMemory({
+          openrouter: { type: "api_key", key: "sk-or-v1-operator" },
+        }),
+        classifyMode: async () => "EASY_SERIOUS",
+        runnerFactory: (input) => ({
+          prompt: async () => {
+            runnerModel = input.model;
+            const result = makeRunnerResult("done");
+            await input.onResponse(result.text);
+            return result;
+          },
+        }),
+      });
+
+      // @model should win over the remap
+      await handler.handleIncomingMessage(makeMessage("!s @openrouter:google/gemini-flash hello", { isDirect: true }), {
+        sendResponse: async (text) => { sent.push(text); },
+      });
+
+      expect(runnerModel).toBe("openrouter:google/gemini-flash");
+    } finally {
+      await rm(muaddibHome, { recursive: true, force: true });
+      await history.close();
+    }
+  });
+
   it("refuses over-budget free users before runner creation", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();

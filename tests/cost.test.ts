@@ -278,6 +278,184 @@ describe("UserPolicyStore", () => {
       rmSync(home, { recursive: true, force: true });
     }
   });
+
+  describe("triggerModels CRUD", () => {
+    it("returns null when no trigger model is set", () => {
+      const home = makeTempHome();
+      try {
+        const store = new UserPolicyStore(home);
+        expect(store.getTriggerModel("libera#alice", "!s")).toBeNull();
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
+
+    it("sets and retrieves a trigger model", () => {
+      const home = makeTempHome();
+      const userArc = "libera#alice";
+      try {
+        const store = new UserPolicyStore(home);
+        store.setTriggerModel(userArc, "!s", {
+          model: "openrouter:x-ai/grok-4",
+          systemDefaultAtSet: "openrouter:xiaomi/mimo-v2-omni",
+          setAt: "2026-04-16T12:00:00Z",
+        });
+        const entry = store.getTriggerModel(userArc, "!s");
+        expect(entry).toEqual({
+          model: "openrouter:x-ai/grok-4",
+          systemDefaultAtSet: "openrouter:xiaomi/mimo-v2-omni",
+          setAt: "2026-04-16T12:00:00Z",
+        });
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
+
+    it("preserves operator-managed fields on write", () => {
+      const home = makeTempHome();
+      const userArc = "libera#alice";
+      try {
+        const dir = join(home, "users", userArc);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, "policy.json"), JSON.stringify({ exempt: true, freeTierBudgetUsd: 5 }));
+
+        const store = new UserPolicyStore(home);
+        store.setTriggerModel(userArc, "!s", {
+          model: "openrouter:x-ai/grok-4",
+          systemDefaultAtSet: "openrouter:xiaomi/mimo-v2-omni",
+          setAt: "2026-04-16T12:00:00Z",
+        });
+
+        const raw = JSON.parse(readFileSync(join(dir, "policy.json"), "utf-8"));
+        expect(raw.exempt).toBe(true);
+        expect(raw.freeTierBudgetUsd).toBe(5);
+        expect(raw.triggerModels["!s"].model).toBe("openrouter:x-ai/grok-4");
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
+
+    it("clears a single trigger model", () => {
+      const home = makeTempHome();
+      const userArc = "libera#alice";
+      try {
+        const store = new UserPolicyStore(home);
+        store.setTriggerModel(userArc, "!s", {
+          model: "openrouter:x-ai/grok-4",
+          systemDefaultAtSet: "op-default",
+          setAt: "2026-04-16T12:00:00Z",
+        });
+        store.setTriggerModel(userArc, "!a", {
+          model: "openrouter:anthropic/claude-sonnet-4.5",
+          systemDefaultAtSet: "op-default-a",
+          setAt: "2026-04-16T12:00:00Z",
+        });
+        const existed = store.clearTriggerModel(userArc, "!s");
+        expect(existed).toBe(true);
+        expect(store.getTriggerModel(userArc, "!s")).toBeNull();
+        expect(store.getTriggerModel(userArc, "!a")).not.toBeNull();
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
+
+    it("returns false when clearing nonexistent trigger model", () => {
+      const home = makeTempHome();
+      try {
+        const store = new UserPolicyStore(home);
+        expect(store.clearTriggerModel("libera#alice", "!s")).toBe(false);
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
+
+    it("clears all trigger models", () => {
+      const home = makeTempHome();
+      const userArc = "libera#alice";
+      try {
+        const store = new UserPolicyStore(home);
+        store.setTriggerModel(userArc, "!s", {
+          model: "m1", systemDefaultAtSet: "d1", setAt: "2026-01-01T00:00:00Z",
+        });
+        store.setTriggerModel(userArc, "!a", {
+          model: "m2", systemDefaultAtSet: "d2", setAt: "2026-01-01T00:00:00Z",
+        });
+        const count = store.clearAllTriggerModels(userArc);
+        expect(count).toBe(2);
+        expect(store.listTriggerModels(userArc)).toEqual({});
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
+
+    it("removes triggerModels key from JSON when all entries cleared", () => {
+      const home = makeTempHome();
+      const userArc = "libera#alice";
+      try {
+        const store = new UserPolicyStore(home);
+        store.setTriggerModel(userArc, "!s", {
+          model: "m1", systemDefaultAtSet: "d1", setAt: "2026-01-01T00:00:00Z",
+        });
+        store.clearTriggerModel(userArc, "!s");
+        const dir = join(home, "users", userArc);
+        const raw = JSON.parse(readFileSync(join(dir, "policy.json"), "utf-8"));
+        expect(raw.triggerModels).toBeUndefined();
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
+
+    it("markSystemDefaultNotified updates systemDefaultAtSet", () => {
+      const home = makeTempHome();
+      const userArc = "libera#alice";
+      try {
+        const store = new UserPolicyStore(home);
+        store.setTriggerModel(userArc, "!s", {
+          model: "openrouter:x-ai/grok-4",
+          systemDefaultAtSet: "old-default",
+          setAt: "2026-04-16T12:00:00Z",
+        });
+        store.markSystemDefaultNotified(userArc, "!s", "new-default");
+        const entry = store.getTriggerModel(userArc, "!s");
+        expect(entry!.systemDefaultAtSet).toBe("new-default");
+        expect(entry!.model).toBe("openrouter:x-ai/grok-4");
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
+
+    it("validates triggerModels entries on load", () => {
+      const home = makeTempHome();
+      const userArc = "libera#alice";
+      try {
+        const dir = join(home, "users", userArc);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, "policy.json"), JSON.stringify({
+          triggerModels: { "!s": { model: 42 } },
+        }));
+        const store = new UserPolicyStore(home);
+        expect(() => store.listTriggerModels(userArc)).toThrow(/triggerModels\['!s'\]/);
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
+
+    it("rejects trigger keys not starting with !", () => {
+      const home = makeTempHome();
+      const userArc = "libera#alice";
+      try {
+        const dir = join(home, "users", userArc);
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, "policy.json"), JSON.stringify({
+          triggerModels: { "bad": { model: "m", systemDefaultAtSet: "d", setAt: "t" } },
+        }));
+        const store = new UserPolicyStore(home);
+        expect(() => store.listTriggerModels(userArc)).toThrow(/must start with '!'/);
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+      }
+    });
+  });
 });
 
 describe("checkUserBudget", () => {

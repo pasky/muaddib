@@ -42,7 +42,7 @@ import {
   parseSetKeyArgs,
   UserKeyStore,
 } from "../../cost/user-key-store.js";
-import { UserPolicyStore } from "../../cost/user-policy-store.js";
+import { UserPolicyStore, type TriggerModelEntry } from "../../cost/user-policy-store.js";
 import { UserCostLedger } from "../../cost/user-cost-ledger.js";
 import { withPersistedCostSpan, recordUsage, withCostSpan, currentCostSpan } from "../../cost/cost-span.js";
 import { LLM_CALL_TYPE, COST_SOURCE, type CostSource } from "../../cost/llm-call-type.js";
@@ -441,6 +441,9 @@ export class CommandExecutor {
       case "!balance":
         await this.handleBalanceCommand(message, deliver);
         return;
+      case "!setmodel":
+        await this.handleSetModelCommand(message, resolved.queryText, deliver);
+        return;
       default:
         await deliver(`${message.nick}: Unknown builtin command '${resolved.builtinCommand}'.`);
     }
@@ -537,6 +540,125 @@ export class CommandExecutor {
     await deliver(`${message.nick}: free tier usage is $${spent.toFixed(4)} / $${policy.freeTierBudgetUsd.toFixed(2)} in the last ${policy.freeTierWindowHours}h; $${remaining.toFixed(4)} remaining.\n${byokGuide}`);
   }
 
+  private async handleSetModelCommand(
+    message: RoomMessage,
+    queryText: string,
+    deliver: (text: string) => Promise<void>,
+  ): Promise<void> {
+    const userArc = buildUserArc(message.serverTag, message.nick);
+
+    // Require BYOK-active
+    const budgetStatus = await checkUserBudget({
+      costPolicy: this.runtime.config.getCostPolicyConfig(),
+      userArc,
+      keyStore: this.userKeyStore,
+      policyStore: this.userPolicyStore,
+      ledger: this.userCostLedger,
+    });
+    if (budgetStatus.state !== "byok") {
+      await deliver(`${message.nick}: !setmodel requires an active BYOK key. Set one first with !setkey openrouter <key>.`);
+      return;
+    }
+
+    const tokens = queryText.trim().split(/\s+/).filter(Boolean);
+
+    // No args: list current remaps
+    if (tokens.length === 0) {
+      await this.handleSetModelList(userArc, message.nick, deliver);
+      return;
+    }
+
+    // "clear" — clear all remaps
+    if (tokens.length === 1 && tokens[0] === "clear") {
+      const count = this.userPolicyStore.clearAllTriggerModels(userArc);
+      if (count === 0) {
+        await deliver(`${message.nick}: no model remaps to clear.`);
+      } else {
+        await deliver(`${message.nick}: cleared ${count} model remap(s). Back to operator defaults.`);
+      }
+      return;
+    }
+
+    const trigger = tokens[0];
+
+    // Validate trigger
+    if (!this.resolver.triggerToMode[trigger]) {
+      const validTriggers = Object.keys(this.resolver.triggerToMode).join(", ");
+      await deliver(`${message.nick}: unknown trigger '${trigger}'. Valid triggers: ${validTriggers}`);
+      return;
+    }
+
+    // Single trigger arg: clear that remap
+    if (tokens.length === 1) {
+      const existed = this.userPolicyStore.clearTriggerModel(userArc, trigger);
+      if (existed) {
+        await deliver(`${message.nick}: cleared model remap for ${trigger}. Back to operator default.`);
+      } else {
+        await deliver(`${message.nick}: no model remap set for ${trigger}.`);
+      }
+      return;
+    }
+
+    // Two args: set remap
+    const modelInput = tokens[1];
+    try {
+      parseModelSpec(modelInput);
+    } catch {
+      await deliver(`${message.nick}: invalid model spec '${modelInput}'. Expected format: provider:model (e.g. openrouter:x-ai/grok-4).`);
+      return;
+    }
+
+    // Compute operator default for this trigger
+    const modeKey = this.resolver.triggerToMode[trigger];
+    const modeConfig = this.commandConfig.modes[modeKey];
+    const triggerOverrides = this.resolver.triggerOverrides[trigger] ?? {};
+    const operatorDefault =
+      (triggerOverrides.model as string | undefined) ??
+      pickModeModel(modeConfig.model) ??
+      "(none)";
+
+    const entry: TriggerModelEntry = {
+      model: modelInput,
+      systemDefaultAtSet: operatorDefault,
+      setAt: new Date().toISOString(),
+    };
+    this.userPolicyStore.setTriggerModel(userArc, trigger, entry);
+    await deliver(
+      `${message.nick}: ${trigger} remapped to ${modelInput} (operator default: ${operatorDefault}). Clear with: !setmodel ${trigger}`,
+    );
+  }
+
+  private async handleSetModelList(
+    userArc: string,
+    nick: string,
+    deliver: (text: string) => Promise<void>,
+  ): Promise<void> {
+    const models = this.userPolicyStore.listTriggerModels(userArc);
+    const entries = Object.entries(models);
+    if (entries.length === 0) {
+      await deliver(`${nick}: no model remaps set. Use !setmodel <trigger> <model> to remap a prefix (e.g. !setmodel !s openrouter:x-ai/grok-4). Use !h to see operator defaults.`);
+      return;
+    }
+
+    const lines = entries.map(([trigger, entry]) => {
+      const modeKey = this.resolver.triggerToMode[trigger];
+      const modeConfig = modeKey ? this.commandConfig.modes[modeKey] : undefined;
+      const triggerOverrides = this.resolver.triggerOverrides[trigger] ?? {};
+      const currentDefault =
+        (triggerOverrides.model as string | undefined) ??
+        pickModeModel(modeConfig?.model) ??
+        "(none)";
+
+      let line = `  ${trigger} → ${entry.model}`;
+      if (currentDefault !== entry.systemDefaultAtSet) {
+        line += ` ⚠ operator default changed (was ${entry.systemDefaultAtSet}, now ${currentDefault})`;
+      }
+      return line;
+    });
+
+    await deliver(`${nick}: your BYOK model remaps:\n${lines.join("\n")}\nTo clear: !setmodel <trigger>. To see operator defaults: !h`);
+  }
+
   /**
    * Execute a command: resolve mode, build context, run agent, process result,
    * persist, and deliver response.
@@ -608,8 +730,36 @@ export class CommandExecutor {
       budgetStatus.state === "byok" && budgetStatus.openRouterKey
         ? createOpenRouterAuthStorageOverride(this.runtime.authStorage, budgetStatus.openRouterKey)
         : this.runtime.authStorage;
+
+    // ── BYOK user model remap ──
+    let remappedModelSpec = modelSpec;
+    let driftWarning: string | null = null;
+    if (budgetStatus.state === "byok" && !resolved.modelOverride && trigger) {
+      const userRemap = this.userPolicyStore.getTriggerModel(userArc, trigger);
+      if (userRemap) {
+        remappedModelSpec = userRemap.model;
+        logger.debug(
+          "Applying BYOK user model remap",
+          `trigger=${trigger}`,
+          `remap=${userRemap.model}`,
+          `operatorDefault=${modelSpec}`,
+        );
+
+        // Check for operator default drift
+        const triggerOverrides = this.resolver.triggerOverrides[trigger] ?? {};
+        const currentOperatorDefault =
+          (triggerOverrides.model as string | undefined) ??
+          pickModeModel(modeConfig.model) ??
+          "(none)";
+        if (currentOperatorDefault !== userRemap.systemDefaultAtSet) {
+          driftWarning = `${message.nick}: heads up \u2014 operator changed default for ${trigger} from ${userRemap.systemDefaultAtSet} to ${currentOperatorDefault}. Your remap ${userRemap.model} is still active. Clear with: /msg <me> !setmodel ${trigger}`;
+          this.userPolicyStore.markSystemDefaultNotified(userArc, trigger, currentOperatorDefault);
+        }
+      }
+    }
+
     const effectiveModelSpec = budgetStatus.state === "byok"
-      ? remapToOpenRouter(modelSpec)
+      ? remapToOpenRouter(remappedModelSpec)
       : modelSpec;
 
     // ── Build context & invoke agent ──
@@ -741,6 +891,11 @@ export class CommandExecutor {
             // Send optional human-readable followups for expensive runs/milestones.
             if (usage && usage.cost.total > 0) {
               await this.emitCostFollowups(message, usage, toolCallsCount, deliver);
+            }
+
+            // Notify BYOK user if operator default drifted since they set their remap.
+            if (driftWarning) {
+              await deliver(driftWarning);
             }
           },
           triggerTs,

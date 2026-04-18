@@ -55,7 +55,7 @@ export class CommandResolver {
     private readonly helpToken: string,
     private readonly flagTokens: Set<string>,
     private readonly modelNameFormatter: (value: unknown) => string,
-    private readonly builtinTokens: Set<string> = new Set(["!setkey", "!balance"]),
+    private readonly builtinTokens: Set<string> = new Set(["!setkey", "!balance", "!setmodel"]),
   ) {
     for (const [modeKey, modeConfig] of Object.entries(commandConfig.modes)) {
       const triggers = modeConfig.triggers;
@@ -135,6 +135,10 @@ export class CommandResolver {
         }
         modeToken = token;
         consumed = i + 1;
+        // Builtin commands consume everything after as arguments — stop prefix parsing.
+        if (this.builtinTokens.has(token)) {
+          break;
+        }
         continue;
       }
 
@@ -307,7 +311,7 @@ export class CommandResolver {
 
     return `${
       `default is ${defaultDescription}; modes: ${modeParts}; `
-    }use @modelid to override model; !c disables context; !balance shows your budget status`;
+    }use @modelid to override model; !c disables context; !balance shows your budget status; !setmodel remaps prefixes to your own model (BYOK)`;
   }
 
   async resolve(input: {
