@@ -89,6 +89,16 @@ function releaseVmSlot(): void {
 
 export type SupportedDnsMode = NonNullable<GondolinConfig["dnsMode"]>;
 
+export function resolveVmMemoryMb(value: unknown): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Number.isInteger(value) || (value as number) < 1) {
+    throw new Error(
+      `agent.tools.gondolin.vmMemoryMb must be a positive integer, got ${JSON.stringify(value)}`,
+    );
+  }
+  return value as number;
+}
+
 export function resolveDnsMode(dnsMode: unknown): SupportedDnsMode {
   if (dnsMode === undefined) return "synthetic";
   if (dnsMode === "open" || dnsMode === "synthetic") return dnsMode;
@@ -429,7 +439,13 @@ async function ensureVm(opts: VmSessionOptions): Promise<VM> {
         httpHooks,
         ...(Object.keys(combinedEnv).length > 0 ? { env: combinedEnv } : {}),
         dns: { mode: dnsMode },
-        sandbox: { debug: ["protocol"], ...(guestDir ? { imagePath: guestDir } : {}) },
+        sandbox: {
+          debug: ["protocol"],
+          ...(guestDir ? { imagePath: guestDir } : {}),
+          ...(resolveVmMemoryMb(config.vmMemoryMb) != null
+            ? { memory: `${resolveVmMemoryMb(config.vmMemoryMb)}M` }
+            : {}),
+        },
         debugLog,
       };
 

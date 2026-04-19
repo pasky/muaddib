@@ -100,6 +100,13 @@ export interface GondolinConfig {
    */
   workspaceSizeMb?: number;
   /**
+   * RAM allocated to each QEMU VM in megabytes.
+   * Passed to QEMU via gondolin's `sandbox.memory` option using QEMU syntax
+   * (e.g. 1024 → "1024M").
+   * Default: 1024 (1 GB).
+   */
+  vmMemoryMb?: number;
+  /**
    * Reusable named Gondolin config fragments.
    */
   profiles?: Record<string, GondolinProfileConfig>;

@@ -26,6 +26,7 @@ import {
   resetGondolinVmCache,
   closeAllVms,
   getVmSlotState,
+  resolveVmMemoryMb,
 } from "../src/agent/gondolin/vm.js";
 import { resolveUrlAllowRegexes } from "../src/agent/gondolin/env.js";
 
@@ -1905,5 +1906,57 @@ describe("gondolin — sandbox.imagePath for checkpoint invalidation", () => {
       expect(opts.sandbox?.imagePath).toBeUndefined();
     }
     expect(opts.sandbox?.debug).toEqual(["protocol"]);
+  });
+});
+
+// ── vmMemoryMb config → sandbox.memory passthrough ─────────────────────────
+
+describe("resolveVmMemoryMb", () => {
+  it("returns undefined for undefined/null", () => {
+    expect(resolveVmMemoryMb(undefined)).toBeUndefined();
+    expect(resolveVmMemoryMb(null)).toBeUndefined();
+  });
+
+  it("returns the value for a positive integer", () => {
+    expect(resolveVmMemoryMb(512)).toBe(512);
+    expect(resolveVmMemoryMb(2048)).toBe(2048);
+  });
+
+  it("throws for non-integer or non-positive values", () => {
+    expect(() => resolveVmMemoryMb(0)).toThrow(/positive integer/);
+    expect(() => resolveVmMemoryMb(-1)).toThrow(/positive integer/);
+    expect(() => resolveVmMemoryMb(1.5)).toThrow(/positive integer/);
+    expect(() => resolveVmMemoryMb("512")).toThrow(/positive integer/);
+  });
+});
+
+describe("gondolin — vmMemoryMb passthrough to sandbox.memory", () => {
+  it("passes vmMemoryMb as sandbox.memory in QEMU syntax", async () => {
+    const fakeVm = makeFakeVm();
+    await registerFakeVm(fakeVm);
+
+    const config = { ...gondolinConfig, vmMemoryMb: 2048 };
+    const { tools } = createGondolinTools({ arc: "mem-arc", config });
+    const bashTool = tools.find((t) => t.name === "bash")!;
+    await bashTool.execute("id", { command: "echo hi" }, new AbortController().signal, () => {});
+
+    const gondolin = await import("@earendil-works/gondolin");
+    // @ts-expect-error test-only
+    const opts = gondolin.__lastVmOptions.value as { sandbox?: { memory?: string } };
+    expect(opts.sandbox?.memory).toBe("2048M");
+  });
+
+  it("omits sandbox.memory when vmMemoryMb is not set", async () => {
+    const fakeVm = makeFakeVm();
+    await registerFakeVm(fakeVm);
+
+    const { tools } = createGondolinTools({ arc: "nomem-arc", config: gondolinConfig });
+    const bashTool = tools.find((t) => t.name === "bash")!;
+    await bashTool.execute("id", { command: "echo hi" }, new AbortController().signal, () => {});
+
+    const gondolin = await import("@earendil-works/gondolin");
+    // @ts-expect-error test-only
+    const opts = gondolin.__lastVmOptions.value as { sandbox?: { memory?: string } };
+    expect(opts.sandbox?.memory).toBeUndefined();
   });
 });
