@@ -200,7 +200,7 @@
         "ratePeriod": 60,
         "debounceSeconds": 15.0,
         "models": {
-          "serious": "anthropic:claude-opus-4-7",
+          "serious": "anthropic:claude-opus-4-5",
           "validation": [
             "openai:gpt-5-mini"
           ]
