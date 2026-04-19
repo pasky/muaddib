@@ -13,6 +13,7 @@ import { ChronicleLifecycleTs } from "../src/chronicle/lifecycle.js";
 import { recordUsage } from "../src/cost/cost-span.js";
 import { COST_SOURCE, LLM_CALL_TYPE } from "../src/cost/llm-call-type.js";
 import { AutoChroniclerTs } from "../src/rooms/autochronicler.js";
+import { _buildEventMessage } from "../src/events/watcher.js";
 import { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { buildArc } from "../src/rooms/message.js";
 import type { RoomMessage } from "../src/rooms/message.js";
@@ -1017,5 +1018,83 @@ describe("ChatHistoryStore – in-flight trigger annotation", () => {
       (m) => typeof m.content === "string" && m.content.includes("bob"),
     );
     expect(bobMsg!.content).not.toContain("<meta>");
+  });
+
+  it("does not annotate event triggers even when their run is unresolved", async () => {
+    const store = createTempHistoryStore();
+    await store.initialize();
+
+    const eventBody = _buildEventMessage("/events/daily.json", {
+      type: "periodic",
+      text: "!a summary please",
+      schedule: "0 21 * * *",
+    });
+    await store.addMessage(roomMsg("event", eventBody), { selfRun: true });
+    await tick();
+    await store.addMessage(roomMsg("alice", "hi"));
+
+    const context = await store.getContext("test###test");
+    const eventMsg = context.find(
+      (m) => typeof m.content === "string" && m.content.includes("<event>"),
+    );
+    expect(eventMsg).toBeDefined();
+    expect(eventMsg!.content).not.toContain("already in progress");
+  });
+});
+
+describe("ChatHistoryStore – event trigger compaction", () => {
+  const eventPath = "/events/brmlab-calendar-daily.json";
+  const taskText = "!a Denní souhrn brmlab událostí";
+  const makeEvent = () =>
+    _buildEventMessage(eventPath, {
+      type: "periodic",
+      text: taskText,
+      schedule: "0 21 * * *",
+    });
+
+  it("strips separator + async-launch preamble from non-last event triggers, keeping [EVENT:...] body", async () => {
+    const store = createTempHistoryStore();
+    await store.initialize();
+
+    await store.addMessage(roomMsg("event", makeEvent()), { selfRun: true });
+    await tick();
+    await store.addMessage(roomMsg("sladidlostevia", "https://example.com"));
+
+    const context = await store.getContext("test###test");
+    const eventMsg = context.find(
+      (m) => typeof m.content === "string" && m.content.includes("<event>"),
+    );
+    expect(eventMsg).toBeDefined();
+    const content = eventMsg!.content as string;
+
+    // EVENT header + task body must survive.
+    expect(content).toContain(`[EVENT:${eventPath}`);
+    expect(content).toContain(taskText);
+    // The `----------` separator and the async-launch preamble must not.
+    expect(content).not.toContain("----------");
+    expect(content).not.toMatch(/launched asynchronously/);
+  });
+
+  it("preserves the last event trigger verbatim (current turn query)", async () => {
+    const store = createTempHistoryStore();
+    await store.initialize();
+
+    await store.addMessage(roomMsg("alice", "earlier chat"));
+    await tick();
+    const eventBody = makeEvent();
+    await store.addMessage(roomMsg("event", eventBody), { selfRun: true });
+
+    const context = await store.getContext("test###test");
+    const eventMsg = context.find(
+      (m) => typeof m.content === "string" && m.content.includes("<event>"),
+    );
+    expect(eventMsg).toBeDefined();
+    const content = eventMsg!.content as string;
+
+    // Full verbatim body (preamble + EVENT line + task) must be present.
+    expect(content).toContain("----------");
+    expect(content).toMatch(/launched asynchronously/);
+    expect(content).toContain(`[EVENT:${eventPath}`);
+    expect(content).toContain(taskText);
   });
 });

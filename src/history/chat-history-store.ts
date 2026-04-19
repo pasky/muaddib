@@ -189,7 +189,9 @@ export class ChatHistoryStore {
     const lines = threadId
       ? await this.readThreadContext(arc, threadId, inferenceLimit)
       : await this.readMainContext(arc, inferenceLimit);
-    return this.formatContextLines(this.annotateInFlightTriggers(lines, options?.excludeRunTs));
+    return this.formatContextLines(
+      this.compactEventTriggers(this.annotateInFlightTriggers(lines, options?.excludeRunTs)),
+    );
   }
 
   async getFullHistory(
@@ -603,7 +605,8 @@ export class ChatHistoryStore {
         !line.run ||
         line.run !== line.ts ||
         resolvedRuns.has(line.run) ||
-        line.ts === excludeRunTs
+        line.ts === excludeRunTs ||
+        line.n === "event"
       ) {
         return line;
       }
@@ -612,6 +615,29 @@ export class ChatHistoryStore {
         ...line,
         m: (line.m ?? "") + "\n<meta>(My response to this message is already in progress.)</meta>",
       };
+    });
+  }
+
+  /**
+   * Compact old event trigger lines in context so the bulky `[EVENT:...]`
+   * preamble + task body doesn't leak into every future context build.
+   *
+   * - Only lines with `n === "event"` are touched.
+   * - If the very last line is an event, it's preserved verbatim (the current
+   *   turn's event trigger — sliced off as the query by callers).
+   * - All other event lines are stripped of the `----------` separator and the
+   *   async-launch `<meta>..</meta>` preamble, leaving only the `[EVENT:...]`
+   *   instruction body so past events remain identifiable in context without
+   *   their now-irrelevant framing.
+   */
+  private compactEventTriggers(lines: JsonlLine[]): JsonlLine[] {
+    const lastIdx = lines.length - 1;
+    return lines.map((line, idx) => {
+      if (line.n !== "event" || idx === lastIdx) return line;
+      const raw = line.m ?? "";
+      const eventIdx = raw.indexOf("[EVENT:");
+      if (eventIdx < 0) return line;
+      return { ...line, m: raw.slice(eventIdx) };
     });
   }
 }
