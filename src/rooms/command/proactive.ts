@@ -14,7 +14,7 @@ import { formatUtcTime, messageText } from "../../utils/index.js";
 import { responseText } from "../../agent/message.js";
 import type { ProactiveRoomConfig } from "../../config/muaddib-config.js";
 import type { MuaddibRuntime } from "../../runtime.js";
-import { type CommandConfig, CommandResolver, pickModeModel } from "./resolver.js";
+import { type CommandConfig, CommandResolver } from "./resolver.js";
 import { RateLimiter } from "./rate-limiter.js";
 import type {
   CommandExecutor,
@@ -93,7 +93,7 @@ export function buildProactiveConfig(
     interjectThreshold: rawProactive.interjectThreshold ?? 7,
     models: {
       validation: rawProactive.models?.validation ?? [],
-      serious: rawProactive.models?.serious ?? pickModeModel(commandConfig.modes.serious?.model) ?? "",
+      serious: rawProactive.models?.serious ?? commandConfig.modes.serious?.model ?? "",
     },
     prompts: {
       interject: rawProactive.prompts?.interject ?? "",

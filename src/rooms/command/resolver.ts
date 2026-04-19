@@ -4,15 +4,6 @@ import { buildArc, type RoomMessage } from "../message.js";
 
 export type { CommandConfig, ModeConfig };
 
-export function pickModeModel(model: string | string[] | undefined): string | null {
-  if (!model) {
-    return null;
-  }
-  if (Array.isArray(model)) {
-    return model[0] ?? null;
-  }
-  return model;
-}
 
 export interface ParsedPrefix {
   noContext: boolean;

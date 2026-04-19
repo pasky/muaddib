@@ -19,7 +19,7 @@ import {
 import type { UserPolicyStore, TriggerModelEntry } from "../../cost/user-policy-store.js";
 import type { UserCostLedger } from "../../cost/user-cost-ledger.js";
 import type { RoomMessage } from "../message.js";
-import { pickModeModel, type CommandConfig } from "./resolver.js";
+import type { CommandConfig } from "./resolver.js";
 
 // ── Builtin command handlers ──
 
@@ -205,7 +205,7 @@ export async function handleSetModelCommand(
   const overrides = triggerOverrides[trigger] ?? {};
   const operatorDefault =
     (overrides.model as string | undefined) ??
-    pickModeModel(modeConfig.model) ??
+    modeConfig.model ??
     "(none)";
 
   const entry: TriggerModelEntry = {
@@ -241,7 +241,7 @@ async function listTriggerModels(
     const overrides = triggerOverrides[trigger] ?? {};
     const currentDefault =
       (overrides.model as string | undefined) ??
-      pickModeModel(modeConfig?.model) ??
+      modeConfig?.model ??
       "(none)";
 
     let line = `  ${trigger} → ${entry.model}`;
@@ -274,7 +274,7 @@ export function resolveByokRemap(
   nick: string,
   trigger: string,
   modelSpec: string,
-  modeConfig: { model?: string | string[] },
+  modeConfig: { model?: string },
   logger?: { debug: (...args: string[]) => void },
 ): ByokRemapResult {
   const userRemap = policyStore.getTriggerModel(userArc, trigger);
@@ -294,7 +294,7 @@ export function resolveByokRemap(
   const overrides = triggerOverrides[trigger] ?? {};
   const currentOperatorDefault =
     (overrides.model as string | undefined) ??
-    pickModeModel(modeConfig.model) ??
+    modeConfig.model ??
     "(none)";
 
   let driftWarning: string | null = null;

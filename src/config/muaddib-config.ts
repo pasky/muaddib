@@ -192,7 +192,7 @@ interface ChroniclerConfig {
 // ── Mode / Command config ──────────────────────────────────────────────
 
 export interface ModeConfig {
-  model?: string | string[];
+  model?: string;
   historySize?: number;
   reasoningEffort?: string;
   allowedTools?: string[];

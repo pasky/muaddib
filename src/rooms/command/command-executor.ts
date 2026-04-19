@@ -52,7 +52,6 @@ import { createModeClassifier } from "./classifier.js";
 import { RateLimiter } from "./rate-limiter.js";
 import {
   CommandResolver,
-  pickModeModel,
   type CommandConfig,
 } from "./resolver.js";
 import { generateToolSummaryFromSession } from "./tool-summary.js";
@@ -378,7 +377,7 @@ export class CommandExecutor {
     const modelSpec =
       resolved.modelOverride ??
       resolved.runtime.model ??
-      pickModeModel(modeConfig.model) ??
+      modeConfig.model ??
       null;
 
     if (!modelSpec) {
@@ -1115,7 +1114,7 @@ export class CommandExecutor {
       const triggerOverrideModel = this.resolver.triggerOverrides[trigger]?.model as string | undefined;
       const effectiveModel =
         triggerOverrideModel ??
-        (modeKey === mode && modelOverride ? modelOverride : pickModeModel(this.commandConfig.modes[modeKey].model));
+        (modeKey === mode && modelOverride ? modelOverride : this.commandConfig.modes[modeKey].model);
       triggerModelVars[`${trigger}_model`] = modelStrCore(effectiveModel ?? "");
     }
 
