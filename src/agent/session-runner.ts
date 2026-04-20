@@ -253,6 +253,16 @@ export class SessionRunner {
         (suffix) => { responseSuffix = `${responseSuffix} ${suffix}`.trim(); },
       );
 
+      // Drain any steering messages that raced with the agent loop's final
+      // getSteeringMessages() poll.  pi-agent-core polls exactly once per turn,
+      // right after turn_end; a steer() call that arrives between that poll and
+      // the agent loop exiting would otherwise be orphaned in the queue.  Each
+      // continue() re-runs the loop with the drained messages and exposes
+      // another (narrower) race window — loop until the queue settles.
+      while (agent.hasQueuedMessages()) {
+        await agent.continue();
+      }
+
       const EMPTY_RETRY_DELAYS_MS = [5_000, 20_000, 60_000];
       // Treat "[internal monologue]" as empty — these are suppressed by
       // cleanResponseText in command-executor.ts, so the user would see nothing.

@@ -37,7 +37,11 @@ function makeUsage(multiplier = 1): Usage {
 interface MockSessionCtx {
   session: any;
   callbacks: Array<(event: any) => void>;
-  agent: { state: { model: any } };
+  agent: {
+    state: { model: any };
+    hasQueuedMessages: ReturnType<typeof vi.fn>;
+    continue: ReturnType<typeof vi.fn>;
+  };
   ensureProviderKey: ReturnType<typeof vi.fn>;
 }
 
@@ -55,7 +59,11 @@ function makeMockSession(opts: {
     prompt: vi.fn(),
   };
   if (opts.dispose) session.dispose = opts.dispose;
-  const agent = { state: { model: null as any } };
+  const agent = {
+    state: { model: null as any },
+    hasQueuedMessages: vi.fn(() => false),
+    continue: vi.fn(async () => {}),
+  };
   const ensureProviderKey = vi.fn(async () => {});
   const ctx: MockSessionCtx = { session, callbacks, agent, ensureProviderKey };
 
@@ -236,6 +244,55 @@ describe("SessionRunner", () => {
     expect(result.refusalFallbackModel).toBe("anthropic:claude-sonnet-4");
     expect(ctx.ensureProviderKey).toHaveBeenCalledWith("anthropic");
     expect(ctx.agent.state.model).toEqual({ provider: "anthropic", id: "claude-sonnet-4" });
+  });
+
+  it("drains steering messages that raced with the agent loop's final poll", async () => {
+    // Simulate: agent's final turn_end polled the steering queue when empty,
+    // then a steer() arrived and was enqueued into the (now-terminated) agent.
+    // session-runner must notice and call agent.continue() to drain it before
+    // returning, so the message is not orphaned.
+    const ctx = makeMockSession({
+      messages: [{ role: "assistant", content: [{ type: "text", text: "first reply" }], usage: makeUsage(), stopReason: "stop" }],
+    });
+
+    // First hasPendingMessages() call (after initial session.prompt) reports a
+    // queued steer; continue() drains it and appends a follow-up assistant
+    // response; the next hasPendingMessages() returns false and the loop exits.
+    ctx.agent.hasQueuedMessages
+      .mockReturnValueOnce(true)
+      .mockReturnValue(false);
+    ctx.agent.continue.mockImplementation(async () => {
+      ctx.session.messages.push({
+        role: "user", content: [{ type: "text", text: "slow" }],
+      });
+      ctx.session.messages.push({
+        role: "assistant", content: [{ type: "text", text: "second reply" }],
+        usage: makeUsage(), stopReason: "stop",
+      });
+      ctx.callbacks.forEach((cb) => cb({ type: "message_end", message: ctx.session.messages.at(-1) }));
+      ctx.callbacks.forEach((cb) => cb({ type: "turn_end" }));
+    });
+
+    const deliveredTexts: string[] = [];
+    const runner = makeRunner({ onResponse: (text: string) => { deliveredTexts.push(text); } });
+    const result = await runner.prompt("hello");
+
+    expect(ctx.agent.continue).toHaveBeenCalledTimes(1);
+    // The late-arriving steer's response is what the user sees last.
+    expect(result.text).toBe("second reply");
+    expect(deliveredTexts).toContain("second reply");
+  });
+
+  it("does not call agent.continue() when no steering is queued", async () => {
+    const ctx = makeMockSession({
+      messages: [{ role: "assistant", content: [{ type: "text", text: "reply" }], usage: makeUsage(), stopReason: "stop" }],
+    });
+
+    const runner = makeRunner();
+    await runner.prompt("hello");
+
+    expect(ctx.agent.hasQueuedMessages).toHaveBeenCalled();
+    expect(ctx.agent.continue).not.toHaveBeenCalled();
   });
 
   it("defers toolSet.dispose to session.dispose on success", async () => {
