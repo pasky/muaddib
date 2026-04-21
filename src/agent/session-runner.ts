@@ -253,12 +253,7 @@ export class SessionRunner {
         (suffix) => { responseSuffix = `${responseSuffix} ${suffix}`.trim(); },
       );
 
-      // Drain any steering messages that raced with the agent loop's final
-      // getSteeringMessages() poll.  pi-agent-core polls exactly once per turn,
-      // right after turn_end; a steer() call that arrives between that poll and
-      // the agent loop exiting would otherwise be orphaned in the queue.  Each
-      // continue() re-runs the loop with the drained messages and exposes
-      // another (narrower) race window — loop until the queue settles.
+      // Drain steers that raced with pi-agent-core's single post-turn_end poll.
       while (agent.hasQueuedMessages()) {
         await agent.continue();
       }
