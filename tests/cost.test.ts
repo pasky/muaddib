@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   checkUserBudget,
@@ -12,7 +12,7 @@ import {
   applyUserPolicyOverride,
 } from "../src/cost/cost-policy.js";
 import { remapToOpenRouter } from "../src/cost/model-remap.js";
-import { resolveProviderOverrideModel } from "../src/models/provider-overrides.js";
+import { fetchOpenRouterEndpoints, resolveProviderOverrideModel } from "../src/models/provider-overrides.js";
 import { LLM_CALL_TYPE, isLlmCallType } from "../src/cost/llm-call-type.js";
 import { UserCostLedger } from "../src/cost/user-cost-ledger.js";
 import { UserKeyStore } from "../src/cost/user-key-store.js";
@@ -60,6 +60,109 @@ describe("resolveProviderOverrideModel normalizes version separators", () => {
     const model = resolveProviderOverrideModel("openrouter", "openai/gpt-4o-mini");
     expect(model).toBeDefined();
     expect(model!.id).toBe("openai/gpt-4o-mini");
+  });
+});
+
+describe("resolveProviderOverrideModel uses per-endpoint pricing", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("picks the endpoint matching providerRouting[0] tag even when top-level /models pricing is 0", async () => {
+    // Simulates the kimi-k2.6 case: top-level /models lists prompt=0 (because Parasail is 0),
+    // but moonshotai/int4 endpoint has real pricing.
+    const endpointsPayload = {
+      data: {
+        id: "moonshotai/kimi-k2.6",
+        architecture: { input_modalities: ["text", "image"] },
+        endpoints: [
+          {
+            tag: "parasail/int4",
+            provider_name: "Parasail",
+            context_length: 262144,
+            max_completion_tokens: 262144,
+            supported_parameters: ["include_reasoning", "tools"],
+            status: -2,
+            pricing: { prompt: "0", completion: "0" },
+          },
+          {
+            tag: "moonshotai/int4",
+            provider_name: "Moonshot AI",
+            context_length: 262144,
+            max_completion_tokens: null,
+            supported_parameters: ["include_reasoning", "tools"],
+            status: 0,
+            pricing: {
+              prompt: "0.00000095",
+              completion: "0.000004",
+              input_cache_read: "0.00000016",
+            },
+          },
+        ],
+      },
+    };
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => endpointsPayload,
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    // Prime the cache (in production this runs lazily; here we await to test resolve()).
+    await fetchOpenRouterEndpoints("moonshotai/kimi-k2.6");
+
+    const model = resolveProviderOverrideModel(
+      "openrouter",
+      "moonshotai/kimi-k2.6",
+      ["moonshotai/int4"],
+    );
+    expect(model).toBeDefined();
+    expect(model!.cost.input).toBeCloseTo(0.95, 5);
+    expect(model!.cost.output).toBeCloseTo(4, 5);
+    expect(model!.cost.cacheRead).toBeCloseTo(0.16, 5);
+    expect(model!.compat).toEqual({ openRouterRouting: { only: ["moonshotai/int4"] } });
+  });
+
+  it("falls back to default active endpoint when no providerRouting is specified", async () => {
+    const endpointsPayload = {
+      data: {
+        id: "some-vendor/test-model",
+        architecture: { input_modalities: ["text"] },
+        endpoints: [
+          {
+            tag: "zero-cost-provider",
+            provider_name: "Zero",
+            context_length: 128000,
+            max_completion_tokens: 4096,
+            supported_parameters: [],
+            status: -2,
+            pricing: { prompt: "0", completion: "0" },
+          },
+          {
+            tag: "real-provider",
+            provider_name: "Real",
+            context_length: 128000,
+            max_completion_tokens: 4096,
+            supported_parameters: [],
+            status: 0,
+            pricing: { prompt: "0.000002", completion: "0.000008" },
+          },
+        ],
+      },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, status: 200, statusText: "OK", json: async () => endpointsPayload })),
+    );
+
+    await fetchOpenRouterEndpoints("some-vendor/test-model");
+    const model = resolveProviderOverrideModel("openrouter", "some-vendor/test-model");
+    expect(model).toBeDefined();
+    // Should skip the status=-2 endpoint and pick the active one.
+    expect(model!.cost.input).toBeCloseTo(2, 5);
+    expect(model!.cost.output).toBeCloseTo(8, 5);
+    expect(model!.compat).toBeUndefined();
   });
 });
 
