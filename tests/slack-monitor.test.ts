@@ -441,6 +441,38 @@ describe("SlackRoomMonitor", () => {
     await history.close();
   });
 
+  it("strips @botname prefix from multiline direct messages", async () => {
+    // Regression: the leading-mention regex used to omit the dotAll flag,
+    // so a newline after `@Muaddib` caused the strip to silently skip and the
+    // resolver then parsed `@Muaddib` as a (broken) model override token.
+    const history = createTempHistoryStore(20);
+
+    let seenText = "";
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async (message) => {
+          seenText = message.content;
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      workspaceId: "T123",
+      channelId: "C123",
+      username: "alice",
+      text: "@Muaddib !a yes (maybe git skill?)\nalso you never came back with CI status",
+      mynick: "Muaddib",
+      mentionsBot: true,
+    });
+
+    expect(seenText).toBe("!a yes (maybe git skill?)\nalso you never came back with CI status");
+
+    await history.close();
+  });
+
   it("strips a bare @botname mention when only attachments are present", async () => {
     // Regression: a DM/channel message whose text is just the bot mention
     // (e.g. "@Muaddib" + an image) used to leak the literal "@Muaddib"
