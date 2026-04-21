@@ -21,6 +21,16 @@ import type { SessionLimitsConfig } from "../config/muaddib-config.js";
 const DEFAULT_MAX_CONTEXT_LENGTH = 100_000;
 const DEFAULT_MAX_COST_USD = 1.0;
 
+/** Custom session entry type used to stash the muaddib system prompt so
+ * `session_query` can replay the exact prefix on a resumed session. */
+export const MUADDIB_SYSTEM_PROMPT_CUSTOM_TYPE = "muaddib.system_prompt";
+
+/** Custom session entry type used to stash the tool schemas (name, description,
+ * JSON Schema parameters) the session was created with.  `session_query`
+ * replays these so the provider sees byte-for-byte the same `tools` list and
+ * can hit its prompt cache on the resumed prefix. */
+export const MUADDIB_TOOL_SCHEMAS_CUSTOM_TYPE = "muaddib.tool_schemas";
+
 // ── Internal nudge transform ──
 
 /**
@@ -178,6 +188,12 @@ interface CreateAgentSessionInput {
   metaReminder?: string;
   progressThresholdSeconds?: number;
   logger?: Logger;
+  /**
+   * When set, the session is persisted as a pi-coding-agent JSONL file at
+   * this exact path (typically `<sessionHostDir>/.session-record.jsonl`).
+   * Omit for an in-memory session.
+   */
+  sessionFile?: string;
 }
 
 interface CreateAgentSessionResult {
@@ -188,12 +204,43 @@ interface CreateAgentSessionResult {
   getVisionFallbackActivated: () => boolean;
   bumpSessionLimits: (tokens: number, costUsd: number) => void;
   dispose: () => void;
+  /** Path to the persisted session JSONL file, or `null` when in-memory. */
+  sessionFile: string | null;
+  /** Short session identifier (from the session header). */
+  sessionId: string;
 }
 
 export function createAgentSessionForInvocation(input: CreateAgentSessionInput): CreateAgentSessionResult {
   const logger = input.logger ?? console;
   const resolvedModel = input.modelAdapter.resolve(input.model);
-  const sessionManager = SessionManager.inMemory();
+  const sessionManager = input.sessionFile
+    ? SessionManager.open(input.sessionFile)
+    : SessionManager.inMemory();
+  const sessionFile = sessionManager.getSessionFile() ?? null;
+  const sessionId = sessionManager.getSessionId();
+  if (sessionFile) {
+    logger.info(`session_file ${sessionId} ${sessionFile}`);
+    // Persist the effective system prompt so session_query can replay it
+    // verbatim on follow-up — required for provider prompt-cache hits.
+    // Skip if one is already persisted (resuming an existing file).
+    const alreadyPersisted = sessionManager
+      .getBranch()
+      .some((entry) => entry.type === "custom" && entry.customType === MUADDIB_SYSTEM_PROMPT_CUSTOM_TYPE);
+    if (!alreadyPersisted) {
+      sessionManager.appendCustomEntry(MUADDIB_SYSTEM_PROMPT_CUSTOM_TYPE, { text: input.systemPrompt });
+      const toolSchemas = input.tools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
+      }));
+      sessionManager.appendCustomEntry(MUADDIB_TOOL_SCHEMAS_CUSTOM_TYPE, { schemas: toolSchemas });
+      // Pi only records `model_change` entries on explicit setModel/cycleModel
+      // calls; the initial model from `Agent.initialState` is never written.
+      // Record it ourselves so `session_query` can recover the session's model
+      // on resume.
+      sessionManager.appendModelChange(resolvedModel.spec.provider, resolvedModel.spec.modelId);
+    }
+  }
   const settingsManager = SettingsManager.inMemory({
     compaction: { enabled: true },
     retry: { enabled: true, maxRetries: 3 },
@@ -257,6 +304,13 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
 
   if (input.contextMessages) {
     agent.state.messages = convertContextToAgentMessages(input.contextMessages, resolvedModel);
+  } else if (sessionFile) {
+    // Resuming an existing session file — prime the agent with its history
+    // so a follow-up prompt can re-use the provider's prompt cache.
+    const resumed = sessionManager.buildSessionContext();
+    if (resumed.messages.length > 0) {
+      agent.state.messages = resumed.messages;
+    }
   }
 
   const session = new AgentSession({
@@ -324,6 +378,8 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
     session,
     agent,
     responseTimestamp,
+    sessionFile,
+    sessionId,
     ensureProviderKey: async (provider: string) => {
       const key = await input.authStorage.getApiKey(provider);
       if (!key) {

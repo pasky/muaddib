@@ -46,6 +46,14 @@ export interface SessionRunnerOptions {
   progressThresholdSeconds?: number;
   logger?: RunnerLogger;
   onAgentCreated?: (agent: Agent) => void;
+  /**
+   * When set, persist this prompt() invocation as a pi-coding-agent JSONL
+   * session file at this exact path (typically
+   * `<gondolin-session-host-dir>/.session-record.jsonl`).  Omit for an
+   * ephemeral in-memory session (used by nested sub-sessions like
+   * oracle / deepResearch).
+   */
+  sessionFile?: string;
 }
 
 export interface PromptOptions {
@@ -68,6 +76,10 @@ export interface PromptResult {
   refusalFallbackActivated?: boolean;
   refusalFallbackModel?: string;
   session?: AgentSession;
+  /** Path to the persisted session JSONL file, or `null` when in-memory. */
+  sessionFile?: string | null;
+  /** Short session identifier (from the session header). */
+  sessionId?: string;
   /** Increase the session's token/cost limits (e.g. before a follow-up prompt). */
   bumpSessionLimits?: (tokens: number, costUsd: number) => void;
   /** Stop firing onResponse for subsequent session.prompt() calls (e.g. memory update). */
@@ -115,6 +127,7 @@ export class SessionRunner {
       metaReminder: this.options.metaReminder,
       progressThresholdSeconds: this.options.progressThresholdSeconds,
       logger: this.logger,
+      sessionFile: this.options.sessionFile,
     });
 
     const { session, agent } = sessionCtx;
@@ -334,6 +347,8 @@ export class SessionRunner {
           ? options.refusalFallbackModel
           : undefined,
         session,
+        sessionFile: sessionCtx.sessionFile,
+        sessionId: sessionCtx.sessionId,
         bumpSessionLimits: sessionCtx.bumpSessionLimits,
         muteResponses: () => {
           responseMuted = true;

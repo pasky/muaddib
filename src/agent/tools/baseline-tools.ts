@@ -26,6 +26,7 @@ import {
   createRequestNetworkAccessTool,
 } from "./request-network-access.js";
 import { createGondolinTools } from "./gondolin-tools.js";
+import { createSessionQueryTool } from "./session-query.js";
 import type { ArcEventsWatcher } from "../../events/watcher.js";
 import type { GenerateImageExecutor } from "./image.js";
 import type { OracleExecutor } from "./oracle.js";
@@ -156,7 +157,13 @@ export function createBaselineAgentTools(options: BaselineToolOptions): ToolSet 
     ...executorBackedTools,
     ...gondolinToolSet.tools,
     createMakePlanTool(),
+    createSessionQueryTool(options),
   ];
 
-  return { tools, dispose: gondolinToolSet.dispose, systemPromptSuffix: gondolinToolSet.systemPromptSuffix };
+  return {
+    tools,
+    dispose: gondolinToolSet.dispose,
+    systemPromptSuffix: gondolinToolSet.systemPromptSuffix,
+    sessionHostDir: gondolinToolSet.sessionHostDir,
+  };
 }

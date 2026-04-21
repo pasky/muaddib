@@ -8,6 +8,8 @@
  * returns a result. All queue/session lifecycle stays in message-handler.
  */
 
+import { join } from "node:path";
+
 import type { Agent, ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { type Usage } from "@mariozechner/pi-ai";
@@ -222,6 +224,9 @@ export class CommandExecutor {
           onResponse: input.onResponse,
           logger: input.logger,
           onAgentCreated: input.onAgentCreated,
+          sessionFile: input.toolSet.sessionHostDir
+            ? join(input.toolSet.sessionHostDir, ".session-record.jsonl")
+            : undefined,
         }));
 
     const configuredRateLimit = this.commandConfig.rateLimit;

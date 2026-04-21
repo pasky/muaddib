@@ -58,7 +58,18 @@ vi.mock("@mariozechner/pi-coding-agent", () => ({
   ModelRegistry: {
     inMemory: (_authStorage: unknown) => ({}),
   },
-  SessionManager: { inMemory: vi.fn(() => ({ type: "sessionManager" })) },
+  SessionManager: {
+    inMemory: vi.fn(() => ({
+      type: "sessionManager",
+      getSessionFile: () => undefined,
+      getSessionId: () => "mock-session-id",
+    })),
+    open: vi.fn((path: string) => ({
+      type: "sessionManager",
+      getSessionFile: () => path,
+      getSessionId: () => "mock-session-id",
+    })),
+  },
   SettingsManager: { inMemory: vi.fn(() => ({ type: "settingsManager" })) },
   convertToLlm: vi.fn(),
   createExtensionRuntime: vi.fn(() => ({ type: "extensionRuntime" })),

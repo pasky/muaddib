@@ -82,7 +82,7 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
   const bashTimeoutSeconds = config.bashTimeoutSeconds ?? 270;
   const vmOpTimeoutMs = bashTimeoutSeconds * 1000;
 
-  const { getVm, sessionDir } = createVmSession({
+  const { getVm, sessionDir, sessionHostDir } = createVmSession({
     arc,
     serverTag,
     channelName,
@@ -140,7 +140,7 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
 
   const dispose = () => checkpointGondolinArc(arc, logger);
 
-  return { tools, dispose, systemPromptSuffix };
+  return { tools, dispose, systemPromptSuffix, sessionHostDir };
 }
 
 // ── System prompt construction ──────────────────────────────────────────────

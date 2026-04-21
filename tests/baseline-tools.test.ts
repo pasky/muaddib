@@ -95,6 +95,7 @@ describe("baseline agent tools", () => {
       "bash",
       "share_artifact",
       "make_plan",
+      "session_query",
     ]);
   });
 
