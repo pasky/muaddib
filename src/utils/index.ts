@@ -172,14 +172,14 @@ export function stripLeadingMention(
 
   if (botUserId) {
     const fragment = mentionFragment ?? `<@${escapeRegExp(botUserId)}>`;
-    const mentionPattern = new RegExp(`^\\s*(?:${fragment}\\s*)+[:,]?\\s*(.*)$`, "i");
+    const mentionPattern = new RegExp(`^\\s*(?:${fragment}\\s*)+[:,]?\\s*(.*)$`, "is");
     const match = cleaned.match(mentionPattern);
     if (match) {
       cleaned = match[1]?.trim() ?? "";
     }
   }
 
-  const namePattern = new RegExp(`^\\s*@?${escapeRegExp(mynick)}[:,]?\\s*(.*)$`, "i");
+  const namePattern = new RegExp(`^\\s*@?${escapeRegExp(mynick)}[:,]?\\s*(.*)$`, "is");
   const nameMatch = cleaned.match(namePattern);
   if (nameMatch) {
     cleaned = nameMatch[1]?.trim() ?? "";
