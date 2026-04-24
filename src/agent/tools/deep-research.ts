@@ -1,4 +1,4 @@
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { SessionRunner } from "../session-runner.js";
@@ -26,6 +26,14 @@ export interface DeepResearchInput {
 
 export type DeepResearchExecutor = (input: DeepResearchInput) => Promise<string>;
 
+const DEEP_RESEARCH_PARAMETERS = Type.Object({
+  query: Type.String({
+    description:
+      "The research question or topic. Be extremely specific about what information you researched. " +
+      "The research agent will get access to the chat context, but not to your progress made on the last request so far.",
+  }),
+});
+
 const DEFAULT_DEEP_RESEARCH_SYSTEM_PROMPT =
   "You are a web research specialist. Your job is to conduct thorough, breadth-first web research " +
   "to gather information on a topic. Search broadly, follow leads, cross-reference sources, and " +
@@ -33,7 +41,10 @@ const DEFAULT_DEEP_RESEARCH_SYSTEM_PROMPT =
 
 const DEEP_RESEARCH_LOG_SEPARATOR = "----------------------------------------------";
 
-export function createDeepResearchTool(executors: { deepResearch: DeepResearchExecutor }, modelId?: string): MuaddibTool {
+export function createDeepResearchTool(
+  executors: { deepResearch: DeepResearchExecutor },
+  modelId?: string,
+): MuaddibTool<typeof DEEP_RESEARCH_PARAMETERS> {
   const modelClause = modelId ? ` (${modelId})` : "";
   return {
     name: "deep_research",
@@ -44,13 +55,7 @@ export function createDeepResearchTool(executors: { deepResearch: DeepResearchEx
       "equipped with web_search and visit_webpage tools. Rule of thumb: use it any time you would expect to chain web_search + visit_webpage tools yourself. Advisory: results are best-effort and " +
       "may require an additional validation on challenging or nuanced questions. " +
       "If you are going to call this tool, also send the user a very short one-line note at the same moment.",
-    parameters: Type.Object({
-      query: Type.String({
-        description:
-          "The research question or topic. Be extremely specific about what information you researched. " +
-          "The research agent will get access to the chat context, but not to your progress made on the last request so far.",
-      }),
-    }),
+    parameters: DEEP_RESEARCH_PARAMETERS,
     execute: async (_toolCallId, params: DeepResearchInput) => {
       const output = await executors.deepResearch(params);
       return {

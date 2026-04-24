@@ -16,7 +16,7 @@ import {
   SessionManager,
   type SessionEntry,
 } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 
 import { getMuaddibHome } from "../../config/paths.js";
 import { withCostSpan } from "../../cost/cost-span.js";
@@ -35,6 +35,17 @@ export interface SessionQueryInput {
   sessionId: string;
   question: string;
 }
+
+const SESSION_QUERY_PARAMETERS = Type.Object({
+  sessionId: Type.String({
+    description:
+      "Short session slug — the 8-char `<id>` in `/workspace/.sessions/session-<id>/` (with or without the `session-` prefix).",
+  }),
+  question: Type.String({
+    description:
+      "What you want to know about that session (e.g. 'What files were modified?' or 'What approach was chosen?').",
+  }),
+});
 
 const SESSION_RECORD_FILENAME = ".session-record.jsonl";
 
@@ -164,7 +175,7 @@ function replayStoredTool(schema: StoredToolSchema): MuaddibTool {
   };
 }
 
-export function createSessionQueryTool(options: ToolContext): MuaddibTool {
+export function createSessionQueryTool(options: ToolContext): MuaddibTool<typeof SESSION_QUERY_PARAMETERS> {
   const modelAdapter = options.modelAdapter as PiAiModelAdapter;
   const logger = options.logger;
 
@@ -174,16 +185,7 @@ export function createSessionQueryTool(options: ToolContext): MuaddibTool {
     label: "Session Query",
     description:
       "Query a previous muaddib session by its short slug (the 8-char `<id>` in `/workspace/.sessions/session-<id>/`) — ask a specific question and get a concise answer. The query resumes the original session with its original model, so the conversation prefix stays in the provider's prompt cache.",
-    parameters: Type.Object({
-      sessionId: Type.String({
-        description:
-          "Short session slug — the 8-char `<id>` in `/workspace/.sessions/session-<id>/` (with or without the `session-` prefix).",
-      }),
-      question: Type.String({
-        description:
-          "What you want to know about that session (e.g. 'What files were modified?' or 'What approach was chosen?').",
-      }),
-    }),
+    parameters: SESSION_QUERY_PARAMETERS,
     execute: async (_toolCallId: string, params: SessionQueryInput) => {
       const sessionId = params.sessionId.trim();
       const question = params.question.trim();

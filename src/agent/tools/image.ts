@@ -1,4 +1,4 @@
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 
 import { parseModelSpec } from "../../models/model-spec.js";
 import type { ToolContext, MuaddibTool } from "./types.js";
@@ -26,6 +26,17 @@ export interface GenerateImageResult {
 export type GenerateImageExecutor = (input: GenerateImageInput) => Promise<GenerateImageResult>;
 import { writeArtifactBytes } from "./artifact-storage.js";
 
+const GENERATE_IMAGE_PARAMETERS = Type.Object({
+  prompt: Type.String({
+    description: "Text description of the image to generate.",
+  }),
+  image_urls: Type.Optional(
+    Type.Array(Type.String({ format: "uri" }), {
+      description: "Optional list of reference image URLs to include.",
+    }),
+  ),
+});
+
 const DEFAULT_IMAGE_LIMIT = 3_500_000;
 const DEFAULT_IMAGE_GEN_TIMEOUT_MS = 120_000;
 const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
@@ -39,7 +50,7 @@ const IMAGE_SUFFIX_BY_MIME_TYPE: Record<string, string> = {
 export function createGenerateImageTool(
   executors: { generateImage: GenerateImageExecutor },
   modelId?: string,
-): MuaddibTool {
+): MuaddibTool<typeof GENERATE_IMAGE_PARAMETERS> {
   const modelClause = modelId ? `using ${modelId}` : "using the configured image generation model";
   return {
     name: "generate_image",
@@ -47,16 +58,7 @@ export function createGenerateImageTool(
     label: "Generate Image",
     description:
       `Generate image(s) ${modelClause}. Optionally include reference image URLs for edits or variations.`,
-    parameters: Type.Object({
-      prompt: Type.String({
-        description: "Text description of the image to generate.",
-      }),
-      image_urls: Type.Optional(
-        Type.Array(Type.String({ format: "uri" }), {
-          description: "Optional list of reference image URLs to include.",
-        }),
-      ),
-    }),
+    parameters: GENERATE_IMAGE_PARAMETERS,
     execute: async (_toolCallId, params: GenerateImageInput) => {
       const output = await executors.generateImage(params);
       return {

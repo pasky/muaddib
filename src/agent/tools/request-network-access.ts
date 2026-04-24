@@ -1,4 +1,4 @@
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 
 import { NetworkBoundaryService } from "../network-boundary-service.js";
 import type { MuaddibTool, ToolContext } from "./types.js";
@@ -10,26 +10,28 @@ export interface RequestNetworkAccessInput {
 
 export type RequestNetworkAccessExecutor = (input: RequestNetworkAccessInput) => Promise<string>;
 
+const REQUEST_NETWORK_ACCESS_PARAMETERS = Type.Object({
+  url: Type.String({
+    format: "uri",
+    description: "The URL to trust for outbound HTTP in this arc.",
+  }),
+  reason: Type.Optional(Type.String({
+    description: "Optional explanation of why this network access is needed (context for approval decision).",
+  })),
+});
+
 const networkBoundary = new NetworkBoundaryService();
 
 export function createRequestNetworkAccessTool(
   executors: { requestNetworkAccess: RequestNetworkAccessExecutor },
-): MuaddibTool {
+): MuaddibTool<typeof REQUEST_NETWORK_ACCESS_PARAMETERS> {
   return {
     name: "request_network_access",
     persistType: "summary",
     label: "Request Network Access",
     description:
       "Request approval to trust a URL for outbound HTTP if access has been denied. Access is allowed for URLs from websearch, configured allow rules, URLs from other trusted URLs, or URLs allowed previously.",
-    parameters: Type.Object({
-      url: Type.String({
-        format: "uri",
-        description: "The URL to trust for outbound HTTP in this arc.",
-      }),
-      reason: Type.Optional(Type.String({
-        description: "Optional explanation of why this network access is needed (context for approval decision).",
-      })),
-    }),
+    parameters: REQUEST_NETWORK_ACCESS_PARAMETERS,
     execute: async (_toolCallId, params: RequestNetworkAccessInput) => {
       const output = await executors.requestNetworkAccess(params);
       return {

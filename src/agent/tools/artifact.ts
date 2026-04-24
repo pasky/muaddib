@@ -1,6 +1,6 @@
 import { extname } from "node:path";
 
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 
 import type { ArtifactContext, MuaddibTool } from "./types.js";
 import { writeArtifactBytes } from "./artifact-storage.js";
@@ -11,6 +11,12 @@ export interface ShareArtifactInput {
 
 export type ShareArtifactExecutor = (input: ShareArtifactInput) => Promise<string>;
 
+const SHARE_ARTIFACT_PARAMETERS = Type.Object({
+  file_path: Type.String({
+    description: "Path to the file inside the sandbox to publish as an artifact.",
+  }),
+});
+
 /**
  * Read a file from the sandbox VM as a Buffer.
  * Injected by the gondolin tool set.
@@ -19,18 +25,14 @@ export type SandboxReadFile = (absolutePath: string) => Promise<Buffer>;
 
 export function createShareArtifactTool(
   executors: { shareArtifact: ShareArtifactExecutor },
-): MuaddibTool {
+): MuaddibTool<typeof SHARE_ARTIFACT_PARAMETERS> {
   return {
     name: "share_artifact",
     persistType: "summary",
     label: "Share Artifact",
     description:
       "Publish a file from the sandbox as a shareable artifact URL. Use for scripts, reports, images, data files, or any large output.",
-    parameters: Type.Object({
-      file_path: Type.String({
-        description: "Path to the file inside the sandbox to publish as an artifact.",
-      }),
-    }),
+    parameters: SHARE_ARTIFACT_PARAMETERS,
     execute: async (_toolCallId, params: ShareArtifactInput) => {
       const output = await executors.shareArtifact(params);
       return {

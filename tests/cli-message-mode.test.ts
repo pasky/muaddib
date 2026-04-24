@@ -718,7 +718,7 @@ describe("runCliMessageMode", () => {
     expect(result.response).toBe("cli ok");
   });
 
-  it("accepts agent.refusalFallbackModel with deepseek provider", async () => {
+  it("accepts agent.refusalFallbackModel with DeepSeek V4 Pro", async () => {
     const dir = await mkdtemp(join(tmpdir(), "muaddib-cli-"));
     tempDirs.push(dir);
 
@@ -727,11 +727,11 @@ describe("runCliMessageMode", () => {
       providers: {
         deepseek: {
           key: "test-deepseek-key",
-          url: "https://api.deepseek.com/anthropic/v1/messages",
+          url: "https://api.deepseek.com/v1/chat/completions",
         },
       },
       agent: {
-        refusalFallbackModel: "deepseek:deepseek-reasoner",
+        refusalFallbackModel: "deepseek:deepseek-v4-pro",
       },
       rooms: {
         common: {

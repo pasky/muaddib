@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { extname } from "node:path";
 
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 
 import type { ToolContext, MuaddibTool } from "./types.js";
 import { resolveLocalArtifactFilePath } from "./url-utils.js";
@@ -58,17 +58,30 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
   ".webp": "image/webp",
 };
 
-export function createWebSearchTool(executors: { webSearch: WebSearchExecutor }): MuaddibTool {
+const WEB_SEARCH_PARAMETERS = Type.Object({
+  query: Type.String({
+    description: "The search query to perform.",
+  }),
+});
+
+const VISIT_WEBPAGE_PARAMETERS = Type.Object({
+  url: Type.String({
+    format: "uri",
+    description: "The URL to visit.",
+  }),
+  query: Type.Optional(Type.String({
+    description: "Optional: describe what information to extract from the page. " +
+      "When provided, the content transcript will focus on this query.",
+  })),
+});
+
+export function createWebSearchTool(executors: { webSearch: WebSearchExecutor }): MuaddibTool<typeof WEB_SEARCH_PARAMETERS> {
   return {
     name: "web_search",
     persistType: "summary",
     label: "Web Search",
     description: "Search the web and return top results with titles, URLs, and descriptions.",
-    parameters: Type.Object({
-      query: Type.String({
-        description: "The search query to perform.",
-      }),
-    }),
+    parameters: WEB_SEARCH_PARAMETERS,
     execute: async (_toolCallId, params) => {
       const output = await executors.webSearch(params.query);
       return {
@@ -83,23 +96,14 @@ export function createWebSearchTool(executors: { webSearch: WebSearchExecutor })
 
 export function createVisitWebpageTool(
   executors: { visitWebpage: VisitWebpageExecutor },
-): MuaddibTool {
+): MuaddibTool<typeof VISIT_WEBPAGE_PARAMETERS> {
   return {
     name: "visit_webpage",
     persistType: "summary",
     label: "Visit Webpage",
     description:
       "Visit the given URL and return content as markdown text, or as image content for image URLs.",
-    parameters: Type.Object({
-      url: Type.String({
-        format: "uri",
-        description: "The URL to visit.",
-      }),
-      query: Type.Optional(Type.String({
-        description: "Optional: describe what information to extract from the page. " +
-          "When provided, the content transcript will focus on this query.",
-      })),
-    }),
+    parameters: VISIT_WEBPAGE_PARAMETERS,
     execute: async (_toolCallId, params) => {
       const output = await executors.visitWebpage(params.url, params.query);
       return toolResultFromVisitWebpageOutput(params.url, output);

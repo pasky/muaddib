@@ -1,5 +1,6 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { AuthStorage } from "@mariozechner/pi-coding-agent";
+import type { TSchema } from "typebox";
 import type { ToolsConfig } from "../../config/muaddib-config.js";
 import type { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import type { Logger } from "../../app/logging.js";
@@ -36,7 +37,7 @@ export interface ToolSet {
  * and stored in the chronicle for future recall (matching the Python
  * tool `persist` field).
  */
-export interface MuaddibTool<T = any> extends AgentTool<any, T> {
+export interface MuaddibTool<TParameters extends TSchema = TSchema, TDetails = any> extends AgentTool<TParameters, TDetails> {
   persistType: ToolPersistType;
 }
 

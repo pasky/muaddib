@@ -28,7 +28,7 @@
  *   Both assertions pass: nudges appear in LLM context but not in session.messages.
  */
 
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 
 import { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";

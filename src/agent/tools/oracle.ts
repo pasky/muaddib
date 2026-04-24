@@ -1,6 +1,6 @@
 import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { Message } from "@mariozechner/pi-ai";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 
 import { iterationsToSessionLimits } from "../../config/muaddib-config.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
@@ -16,6 +16,14 @@ export interface OracleInput {
 }
 
 export type OracleExecutor = (input: OracleInput) => Promise<string>;
+
+const ORACLE_PARAMETERS = Type.Object({
+  query: Type.String({
+    description:
+      "The question or task for the oracle. Be extremely specific about what analysis, plan, or solution you need. " +
+      "The Oracle will get access to the chat context, but not to your progress made on the last request so far.",
+  }),
+});
 
 const DEFAULT_ORACLE_SYSTEM_PROMPT =
   "You are an oracle - a powerful reasoning entity consulted for complex analysis.";
@@ -44,7 +52,10 @@ function getOracleThinkingLevel(value: unknown): ThinkingLevel {
   );
 }
 
-export function createOracleTool(executors: { oracle: OracleExecutor }, modelId?: string): MuaddibTool {
+export function createOracleTool(
+  executors: { oracle: OracleExecutor },
+  modelId?: string,
+): MuaddibTool<typeof ORACLE_PARAMETERS> {
   const modelClause = modelId ? ` (${modelId})` : "";
   return {
     name: "oracle",
@@ -54,13 +65,7 @@ export function createOracleTool(executors: { oracle: OracleExecutor }, modelId?
       `Consult the oracle${modelClause} - a more powerful reasoning model that may be consulted for complex analysis and creative work. ` +
       "Invoke it whenever it would be helpful to get deep advice on complex problems or produce a high quality creative piece. " +
       "If you are going to call this tool, also send the user a very short one-line note at the same moment.",
-    parameters: Type.Object({
-      query: Type.String({
-        description:
-          "The question or task for the oracle. Be extremely specific about what analysis, plan, or solution you need. " +
-          "The Oracle will get access to the chat context, but not to your progress made on the last request so far.",
-      }),
-    }),
+    parameters: ORACLE_PARAMETERS,
     execute: async (_toolCallId, params: OracleInput) => {
       const output = await executors.oracle(params);
       return {
