@@ -2374,11 +2374,60 @@ describe("RoomMessageHandler", () => {
     });
 
     expect(sent[0]).toContain("... full response: https://example.com/artifacts/?");
+    expect(Buffer.byteLength(sent[0]!, "utf-8")).toBeLessThanOrEqual(120);
     expect(sent).toHaveLength(1);
 
     const rows = await history.getFullHistory("libera##test");
     expect(rows).toHaveLength(2);
     expect(rows[1].message).toContain("full response: https://example.com/artifacts/?");
+
+    await history.close();
+  });
+
+  it("keeps artifact-link truncation shorter than a barely oversized response", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const incoming = makeMessage("!s barely too long");
+    const responseMaxBytes = 120;
+    const longResponse = "x".repeat(responseMaxBytes + 8);
+    const artifactsPath = await mkdtemp(join(tmpdir(), "muaddib-artifacts-"));
+    const sent: string[] = [];
+
+    const handler = createHandler({
+      roomConfig: {
+        ...roomConfig,
+        command: {
+          ...roomConfig.command,
+          responseMaxBytes,
+        },
+      } as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      configData: {
+        agent: {
+          tools: {
+            artifacts: {
+              path: artifactsPath,
+              url: "https://example.com/artifacts",
+            },
+          },
+        },
+      },
+      runnerFactory: makeRunner(longResponse),
+    });
+
+    incoming.isDirect = true;
+    await handler.handleIncomingMessage(incoming, {
+      sendResponse: async (text) => {
+        sent.push(text);
+      },
+    });
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("full response: https://example.com/artifacts/?");
+    expect(Buffer.byteLength(sent[0]!, "utf-8")).toBeLessThanOrEqual(responseMaxBytes);
+    expect(Buffer.byteLength(sent[0]!, "utf-8")).toBeLessThan(Buffer.byteLength(longResponse, "utf-8"));
 
     await history.close();
   });

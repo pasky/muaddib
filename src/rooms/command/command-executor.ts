@@ -1213,7 +1213,10 @@ export class CommandExecutor {
       ).replace(/\uFFFD$/, "");
     };
 
-    let trimmed = trimToMaxBytes(fullResponse, this.responseMaxBytes);
+    const suffix = `... full response: ${artifactUrl}`;
+    const suffixBytes = Buffer.byteLength(suffix, "utf8");
+    const prefixMaxBytes = Math.max(0, this.responseMaxBytes - suffixBytes);
+    let trimmed = trimToMaxBytes(fullResponse, prefixMaxBytes);
 
     const minLength = Math.max(0, trimmed.length - 100);
     const lastSentence = trimmed.lastIndexOf(".");
@@ -1224,7 +1227,7 @@ export class CommandExecutor {
       trimmed = trimmed.slice(0, lastWord);
     }
 
-    return `${trimmed}... full response: ${artifactUrl}`;
+    return `${trimmed}${suffix}`;
   }
 
   private async persistGeneratedToolSummary(
