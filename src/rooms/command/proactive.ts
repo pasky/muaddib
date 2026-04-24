@@ -118,9 +118,9 @@ export class ProactiveRunner {
   private readonly executor: CommandExecutor;
   private readonly resolver: CommandResolver;
   private readonly userCostLedger?: UserCostLedger;
-  /** Channel keys with an active debounce wait — prevents duplicate proactive sessions. */
+  /** Proactive session keys with an active debounce wait — prevents duplicate proactive sessions. */
   private readonly activeDebounces = new Set<string>();
-  /** Active proactive agents keyed by channel key — any passive message can steer into these. */
+  /** Active proactive agents keyed by proactive session key (channel + thread) — any passive message in the same thread can steer into these. */
   private readonly activeAgents = new Map<string, Agent>();
   /** Abort controller for cancelling all running proactive sessions. */
   private abortController = new AbortController();
@@ -172,9 +172,12 @@ export class ProactiveRunner {
     if (!this.channels.has(channelKey)) {
       return false;
     }
+    const sessionKey = proactiveSessionKey(message);
 
-    // Steer into running proactive agent if one exists
-    const existing = this.activeAgents.get(channelKey);
+    // Steer into running proactive agent if one exists in the same thread.
+    // Sessions are scoped per-thread to avoid cross-thread contamination in
+    // rooms that support threading (Slack, Discord).
+    const existing = this.activeAgents.get(sessionKey);
     if (existing) {
       const ts = formatUtcTime().slice(-5);
       const content = wrapSteeredMessage(`[${ts}] <${message.nick}> ${message.content}`);
@@ -193,7 +196,8 @@ export class ProactiveRunner {
     }
 
     // No active agent — start debounce + eval if not already debouncing
-    if (!this.activeDebounces.has(channelKey)) {
+    // for this channel+thread combination.
+    if (!this.activeDebounces.has(sessionKey)) {
       this.runtime.logger.withMessageContext(
         { arc: message.arc, nick: "proactive", message: message.content },
         () => this.runSession(message, sendResponse, hasActiveCommandSession),
@@ -216,8 +220,9 @@ export class ProactiveRunner {
   ): Promise<void> {
     const debounceMs = this.config.debounceSeconds * 1000;
     const channelKey = CommandResolver.channelKey(message.serverTag, message.channelName);
+    const sessionKey = proactiveSessionKey(message);
 
-    this.activeDebounces.add(channelKey);
+    this.activeDebounces.add(sessionKey);
     const signal = this.abortController.signal;
     try {
       // ── Debounce loop: poll history for silence ──
@@ -246,17 +251,17 @@ export class ProactiveRunner {
       }
 
       // Silence achieved — evaluate and maybe interject.
-      await this.evaluateAndMaybeInterject(message, sendResponse, channelKey);
+      await this.evaluateAndMaybeInterject(message, sendResponse, sessionKey);
     } finally {
-      this.activeDebounces.delete(channelKey);
-      this.activeAgents.delete(channelKey);
+      this.activeDebounces.delete(sessionKey);
+      this.activeAgents.delete(sessionKey);
     }
   }
 
   private async evaluateAndMaybeInterject(
     message: RoomMessage,
     sendResponse: SendResponse,
-    channelKey: string,
+    sessionKey: string,
   ): Promise<void> {
     if (!this.rateLimiter.checkLimit()) {
       this.logger.debug(
@@ -351,9 +356,23 @@ export class ProactiveRunner {
         reasoningEffort: classifiedRuntime.reasoningEffort,
         allowedTools: classifiedRuntime.allowedTools,
       },
-      (agent) => { this.activeAgents.set(channelKey, agent); },
+      (agent) => { this.activeAgents.set(sessionKey, agent); },
     );
   }
+}
+
+/**
+ * Session key for per-thread proactive session isolation. Sessions are
+ * keyed by (server, channel, thread) so a proactive agent running in one
+ * thread does not absorb passive messages from a different thread (or
+ * from the channel's main timeline) in the same room.
+ */
+function proactiveSessionKey(message: RoomMessage): string {
+  const channelKey = CommandResolver.channelKey(message.serverTag, message.channelName);
+  // Mirrors message-handler's `scope\0user\0thread` shape. Proactive sessions
+  // are always channel-wide (any user can steer), so the user slot is the
+  // `*` wildcard in both the main-timeline and threaded cases.
+  return `${channelKey}\0*\0${message.threadId ?? ""}`;
 }
 
 // ── Evaluation function ──
