@@ -374,7 +374,7 @@ export class SlackRoomMonitor {
     }
 
     const userAllowlist = this.options.roomConfig.userAllowlist;
-    const trusted = userAllowlist
+    const trusted = userAllowlist && userAllowlist.length > 0
       ? matchPlatformAllowlist(event.userId ? `${normalizeName(event.username)}_${event.userId}` : undefined, userAllowlist)
       : undefined;
 

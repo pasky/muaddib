@@ -734,6 +734,33 @@ describe("DiscordRoomMonitor", () => {
     await history.close();
   });
 
+  it("leaves trusted undefined when Discord allowlist is empty", async () => {
+    const history = createTempHistoryStore(20);
+
+    let seenTrusted: boolean | undefined = true; // sentinel
+
+    const monitor = new DiscordRoomMonitor({
+      roomConfig: { enabled: true, userAllowlist: [] },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async (message) => {
+          seenTrusted = message.trusted;
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      channelId: "chan-1",
+      username: "alice",
+      authorId: "123456",
+      content: "hello",
+      mynick: "muaddib",
+    });
+
+    expect(seenTrusted).toBeUndefined();
+    await history.close();
+  });
+
   it("passes passive messages with isDirect=false", async () => {
     const history = createTempHistoryStore(20);
 

@@ -95,6 +95,30 @@ describe("IrcRoomMonitor", () => {
     await history.close();
   });
 
+  it("fromRuntime preserves configured IRC allowlist", async () => {
+    const history = createTempHistoryStore(20);
+    await history.initialize();
+
+    const monitors = IrcRoomMonitor.fromRuntime(buildRuntime({
+      rooms: {
+        common: {
+          command: baseCommandConfig(),
+        },
+        irc: {
+          userAllowlist: ["*!*@unaffiliated/pasky"],
+          varlink: {
+            socketPath: "/tmp/muaddib-varlink.sock",
+          },
+        },
+      },
+    }, history));
+
+    expect((monitors[0] as unknown as { options: { roomConfig: { userAllowlist?: string[] } } }).options.roomConfig.userAllowlist).toEqual([
+      "*!*@unaffiliated/pasky",
+    ]);
+    await history.close();
+  });
+
   it("uses the same IRC cleaner for gateway send and inject responses", async () => {
     const history = createTempHistoryStore(20);
     await history.initialize();
@@ -893,6 +917,40 @@ describe("IrcRoomMonitor", () => {
 
     const monitor = new IrcRoomMonitor({
       roomConfig: {
+        varlink: { socketPath: "/tmp/varlink.sock" },
+      },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async (message) => {
+          seenTrusted = message.trusted;
+        },
+      },
+      varlinkEvents: new FakeEventsClient(),
+      varlinkSender: new FakeSender(),
+    });
+
+    await monitor.processMessageEvent({
+      type: "message",
+      subtype: "public",
+      server: "libera",
+      target: "#test",
+      nick: "alice",
+      message: "hello",
+    });
+
+    expect(seenTrusted).toBeUndefined();
+    await history.close();
+  });
+
+  it("leaves trusted undefined when IRC allowlist is empty", async () => {
+    const history = createTempHistoryStore(20);
+    await history.initialize();
+
+    let seenTrusted: boolean | undefined = true; // sentinel to detect undefined
+
+    const monitor = new IrcRoomMonitor({
+      roomConfig: {
+        userAllowlist: [],
         varlink: { socketPath: "/tmp/varlink.sock" },
       },
       history,

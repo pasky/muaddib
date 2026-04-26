@@ -312,7 +312,7 @@ export class DiscordRoomMonitor {
         : "discord:_DM";
 
     const userAllowlist = this.options.roomConfig.userAllowlist;
-    const trusted = userAllowlist
+    const trusted = userAllowlist && userAllowlist.length > 0
       ? matchPlatformAllowlist(event.authorId ? `${normalizeName(event.username)}_${event.authorId}` : undefined, userAllowlist)
       : undefined;
 

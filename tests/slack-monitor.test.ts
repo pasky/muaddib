@@ -245,6 +245,34 @@ describe("SlackRoomMonitor", () => {
     await history.close();
   });
 
+  it("leaves trusted undefined when Slack allowlist is empty", async () => {
+    const history = createTempHistoryStore(20);
+
+    let seenTrusted: boolean | undefined = true; // sentinel
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true, userAllowlist: [] },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async (message) => {
+          seenTrusted = message.trusted;
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      workspaceId: "T123",
+      channelId: "C123",
+      username: "alice",
+      userId: "U0ABC123",
+      text: "hello",
+      mynick: "muaddib",
+    });
+
+    expect(seenTrusted).toBeUndefined();
+    await history.close();
+  });
+
   it("includes Slack attachment context and propagates secrets", async () => {
     const history = createTempHistoryStore(20);
 

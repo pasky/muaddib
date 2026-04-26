@@ -93,7 +93,9 @@ export class IrcRoomMonitor {
 
     const monitor = new IrcRoomMonitor({
       roomConfig: {
+        ...roomConfig,
         varlink: {
+          ...roomConfig.varlink,
           socketPath,
         },
       },
@@ -253,7 +255,7 @@ export class IrcRoomMonitor {
     const cleanedMessage = inputMatch?.groups?.content ?? normalizedMessage;
 
     const userAllowlist = this.options.roomConfig.userAllowlist;
-    const trusted = userAllowlist
+    const trusted = userAllowlist && userAllowlist.length > 0
       ? matchIrcAllowlist(event.hostmask, userAllowlist)
       : undefined;
 
