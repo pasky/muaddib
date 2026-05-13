@@ -311,10 +311,19 @@ export class DiscordRoomMonitor {
         ? `discord:${event.guildId}`
         : "discord:_DM";
 
+    const userIdentifier = event.authorId ? `${normalizeName(event.username)}_${event.authorId}` : undefined;
     const userAllowlist = this.options.roomConfig.userAllowlist;
     const trusted = userAllowlist
-      ? matchPlatformAllowlist(event.authorId ? `${normalizeName(event.username)}_${event.authorId}` : undefined, userAllowlist)
+      ? matchPlatformAllowlist(userIdentifier, userAllowlist)
       : undefined;
+    if (trusted === false && isDirect) {
+      // Log the copy-paste-ready identifier so an operator can add it to userAllowlist.
+      this.logger.info(
+        "Untrusted direct Discord message; add to userAllowlist to grant access",
+        `userIdentifier=${userIdentifier ?? "<unknown>"}`,
+        `nick=${event.username}`,
+      );
+    }
 
     const channelName = event.channelName ?? event.channelId;
     const message: RoomMessage = {

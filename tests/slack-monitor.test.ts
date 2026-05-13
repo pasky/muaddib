@@ -217,6 +217,40 @@ describe("SlackRoomMonitor", () => {
     await history.close();
   });
 
+  it("logs allowlist-ready identifier when rejecting direct untrusted Slack message", async () => {
+    const history = createTempHistoryStore(20);
+    const infoLogs: string[][] = [];
+
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true, userAllowlist: ["alice_U0ABC123"] },
+      history,
+      logger: {
+        info: (...args: string[]) => { infoLogs.push(args); },
+        warn: () => {},
+        error: () => {},
+        debug: () => {},
+      } as any,
+      commandHandler: {
+        handleIncomingMessage: async () => {},
+      },
+    });
+
+    await monitor.processMessageEvent({
+      workspaceId: "T123",
+      channelId: "C123",
+      username: "bob",
+      userId: "U0XYZ999",
+      text: "muaddib: hi",
+      mynick: "muaddib",
+      mentionsBot: true,
+    });
+
+    const rejectLog = infoLogs.find((args) => typeof args[0] === "string" && args[0].includes("Untrusted direct Slack message"));
+    expect(rejectLog).toBeDefined();
+    expect(rejectLog!).toContain("userIdentifier=bob_U0XYZ999");
+    await history.close();
+  });
+
   it("leaves trusted undefined when no Slack allowlist is configured", async () => {
     const history = createTempHistoryStore(20);
 

@@ -373,10 +373,19 @@ export class SlackRoomMonitor {
       return;
     }
 
+    const userIdentifier = event.userId ? `${normalizeName(event.username)}_${event.userId}` : undefined;
     const userAllowlist = this.options.roomConfig.userAllowlist;
     const trusted = userAllowlist
-      ? matchPlatformAllowlist(event.userId ? `${normalizeName(event.username)}_${event.userId}` : undefined, userAllowlist)
+      ? matchPlatformAllowlist(userIdentifier, userAllowlist)
       : undefined;
+    if (trusted === false && isDirect) {
+      // Log the copy-paste-ready identifier so an operator can add it to userAllowlist.
+      this.logger.info(
+        "Untrusted direct Slack message; add to userAllowlist to grant access",
+        `userIdentifier=${userIdentifier ?? "<unknown>"}`,
+        `nick=${event.username}`,
+      );
+    }
 
     const serverTag = `slack:${event.workspaceName ?? event.workspaceId}`;
     const channelName = resolveSlackChannelName(event);

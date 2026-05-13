@@ -707,6 +707,39 @@ describe("DiscordRoomMonitor", () => {
     await history.close();
   });
 
+  it("logs allowlist-ready identifier when rejecting direct untrusted Discord message", async () => {
+    const history = createTempHistoryStore(20);
+    const infoLogs: string[][] = [];
+
+    const monitor = new DiscordRoomMonitor({
+      roomConfig: { enabled: true, userAllowlist: ["alice_123456"] },
+      history,
+      logger: {
+        info: (...args: string[]) => { infoLogs.push(args); },
+        warn: () => {},
+        error: () => {},
+        debug: () => {},
+      } as any,
+      commandHandler: {
+        handleIncomingMessage: async () => {},
+      },
+    });
+
+    await monitor.processMessageEvent({
+      channelId: "chan-1",
+      username: "bob",
+      authorId: "999999",
+      content: "hello",
+      mynick: "muaddib",
+      isDirectMessage: true,
+    });
+
+    const rejectLog = infoLogs.find((args) => typeof args[0] === "string" && args[0].includes("Untrusted direct Discord message"));
+    expect(rejectLog).toBeDefined();
+    expect(rejectLog!).toContain("userIdentifier=bob_999999");
+    await history.close();
+  });
+
   it("leaves trusted undefined when no Discord allowlist is configured", async () => {
     const history = createTempHistoryStore(20);
 
