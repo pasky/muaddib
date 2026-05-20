@@ -102,7 +102,7 @@ export function buildToolSummaryFollowUpPrompt(summaryToolNames: string[]): stri
   return [
     "<meta>Session complete. DO NOT RESPOND ANYMORE.",
     "",
-    `Wrap-up task: As an AI agent, you need to remember in the future what tools you used when generating a response, and what the tools told you. Summarize the tool calls from this session in a single concise paragraph. Only cover these tools: ${toolList}. Include every artifact link and tie each link to the corresponding tool call. Include /workspace/.sessions/session-* working directory paths so you can return to previous work. Do NOT use any tools.`,
+    `Wrap-up task: As an AI agent, you need to remember in the future what tools you used when generating a response, and what the tools told you. Summarize the tool calls from this session in a single concise paragraph. Only cover these tools: ${toolList}. Include every artifact link and tie each link to the corresponding tool call. Include /workspace/.sessions/session-<slug>/ working directory paths so you can return to previous work — and cite the <slug> explicitly so later turns can replay this session via the session_query tool. Do NOT use any tools.`,
     "</meta>",
   ].join("\n");
 }

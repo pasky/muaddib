@@ -141,6 +141,30 @@ function makeMessage(content: string, overrides?: Partial<RoomMessage>): RoomMes
   };
 }
 
+/** Mock Agent with subscribe/emit wiring; fireAgentEnd() simulates agent_end. */
+function makeMockAgent(steerCalls: any[] = []): {
+  agent: { steer: (msg: any) => void; subscribe: (fn: (event: any) => void) => () => void };
+  fireAgentEnd: () => void;
+} {
+  const listeners: Array<(event: any) => void> = [];
+  const agent = {
+    steer: (msg: any) => { steerCalls.push(msg); },
+    subscribe: (fn: (event: any) => void) => {
+      listeners.push(fn);
+      return () => {
+        const idx = listeners.indexOf(fn);
+        if (idx >= 0) listeners.splice(idx, 1);
+      };
+    },
+  };
+  return {
+    agent,
+    fireAgentEnd: () => {
+      for (const fn of [...listeners]) fn({ type: "agent_end" });
+    },
+  };
+}
+
 function makeRunnerResult(
   text: string,
   options: {
@@ -927,9 +951,7 @@ describe("RoomMessageHandler", () => {
 
     let promptCallCount = 0;
     const steerCalls: any[] = [];
-    const mockAgent = {
-      steer: (msg: any) => { steerCalls.push(msg); },
-    };
+    const { agent: mockAgent } = makeMockAgent(steerCalls);
 
     const handler = createHandler({
       roomConfig: roomConfig as any,
@@ -994,9 +1016,7 @@ describe("RoomMessageHandler", () => {
     const releaseFirst = createDeferred<void>();
 
     const steerCalls: any[] = [];
-    const mockAgent = {
-      steer: (msg: any) => { steerCalls.push(msg); },
-    };
+    const { agent: mockAgent } = makeMockAgent(steerCalls);
 
     const handler = createHandler({
       roomConfig: roomConfig as any,
@@ -1242,9 +1262,7 @@ describe("RoomMessageHandler", () => {
 
     let promptCallCount = 0;
     const steerCalls: any[] = [];
-    const mockAgent = {
-      steer: (msg: any) => { steerCalls.push(msg); },
-    };
+    const { agent: mockAgent } = makeMockAgent(steerCalls);
 
     const handler = createHandler({
       roomConfig: policyRoomConfig as any,
@@ -1312,9 +1330,7 @@ describe("RoomMessageHandler", () => {
     const releaseFirst = createDeferred<void>();
 
     const steerCalls: any[] = [];
-    const mockAgent = {
-      steer: (msg: any) => { steerCalls.push(msg); },
-    };
+    const { agent: mockAgent } = makeMockAgent(steerCalls);
 
     const handler = createHandler({
       roomConfig: roomConfig as any,
@@ -2648,9 +2664,7 @@ describe("RoomMessageHandler", () => {
 
     let runCount = 0;
     const steerCalls: any[] = [];
-    const mockAgent = {
-      steer: (msg: any) => { steerCalls.push(msg); },
-    };
+    const { agent: mockAgent } = makeMockAgent(steerCalls);
 
     const handler = createHandler({
       roomConfig: roomConfig as any,
@@ -2705,9 +2719,7 @@ describe("RoomMessageHandler", () => {
     const releaseResolve = createDeferred<void>();
 
     const steerCalls: any[] = [];
-    const mockAgent = {
-      steer: (msg: any) => { steerCalls.push(msg); },
-    };
+    const { agent: mockAgent } = makeMockAgent(steerCalls);
 
     // The runner factory delays onAgentCreated until releaseResolve fires,
     // simulating a slow resolve/context-build phase.
@@ -2765,9 +2777,7 @@ describe("RoomMessageHandler", () => {
     const releaseFirst = createDeferred<void>();
 
     const steerCalls: any[] = [];
-    const mockAgent = {
-      steer: (msg: any) => { steerCalls.push(msg); },
-    };
+    const { agent: mockAgent } = makeMockAgent(steerCalls);
 
     const handler = createHandler({
       roomConfig: roomConfig as any,
@@ -2824,9 +2834,7 @@ describe("RoomMessageHandler", () => {
     const releaseFirst = createDeferred<void>();
 
     const steerCalls: any[] = [];
-    const mockAgent = {
-      steer: (msg: any) => { steerCalls.push(msg); },
-    };
+    const { agent: mockAgent } = makeMockAgent(steerCalls);
     const sent: string[] = [];
 
     const handler = createHandler({
@@ -2904,9 +2912,7 @@ describe("RoomMessageHandler", () => {
 
     // Mock agent with steer tracking
     const steerCalls: any[] = [];
-    const mockAgent = {
-      steer: (msg: any) => { steerCalls.push(msg); },
-    };
+    const { agent: mockAgent } = makeMockAgent(steerCalls);
 
     const handler = createHandler({
       roomConfig: roomConfig as any,
@@ -2956,9 +2962,7 @@ describe("RoomMessageHandler", () => {
     const releaseFirst = createDeferred<void>();
 
     const steerCalls: any[] = [];
-    const mockAgent = {
-      steer: (msg: any) => { steerCalls.push(msg); },
-    };
+    const { agent: mockAgent } = makeMockAgent(steerCalls);
 
     const handler = createHandler({
       roomConfig: roomConfig as any,
@@ -3040,14 +3044,13 @@ describe("RoomMessageHandler", () => {
     const agentReady = createDeferred<void>();
     const releaseAgent = createDeferred<void>();
     // Gate that blocks triggerAutoChronicler — this runs AFTER
-    // onResponseDelivered and after post-response maintenance in execute().
+    // the agent has emitted agent_end and after post-response maintenance
+    // in execute().
     const chroniclerStarted = createDeferred<void>();
     const releaseChronicler = createDeferred<void>();
 
     const steerCalls: any[] = [];
-    const mockAgent = {
-      steer: (msg: any) => { steerCalls.push(msg); },
-    };
+    const { agent: mockAgent, fireAgentEnd } = makeMockAgent(steerCalls);
 
     let runCount = 0;
     const handler = createHandler({
@@ -3070,12 +3073,14 @@ describe("RoomMessageHandler", () => {
             await releaseAgent.promise;
             const result = makeRunnerResult("done");
             await input.onResponse(result.text);
+            fireAgentEnd();
             return result;
           }
-          // Second invocation — just return immediately
-          input.onAgentCreated?.({ steer() {} } as any);
+          const { agent: secondAgent, fireAgentEnd: fireSecondEnd } = makeMockAgent();
+          input.onAgentCreated?.(secondAgent as any);
           const result = makeRunnerResult("second response");
           await input.onResponse(result.text);
+          fireSecondEnd();
           return result;
         },
       }),
@@ -3093,13 +3098,14 @@ describe("RoomMessageHandler", () => {
     releaseAgent.resolve();
 
     // Wait until triggerAutoChronicler starts — by this point execute()
-    // has completed delivering the response and called onResponseDelivered
-    // (deregistering steering), and awaited post-response maintenance. But execute()
-    // itself hasn't returned yet because triggerAutoChronicler is blocked.
+    // has completed delivering the response and the agent has emitted
+    // agent_end (which deregistered steering), and awaited post-response
+    // maintenance. But execute() itself hasn't returned yet because
+    // triggerAutoChronicler is blocked.
     await chroniclerStarted.promise;
 
     // Send a second message from the same user while execute() is still
-    // blocked in triggerAutoChronicler. Since onResponseDelivered already
+    // blocked in triggerAutoChronicler. Since agent_end already
     // deregistered steering, this should NOT be steered — it should start
     // its own session.
     const secondResult = handler.handleIncomingMessage(makeMessage("!s second message", { isDirect: true }), {
@@ -3819,7 +3825,7 @@ describe("RoomMessageHandler", () => {
       runnerFactory: (input) => ({
         prompt: async () => {
           if (isProactiveCall) {
-            input.onAgentCreated?.({ steer() {} } as any);
+            input.onAgentCreated?.({ steer() {}, subscribe: () => () => {} } as any);
             agentStarted.resolve();
             await releaseAgent.promise;
             const r = makeRunnerResult("proactive response");
@@ -3827,7 +3833,7 @@ describe("RoomMessageHandler", () => {
             return r;
           }
           commandRunnerCalled = true;
-          input.onAgentCreated?.({ steer() {} } as any);
+          input.onAgentCreated?.({ steer() {}, subscribe: () => () => {} } as any);
           const r = makeRunnerResult("command response");
           await input.onResponse(r.text);
           return r;
@@ -3987,9 +3993,7 @@ describe("RoomMessageHandler", () => {
 
     let runCount = 0;
     const steerCalls: any[] = [];
-    const mockAgent = {
-      steer: (msg: any) => { steerCalls.push(msg); },
-    };
+    const { agent: mockAgent } = makeMockAgent(steerCalls);
     const sent: string[] = [];
 
     const handler = createHandler({

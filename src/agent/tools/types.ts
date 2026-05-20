@@ -21,6 +21,13 @@ export interface ToolSet {
   tools: MuaddibTool[];
   dispose?: () => Promise<void>;
   systemPromptSuffix?: string;
+  /**
+   * Host-side directory colocated with the session's workspace files
+   * (e.g. `$MUADDIB_HOME/arcs/<arc>/workspace/.sessions/session-<id>`).
+   * Used by `SessionRunner` to drop the pi-coding-agent JSONL
+   * conversation record alongside the session's artefacts.
+   */
+  sessionHostDir?: string;
 }
 
 /**

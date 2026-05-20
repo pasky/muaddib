@@ -28,6 +28,7 @@ export const LLM_CALL_TYPE = {
   AUTOCHRONICLER_APPEND: "autochronicler_append",
   CHAPTER_SUMMARY: "chapter_summary",
   GENERATE_IMAGE: "generate_image",
+  SESSION_QUERY: "session_query",
 } as const;
 
 export type LlmCallType = (typeof LLM_CALL_TYPE)[keyof typeof LLM_CALL_TYPE];

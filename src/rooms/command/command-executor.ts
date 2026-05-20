@@ -8,6 +8,8 @@
  * returns a result. All queue/session lifecycle stays in message-handler.
  */
 
+import { join } from "node:path";
+
 import type { Agent, ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { AuthStorage } from "@mariozechner/pi-coding-agent";
 import { type Usage } from "@mariozechner/pi-ai";
@@ -222,6 +224,9 @@ export class CommandExecutor {
           onResponse: input.onResponse,
           logger: input.logger,
           onAgentCreated: input.onAgentCreated,
+          sessionFile: input.toolSet.sessionHostDir
+            ? join(input.toolSet.sessionHostDir, ".session-record.jsonl")
+            : undefined,
         }));
 
     const configuredRateLimit = this.commandConfig.rateLimit;
@@ -478,12 +483,10 @@ export class CommandExecutor {
     sendResponse: SendResponse,
     options?: {
       onAgentCreated?: (agent: Agent) => void;
-      onResponseDelivered?: () => void;
       networkAccessApprover?: NetworkAccessApprover;
     },
   ): Promise<void> {
     const onAgentCreated = options?.onAgentCreated;
-    const onResponseDelivered = options?.onResponseDelivered;
     const networkAccessApprover = options?.networkAccessApprover;
     const { logger } = this;
 
@@ -678,11 +681,8 @@ export class CommandExecutor {
             modelSpec: effectiveModelSpec,
           },
           async ({ usage, toolCallsCount }) => {
-            // Signal that the primary response has been delivered — callers can deregister
-            // steering before the potentially long background work begins.
-            onResponseDelivered?.();
-
             // Send optional human-readable followups for expensive runs/milestones.
+
             if (usage && usage.cost.total > 0) {
               await this.emitCostFollowups(message, usage, toolCallsCount, deliver);
             }

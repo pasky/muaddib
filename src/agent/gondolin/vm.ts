@@ -787,7 +787,11 @@ export interface VmSessionOptions {
 
 export interface VmSession {
   getVm: () => Promise<VM>;
+  /** Session working directory as seen from inside the VM (e.g. `/workspace/.sessions/session-<id>`). */
   sessionDir: string;
+  /** Same directory as seen from the host filesystem — used for colocating
+   * the pi-coding-agent conversation record alongside the session's files. */
+  sessionHostDir: string;
 }
 
 /**
@@ -816,7 +820,12 @@ export function createVmSession(opts: VmSessionOptions): VmSession {
   // active even before the VM has been started or any tool has been called.
   registerActiveSession(arc);
 
-  const sessionDir = `/workspace/.sessions/session-${randomUUID().slice(0, 8)}`;
+  const sessionSlug = `session-${randomUUID().slice(0, 8)}`;
+  const sessionDir = `/workspace/.sessions/${sessionSlug}`;
+  const sessionHostDir = join(workspacePath, ".sessions", sessionSlug);
+  // Create the host-side directory eagerly so callers (e.g. SessionManager)
+  // can write the conversation record before the VM has even booted.
+  mkdirSync(sessionHostDir, { recursive: true });
 
   let vmReady: Promise<VM> | null = null;
 
@@ -833,5 +842,5 @@ export function createVmSession(opts: VmSessionOptions): VmSession {
     return vmReady;
   }
 
-  return { getVm, sessionDir };
+  return { getVm, sessionDir, sessionHostDir };
 }

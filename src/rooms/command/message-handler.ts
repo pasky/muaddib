@@ -279,6 +279,9 @@ export class RoomMessageHandler {
     const pending: RoomMessage[] = [];
     this.activeSteers.set(key, { steer: (msg) => { pending.push(msg); }, modeKey: sessionModeKey, onSteered });
 
+    // Boxed so TS control-flow narrowing doesn't collapse to `never` in finally.
+    const unsubRef: { fn: (() => void) | null } = { fn: null };
+
     try {
       await this.executor.execute(message, triggerTs, sendResponse, {
         networkAccessApprover,
@@ -289,17 +292,22 @@ export class RoomMessageHandler {
           }
           pending.length = 0;
           this.activeSteers.set(key, { steer: (msg) => { this.steerAgent(agent, msg); }, modeKey: sessionModeKey, onSteered });
-        },
-        onResponseDelivered: () => {
-          // Deregister steering as soon as the response is delivered, before
-          // background work (memory update, tool summary) begins — prevents
-          // new messages from being steered into the session during that window.
-          this.activeSteers.delete(key);
+
+          // Stop accepting steers once the agent has terminated; late
+          // arrivals fall through to new-session routing.
+          const unsubscribe = agent.subscribe((event) => {
+            if (event.type !== "agent_end") return;
+            this.activeSteers.delete(key);
+            unsubscribe();
+            unsubRef.fn = null;
+          });
+          unsubRef.fn = unsubscribe;
         },
       });
     } finally {
-      // Safety fallback: ensure cleanup even if execute() throws before
-      // invoking the onResponseDelivered callback.
+      // Safety fallback for paths where agent_end never fires (e.g. execute throws
+      // before the agent is created).
+      unsubRef.fn?.();
       this.activeSteers.delete(key);
     }
   }
