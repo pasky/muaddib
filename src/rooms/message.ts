@@ -53,7 +53,58 @@ export function matchIrcAllowlist(hostmask: string | undefined, allowlist: strin
   });
 }
 
-/** Wrap the steered message payload in steering instructions. */
-export function wrapSteeredMessage(message: string): string {
-  return `<meta>Background channel message — DO NOT derail from your current task and continue work / responding. Acknowledge only if directly relevant. If you just sent a final response, respond with only one word NULL unless this message should provoke a direct followup.</meta>\n\n${message}\n\n<meta>Before reacting in any way, consider silently whether to adjust course in any way or continue in your current trajectory.</meta>`;
+/**
+ * Custom AgentMessage type for passive room messages steered into a running
+ * session. The body (channel timestamp + nick + content) is stored verbatim;
+ * the surrounding `<meta>...</meta>` steering instructions are rendered at
+ * LLM-call time by the wrapped `convertToLlm` in session-factory.ts, where the
+ * actual predecessor in the transcript is known and the variant can be chosen
+ * accordingly (after-assistant vs after-tool).
+ */
+export const MUADDIB_STEERED_PASSIVE_CUSTOM_TYPE = "muaddib.steered_passive";
+
+export interface SteeredPassiveMessage {
+  role: "custom";
+  customType: typeof MUADDIB_STEERED_PASSIVE_CUSTOM_TYPE;
+  /** Raw body text (e.g. `[HH:MM] <nick> message body`). */
+  content: string;
+  /** Not displayed in any TUI — muaddib has no TUI for this. */
+  display: false;
+  timestamp: number;
+}
+
+declare module "@mariozechner/pi-agent-core" {
+  interface CustomAgentMessages {
+    steeredPassive: SteeredPassiveMessage;
+  }
+}
+
+/** Build a SteeredPassiveMessage suitable for `agent.steer(...)`. */
+export function buildSteeredPassiveMessage(body: string): SteeredPassiveMessage {
+  return {
+    role: "custom",
+    customType: MUADDIB_STEERED_PASSIVE_CUSTOM_TYPE,
+    content: body,
+    display: false,
+    timestamp: Date.now(),
+  };
+}
+
+/**
+ * Render the LLM-facing text for a steered passive message.
+ *
+ * `afterTool === true` means the message immediately follows a `toolResult` in
+ * the transcript — i.e. the agent is mid-task, between a tool call and its
+ * follow-up assistant turn. In that case the wording must encourage continuing
+ * the in-progress work rather than treating the steer as a fresh prompt.
+ *
+ * `afterTool === false` is the post-assistant-text case (or no predecessor):
+ * the agent has just finished responding, so the NULL-when-irrelevant hint
+ * makes sense.
+ */
+export function renderSteeredPassive(body: string, opts: { afterTool: boolean }): string {
+  const head = opts.afterTool
+    ? "<meta>Background channel message — DO NOT derail from your in-progress task. Continue your current tool work; only adjust course if this message is directly relevant to what you are doing.</meta>"
+    : "<meta>Background channel message — DO NOT derail from your current task and continue work / responding. Acknowledge only if directly relevant. If you just finished responding, respond with only the single word NULL unless this message should provoke a direct followup.</meta>";
+  return `${head}\n\n${body}\n\n<meta>Before reacting in any way, consider silently whether to adjust course in any way or continue in your current trajectory.</meta>`;
 }

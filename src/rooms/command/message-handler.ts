@@ -20,7 +20,7 @@ import {
   type SendResponse,
 } from "./command-executor.js";
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
-import { type RoomMessage, wrapSteeredMessage } from "../message.js";
+import { buildSteeredPassiveMessage, type RoomMessage } from "../message.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import type {
   NetworkAccessApprover,
@@ -320,14 +320,19 @@ export class RoomMessageHandler {
     const baseText = `[${ts}] ${nickContent}`;
 
     // Direct messages (in-channel mentions, DMs) are user follow-ups — steer
-    // them verbatim. Passive/background messages get the "do not derail" wrapper.
-    const content = message.isDirect ? baseText : wrapSteeredMessage(baseText);
-
-    agent.steer({
-      role: "user",
-      content: [{ type: "text", text: content }],
-      timestamp: Date.now(),
-    });
+    // them verbatim as a regular user message. Passive/background messages are
+    // queued as a custom AgentMessage that gets the "do not derail" wrapping
+    // rendered at LLM-call time, where the actual predecessor (assistant text
+    // vs toolResult) determines the variant.
+    if (message.isDirect) {
+      agent.steer({
+        role: "user",
+        content: [{ type: "text", text: baseText }],
+        timestamp: Date.now(),
+      });
+    } else {
+      agent.steer(buildSteeredPassiveMessage(baseText));
+    }
     this.logger.info(
       "Steered message into active session",
       `arc=${message.arc}`,

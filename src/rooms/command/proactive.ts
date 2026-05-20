@@ -22,7 +22,7 @@ import type {
   CommandExecutorLogger,
   SendResponse,
 } from "./command-executor.js";
-import { type RoomMessage, wrapSteeredMessage } from "../message.js";
+import { buildSteeredPassiveMessage, type RoomMessage } from "../message.js";
 import { COST_SOURCE } from "../../cost/llm-call-type.js";
 import { sleep } from "../../utils/index.js";
 import { withPersistedCostSpan } from "../../cost/cost-span.js";
@@ -180,12 +180,7 @@ export class ProactiveRunner {
     const existing = this.activeAgents.get(sessionKey);
     if (existing) {
       const ts = formatUtcTime().slice(-5);
-      const content = wrapSteeredMessage(`[${ts}] <${message.nick}> ${message.content}`);
-      existing.steer({
-        role: "user",
-        content: [{ type: "text", text: content }],
-        timestamp: Date.now(),
-      });
+      existing.steer(buildSteeredPassiveMessage(`[${ts}] <${message.nick}> ${message.content}`));
       this.logger.info(
         "Steered passive message into proactive session",
         `arc=${message.arc}`,

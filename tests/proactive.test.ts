@@ -155,9 +155,13 @@ describe("ProactiveRunner.steerOrStart thread isolation", () => {
     expect(steeredB).toBe(true);
     expect(steerCalls).toHaveLength(2);
     expect(steerCalls[0].key).toBe("A");
-    expect(steerCalls[0].m.content[0].text).toContain("msg-in-a");
+    expect(steerCalls[0].m.role).toBe("custom");
+    expect(steerCalls[0].m.customType).toBe("muaddib.steered_passive");
+    expect(steerCalls[0].m.content).toContain("msg-in-a");
     expect(steerCalls[1].key).toBe("B");
-    expect(steerCalls[1].m.content[0].text).toContain("msg-in-b");
+    expect(steerCalls[1].m.role).toBe("custom");
+    expect(steerCalls[1].m.customType).toBe("muaddib.steered_passive");
+    expect(steerCalls[1].m.content).toContain("msg-in-b");
   });
 
   it("does not steer messages from a different thread into an active proactive agent", () => {

@@ -17,6 +17,52 @@ import { PiAiModelAdapter, type ResolvedPiAiModel } from "../models/pi-ai-model-
 import type { Logger } from "../app/logging.js";
 import { safeJson } from "./debug-utils.js";
 import type { SessionLimitsConfig } from "../config/muaddib-config.js";
+import {
+  MUADDIB_STEERED_PASSIVE_CUSTOM_TYPE,
+  renderSteeredPassive,
+  type SteeredPassiveMessage,
+} from "../rooms/message.js";
+
+/**
+ * Wrap pi-coding-agent's `convertToLlm` so that any `muaddib.steered_passive`
+ * custom message in the transcript is rendered into a regular user message
+ * with the correct steering wording, chosen based on its actual predecessor.
+ *
+ * The predecessor is the nearest non-(`user`/`custom`) message before the
+ * steered entry. If that predecessor is a `toolResult`, the agent is mid-task
+ * and we use the "continue your in-progress work" wording; otherwise we use
+ * the post-assistant-text wording (which includes the NULL hint).
+ *
+ * Running this rewrite at `convertToLlm` time — i.e. immediately before each
+ * LLM call, after steering/follow-up draining — means the custom message is
+ * already at its real final position in the transcript, so the variant we
+ * pick is exactly what the LLM is about to see.
+ */
+export function createSteeredPassiveAwareConvertToLlm(): typeof convertToLlm {
+  return (messages: AgentMessage[]) => {
+    const rewritten = messages.map((m, i) => {
+      if (
+        m.role !== "custom" ||
+        (m as SteeredPassiveMessage).customType !== MUADDIB_STEERED_PASSIVE_CUSTOM_TYPE
+      ) {
+        return m;
+      }
+      // Walk back past further user/custom entries (batched steers, ephemeral
+      // nudges, retry prompts) to find the real predecessor.
+      let j = i - 1;
+      while (j >= 0 && (messages[j].role === "user" || messages[j].role === "custom")) j--;
+      const predecessor = j >= 0 ? messages[j] : undefined;
+      const afterTool = predecessor?.role === "toolResult";
+      const body = (m as SteeredPassiveMessage).content;
+      return {
+        role: "user",
+        content: [{ type: "text", text: renderSteeredPassive(body, { afterTool }) }],
+        timestamp: m.timestamp,
+      } as AgentMessage;
+    });
+    return convertToLlm(rewritten);
+  };
+}
 
 const DEFAULT_MAX_CONTEXT_LENGTH = 100_000;
 const DEFAULT_MAX_COST_USD = 1.0;
@@ -295,7 +341,7 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
       thinkingLevel: input.thinkingLevel ?? "off",
       tools: input.tools,
     },
-    convertToLlm,
+    convertToLlm: createSteeredPassiveAwareConvertToLlm(),
     transformContext,
     getApiKey: (provider: string) => input.authStorage.getApiKey(provider),
     streamFn,

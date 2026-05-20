@@ -6,6 +6,12 @@ import {
   isToolCall,
   responseText,
 } from "../src/agent/message.js";
+import { createSteeredPassiveAwareConvertToLlm } from "../src/agent/session-factory.js";
+import {
+  buildSteeredPassiveMessage,
+  MUADDIB_STEERED_PASSIVE_CUSTOM_TYPE,
+  renderSteeredPassive,
+} from "../src/rooms/message.js";
 
 import type { AssistantMessage, TextContent, ToolCall } from "@mariozechner/pi-ai";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
@@ -107,5 +113,124 @@ describe("responseText", () => {
       { type: "toolCall", id: "c1", name: "bash", arguments: {} },
     ]);
     expect(responseText(msg)).toBe("");
+  });
+});
+
+describe("renderSteeredPassive", () => {
+  const body = "[12:34] <alice> hello";
+
+  it("after-assistant variant includes the NULL hint", () => {
+    const text = renderSteeredPassive(body, { afterTool: false });
+    expect(text).toContain("Background channel message");
+    expect(text).toContain("respond with only the single word NULL");
+    expect(text).toContain(body);
+    expect(text).not.toContain("in-progress task");
+  });
+
+  it("after-tool variant emphasises continuing the in-progress task and omits the NULL hint", () => {
+    const text = renderSteeredPassive(body, { afterTool: true });
+    expect(text).toContain("in-progress task");
+    expect(text).toContain("Continue your current tool work");
+    expect(text).toContain(body);
+    expect(text).not.toContain("NULL");
+  });
+});
+
+describe("buildSteeredPassiveMessage", () => {
+  it("produces a custom AgentMessage with the steered-passive type", () => {
+    const m = buildSteeredPassiveMessage("hello");
+    expect(m.role).toBe("custom");
+    expect(m.customType).toBe(MUADDIB_STEERED_PASSIVE_CUSTOM_TYPE);
+    expect(m.content).toBe("hello");
+    expect(m.display).toBe(false);
+    expect(typeof m.timestamp).toBe("number");
+  });
+});
+
+describe("createSteeredPassiveAwareConvertToLlm", () => {
+  const convert = createSteeredPassiveAwareConvertToLlm();
+
+  function userMsg(text: string): AgentMessage {
+    return { role: "user", content: [{ type: "text", text }], timestamp: 0 };
+  }
+
+  function assistantMsg(text: string): AgentMessage {
+    return makeAssistant([{ type: "text", text }]);
+  }
+
+  function toolResultMsg(): AgentMessage {
+    return {
+      role: "toolResult",
+      toolCallId: "c1",
+      toolName: "bash",
+      content: [{ type: "text", text: "output" }],
+      isError: false,
+      timestamp: 0,
+    };
+  }
+
+  it("renders after-assistant variant when predecessor is an assistant message", async () => {
+    const messages: AgentMessage[] = [
+      userMsg("do something"),
+      assistantMsg("sure"),
+      buildSteeredPassiveMessage("[12:34] <alice> ping"),
+    ];
+    const out = await convert(messages);
+    const last = out.at(-1) as { role: string; content: Array<{ type: string; text: string }> };
+    expect(last.role).toBe("user");
+    expect(last.content[0]?.text).toContain("respond with only the single word NULL");
+    expect(last.content[0]?.text).toContain("[12:34] <alice> ping");
+  });
+
+  it("renders after-tool variant when predecessor is a toolResult", async () => {
+    const messages: AgentMessage[] = [
+      userMsg("run x"),
+      assistantMsg("calling"),
+      toolResultMsg(),
+      buildSteeredPassiveMessage("[12:34] <alice> ping"),
+    ];
+    const out = await convert(messages);
+    const last = out.at(-1) as { role: string; content: Array<{ type: string; text: string }> };
+    expect(last.role).toBe("user");
+    expect(last.content[0]?.text).toContain("Continue your current tool work");
+    expect(last.content[0]?.text).not.toContain("NULL");
+  });
+
+  it("walks back past intervening user/custom messages to find the real predecessor", async () => {
+    // Two batched steered passives + a synthetic user nudge between them and
+    // the toolResult. Both must render as after-tool.
+    const messages: AgentMessage[] = [
+      userMsg("run x"),
+      assistantMsg("calling"),
+      toolResultMsg(),
+      userMsg("<meta>ephemeral nudge</meta>"),
+      buildSteeredPassiveMessage("[12:34] <alice> ping"),
+      buildSteeredPassiveMessage("[12:35] <bob> pong"),
+    ];
+    const out = await convert(messages);
+    const renderedSteers = out.slice(-2) as Array<{ content: Array<{ text: string }> }>;
+    for (const m of renderedSteers) {
+      expect(m.content[0]?.text).toContain("Continue your current tool work");
+    }
+  });
+
+  it("defaults to after-assistant variant when there is no non-user predecessor", async () => {
+    const messages: AgentMessage[] = [
+      buildSteeredPassiveMessage("[12:34] <alice> ping"),
+    ];
+    const out = await convert(messages);
+    const only = out[0] as { content: Array<{ text: string }> };
+    expect(only.content[0]?.text).toContain("respond with only the single word NULL");
+  });
+
+  it("passes non-steered-passive messages through unchanged", async () => {
+    const messages: AgentMessage[] = [
+      userMsg("hi"),
+      assistantMsg("hello"),
+    ];
+    const out = await convert(messages);
+    expect(out).toHaveLength(2);
+    expect(out[0]?.role).toBe("user");
+    expect(out[1]?.role).toBe("assistant");
   });
 });

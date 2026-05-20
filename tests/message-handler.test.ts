@@ -2762,7 +2762,11 @@ describe("RoomMessageHandler", () => {
     await Promise.all([t1, t2, t3]);
 
     expect(steerCalls).toHaveLength(2);
-    const texts = steerCalls.map((c: any) => c.content[0].text);
+    // Direct steers are role: "user" with array content; passive steers are
+    // role: "custom" (muaddib.steered_passive) with string content.
+    const texts = steerCalls.map((c: any) =>
+      typeof c.content === "string" ? c.content : c.content[0].text,
+    );
     expect(texts.some((t: string) => t.includes("continuation"))).toBe(true);
     expect(texts.some((t: string) => t.includes("passive follow-up"))).toBe(true);
 
@@ -2949,7 +2953,12 @@ describe("RoomMessageHandler", () => {
     await t1;
 
     expect(steerCalls).toHaveLength(1);
-    expect(steerCalls[0].content[0].text).toContain("interrupt me");
+    // Passive steers arrive as muaddib.steered_passive custom messages with
+    // the raw body in `content` (string). The <meta> wrapping is applied
+    // later at convertToLlm time.
+    expect(steerCalls[0].role).toBe("custom");
+    expect(steerCalls[0].customType).toBe("muaddib.steered_passive");
+    expect(steerCalls[0].content).toContain("interrupt me");
 
     await history.close();
   });
@@ -2998,7 +3007,9 @@ describe("RoomMessageHandler", () => {
     await t1;
 
     expect(steerCalls).toHaveLength(1);
-    const steeredText = steerCalls[0].content[0].text;
+    expect(steerCalls[0].role).toBe("custom");
+    expect(steerCalls[0].customType).toBe("muaddib.steered_passive");
+    const steeredText = steerCalls[0].content as string;
     expect(steeredText).toContain("[UNTRUSTED]");
     expect(steeredText).toContain("<alice> sneaky command");
     expect(steeredText).toContain("[/UNTRUSTED]");
@@ -3715,13 +3726,18 @@ describe("RoomMessageHandler", () => {
 
     const agentStarted = createDeferred<void>();
     const releaseAgent = createDeferred<void>();
-    const steeredMessages: string[] = [];
+    const steeredMessages: Array<{ role: string; customType?: string; text: string }> = [];
 
-    // Fake agent that records steered messages
+    // Fake agent that records steered messages. Passive steers arrive as
+    // muaddib.steered_passive custom messages (body in `content` as string).
     const fakeAgent = {
-      steer(msg: { content: Array<{ type: string; text: string }> }) {
-        const text = msg.content[0]?.text ?? "";
-        steeredMessages.push(text);
+      steer(msg: { role: string; customType?: string; content: unknown }) {
+        const text = typeof msg.content === "string"
+          ? msg.content
+          : Array.isArray(msg.content)
+            ? (msg.content[0] as { text?: string } | undefined)?.text ?? ""
+            : "";
+        steeredMessages.push({ role: msg.role, customType: msg.customType, text });
       },
     };
 
@@ -3765,13 +3781,15 @@ describe("RoomMessageHandler", () => {
     );
 
     for (const msg of steeredMessages) {
-      expect(msg).toContain("Background channel message");
-      expect(msg).toContain("<meta>");
+      // Passive steers are queued as a custom AgentMessage; the <meta>
+      // wrapping is applied at LLM-call time by convertToLlm.
+      expect(msg.role).toBe("custom");
+      expect(msg.customType).toBe("muaddib.steered_passive");
       // Steered messages must include a [HH:MM] UTC timestamp before the nick
-      expect(msg).toMatch(/\[\d{2}:\d{2}\] </);
+      expect(msg.text).toMatch(/\[\d{2}:\d{2}\] </);
     }
-    expect(steeredMessages[0]).toContain("<bob> bob says hi");
-    expect(steeredMessages[1]).toContain("<carol> carol chimes in");
+    expect(steeredMessages[0].text).toContain("<bob> bob says hi");
+    expect(steeredMessages[1].text).toContain("<carol> carol chimes in");
 
     // Release the agent and let the proactive session finish
     releaseAgent.resolve();
