@@ -909,6 +909,46 @@ describe("IrcRoomMonitor", () => {
     await history.close();
   });
 
+  it("logs allowlist-ready hostmask when rejecting direct untrusted IRC message", async () => {
+    const history = createTempHistoryStore(20);
+    await history.initialize();
+
+    const infoLogs: string[][] = [];
+    const monitor = new IrcRoomMonitor({
+      roomConfig: {
+        userAllowlist: ["*!*@unaffiliated/pasky"],
+        varlink: { socketPath: "/tmp/varlink.sock" },
+      },
+      history,
+      logger: {
+        info: (...args: string[]) => { infoLogs.push(args); },
+        warn: () => {},
+        error: () => {},
+        debug: () => {},
+      } as any,
+      commandHandler: {
+        handleIncomingMessage: async () => {},
+      },
+      varlinkEvents: new FakeEventsClient(),
+      varlinkSender: new FakeSender(),
+    });
+
+    await monitor.processMessageEvent({
+      type: "message",
+      subtype: "private",
+      server: "libera",
+      target: "muaddib",
+      nick: "stranger",
+      message: "hi",
+      hostmask: "stranger!~user@some.host.com",
+    });
+
+    const rejectLog = infoLogs.find((args) => typeof args[0] === "string" && args[0].includes("Untrusted direct IRC message"));
+    expect(rejectLog).toBeDefined();
+    expect(rejectLog!).toContain("hostmask=stranger!~user@some.host.com");
+    await history.close();
+  });
+
   it("leaves trusted undefined when no allowlist is configured", async () => {
     const history = createTempHistoryStore(20);
     await history.initialize();

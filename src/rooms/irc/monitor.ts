@@ -258,6 +258,14 @@ export class IrcRoomMonitor {
     const trusted = userAllowlist && userAllowlist.length > 0
       ? matchIrcAllowlist(event.hostmask, userAllowlist)
       : undefined;
+    if (trusted === false && isDirect) {
+      // Log the hostmask glob-pattern so an operator can paste it into userAllowlist.
+      this.logger.info(
+        "Untrusted direct IRC message; add to userAllowlist to grant access",
+        `hostmask=${event.hostmask ?? "<unknown>"}`,
+        `nick=${normalizedNick}`,
+      );
+    }
 
     const roomMessage: RoomMessage = {
       serverTag: server,
