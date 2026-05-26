@@ -2,8 +2,8 @@ import { mkdir, mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { AuthStorage, SessionManager } from "@mariozechner/pi-coding-agent";
-import { Type } from "@mariozechner/pi-ai";
+import { AuthStorage, SessionManager } from "@earendil-works/pi-coding-agent";
+import { Type } from "@earendil-works/pi-ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── streamSimple mock ────────────────────────────────────────────────────
@@ -27,8 +27,8 @@ if (!globalAny.__sessionQueryCaptured) {
 }
 const captured: CapturedContext[] = globalAny.__sessionQueryCaptured;
 
-vi.mock("@mariozechner/pi-ai", async () => {
-  const actual = await vi.importActual<typeof import("@mariozechner/pi-ai")>("@mariozechner/pi-ai");
+vi.mock("@earendil-works/pi-ai", async () => {
+  const actual = await vi.importActual<typeof import("@earendil-works/pi-ai")>("@earendil-works/pi-ai");
   const streamSimple = (_model: unknown, context: { systemPrompt?: string; messages: unknown[]; tools?: unknown[] }, _options?: unknown) => {
     const g = globalThis as unknown as { __sessionQueryCaptured?: { systemPrompt?: string; messages: unknown[]; tools: unknown[] }[] };
     if (!g.__sessionQueryCaptured) {

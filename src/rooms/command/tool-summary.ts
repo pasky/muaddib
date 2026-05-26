@@ -1,4 +1,4 @@
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 import { isAssistantMessage, responseText } from "../../agent/message.js";
 import type { MuaddibTool } from "../../agent/tools/baseline-tools.js";

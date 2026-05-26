@@ -3,7 +3,7 @@ import { Type } from "typebox";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { SessionRunner } from "../session-runner.js";
 import type { MuaddibTool, ToolContext, ToolSet } from "./types.js";
-import type { Message } from "@mariozechner/pi-ai";
+import type { Message } from "@earendil-works/pi-ai";
 import type { RunnerLogger } from "../session-factory.js";
 import { stringifyError, toConfiguredString } from "../../utils/index.js";
 import { withCostSpan } from "../../cost/cost-span.js";

@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
-import type { Usage } from "@mariozechner/pi-ai";
+import type { Usage } from "@earendil-works/pi-ai";
 
 import { cloneUsage, emptyUsage, accumulateUsage } from "./usage.js";
 import type { ChatHistoryStore } from "../history/chat-history-store.js";

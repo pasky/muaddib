@@ -73,7 +73,7 @@ export interface SteeredPassiveMessage {
   timestamp: number;
 }
 
-declare module "@mariozechner/pi-agent-core" {
+declare module "@earendil-works/pi-agent-core" {
   interface CustomAgentMessages {
     steeredPassive: SteeredPassiveMessage;
   }

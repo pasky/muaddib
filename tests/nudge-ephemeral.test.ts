@@ -30,7 +30,7 @@
 
 import { Type } from "typebox";
 
-import { AuthStorage } from "@mariozechner/pi-coding-agent";
+import { AuthStorage } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -48,8 +48,8 @@ import { PiAiModelAdapter } from "../src/models/pi-ai-model-adapter.js";
 
 const mockState: StreamMockState = createStreamMockState();
 
-vi.mock("@mariozechner/pi-ai", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@mariozechner/pi-ai")>();
+vi.mock("@earendil-works/pi-ai", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@earendil-works/pi-ai")>();
   return {
     ...original,
     streamSimple: (...args: unknown[]) => handleStreamSimpleCall(mockState, ...args),

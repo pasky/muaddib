@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Message, UserMessage } from "@mariozechner/pi-ai";
+import type { Message, UserMessage } from "@earendil-works/pi-ai";
 
 export interface Chapter {
   number: number;

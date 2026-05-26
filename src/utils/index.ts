@@ -214,7 +214,7 @@ import { isTextContent, responseText } from "../agent/message.js";
  * For assistant messages, concatenates all text content blocks; for user/tool-result messages,
  * returns the string content directly (or concatenates text blocks if content is an array).
  */
-export function messageText(msg: import("@mariozechner/pi-ai").Message): string {
+export function messageText(msg: import("@earendil-works/pi-ai").Message): string {
   if (msg.role === "assistant") {
     return responseText(msg, " ");
   }

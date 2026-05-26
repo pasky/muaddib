@@ -1,5 +1,5 @@
-import { Agent, type AgentMessage, type AgentTool, type StreamFn, type ThinkingLevel } from "@mariozechner/pi-agent-core";
-import { streamSimple, type Message } from "@mariozechner/pi-ai";
+import { Agent, type AgentMessage, type AgentTool, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { streamSimple, type Message } from "@earendil-works/pi-ai";
 import { isAssistantMessage } from "./message.js";
 import {
   AgentSession,
@@ -10,7 +10,7 @@ import {
   convertToLlm,
   createExtensionRuntime,
   type ResourceLoader,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 
 import { PiAiModelAdapter, type ResolvedPiAiModel } from "../models/pi-ai-model-adapter.js";

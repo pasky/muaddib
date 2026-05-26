@@ -1,4 +1,4 @@
-import type { Message } from "@mariozechner/pi-ai";
+import type { Message } from "@earendil-works/pi-ai";
 
 import { NOOP_LOGGER, type Logger } from "../../app/logging.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";

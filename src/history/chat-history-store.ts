@@ -6,7 +6,7 @@ import {
 } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { AssistantMessage, Message, UserMessage } from "@mariozechner/pi-ai";
+import type { AssistantMessage, Message, UserMessage } from "@earendil-works/pi-ai";
 
 import type { RoomMessage } from "../rooms/message.js";
 

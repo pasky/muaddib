@@ -1,4 +1,4 @@
-import { getModel, type Api, type KnownProvider, type Model, type OpenAICompletionsCompat } from "@mariozechner/pi-ai";
+import { getModel, type Api, type KnownProvider, type Model, type OpenAICompletionsCompat } from "@earendil-works/pi-ai";
 
 const OPENROUTER_PROVIDER = "openrouter";
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";

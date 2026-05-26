@@ -16,7 +16,7 @@ import type {
   EditOperations,
   ReadOperations,
   WriteOperations,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import type { HttpFetch, VM } from "@earendil-works/gondolin";
 
 import type { GondolinConfig } from "../../config/muaddib-config.js";

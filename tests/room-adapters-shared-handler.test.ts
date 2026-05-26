@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { AuthStorage } from "@mariozechner/pi-coding-agent";
+import { AuthStorage } from "@earendil-works/pi-coding-agent";
 import { RoomMessageHandler } from "../src/rooms/command/message-handler.js";
 import { buildArc } from "../src/rooms/message.js";
 import { DiscordRoomMonitor } from "../src/rooms/discord/monitor.js";

@@ -10,9 +10,9 @@
 
 import { join } from "node:path";
 
-import type { Agent, ThinkingLevel } from "@mariozechner/pi-agent-core";
-import type { AuthStorage } from "@mariozechner/pi-coding-agent";
-import { type Usage } from "@mariozechner/pi-ai";
+import type { Agent, ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { type Usage } from "@earendil-works/pi-ai";
 
 import { deepMerge, formatUtcTime, messageText } from "../../utils/index.js";
 import {
@@ -28,7 +28,7 @@ import {
   type ToolSet,
 } from "../../agent/tools/baseline-tools.js";
 import { writeArtifactText } from "../../agent/tools/artifact-storage.js";
-import type { Message } from "@mariozechner/pi-ai";
+import type { Message } from "@earendil-works/pi-ai";
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { parseModelSpec } from "../../models/model-spec.js";

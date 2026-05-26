@@ -3,7 +3,7 @@ import { join } from "node:path";
 import {
   AuthStorage,
   type AuthCredential,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 import { buildArc } from "../rooms/message.js";
 

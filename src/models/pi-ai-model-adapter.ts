@@ -8,9 +8,9 @@ import {
   type KnownProvider,
   type Model,
   type SimpleStreamOptions,
-} from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-ai";
 
-import type { AuthStorage } from "@mariozechner/pi-coding-agent";
+import type { AuthStorage } from "@earendil-works/pi-coding-agent";
 
 import type { Logger } from "../app/logging.js";
 import { stripBinaryContent } from "../agent/debug-utils.js";

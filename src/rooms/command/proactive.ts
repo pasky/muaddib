@@ -7,8 +7,8 @@
  * loop, evaluation, and delegation to the executor for actual interjection.
  */
 
-import type { Agent } from "@mariozechner/pi-agent-core";
-import type { Message } from "@mariozechner/pi-ai";
+import type { Agent } from "@earendil-works/pi-agent-core";
+import type { Message } from "@earendil-works/pi-ai";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { formatUtcTime, messageText } from "../../utils/index.js";
 import { responseText } from "../../agent/message.js";

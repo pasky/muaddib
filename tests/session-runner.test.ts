@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Usage } from "@mariozechner/pi-ai";
-import { AuthStorage } from "@mariozechner/pi-coding-agent";
+import type { Usage } from "@earendil-works/pi-ai";
+import { AuthStorage } from "@earendil-works/pi-coding-agent";
 
 import type { Mock } from "vitest";
 

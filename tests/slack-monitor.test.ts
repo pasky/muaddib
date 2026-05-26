@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { AuthStorage } from "@mariozechner/pi-coding-agent";
+import { AuthStorage } from "@earendil-works/pi-coding-agent";
 import type { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { buildArc } from "../src/rooms/message.js";
 import { SlackRoomMonitor, findArtifactUrls, replaceArtifactUrlsWithUploads, postProcessOutgoingSlackMessage } from "../src/rooms/slack/monitor.js";

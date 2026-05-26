@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { Message } from "@mariozechner/pi-ai";
+import type { Message } from "@earendil-works/pi-ai";
 
 import { ContextReducerTs } from "../src/rooms/command/context-reducer.js";
 import { createStubAssistantFields } from "../src/history/chat-history-store.js";

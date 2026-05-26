@@ -15,7 +15,7 @@ import {
   createReadTool,
   createWriteTool,
   type AuthStorage,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 import type { GondolinConfig } from "../../config/muaddib-config.js";
 import type { ToolsConfig } from "../../config/muaddib-config.js";

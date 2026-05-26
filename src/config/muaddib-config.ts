@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 
 import { getMuaddibHome, resolveMuaddibPath } from "./paths.js";
 import { deepMerge, isRecord } from "../utils/index.js";

@@ -41,9 +41,9 @@ describe("PiAiModelAdapter", () => {
     expect(resolved.model.baseUrl).toBe("https://api.deepseek.com");
     expect(compat?.thinkingFormat).toBe("deepseek");
     expect(resolved.model.reasoning).toBe(true);
-    expect(resolved.model.cost.input).toBe(1.74);
-    expect(resolved.model.cost.output).toBe(3.48);
-    expect(resolved.model.cost.cacheRead).toBe(0.145);
+    expect(resolved.model.cost.input).toBe(0.435);
+    expect(resolved.model.cost.output).toBe(0.87);
+    expect(resolved.model.cost.cacheRead).toBe(0.003625);
     expect(resolved.model.contextWindow).toBe(1_000_000);
     expect(resolved.model.maxTokens).toBe(384_000);
   });

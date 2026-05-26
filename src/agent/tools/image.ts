@@ -438,7 +438,7 @@ function isAbortError(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && (error as { name?: unknown }).name === "AbortError");
 }
 
-import type { Usage } from "@mariozechner/pi-ai";
+import type { Usage } from "@earendil-works/pi-ai";
 
 function extractUsageFromResponse(payload: unknown): Usage {
   const usage = emptyUsage();

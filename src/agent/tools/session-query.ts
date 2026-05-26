@@ -15,7 +15,7 @@ import { join } from "node:path";
 import {
   SessionManager,
   type SessionEntry,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 import { getMuaddibHome } from "../../config/paths.js";

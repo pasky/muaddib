@@ -17,7 +17,7 @@ import {
   loadSkillsFromDir,
   type ResourceDiagnostic,
   type Skill,
-} from "@mariozechner/pi-coding-agent";
+} from "@earendil-works/pi-coding-agent";
 
 import { getArcWorkspacePath, VM_SKILLS_BASE, VM_WORKSPACE_SKILLS_BASE } from "../gondolin/fs.js";
 

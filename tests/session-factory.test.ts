@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AuthStorage } from "@mariozechner/pi-coding-agent";
+import { AuthStorage } from "@earendil-works/pi-coding-agent";
 
 const mockState = vi.hoisted(() => ({
   streamSimpleMock: vi.fn((_model, _context, options) => {
@@ -9,7 +9,7 @@ const mockState = vi.hoisted(() => ({
   sessions: [] as any[],
 }));
 
-vi.mock("@mariozechner/pi-agent-core", () => ({
+vi.mock("@earendil-works/pi-agent-core", () => ({
   Agent: class {
     public state: any = { model: null, messages: [], systemPrompt: "" };
     public steer = vi.fn();
@@ -19,12 +19,12 @@ vi.mock("@mariozechner/pi-agent-core", () => ({
   },
 }));
 
-vi.mock("@mariozechner/pi-ai", () => ({
+vi.mock("@earendil-works/pi-ai", () => ({
   streamSimple: (model: unknown, context: unknown, options: unknown) =>
     mockState.streamSimpleMock(model, context, options),
 }));
 
-vi.mock("@mariozechner/pi-coding-agent", () => ({
+vi.mock("@earendil-works/pi-coding-agent", () => ({
   AgentSession: class {
     public readonly callbacks: Array<(event: any) => void> = [];
     public abort = vi.fn(async () => {});

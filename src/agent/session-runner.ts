@@ -1,6 +1,6 @@
-import { type Agent, type AgentMessage, type AgentTool, type ThinkingLevel } from "@mariozechner/pi-agent-core";
-import type { AgentSession, AuthStorage } from "@mariozechner/pi-coding-agent";
-import type { AssistantMessage, Message, Usage } from "@mariozechner/pi-ai";
+import { type Agent, type AgentMessage, type AgentTool, type ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { AgentSession, AuthStorage } from "@earendil-works/pi-coding-agent";
+import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai";
 
 import { isAssistantMessage, isTextContent, isToolCall, isToolResultMessage, responseText } from "./message.js";
 import { detectRefusalSignal } from "./refusal-detection.js";

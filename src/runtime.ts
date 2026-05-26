@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-import { AuthStorage } from "@mariozechner/pi-coding-agent";
+import { AuthStorage } from "@earendil-works/pi-coding-agent";
 
 import { getMuaddibHome } from "./config/paths.js";
 import { RuntimeLogWriter } from "./app/logging.js";

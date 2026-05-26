@@ -137,7 +137,7 @@ Manual for IRC ("bring your own irssi"):
 
 ## Architecture
 
-Muaddib is built on the [`pi-coding-agent`](https://github.com/badlogic/pi-mono) SDK (`@mariozechner/pi-agent-core` and `@mariozechner/pi-ai`) for its agent runtime, but defines its own complete tool set (code execution, web search, artifacts, etc.).
+Muaddib is built on the [`pi-coding-agent`](https://github.com/earendil-works/pi-mono) SDK (`@earendil-works/pi-agent-core` and `@earendil-works/pi-ai`) for its agent runtime, but defines its own complete tool set (code execution, web search, artifacts, etc.).
 
 ## Development
 

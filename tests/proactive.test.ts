@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { Message, AssistantMessage } from "@mariozechner/pi-ai";
+import type { Message, AssistantMessage } from "@earendil-works/pi-ai";
 
 import {
   evaluateProactiveInterjection,

@@ -6,7 +6,7 @@
  * → web_search tool → Jina fetch → oracle result → final IRC response.
  *
  * Mock boundaries:
- *   - `streamSimple` from `@mariozechner/pi-ai` (scripted LLM responses)
+ *   - `streamSimple` from `@earendil-works/pi-ai` (scripted LLM responses)
  *   - global `fetch` (for Jina web search API)
  */
 
@@ -33,8 +33,8 @@ import { resetWebRateLimiters } from "../../src/agent/tools/web.js";
 
 const mockState: StreamMockState = createStreamMockState();
 
-vi.mock("@mariozechner/pi-ai", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@mariozechner/pi-ai")>();
+vi.mock("@earendil-works/pi-ai", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@earendil-works/pi-ai")>();
   return {
     ...original,
     streamSimple: (...args: unknown[]) => handleStreamSimpleCall(mockState, ...args),

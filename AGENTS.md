@@ -9,7 +9,7 @@
 - NEVER use `git add -A` blindly, there may be untracked files that must not be committed; use `git add -u` instead.
 
 ## Architecture
-- **Built on**: [`pi-coding-agent`](https://github.com/badlogic/pi-mono) SDK (`@mariozechner/pi-agent-core` and `@mariozechner/pi-ai`). Muaddib uses the `Agent` class from pi-agent-core but overrides all built-in tools via `baseToolsOverride` — pi's default read/write/bash tools are **not** exposed to the agent. All tools (bash, read, write, edit, web_search, etc.) are muaddib's own, defined in `src/agent/tools/`.
+- **Built on**: [`pi-coding-agent`](https://github.com/earendil-works/pi-mono) SDK (`@earendil-works/pi-agent-core` and `@earendil-works/pi-ai`). Muaddib uses the `Agent` class from pi-agent-core but overrides all built-in tools via `baseToolsOverride` — pi's default read/write/bash tools are **not** exposed to the agent. All tools (bash, read, write, edit, web_search, etc.) are muaddib's own, defined in `src/agent/tools/`.
 - **Main Service**: `src/app/main.ts` - core service coordinator (config, history, rooms, chronicler lifecycle)
 - **CLI Message Mode**: `src/cli/main.ts` + `src/cli/message-mode.ts`
 - **Room Isolation**:
@@ -27,7 +27,7 @@
 - No backwards compatibility shims for legacy config keys.
 
 ## Code Style
-- **Language**: TypeScript (Node 20+, ESM, strict mode)
+- **Language**: TypeScript (Node 22.19+, ESM, strict mode)
 - **Async**: async/await for non-blocking room/message flow
 - **Naming**: camelCase for variables/functions, PascalCase for classes/types
 - **Imports**: Node built-ins, then third-party, then local modules

@@ -8,7 +8,7 @@
  * incorporates it into the final response.
  *
  * Mock boundaries:
- *   - `streamSimple` from `@mariozechner/pi-ai` (scripted LLM responses)
+ *   - `streamSimple` from `@earendil-works/pi-ai` (scripted LLM responses)
  *   - global `fetch` (for Jina web search API — also triggers second message)
  */
 
@@ -36,8 +36,8 @@ import type { IrcRoomMonitor } from "../../src/rooms/irc/monitor.js";
 
 const mockState: StreamMockState = createStreamMockState();
 
-vi.mock("@mariozechner/pi-ai", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@mariozechner/pi-ai")>();
+vi.mock("@earendil-works/pi-ai", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@earendil-works/pi-ai")>();
   return {
     ...original,
     streamSimple: (...args: unknown[]) => handleStreamSimpleCall(mockState, ...args),

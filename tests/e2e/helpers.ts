@@ -17,9 +17,9 @@ import {
   type AssistantMessageEventStream,
   type ToolCall,
   type Usage,
-} from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-ai";
 
-import { AuthStorage, type ApiKeyCredential } from "@mariozechner/pi-coding-agent";
+import { AuthStorage, type ApiKeyCredential } from "@earendil-works/pi-coding-agent";
 import { RuntimeLogWriter } from "../../src/app/logging.js";
 import { MuaddibConfig } from "../../src/config/muaddib-config.js";
 import { ChatHistoryStore } from "../../src/history/chat-history-store.js";

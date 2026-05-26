@@ -1,4 +1,4 @@
-import type { Message } from "@mariozechner/pi-ai";
+import type { Message } from "@earendil-works/pi-ai";
 import type { CommandConfig, ModeConfig } from "../../config/muaddib-config.js";
 import { buildArc, type RoomMessage } from "../message.js";
 
