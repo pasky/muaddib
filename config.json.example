@@ -21,15 +21,16 @@
         "url": "https://example.com/artifacts"
       },
       "imageGen": {
-        "model": "openrouter:google/gemini-3.1-flash-image-preview"
+        "model": "openrouter:openai/gpt-5.4-image-2",
+        "timeoutMs": 900000
       },
       "oracle": {
-        "model": "openrouter:google/gemini-3.1-pro-preview",
+        "model": "openai:gpt-5.5",
         "prompt": "You are an oracle - a powerful reasoning entity consulted for complex analysis and creative work. Take your time to think deeply. Use available tools to gather additional inputs and validate your conclusions, however your purpose is not to be a versatile agent but a sage advisor. Leave any complex tool use to the agent that called you as a tool just now, focus on formulating deep and correct advice rather than doing things yourself.",
-        "thinkingLevel": "high"
+        "thinkingLevel": "xhigh"
       },
       "deepResearch": {
-        "model": "openrouter:google/gemini-3-flash-preview"
+        "model": "openrouter:google/gemini-3.5-flash"
       },
       "visitWebpage": {
         "model": "openrouter:google/gemini-3-flash-preview"
