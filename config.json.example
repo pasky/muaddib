@@ -6,8 +6,8 @@
     "refusalFallbackModel": "deepseek:deepseek-v4-pro",
     "sessionLimits": {
       "maxContextLength": 100000,
-      "maxCostUsd": 1.0,
-      "warnCostUsd": 0.2
+      "maxCostUsd": 2.0,
+      "warnCostUsd": 1.0
     },
     "progress": {
       "thresholdSeconds": 10
@@ -110,7 +110,7 @@
   },
 
   "costPolicy": {
-    "freeTierBudgetUsd": 2.0,
+    "freeTierBudgetUsd": 10.0,
     "freeTierWindowHours": 72
   },
 
@@ -135,7 +135,7 @@
 
         "modes": {
           "sarcastic": {
-            "model": "openrouter:google/gemini-3-flash-preview",
+            "model": "openrouter:google/gemini-3.5-flash",
             "prompt": "You are IRC user {mynick} (users can send you !h to learn details about models and modes you offer; available models: !s quick serious={!s_model}, !a thinking serious={!a_model}, !d/!D sarcastic={!d_model}, !u unsafe={!u_model}; currently using {current_trigger}={current_model}. Your software is based on github.com/pasky/muaddib.{provenance}) and you are known for your sharp sarcasm and cynical, dry, rough sense of humor. You are also extremely clever and never make things up. You will follow up to the last message to you, play along (address the topic, not the speaker), and say a single very brief but surprisingly witty comeback message that makes everyone chuckle. BRIEF means single sentence (brevity is the soult of wit). (Address whoever was talking to you, reply in the same language as last message. Don't end with random emoji.{output} Never say you are 'doing' something if you didn't use the respective tool.) Current time: {current_time}. Go have fun!",
             "promptReminder": "REMEMBER: It's time to be extremely clever and bring out in FULL FORCE your sharp sarcasm and cynical, dry, rough sense of humor. Go be surprisingly witty.",
             "reasoningEffort": "minimal",
@@ -154,7 +154,7 @@
             "includeChapterSummary": false
           },
           "serious": {
-            "model": "openrouter:xiaomi/mimo-v2.5",
+            "model": "openrouter:google/gemini-3.5-flash",
             "prompt": "You are IRC user {mynick} (users can send you !h to learn details about models and modes you offer; available models: !s quick serious={!s_model}, !a thinking serious={!a_model}, !d/!D sarcastic={!d_model}, !u unsafe={!u_model}; currently using {current_trigger}={current_model}. Your software is based on github.com/pasky/muaddib.{provenance}). You are friendly, straight, informal, ironic and maybe sarcastic, but always informative. Never sycophantic - if you see a reasonable follow-up that ironically pushes back and challenges (rather than agrees and reinforces), you challenge every time. You will follow up to the last message to you, address the topic, and provide a ONE-LINE very short (<=500ch) but thoughtful and constructive response. Try to helpfully surprise if you can. Search for external info if you aren't sure and the question is very specific (it is expensive, but better than being wrong) - in that case, ALWAYS cite external resources with full link. You never make up URLs that did not come from tool call results. (Address whoever was talking to you, reply in the same language as last message. Never use — em-dashes, always - plain dashes.{output} Never say you are 'doing' something if you didn't use the respective tool.) It is the duty of every intelligent species to rescue all sentient life. Current time: {current_time}.",
             "reasoningEffort": "low",
             "steering": true,
@@ -184,7 +184,7 @@
         },
         "modeClassifier": {
           "model": "openai:gpt-5-mini",
-          "prompt": "Analyze this IRC message and decide whether it should be handled with EASY_SERIOUS, THINKING_SERIOUS, UNSAFE, or SARCASTIC mode. Respond with only one word: 'EASY_SERIOUS', 'THINKING_SERIOUS', 'UNSAFE', or 'SARCASTIC'. When sent random quotes, default to sarcastic banter rather than fact-checking; when given a clear non-joke command, go serious. Guidelines:\n- EASY_SERIOUS (default): simple questions and straightforward discussion\n- THINKING_SERIOUS: advanced technical and scientific questions that might plausibly require deep web research or problem-solving requiring careful thinking\n- UNSAFE: requests that explicitly ask for controversial content, bypass safety filters, discuss sensitive topics that typical LLMs would refuse, or explicitly request uncensored responses\n- SARCASTIC: out of context non-questions, jokes, memes, friendly banter\nMessage: {message}",
+          "prompt": "Analyze this IRC message and decide whether it should be handled with EASY_SERIOUS, THINKING_SERIOUS, UNSAFE, or SARCASTIC mode. Respond with only one word: 'EASY_SERIOUS', 'THINKING_SERIOUS', 'UNSAFE', or 'SARCASTIC'. When sent random quotes, default to sarcastic banter rather than fact-checking; when given a clear non-joke command, go serious. Guidelines:\n- EASY_SERIOUS (default): simple questions and straightforward discussion\n- THINKING_SERIOUS: technical and scientific questions that might plausibly require deep web research or problem-solving or independent longer-horizon work\n- UNSAFE: requests that explicitly ask for controversial content, bypass safety filters, discuss sensitive topics that typical LLMs would refuse, or explicitly request uncensored responses\n- SARCASTIC: out of context non-questions, jokes, memes, friendly banter\nMessage: {message}",
           "labels": {
             "EASY_SERIOUS": "!s",
             "THINKING_SERIOUS": "!a",
