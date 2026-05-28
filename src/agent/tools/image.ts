@@ -1,11 +1,16 @@
+import { execFile, type ExecFileOptions } from "node:child_process";
+
+import type { Usage } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 
-import { parseModelSpec } from "../../models/model-spec.js";
-import type { ToolContext, MuaddibTool } from "./types.js";
-import { toConfiguredString } from "../../utils/index.js";
 import { recordUsage } from "../../cost/cost-span.js";
 import { LLM_CALL_TYPE } from "../../cost/llm-call-type.js";
 import { emptyUsage } from "../../cost/usage.js";
+import { parseModelSpec } from "../../models/model-spec.js";
+import { stringifyError, toConfiguredString } from "../../utils/index.js";
+import { writeArtifactBytes } from "./artifact-storage.js";
+import type { ToolContext, MuaddibTool } from "./types.js";
+import { resolveLocalArtifactFilePath } from "./url-utils.js";
 
 export interface GenerateImageInput {
   prompt: string;
@@ -24,7 +29,6 @@ export interface GenerateImageResult {
 }
 
 export type GenerateImageExecutor = (input: GenerateImageInput) => Promise<GenerateImageResult>;
-import { writeArtifactBytes } from "./artifact-storage.js";
 
 const GENERATE_IMAGE_PARAMETERS = Type.Object({
   prompt: Type.String({
@@ -40,6 +44,8 @@ const GENERATE_IMAGE_PARAMETERS = Type.Object({
 const DEFAULT_IMAGE_LIMIT = 3_500_000;
 const DEFAULT_IMAGE_GEN_TIMEOUT_MS = 120_000;
 const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+const SLOP_WATERMARK_TIMEOUT_MS = 30_000;
+const SLOP_WATERMARK_MAX_BUFFER = 1024 * 1024;
 const IMAGE_SUFFIX_BY_MIME_TYPE: Record<string, string> = {
   "image/png": ".png",
   "image/jpeg": ".jpg",
@@ -160,6 +166,7 @@ export function createDefaultGenerateImageExecutor(
 
       const suffix = IMAGE_SUFFIX_BY_MIME_TYPE[parsedImage.mimeType.toLowerCase()] ?? ".png";
       const artifactUrl = await writeArtifactBytes(options, imageBytes, suffix);
+      await addSlopWatermarkToArtifact(options, artifactUrl);
       images.push({
         data: parsedImage.data,
         mimeType: parsedImage.mimeType,
@@ -385,7 +392,54 @@ async function resolveOpenRouterApiKey(options: ToolContext): Promise<string | u
   return toConfiguredString(process.env.OPENROUTER_API_KEY);
 }
 
+async function addSlopWatermarkToArtifact(options: ToolContext, artifactUrl: string): Promise<void> {
+  try {
+    const filePath = resolveLocalArtifactFilePath(
+      artifactUrl,
+      options.toolsConfig?.artifacts?.url,
+      options.toolsConfig?.artifacts?.path,
+    );
+    if (!filePath) {
+      options.logger?.warn(`Failed to add slop watermark: generated artifact URL did not resolve locally: ${artifactUrl}`);
+      return;
+    }
 
+    await execFileAsync("convert", [
+      filePath,
+      "-gravity",
+      "SouthEast",
+      "-pointsize",
+      "20",
+      "-fill",
+      "rgba(255,255,255,0.6)",
+      "-stroke",
+      "rgba(0,0,0,0.8)",
+      "-strokewidth",
+      "1",
+      "-annotate",
+      "+10+10",
+      "🍌slop",
+      filePath,
+    ], {
+      timeout: SLOP_WATERMARK_TIMEOUT_MS,
+      maxBuffer: SLOP_WATERMARK_MAX_BUFFER,
+    });
+  } catch (error) {
+    options.logger?.warn(`Failed to add slop watermark to ${artifactUrl}: ${stringifyError(error)}`);
+  }
+}
+
+function execFileAsync(file: string, args: string[], options: ExecFileOptions): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, options, (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+}
 
 function parseJsonResponseBody(body: string): unknown {
   if (!body) {
@@ -437,8 +491,6 @@ function extractErrorMessage(value: unknown): string | undefined {
 function isAbortError(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && (error as { name?: unknown }).name === "AbortError");
 }
-
-import type { Usage } from "@earendil-works/pi-ai";
 
 function extractUsageFromResponse(payload: unknown): Usage {
   const usage = emptyUsage();

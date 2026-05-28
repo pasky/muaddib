@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1165,6 +1165,81 @@ describe("core tool executors generate_image support", () => {
     expect(openRouterRequestBody.messages[0].content[0]).toEqual({ type: "text", text: "Draw a tiny cat" });
     expect(openRouterRequestBody.messages[0].content[1].type).toBe("image_url");
     expect(openRouterRequestBody.messages[0].content[1].image_url.url).toMatch(/^data:image\/png;base64,/);
+  });
+
+  it("generate_image adds the slop watermark to the local artifact file", async () => {
+    const { dir, artifactsPath } = await makeArtifactsDir();
+    const binDir = join(dir, "bin");
+    const convertLogPath = join(dir, "convert-args.json");
+    const convertPath = join(binDir, "convert");
+
+    await mkdir(binDir, { recursive: true });
+    await writeFile(
+      convertPath,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+fs.writeFileSync(${JSON.stringify(convertLogPath)}, JSON.stringify(args));
+fs.appendFileSync(args[args.length - 1], "\\nWATERMARKED");
+`,
+    );
+    await chmod(convertPath, 0o755);
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url === "https://openrouter.ai/api/v1/chat/completions") {
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  images: [
+                    {
+                      image_url: {
+                        url: "data:image/png;base64,QUJD",
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/json",
+            },
+          },
+        );
+      }
+
+      throw new Error(`Unexpected fetch URL in test: ${url}`);
+    });
+
+    const executors = createDefaultToolExecutors({ toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" }, imageGen: { model: "openrouter:google/gemini-3-pro-image-preview" } },
+      authStorage: AuthStorage.inMemory({ openrouter: { type: "api_key", key: "or-key" } }),
+    });
+
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${binDir}:${previousPath ?? ""}`;
+    try {
+      const result = await executors.generateImage({
+        prompt: "Draw a tiny cat",
+      });
+
+      const artifactFilename = extractFilenameFromViewerUrl(result.images[0].artifactUrl);
+      const expectedPath = join(artifactsPath, artifactFilename);
+      const convertArgs = JSON.parse(await readFile(convertLogPath, "utf-8")) as string[];
+
+      expect(convertArgs[0]).toBe(expectedPath);
+      expect(convertArgs.at(-1)).toBe(expectedPath);
+      expect(convertArgs).toContain("🍌slop");
+      expect(convertArgs[0]).not.toContain("?");
+      expect((await readFile(expectedPath)).toString()).toBe("ABC\nWATERMARKED");
+    } finally {
+      process.env.PATH = previousPath;
+    }
   });
 
   it("generate_image fails fast when tools.image_gen.model is missing", async () => {
