@@ -10,7 +10,7 @@ import { parseModelSpec } from "../../models/model-spec.js";
 import { stringifyError, toConfiguredString } from "../../utils/index.js";
 import { writeArtifactBytes } from "./artifact-storage.js";
 import type { ToolContext, MuaddibTool } from "./types.js";
-import { resolveLocalArtifactFilePath } from "./url-utils.js";
+import { extractLocalArtifactPath, resolveLocalArtifactFilePath } from "./url-utils.js";
 
 export interface GenerateImageInput {
   prompt: string;
@@ -125,7 +125,11 @@ export function createDefaultGenerateImageExecutor(
         throw new Error("generate_image.image_urls entries must be non-empty URLs.");
       }
 
-      const dataUrl = await fetchImageAsDataUrl(imageUrl, maxImageBytes);
+      const dataUrl = await fetchImageAsDataUrl(
+        imageUrl,
+        maxImageBytes,
+        options.toolsConfig?.artifacts?.url,
+      );
       contentBlocks.push({
         type: "image_url",
         image_url: {
@@ -353,13 +357,15 @@ function parseDataUrlImage(dataUrl: string): ParsedDataUrlImage {
 async function fetchImageAsDataUrl(
   imageUrl: string,
   maxImageBytes: number,
+  artifactsUrl: string | undefined,
 ): Promise<string> {
-  const parsedUrl = new URL(imageUrl);
+  const fetchUrl = toRawArtifactReferenceUrl(imageUrl, artifactsUrl);
+  const parsedUrl = new URL(fetchUrl);
   if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
     throw new Error(`Failed to fetch reference image ${imageUrl}: URL must use http:// or https://.`);
   }
 
-  const response = await fetch(imageUrl, {
+  const response = await fetch(fetchUrl, {
     headers: {
       "User-Agent": "muaddib/1.0",
     },
@@ -384,6 +390,19 @@ async function fetchImageAsDataUrl(
   }
 
   return `data:${contentType};base64,${imageBytes.toString("base64")}`;
+}
+
+function toRawArtifactReferenceUrl(imageUrl: string, artifactsUrl: string | undefined): string {
+  const artifactPath = extractLocalArtifactPath(imageUrl, artifactsUrl);
+  if (!artifactPath || !artifactsUrl) {
+    return imageUrl;
+  }
+
+  const encodedPath = artifactPath
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `${artifactsUrl.replace(/\/+$/, "")}/${encodedPath}`;
 }
 
 async function resolveOpenRouterApiKey(options: ToolContext): Promise<string | undefined> {

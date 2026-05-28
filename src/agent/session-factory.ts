@@ -301,10 +301,10 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
   const modelRegistry = ModelRegistry.inMemory(input.authStorage);
   const llmDebugMaxChars = Math.max(500, Math.floor(input.llmDebugMaxChars ?? 120_000));
 
-  // Mutable vision-fallback state: when activated, the streamFn will override
-  // the model parameter to use the vision-capable model. This bypasses the
-  // stale `config.model` that pi-agent-core's _runLoop captures by value at
-  // loop start, avoiding a wasted turn + 5s delay on non-vision models.
+  // Mutable vision-fallback state: when activated, prepareNextTurn switches
+  // pi-agent-core's loop config to the vision-capable model so the next request
+  // resolves that provider's API key. The streamFn override remains a safety net
+  // against any stale model parameter captured before the config update.
   const visionState = { activated: false, model: null as ResolvedPiAiModel["model"] | null };
   const streamFn = createTracingStreamFn(logger, llmDebugMaxChars, visionState);
 
@@ -345,6 +345,12 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
     transformContext,
     getApiKey: (provider: string) => input.authStorage.getApiKey(provider),
     streamFn,
+    prepareNextTurn: () => {
+      if (visionState.activated && visionState.model) {
+        return { model: visionState.model };
+      }
+      return undefined;
+    },
     steeringMode: "all",
   });
 

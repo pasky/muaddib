@@ -242,7 +242,11 @@ describe("createAgentSessionForInvocation", () => {
     expect(agent.state.model).toEqual(visionModel);
     expect(ctx.getVisionFallbackActivated()).toBe(true);
 
-    // After vision fallback activates, the streamFn should use the vision model
+    // After vision fallback activates, the next turn should switch loop config to
+    // the vision model so pi-agent-core resolves that provider's API key.
+    expect(agent.config.prepareNextTurn()).toEqual({ model: visionModel });
+
+    // The streamFn also guards against stale loop model captures by using the vision model.
     mockState.streamSimpleMock.mockClear();
     const streamFn = agent.config.streamFn;
     const originalModel = { provider: "openai", id: "gpt-4o-mini", api: "responses" };

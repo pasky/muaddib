@@ -1167,6 +1167,79 @@ describe("core tool executors generate_image support", () => {
     expect(openRouterRequestBody.messages[0].content[1].image_url.url).toMatch(/^data:image\/png;base64,/);
   });
 
+  it("generate_image fetches configured artifact viewer reference URLs as raw image URLs", async () => {
+    const { artifactsPath } = await makeArtifactsDir();
+
+    const fetchedUrls: string[] = [];
+    let openRouterRequestBody: any = null;
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      fetchedUrls.push(url);
+
+      if (url === "https://example.com/artifacts/ref.png") {
+        return new Response(Uint8Array.from([9]), {
+          status: 200,
+          headers: {
+            "content-type": "image/png",
+          },
+        });
+      }
+
+      if (url === "https://example.com/artifacts/?ref.png") {
+        return new Response("<html>viewer</html>", {
+          status: 200,
+          headers: {
+            "content-type": "text/html",
+          },
+        });
+      }
+
+      if (url === "https://openrouter.ai/api/v1/chat/completions") {
+        openRouterRequestBody = JSON.parse(String(init?.body ?? "{}"));
+
+        return new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  images: [
+                    {
+                      image_url: {
+                        url: "data:image/png;base64,QUJD",
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/json",
+            },
+          },
+        );
+      }
+
+      throw new Error(`Unexpected fetch URL in test: ${url}`);
+    });
+
+    const executors = createDefaultToolExecutors({ toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" }, imageGen: { model: "openrouter:google/gemini-3-pro-image-preview" } },
+      authStorage: AuthStorage.inMemory({ openrouter: { type: "api_key", key: "or-key" } }),
+    });
+
+    await executors.generateImage({
+      prompt: "Edit this reference",
+      image_urls: ["https://example.com/artifacts/?ref.png"],
+    });
+
+    expect(fetchedUrls).toContain("https://example.com/artifacts/ref.png");
+    expect(fetchedUrls).not.toContain("https://example.com/artifacts/?ref.png");
+    expect(openRouterRequestBody.messages[0].content[1].image_url.url).toBe("data:image/png;base64,CQ==");
+  });
+
   it("generate_image adds the slop watermark to the local artifact file", async () => {
     const { dir, artifactsPath } = await makeArtifactsDir();
     const binDir = join(dir, "bin");
