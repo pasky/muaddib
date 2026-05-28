@@ -441,6 +441,73 @@ describe("DiscordRoomMonitor", () => {
     await history.close();
   });
 
+  it("sends a new Discord followup instead of editing beyond Discord's content limit", async () => {
+    const history = createTempHistoryStore(20);
+    const first = "a".repeat(1_900);
+    const second = "b".repeat(150);
+
+    const sendCalls: Array<{ text: string; options?: { replyToMessageId?: string; mentionAuthor?: boolean } }> = [];
+    const editCalls: Array<{ messageId: string; text: string }> = [];
+
+    const monitor = new DiscordRoomMonitor({
+      roomConfig: { enabled: true, replyEditDebounceSeconds: 15 },
+      history,
+      sender: {
+        sendMessage: async (_channelId, text, options) => {
+          sendCalls.push({ text, options });
+          return {
+            messageId: `bot-reply-${sendCalls.length}`,
+          };
+        },
+        editMessage: async (_channelId, messageId, text) => {
+          editCalls.push({ messageId, text });
+          if (text.length > 2_000) {
+            throw new Error("Discord content too long");
+          }
+          return {
+            messageId,
+          };
+        },
+      },
+      commandHandler: {
+        handleIncomingMessage: async (_message, options) => {
+          await options?.sendResponse?.(first);
+          await options?.sendResponse?.(second);
+        },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      guildId: "123456789",
+      channelId: "chan-1",
+      messageId: "msg-42",
+      username: "alice",
+      content: "muaddib: hello",
+      mynick: "muaddib",
+      mentionsBot: true,
+    });
+
+    expect(editCalls).toEqual([]);
+    expect(sendCalls).toEqual([
+      {
+        text: first,
+        options: {
+          replyToMessageId: "msg-42",
+          mentionAuthor: true,
+        },
+      },
+      {
+        text: second,
+        options: {
+          replyToMessageId: "bot-reply-1",
+          mentionAuthor: false,
+        },
+      },
+    ]);
+
+    await history.close();
+  });
+
   it("sends a new Discord followup when reply edit debounce is disabled", async () => {
     const history = createTempHistoryStore(20);
 

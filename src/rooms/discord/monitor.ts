@@ -15,6 +15,8 @@ import {
 import { DiscordGatewayTransport } from "./transport.js";
 import type { ArcEventsWatcher } from "../../events/watcher.js";
 
+const DISCORD_MESSAGE_CONTENT_MAX_CHARS = 2_000;
+
 interface CommandLike {
   handleIncomingMessage(
     message: RoomMessage,
@@ -369,21 +371,30 @@ export class DiscordRoomMonitor {
                 nowSeconds - lastReplyAtSeconds < replyEditDebounceSeconds
               ) {
                 const combined = lastReplyText ? `${lastReplyText}\n${text}` : text;
-                const targetMessageId = lastReplyMessageId;
 
-                const editResult = await sendWithRetryResult<DiscordSendResult>(
-                  event.channelId,
-                  "discord",
-                  this.options.onSendRetryEvent,
-                  async () => await sender.editMessage!(event.channelId, targetMessageId, combined),
-                );
+                if (combined.length <= DISCORD_MESSAGE_CONTENT_MAX_CHARS) {
+                  const targetMessageId = lastReplyMessageId;
 
-                if (editResult?.messageId) {
-                  lastReplyMessageId = editResult.messageId;
+                  const editResult = await sendWithRetryResult<DiscordSendResult>(
+                    event.channelId,
+                    "discord",
+                    this.options.onSendRetryEvent,
+                    async () => await sender.editMessage!(event.channelId, targetMessageId, combined),
+                  );
+
+                  if (editResult?.messageId) {
+                    lastReplyMessageId = editResult.messageId;
+                  }
+                  lastReplyText = combined;
+                  lastReplyAtSeconds = nowSeconds;
+                  return { platformId: lastReplyMessageId, isEdit: true, combinedContent: combined };
                 }
-                lastReplyText = combined;
-                lastReplyAtSeconds = nowSeconds;
-                return { platformId: lastReplyMessageId, isEdit: true, combinedContent: combined };
+
+                this.logger.info(
+                  "Skipping Discord reply edit because combined content exceeds platform limit",
+                  `chars=${combined.length}`,
+                  `max_chars=${DISCORD_MESSAGE_CONTENT_MAX_CHARS}`,
+                );
               }
 
               const replyToMessageId = lastReplyMessageId ?? event.messageId;
