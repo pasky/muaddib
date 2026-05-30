@@ -2,7 +2,7 @@ import { type Agent, type AgentMessage, type AgentTool, type ThinkingLevel } fro
 import type { AgentSession, AuthStorage } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai";
 
-import { isAssistantMessage, isTextContent, isToolCall, isToolResultMessage, responseText } from "./message.js";
+import { isAssistantMessage, isTextContent, isToolCall, responseText } from "./message.js";
 import { detectRefusalSignal } from "./refusal-detection.js";
 import { stringifyError } from "../utils/index.js";
 import { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
@@ -20,6 +20,9 @@ import { LLM_CALL_TYPE, isLlmCallType } from "../cost/llm-call-type.js";
 
 const DEFAULT_EMPTY_COMPLETION_RETRY_PROMPT =
   "<meta>No valid text or tool use found in response. Please try again.</meta>";
+
+const ARTIFACT_TOOLS = new Set(["share_artifact", "generate_image"]);
+const ARTIFACT_URL_PATTERN = /(?:Artifact shared|Generated image):\s+(https?:\/\/\S+)/g;
 
 export interface SessionRunnerOptions {
   model: string;
@@ -142,6 +145,7 @@ export class SessionRunner {
     // handler (vision) so that all messages after a fallback carry the
     // annotation — not just the final response.
     let responseSuffix = "";
+    let lastCreatedArtifactUrl: string | undefined;
     // When true, onResponse is skipped and text is logged at INFO instead.
     // Toggled by the muteResponses() handle returned in PromptResult so
     // callers can silence delivery before background work (memory update).
@@ -166,6 +170,17 @@ export class SessionRunner {
         });
     };
 
+    let pendingArtifactUrlRetry: string | undefined;
+    let artifactUrlRetryAttempted = false;
+    const queueArtifactUrlRetryIfNeeded = (assistantMessage: unknown, text: string): boolean => {
+      if (!lastCreatedArtifactUrl || artifactUrlRetryAttempted || pendingArtifactUrlRetry ||
+          !isPotentialFinalAssistantMessage(assistantMessage) || text.includes(lastCreatedArtifactUrl)) {
+        return false;
+      }
+      pendingArtifactUrlRetry = lastCreatedArtifactUrl;
+      return true;
+    };
+
     const unsubscribe = session.subscribe((event) => {
       if (event.type === "turn_end") {
         iterations += 1;
@@ -185,17 +200,24 @@ export class SessionRunner {
           const assistantMessageObj = event.message && typeof event.message === "object"
             ? event.message as object
             : null;
+          const queuedArtifactRetry = text && !responseMuted
+            ? queueArtifactUrlRetryIfNeeded(event.message, text)
+            : false;
           if (text && this.onResponse && !responseMuted) {
             if (!assistantMessageObj || !deliveredAssistantMessages.has(assistantMessageObj)) {
-              if (assistantMessageObj) {
-                deliveredAssistantMessages.add(assistantMessageObj);
+              if (queuedArtifactRetry) {
+                this.logger.debug("Deferring assistant response missing last artifact URL", `url=${pendingArtifactUrlRetry ?? "unknown"}`);
+              } else {
+                if (assistantMessageObj) {
+                  deliveredAssistantMessages.add(assistantMessageObj);
+                }
+                // Don't decorate NULL sentinel responses with suffixes — they must
+                // pass through to onResponse unchanged so callers can suppress them.
+                const decorated = responseSuffix && !/^["'`]?\s*null\s*["'`]?$/iu.test(text)
+                  ? `${text} ${responseSuffix}`
+                  : text;
+                queueResponseDelivery(decorated);
               }
-              // Don't decorate NULL sentinel responses with suffixes — they must
-              // pass through to onResponse unchanged so callers can suppress them.
-              const decorated = responseSuffix && !/^["'`]?\s*null\s*["'`]?$/iu.test(text)
-                ? `${text} ${responseSuffix}`
-                : text;
-              queueResponseDelivery(decorated);
             }
           } else if (text && responseMuted) {
             this.logger.info("Suppressing post-response text", truncateForDebug(text, 200));
@@ -223,6 +245,10 @@ export class SessionRunner {
             result: event.result,
           }, this.llmDebugMaxChars),
         );
+
+        if (!event.isError && ARTIFACT_TOOLS.has(event.toolName)) {
+          lastCreatedArtifactUrl = extractCreatedArtifactUrl(event.result) ?? lastCreatedArtifactUrl;
+        }
 
         // Vision fallback: once activated, annotate all subsequent responses.
         if (!event.isError && !responseSuffix.includes("vision fallback") &&
@@ -293,16 +319,17 @@ export class SessionRunner {
         throw new Error(`Agent produced empty completion after ${EMPTY_RETRY_DELAYS_MS.length} retries.`);
       }
 
-      // Reject responses that created an artifact but omitted its URL.
-      const ARTIFACT_TOOLS = new Set(["share_artifact", "generate_image"]);
-      const lastArtifactUrl = session.messages
-        .filter((m) => isToolResultMessage(m) && ARTIFACT_TOOLS.has(m.toolName) && !m.isError)
-        .flatMap((m) => isToolResultMessage(m) ? m.content.filter(isTextContent).flatMap((b) => [...b.text.matchAll(/(?:Artifact shared|Generated image):\s+(https?:\/\/\S+)/g)].map((x) => x[1])) : [])
-        .at(-1);
-      if (lastArtifactUrl && !text.includes(lastArtifactUrl)) {
-        this.logger.warn("Response missing last artifact URL, retrying", `url=${lastArtifactUrl}`);
-        const retryPrompt = `<meta>Your response must include the artifact URL you created so the user can access it. Missing URL: ${lastArtifactUrl}. Please respond again and include the URL in your answer.</meta>`;
-        await session.prompt(retryPrompt);
+      // The message_end hook queues this when it suppresses a response that
+      // created an artifact but omitted the URL.  The fallback call covers rare
+      // mocked/provider paths that append a final assistant message without a
+      // message_end event.
+      queueArtifactUrlRetryIfNeeded(findLastAssistantMessage(session.messages), text);
+      if (pendingArtifactUrlRetry) {
+        const url = pendingArtifactUrlRetry;
+        pendingArtifactUrlRetry = undefined;
+        artifactUrlRetryAttempted = true;
+        this.logger.warn("Response missing last artifact URL, retrying", `url=${url}`);
+        await session.prompt(buildArtifactUrlRetryPrompt(url));
         const retryText = stripUndeliverableResponse(extractLastAssistantText(session.messages));
         if (retryText) {
           text = retryText;
@@ -445,6 +472,32 @@ function findLastAssistantMessage(messages: readonly AgentMessage[]): AssistantM
   return null;
 }
 
+function buildArtifactUrlRetryPrompt(url: string): string {
+  return `<meta>Your response must include the artifact URL you created so the user can access it. Missing URL: ${url}. Please respond again and include the URL in your answer.</meta>`;
+}
+
+function extractCreatedArtifactUrl(result: unknown): string | undefined {
+  const text = textPayload(result);
+  return [...text.matchAll(ARTIFACT_URL_PATTERN)].map((match) => match[1]).at(-1);
+}
+
+function textPayload(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.filter(isTextContent).map((block) => block.text).join("\n");
+  if (value && typeof value === "object" && "content" in value) {
+    return textPayload((value as { content: unknown }).content);
+  }
+  return "";
+}
+
+function isPotentialFinalAssistantMessage(message: unknown): boolean {
+  if (!message || typeof message !== "object") return true;
+  const msg = message as AgentMessage;
+  if (!isAssistantMessage(msg)) return false;
+  const stopReason = String(msg.stopReason ?? "");
+  if (stopReason === "tool_use" || stopReason === "toolUse") return false;
+  return !msg.content.some((block) => isToolCall(block));
+}
 
 function resolveCurrentLlmCallType() {
   const spanName = currentCostSpan()?.name;

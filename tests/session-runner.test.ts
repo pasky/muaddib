@@ -107,6 +107,19 @@ function emitAssistantResponse(ctx: MockSessionCtx, text: string, opts?: {
   callbacks.forEach((cb) => cb({ type: "turn_end" }));
 }
 
+function emitToolResult(ctx: MockSessionCtx, toolName: string, text: string, isError = false): void {
+  const { session, callbacks } = ctx;
+  callbacks.forEach((cb) => cb({ type: "tool_execution_start", toolName, args: {} }));
+  session.messages.push({
+    role: "toolResult", toolCallId: `tc${session.messages.length}`, toolName,
+    content: [{ type: "text", text }], isError, timestamp: Date.now(),
+  });
+  callbacks.forEach((cb) => cb({
+    type: "tool_execution_end", toolName, isError,
+    result: [{ type: "text", text }],
+  }));
+}
+
 const defaultModelAdapter = {
   resolve: (spec: string) => ({
     spec: { provider: spec.split(":")[0], modelId: spec.split(":")[1] },
@@ -587,11 +600,7 @@ describe("SessionRunner", () => {
       promptImpl: async (c) => {
         promptCount += 1;
         if (promptCount === 1) {
-          c.session.messages.push({
-            role: "toolResult", toolCallId: "tc1", toolName: "share_artifact",
-            content: [{ type: "text", text: `Artifact shared: ${artifactUrl}` }],
-            isError: false, timestamp: Date.now(),
-          });
+          emitToolResult(c, "share_artifact", `Artifact shared: ${artifactUrl}`);
           emitAssistantResponse(c, "Here is your report.");
         } else {
           emitAssistantResponse(c, `Here is your report: ${artifactUrl}`);
@@ -599,10 +608,12 @@ describe("SessionRunner", () => {
       },
     });
 
-    const runner = makeRunner();
+    const deliveredTexts: string[] = [];
+    const runner = makeRunner({ onResponse: (text: string) => { deliveredTexts.push(text); } });
     const result = await runner.prompt("generate report");
 
     expect(result.text).toBe(`Here is your report: ${artifactUrl}`);
+    expect(deliveredTexts).toEqual([`Here is your report: ${artifactUrl}`]);
     expect(promptCount).toBe(2);
     const retryCall = (result.session!.prompt as any).mock.calls[1];
     expect(retryCall[0]).toContain(artifactUrl);
@@ -617,11 +628,7 @@ describe("SessionRunner", () => {
       promptImpl: async (c) => {
         promptCount += 1;
         if (promptCount === 1) {
-          c.session.messages.push({
-            role: "toolResult", toolCallId: "tc1", toolName: "generate_image",
-            content: [{ type: "text", text: `Generated image: ${artifactUrl} (you must mention to the user explicitly)` }],
-            isError: false, timestamp: Date.now(),
-          });
+          emitToolResult(c, "generate_image", `Generated image: ${artifactUrl} (you must mention to the user explicitly)`);
           emitAssistantResponse(c, "I generated an image for you!");
         } else {
           emitAssistantResponse(c, `Here is the image: ${artifactUrl}`);
@@ -644,18 +651,8 @@ describe("SessionRunner", () => {
     makeMockSession({
       promptImpl: async (c) => {
         promptCount += 1;
-        c.session.messages.push(
-          {
-            role: "toolResult", toolCallId: "tc1", toolName: "share_artifact",
-            content: [{ type: "text", text: `Artifact shared: ${firstUrl}` }],
-            isError: false, timestamp: Date.now(),
-          },
-          {
-            role: "toolResult", toolCallId: "tc2", toolName: "generate_image",
-            content: [{ type: "text", text: `Generated image: ${lastUrl} (you must mention to the user explicitly)` }],
-            isError: false, timestamp: Date.now(),
-          },
-        );
+        emitToolResult(c, "share_artifact", `Artifact shared: ${firstUrl}`);
+        emitToolResult(c, "generate_image", `Generated image: ${lastUrl} (you must mention to the user explicitly)`);
         // Response includes only the last URL, not the first — should be fine
         emitAssistantResponse(c, `Here is the image: ${lastUrl}`);
       },
@@ -675,11 +672,7 @@ describe("SessionRunner", () => {
     makeMockSession({
       promptImpl: async (c) => {
         promptCount += 1;
-        c.session.messages.push({
-          role: "toolResult", toolCallId: "tc1", toolName: "share_artifact",
-          content: [{ type: "text", text: `Artifact shared: ${artifactUrl}` }],
-          isError: false, timestamp: Date.now(),
-        });
+        emitToolResult(c, "share_artifact", `Artifact shared: ${artifactUrl}`);
         emitAssistantResponse(c, `Here is your file: ${artifactUrl}`);
       },
     });
@@ -699,11 +692,7 @@ describe("SessionRunner", () => {
       promptImpl: async (c) => {
         promptCount += 1;
         if (promptCount === 1) {
-          c.session.messages.push({
-            role: "toolResult", toolCallId: "tc1", toolName: "share_artifact",
-            content: [{ type: "text", text: `Artifact shared: ${artifactUrl}` }],
-            isError: false, timestamp: Date.now(),
-          });
+          emitToolResult(c, "share_artifact", `Artifact shared: ${artifactUrl}`);
           emitAssistantResponse(c, "Here is the image.");
         } else {
           emitAssistantResponse(c, "   ");
@@ -711,10 +700,12 @@ describe("SessionRunner", () => {
       },
     });
 
-    const runner = makeRunner();
+    const deliveredTexts: string[] = [];
+    const runner = makeRunner({ onResponse: (text: string) => { deliveredTexts.push(text); } });
     const result = await runner.prompt("generate image");
 
     expect(result.text).toBe("Here is the image.");
+    expect(deliveredTexts).toEqual(["Here is the image."]);
     await result.session!.dispose();
   });
 
