@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { basename, join } from "node:path";
+
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
@@ -9,6 +12,7 @@ import { withCostSpan } from "../../cost/cost-span.js";
 import { LLM_CALL_TYPE } from "../../cost/llm-call-type.js";
 import type { RunnerLogger } from "../session-factory.js";
 import { SessionRunner, type PromptResult } from "../session-runner.js";
+import { generateToolSummaryFromSession } from "../tool-summary.js";
 import type { MuaddibTool, ToolContext, ToolSet } from "./types.js";
 
 export interface OracleInput {
@@ -88,15 +92,14 @@ export interface OracleInvocationContext {
   conversationContext: Message[];
 
   /**
-   * Factory that builds the full baseline tool set.
-   * Injected to break the circular dependency (baseline-tools.ts → oracle.ts).
-   * The oracle filters this through ORACLE_EXCLUDED_TOOLS.
-   * Returns a ToolSet so the oracle's runner can call dispose() on session end.
+   * Lazily returns the current invocation's tool set.
+   * The oracle reuses these tool instances so sandbox-backed tools operate in
+   * the exact same /workspace/.sessions/session-<slug>/ working directory as
+   * the parent agent.  The oracle runner deliberately does not own disposal of
+   * this shared tool set; the parent SessionRunner checkpoints it when the
+   * user-visible command finishes.
    */
-  buildTools: (options: ToolContext) => ToolSet;
-
-  /** Tool options for building oracle's nested tools (arc, secrets, etc.). */
-  toolOptions: ToolContext;
+  getToolSet: () => ToolSet;
 }
 
 export function createDefaultOracleExecutor(
@@ -122,15 +125,25 @@ export function createDefaultOracleExecutor(
     const systemPrompt = toConfiguredString(options.toolsConfig?.oracle?.prompt) ?? DEFAULT_ORACLE_SYSTEM_PROMPT;
     const thinkingLevel = getOracleThinkingLevel(options.toolsConfig?.oracle?.thinkingLevel);
 
-    // Build tools independently (like Python's get_tools_for_arc + EXCLUDED_TOOLS filter).
-    // The returned ToolSet includes a dispose() that SessionRunner calls on session end,
-    // balancing any Gondolin VM refcount increments made during buildTools().
     const toolSet = invocation
-      ? invocation.buildTools(invocation.toolOptions)
+      ? invocation.getToolSet()
       : { tools: [] };
+    const oracleRecordId = toolSet.sessionHostDir
+      ? `oracle-${randomUUID().slice(0, 8)}`
+      : undefined;
+    const oracleRecordFile = oracleRecordId
+      ? `${oracleRecordId}.session-record.jsonl`
+      : undefined;
+    const oracleSessionQueryId = toolSet.sessionHostDir && oracleRecordId
+      ? `${basename(toolSet.sessionHostDir)}/${oracleRecordId}`
+      : undefined;
     const oracleToolSet: ToolSet = {
+      ...toolSet,
+      // Reuse the parent's tool instances (and therefore the parent's exact
+      // Gondolin CWD), but do not dispose/checkpoint them from the nested
+      // oracle runner.  The parent runner still owns the shared tool set.
+      dispose: undefined,
       tools: toolSet.tools.filter((tool) => !ORACLE_EXCLUDED_TOOLS.has(tool.name)),
-      dispose: toolSet.dispose,
     };
 
     const runner = new SessionRunner({
@@ -141,6 +154,9 @@ export function createDefaultOracleExecutor(
       authStorage: options.authStorage,
       sessionLimits: iterationsToSessionLimits(options.toolsConfig?.oracle?.maxIterations),
       logger,
+      sessionFile: oracleToolSet.sessionHostDir && oracleRecordFile
+        ? join(oracleToolSet.sessionHostDir, oracleRecordFile)
+        : undefined,
     });
 
     logger.info(`${ORACLE_LOG_SEPARATOR} CONSULTING ORACLE: ${query.slice(0, 500)}...`);
@@ -152,7 +168,16 @@ export function createDefaultOracleExecutor(
         thinkingLevel,
       }));
       logger.info(`${ORACLE_LOG_SEPARATOR} Oracle response: ${result.text.slice(0, 500)}...`);
-      return result.text;
+      const oracleResult = result;
+      const toolSummary = await withCostSpan(LLM_CALL_TYPE.TOOL_SUMMARY, { arc: options.arc }, async () => await generateToolSummaryFromSession({
+        result: oracleResult,
+        tools: oracleToolSet.tools,
+        logger,
+        model: configuredModel,
+        sessionQueryId: oracleSessionQueryId,
+        arc: options.arc,
+      }));
+      return toolSummary ? `${oracleResult.text}\n\n${toolSummary}` : oracleResult.text;
     } catch (error) {
       const message = stringifyError(error);
       if (message.includes("iteration") || message.includes("max")) {

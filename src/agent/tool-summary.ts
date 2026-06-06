@@ -1,15 +1,20 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
-import { isAssistantMessage, responseText } from "../../agent/message.js";
-import type { MuaddibTool } from "../../agent/tools/baseline-tools.js";
-import type { PromptResult } from "../../agent/session-runner.js";
-import type { Logger } from "../../app/logging.js";
-import { truncateForDebug } from "../../agent/debug-utils.js";
+import { isAssistantMessage, responseText } from "./message.js";
+import type { MuaddibTool } from "./tools/baseline-tools.js";
+import type { PromptResult } from "./session-runner.js";
+import type { Logger } from "../app/logging.js";
+import { recordUsage } from "../cost/cost-span.js";
+import { LLM_CALL_TYPE } from "../cost/llm-call-type.js";
+import { sumAssistantUsage } from "../cost/usage.js";
+import { truncateForDebug } from "./debug-utils.js";
 
 interface GenerateToolSummaryInput {
   result: PromptResult;
   tools: MuaddibTool[];
   logger: Logger;
+  model: string;
+  sessionQueryId?: string;
   arc?: string;
 }
 
@@ -18,6 +23,8 @@ export async function generateToolSummaryFromSession(input: GenerateToolSummaryI
     result,
     tools,
     logger,
+    model,
+    sessionQueryId,
     arc,
   } = input;
 
@@ -52,7 +59,7 @@ export async function generateToolSummaryFromSession(input: GenerateToolSummaryI
     return null;
   }
 
-  return generateInSessionToolSummary(result, summaryToolNames, logger, arc);
+  return generateInSessionToolSummary(result, summaryToolNames, logger, model, sessionQueryId, arc);
 }
 
 /** In-session follow-up — reuses cached conversation context (cheap cache reads). */
@@ -60,6 +67,8 @@ async function generateInSessionToolSummary(
   result: PromptResult,
   summaryToolNames: string[],
   logger: Logger,
+  model: string,
+  sessionQueryId?: string,
   arc?: string,
 ): Promise<string | null> {
   const session = result.session!;
@@ -70,11 +79,14 @@ async function generateInSessionToolSummary(
       Math.ceil((result.usage?.input ?? 0) * 0.1 + (result.usage?.cacheRead ?? 0) * 0.1 + (result.usage?.cacheWrite ?? 0) * 0.1),
       (result.usage?.cost.total ?? 0) * 0.1,
     );
-    await session.prompt(buildToolSummaryFollowUpPrompt(summaryToolNames));
+    await session.prompt(buildToolSummaryFollowUpPrompt(summaryToolNames, { sessionQueryId }));
   } catch (error) {
+    recordToolSummaryUsage(session.messages.slice(preSummaryMsgCount), model);
     logger.error("In-session tool summary failed", error);
     return null;
   }
+
+  recordToolSummaryUsage(session.messages.slice(preSummaryMsgCount), model);
 
   const summaryText = extractAssistantText(
     session.messages.slice(preSummaryMsgCount),
@@ -92,17 +104,28 @@ async function generateInSessionToolSummary(
   return summaryText ?? null;
 }
 
+function recordToolSummaryUsage(messages: AgentMessage[], model: string): void {
+  const { usage } = sumAssistantUsage(messages);
+  recordUsage(LLM_CALL_TYPE.TOOL_SUMMARY, model, usage);
+}
+
 /**
  * Build a follow-up prompt for in-session tool summary generation.
  * Uses the same `<meta>Session complete.` envelope as memory update prompts.
  */
-export function buildToolSummaryFollowUpPrompt(summaryToolNames: string[]): string {
+export function buildToolSummaryFollowUpPrompt(
+  summaryToolNames: string[],
+  options: { sessionQueryId?: string } = {},
+): string {
   const toolList = summaryToolNames.join(", ");
+  const sessionQueryReference = options.sessionQueryId
+    ? `Use session_query id \`${options.sessionQueryId}\` for this session, and cite that id explicitly even if the working directory belongs to a parent command session.`
+    : "Cite the <slug> from /workspace/.sessions/session-<slug>/ explicitly so later turns can replay this session via the session_query tool.";
 
   return [
     "<meta>Session complete. DO NOT RESPOND ANYMORE.",
     "",
-    `Wrap-up task: As an AI agent, you need to remember in the future what tools you used when generating a response, and what the tools told you. Summarize the tool calls from this session in a single concise paragraph. Only cover these tools: ${toolList}. Include every artifact link and tie each link to the corresponding tool call. Include /workspace/.sessions/session-<slug>/ working directory paths so you can return to previous work — and cite the <slug> explicitly so later turns can replay this session via the session_query tool. Do NOT use any tools.`,
+    `Wrap-up task: As an AI agent, you need to remember in the future what tools you used when generating a response, and what the tools told you. Summarize the tool calls from this session in a single concise paragraph. Only cover these tools: ${toolList}. Include every artifact link and tie each link to the corresponding tool call. Include /workspace/.sessions/session-<slug>/ working directory paths so you can return to previous work. ${sessionQueryReference} Do NOT use any tools.`,
     "</meta>",
   ].join("\n");
 }

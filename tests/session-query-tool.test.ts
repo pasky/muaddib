@@ -93,6 +93,15 @@ async function writeMinimalRecord(arc: string, slug: string): Promise<string> {
   return path;
 }
 
+async function writeMinimalOracleRecord(arc: string, rootSlug: string, oracleId: string): Promise<string> {
+  const dir = join(muaddibHome, "arcs", arc, "workspace", ".sessions", `session-${rootSlug}`);
+  await mkdir(dir, { recursive: true });
+  const path = join(dir, `${oracleId}.session-record.jsonl`);
+  const { writeFile } = await import("node:fs/promises");
+  await writeFile(path, "{}\n");
+  return path;
+}
+
 describe("findSessionFileById", () => {
   it("returns null when the arcs directory doesn't exist", () => {
     expect(findSessionFileById("abc12345")).toBeNull();
@@ -113,10 +122,22 @@ describe("findSessionFileById", () => {
     expect(findSessionFileById("session-abc12345")).toBe(expected);
   });
 
+  it("finds a nested oracle transcript by parent-qualified id", async () => {
+    const expected = await writeMinimalOracleRecord("libera##test", "abc12345", "oracle-deadbeef");
+    expect(findSessionFileById("session-abc12345/oracle-deadbeef")).toBe(expected);
+    expect(findSessionFileById("session-abc12345/oracle-deadbeef.session-record.jsonl")).toBeNull();
+    expect(findSessionFileById("oracle-deadbeef")).toBeNull();
+  });
+
+  it("accepts a full VM oracle id path", async () => {
+    const expected = await writeMinimalOracleRecord("libera##test", "abc12345", "oracle-cafebabe");
+    expect(findSessionFileById("/workspace/.sessions/session-abc12345/oracle-cafebabe")).toBe(expected);
+  });
+
   it("prefers the supplied arc when the slug exists in multiple arcs", async () => {
-    await writeMinimalRecord("other", "dup00001");
-    const preferred = await writeMinimalRecord("preferred", "dup00001");
-    expect(findSessionFileById("dup00001", "preferred")).toBe(preferred);
+    await writeMinimalRecord("other", "d0000001");
+    const preferred = await writeMinimalRecord("preferred", "d0000001");
+    expect(findSessionFileById("d0000001", "preferred")).toBe(preferred);
   });
 
   it("trims whitespace and rejects empty ids", () => {
@@ -127,7 +148,7 @@ describe("findSessionFileById", () => {
 describe("session_query prompt-cache prefix guarantee", () => {
   it("sends a follow-up whose systemPrompt + tools + stored messages are byte-identical to what the original session ended with", async () => {
     const arc = "testsrv##chan";
-    const slug = "cacheabc";
+    const slug = "abcabc12";
     const dir = join(muaddibHome, "arcs", arc, "workspace", ".sessions", `session-${slug}`);
     await mkdir(dir, { recursive: true });
     const sessionFile = join(dir, ".session-record.jsonl");

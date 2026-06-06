@@ -236,7 +236,8 @@ interface CreateAgentSessionInput {
   logger?: Logger;
   /**
    * When set, the session is persisted as a pi-coding-agent JSONL file at
-   * this exact path (typically `<sessionHostDir>/.session-record.jsonl`).
+   * this exact path (typically `<sessionHostDir>/.session-record.jsonl`, or a
+   * sibling record file for a nested session sharing the same working dir).
    * Omit for an in-memory session.
    */
   sessionFile?: string;

@@ -292,10 +292,10 @@ function makeRunnerWithBlockedBackgroundWork(options: {
             return;
           }
 
-          recordCurrentSpanUsage(0.03, 7, 4);
           session.messages.push({
             role: "assistant",
             content: [{ type: "text", text: options.summaryText ?? "Summarized tool results." }],
+            usage: makeUsageRecord(7, 4, 0.03),
           });
         }),
         dispose: vi.fn(async () => {
