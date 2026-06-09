@@ -101,7 +101,13 @@ export function findSessionFileById(sessionId: string, preferredArc?: string): s
 }
 
 function sessionRecordRelativePath(sessionId: string): string | null {
-  const id = sessionId.trim().replace(VM_SESSIONS_PREFIX, "");
+  let id = sessionId.trim();
+  if (id.startsWith(VM_SESSIONS_PREFIX)) {
+    id = id.slice(VM_SESSIONS_PREFIX.length);
+  }
+  if (id.endsWith("/")) {
+    id = id.slice(0, -1);
+  }
 
   if (SESSION_REF_PATTERN.test(id)) {
     return join(id.startsWith("session-") ? id : `session-${id}`, SESSION_RECORD_FILENAME);

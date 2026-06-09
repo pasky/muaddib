@@ -134,6 +134,13 @@ describe("findSessionFileById", () => {
     expect(findSessionFileById("/workspace/.sessions/session-abc12345/oracle-cafebabe")).toBe(expected);
   });
 
+  it("accepts a full VM session dir path with trailing slash", async () => {
+    const expected = await writeMinimalRecord("libera##test", "abc12345");
+    expect(findSessionFileById("/workspace/.sessions/session-abc12345/")).toBe(expected);
+    // The VM sessions path only counts as a prefix, not mid-string.
+    expect(findSessionFileById("foo/workspace/.sessions/session-abc12345")).toBeNull();
+  });
+
   it("prefers the supplied arc when the slug exists in multiple arcs", async () => {
     await writeMinimalRecord("other", "d0000001");
     const preferred = await writeMinimalRecord("preferred", "d0000001");
