@@ -90,12 +90,13 @@ describe("E2E: Oracle with nested web_search", () => {
   });
 
   it("oracle consults nested agent which uses web_search, then returns result to outer agent", async () => {
-    // Script 5 sequential streamSimple calls:
+    // Script 6 sequential streamSimple calls:
     // 1. Outer agent → oracle tool call
     // 2. Inner oracle agent → web_search tool call
     // 3. Inner oracle agent → final text (after receiving search results)
-    // 4. Outer agent → final IRC response (after receiving oracle result)
-    // 5. Outer agent → in-session tool summary follow-up
+    // 4. Inner oracle agent → in-session tool summary follow-up
+    // 5. Outer agent → final IRC response (after receiving oracle result)
+    // 6. Outer agent → in-session tool summary follow-up
     mockState.responses = [
       // 1. Outer agent decides to consult the oracle
       toolCallStream({
@@ -113,9 +114,11 @@ describe("E2E: Oracle with nested web_search", () => {
       }),
       // 3. Inner oracle agent produces final answer
       textStream("Dune is a 1965 epic science fiction novel by Frank Herbert, set on the desert planet Arrakis."),
-      // 4. Outer agent produces final IRC response
+      // 4. Inner oracle agent writes its internal tool summary
+      textStream("Used web_search for Dune references to ground the answer."),
+      // 5. Outer agent produces final IRC response
       textStream("According to the oracle: Dune is a 1965 sci-fi novel by Frank Herbert about the desert planet Arrakis."),
-      // 5. Outer agent writes internal tool summary
+      // 6. Outer agent writes internal tool summary
       textStream("Called oracle, which used web_search for Dune references and returned a concise answer."),
     ];
 
@@ -142,8 +145,8 @@ describe("E2E: Oracle with nested web_search", () => {
       "X-Respond-With": "no-content",
     });
 
-    // ── Verify all 5 streamSimple calls happened ──
-    expect(mockState.calls).toHaveLength(5);
+    // ── Verify all 6 streamSimple calls happened ──
+    expect(mockState.calls).toHaveLength(6);
 
     const modelProvider = (i: number) => (mockState.calls[i].model as any).provider;
 
@@ -153,10 +156,19 @@ describe("E2E: Oracle with nested web_search", () => {
     expect(modelProvider(1)).toBe("anthropic");
     // Call 2: inner oracle agent again (after web_search result)
     expect(modelProvider(2)).toBe("anthropic");
-    // Call 3: outer agent again (after oracle result)
-    expect(modelProvider(3)).toBe("openai");
-    // Call 4: outer agent summary follow-up
+    // Call 3: inner oracle agent tool-summary follow-up
+    expect(modelProvider(3)).toBe("anthropic");
+    // Call 4: outer agent again (after oracle result)
     expect(modelProvider(4)).toBe("openai");
+    // Call 5: outer agent summary follow-up
+    expect(modelProvider(5)).toBe("openai");
+
+    const systemPrompt = (i: number) => String((mockState.calls[i].context as any).systemPrompt ?? "");
+    const outerWorkdir = systemPrompt(0).match(/\/workspace\/\.sessions\/session-[0-9a-f]{8}/u)?.[0];
+    expect(outerWorkdir).toBeDefined();
+    expect(systemPrompt(1)).toContain(outerWorkdir!);
+    const outerSessionId = outerWorkdir!.split("/").at(-1)!;
+    expect(JSON.stringify((mockState.calls[3].context as any).messages ?? [])).toContain(`Use session_query id \`${outerSessionId}/oracle-`);
 
     // ── Verify FakeSender got the final response ──
     expect(ctx.sender.sent.length).toBeGreaterThanOrEqual(1);

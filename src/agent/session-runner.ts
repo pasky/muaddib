@@ -52,9 +52,10 @@ export interface SessionRunnerOptions {
   /**
    * When set, persist this prompt() invocation as a pi-coding-agent JSONL
    * session file at this exact path (typically
-   * `<gondolin-session-host-dir>/.session-record.jsonl`).  Omit for an
-   * ephemeral in-memory session (used by nested sub-sessions like
-   * oracle / deepResearch).
+   * `<gondolin-session-host-dir>/.session-record.jsonl`, or another record
+   * file in that directory for nested sessions sharing the same workspace).
+   * Omit for an ephemeral in-memory session (used by subsessions without a
+   * replayable workspace record, e.g. deepResearch).
    */
   sessionFile?: string;
 }

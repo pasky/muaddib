@@ -631,23 +631,23 @@ describe("gondolin session ref-counting", () => {
     expect(logger.debug).not.toHaveBeenCalledWith(expect.stringContaining("still active"));
   });
 
-  // ── Issue #3: oracle nested sessions create and balance Gondolin refcounts ──
+  // ── Concurrent independent sessions create and balance Gondolin refcounts ──
 
-  it("oracle-style nested session: parent + oracle both increment, both checkpoints needed", async () => {
+  it("independent sessions for the same arc both increment, both checkpoints needed", async () => {
     const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
-    // Parent command session opens Gondolin (refcount = 1)
+    // First session opens Gondolin (refcount = 1)
     createGondolinTools({ arc: "test-arc", config: gondolinConfig, logger });
-    // Oracle nested session also opens Gondolin for the same arc (refcount = 2)
+    // A second independent session opens Gondolin for the same arc (refcount = 2)
     createGondolinTools({ arc: "test-arc", config: gondolinConfig, logger });
 
-    // Oracle finishes and calls checkpointGondolinArc — should defer (parent still active)
+    // First session finishes and calls checkpointGondolinArc — should defer (second still active)
     await checkpointGondolinArc("test-arc", logger);
     expect(logger.debug).toHaveBeenCalledWith(
       expect.stringContaining("1 session(s) still active"),
     );
 
-    // Parent finishes and calls checkpointGondolinArc — refcount hits 0, checkpoint triggered
+    // Second session finishes and calls checkpointGondolinArc — refcount hits 0, checkpoint triggered
     await checkpointGondolinArc("test-arc", logger);
     // No deferred log for the second call (no more active sessions)
     const deferCalls = (logger.debug as ReturnType<typeof vi.fn>).mock.calls.filter(

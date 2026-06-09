@@ -1,7 +1,8 @@
 /**
  * session_query tool — query a previous pi-coding-agent JSONL session file
  * stored under `$MUADDIB_HOME/arcs/<arc>/workspace/.sessions/session-<slug>/`
- * by that 8-char slug.
+ * by that 8-char slug, or a nested oracle transcript addressed as
+ * `session-<root-slug>/oracle-<slug>`.
  *
  * Rather than serialising the stored session to a side prompt, the tool
  * *resumes* the session: it loads the JSONL, reuses the model the original
@@ -9,7 +10,7 @@
  * lets the provider's prompt cache hit on the existing message prefix.
  */
 
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -39,7 +40,7 @@ export interface SessionQueryInput {
 const SESSION_QUERY_PARAMETERS = Type.Object({
   sessionId: Type.String({
     description:
-      "Short session slug — the 8-char `<id>` in `/workspace/.sessions/session-<id>/` (with or without the `session-` prefix).",
+      "Session id to query: either the 8-char `<id>` in `/workspace/.sessions/session-<id>/` (with or without `session-`) or a nested oracle id like `session-<id>/oracle-<id>`.",
   }),
   question: Type.String({
     description:
@@ -48,6 +49,9 @@ const SESSION_QUERY_PARAMETERS = Type.Object({
 });
 
 const SESSION_RECORD_FILENAME = ".session-record.jsonl";
+const VM_SESSIONS_PREFIX = "/workspace/.sessions/";
+const SESSION_REF_PATTERN = /^(?:session-)?[0-9a-f]{8}$/u;
+const ORACLE_SESSION_REF_PATTERN = /^session-[0-9a-f]{8}\/oracle-[0-9a-f]{8}$/u;
 
 /**
  * Fallback system prompt used only when the resumed session has no stored
@@ -67,41 +71,51 @@ const QUESTION_ENVELOPE = (question: string): string =>
   ].join("\n");
 
 /**
- * Locate a session JSONL file by its short slug.
+ * Locate a session JSONL file by root slug or parent-qualified oracle id.
  *
- * Sessions live alongside the Gondolin workspace at
+ * Root command sessions live at
  * `$MUADDIB_HOME/arcs/<arc>/workspace/.sessions/session-<slug>/.session-record.jsonl`.
+ * Nested oracle transcripts share the root command working directory and live at
+ * `$MUADDIB_HOME/arcs/<arc>/workspace/.sessions/session-<root>/oracle-<slug>.session-record.jsonl`.
  * Searches the requesting arc first, then all other arcs.
  */
 export function findSessionFileById(sessionId: string, preferredArc?: string): string | null {
-  const trimmed = sessionId.trim();
-  if (!trimmed) return null;
+  const relativePath = sessionRecordRelativePath(sessionId);
+  if (!relativePath) return null;
+
   const arcsRoot = join(getMuaddibHome(), "arcs");
   if (!existsSync(arcsRoot)) return null;
 
-  const arcDirs = readdirSync(arcsRoot, { withFileTypes: true })
+  const arcNames = readdirSync(arcsRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name);
-  const ordered = preferredArc && arcDirs.includes(preferredArc)
-    ? [preferredArc, ...arcDirs.filter((name) => name !== preferredArc)]
-    : arcDirs;
+  const orderedArcs = preferredArc && arcNames.includes(preferredArc)
+    ? [preferredArc, ...arcNames.filter((name) => name !== preferredArc)]
+    : arcNames;
 
-  // Accept either the bare slug ("abc12345") or the full "session-abc12345"
-  // form — either way we look for the matching subdirectory.
-  const slug = trimmed.startsWith("session-") ? trimmed.slice("session-".length) : trimmed;
-  const dirName = `session-${slug}`;
-
-  const candidates: { full: string; mtime: number }[] = [];
-  for (const arcName of ordered) {
-    const sessionsRoot = join(arcsRoot, arcName, "workspace", ".sessions");
-    const candidate = join(sessionsRoot, dirName, SESSION_RECORD_FILENAME);
-    if (existsSync(candidate)) {
-      candidates.push({ full: candidate, mtime: statSync(candidate).mtimeMs });
-      if (arcName === preferredArc) return candidate;
-    }
+  for (const arcName of orderedArcs) {
+    const candidate = join(arcsRoot, arcName, "workspace", ".sessions", relativePath);
+    if (existsSync(candidate)) return candidate;
   }
-  if (candidates.length === 0) return null;
-  return candidates.sort((a, b) => b.mtime - a.mtime)[0]!.full;
+  return null;
+}
+
+function sessionRecordRelativePath(sessionId: string): string | null {
+  let id = sessionId.trim();
+  if (id.startsWith(VM_SESSIONS_PREFIX)) {
+    id = id.slice(VM_SESSIONS_PREFIX.length);
+  }
+  if (id.endsWith("/")) {
+    id = id.slice(0, -1);
+  }
+
+  if (SESSION_REF_PATTERN.test(id)) {
+    return join(id.startsWith("session-") ? id : `session-${id}`, SESSION_RECORD_FILENAME);
+  }
+  if (ORACLE_SESSION_REF_PATTERN.test(id)) {
+    return `${id}.session-record.jsonl`;
+  }
+  return null;
 }
 
 /** Pull the last `model_change` entry out of a session's branch, if any. */
@@ -184,7 +198,7 @@ export function createSessionQueryTool(options: ToolContext): MuaddibTool<typeof
     persistType: "summary",
     label: "Session Query",
     description:
-      "Query a previous muaddib session by its short slug (the 8-char `<id>` in `/workspace/.sessions/session-<id>/`) — ask a specific question and get a concise answer. The query resumes the original session with its original model, so the conversation prefix stays in the provider's prompt cache.",
+      "Query a previous muaddib session by its id — either the 8-char `<id>` in `/workspace/.sessions/session-<id>/` or a parent-qualified nested oracle id like `session-<id>/oracle-<id>`. Ask a specific question and get a concise answer. The query resumes the original session with its original model, so the conversation prefix stays in the provider's prompt cache.",
     parameters: SESSION_QUERY_PARAMETERS,
     execute: async (_toolCallId: string, params: SessionQueryInput) => {
       const sessionId = params.sessionId.trim();

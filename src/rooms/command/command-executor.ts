@@ -56,7 +56,7 @@ import {
   CommandResolver,
   type CommandConfig,
 } from "./resolver.js";
-import { generateToolSummaryFromSession } from "./tool-summary.js";
+import { generateToolSummaryFromSession } from "../../agent/tool-summary.js";
 import type { Logger } from "../../app/logging.js";
 import type { AgentConfig, MemoryConfig, SkillsConfig, ToolsConfig } from "../../config/muaddib-config.js";
 import { loadArcMemoryFile, loadArcUserMemoryFile } from "../../agent/gondolin/index.js";
@@ -975,9 +975,7 @@ export class CommandExecutor {
       }
 
       if (opts.toolSummary !== false) {
-        await withCostSpan(LLM_CALL_TYPE.TOOL_SUMMARY, {}, async () => {
-          await this.persistGeneratedToolSummary(message, agentResult, tools, triggerTs);
-        });
+        await this.persistGeneratedToolSummary(message, agentResult, tools, opts.modelSpec ?? "unknown", triggerTs);
       }
 
       agentResult.session?.dispose();
@@ -1234,12 +1232,14 @@ export class CommandExecutor {
     message: RoomMessage,
     result: PromptResult,
     tools: MuaddibTool[],
+    model: string,
     triggerTs?: string,
   ): Promise<void> {
     const summaryText = await generateToolSummaryFromSession({
       result,
       tools,
       logger: this.logger,
+      model,
       arc: message.arc,
     });
 
@@ -1281,12 +1281,14 @@ export class CommandExecutor {
       threadId: message.threadId,
     };
 
-    const toolSet = createBaselineAgentTools({
+    const toolSet: ToolSet = createBaselineAgentTools({
       ...invocationToolOptions,
       oracleInvocation: {
         conversationContext: conversationContext ?? [],
-        toolOptions: invocationToolOptions,
-        buildTools: createBaselineAgentTools,
+        // Hands the oracle the full baseline tool set (the oracle applies its
+        // own ORACLE_EXCLUDED_TOOLS filter) — deliberately a superset of the
+        // parent's tools when `allowedTools` restricts the parent below.
+        getToolSet: () => toolSet,
       },
       deepResearchInvocation: {
         conversationContext: conversationContext ?? [],
@@ -1298,7 +1300,12 @@ export class CommandExecutor {
     }
 
     const allowed = new Set(allowedTools);
-    return { tools: toolSet.tools.filter((tool) => allowed.has(tool.name)), dispose: toolSet.dispose, systemPromptSuffix: toolSet.systemPromptSuffix };
+    return {
+      tools: toolSet.tools.filter((tool) => allowed.has(tool.name)),
+      dispose: toolSet.dispose,
+      systemPromptSuffix: toolSet.systemPromptSuffix,
+      sessionHostDir: toolSet.sessionHostDir,
+    };
   }
 }
 

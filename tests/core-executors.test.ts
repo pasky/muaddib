@@ -13,6 +13,7 @@ import {
   isUrlTrustedInArc,
   recordNetworkTrustEvent,
 } from "../src/agent/network-boundary.js";
+import { withCostSpan } from "../src/cost/cost-span.js";
 import { LLM_CALL_TYPE } from "../src/cost/llm-call-type.js";
 import { PiAiModelAdapter } from "../src/models/pi-ai-model-adapter.js";
 import { resetWebRateLimiters, jinaRetryConfig } from "../src/agent/tools/web.js";
@@ -225,34 +226,34 @@ describe("oracle executor with invocation context", () => {
     oracleMock.promptFn = vi.fn();
   });
 
-  it("calls buildTools with toolOptions and filters excluded tools", async () => {
+  it("reuses the parent tool set working directory and filters excluded tools", async () => {
     oracleMock.promptFn.mockResolvedValue({ text: "oracle answer", stopReason: "stop", usage: {} });
 
-    const buildTools = vi.fn(() => ({
+    const parentDispose = vi.fn();
+    const getToolSet = vi.fn(() => ({
       tools: [
         { name: "web_search" },
         { name: "oracle" },
         { name: "bash" },
         { name: "visit_webpage" },
       ] as any[],
-      dispose: undefined,
+      dispose: parentDispose,
+      systemPromptSuffix: "Filesystem: /workspace/.sessions/session-parent is your working directory.",
+      sessionHostDir: "/tmp/session-parent",
     }));
-
-    const toolOptions = { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }};
 
     const executor = createDefaultOracleExecutor(
       { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }, logger: { info: vi.fn() } },
       {
         conversationContext: [{ role: "user", content: "prior context" }],
-        toolOptions,
-        buildTools,
+        getToolSet,
       },
     );
 
     const result = await executor({ query: "test query" });
 
     expect(result).toBe("oracle answer");
-    expect(buildTools).toHaveBeenCalledWith(toolOptions);
+    expect(getToolSet).toHaveBeenCalledOnce();
 
     // Verify excluded tools were filtered out
     const toolNames = oracleMock.capturedOptions.toolSet.tools.map((t: any) => t.name);
@@ -260,7 +261,85 @@ describe("oracle executor with invocation context", () => {
     expect(toolNames).toContain("bash");
     expect(toolNames).toContain("visit_webpage");
     expect(toolNames).not.toContain("oracle");
+    expect(oracleMock.capturedOptions.toolSet.systemPromptSuffix).toBe("Filesystem: /workspace/.sessions/session-parent is your working directory.");
+    expect(oracleMock.capturedOptions.toolSet.sessionHostDir).toBe("/tmp/session-parent");
+    expect(oracleMock.capturedOptions.toolSet.dispose).toBeUndefined();
+    expect(oracleMock.capturedOptions.sessionFile).toMatch(/^\/tmp\/session-parent\/oracle-[0-9a-f]{8}\.session-record\.jsonl$/u);
+    expect(parentDispose).not.toHaveBeenCalled();
     // oracle and deep_research are excluded to prevent recursion
+  });
+
+  it("appends nested tool summary and records its usage", async () => {
+    const sessionMessages: any[] = [
+      {
+        role: "toolResult",
+        toolCallId: "call_1",
+        toolName: "web_search",
+        isError: false,
+        content: [{ type: "text", text: "Search results" }],
+      },
+    ];
+    const summaryPrompt = vi.fn(async () => {
+      sessionMessages.push({
+        role: "assistant",
+        content: [{ type: "text", text: "Used web_search for current references." }],
+        usage: {
+          input: 3,
+          output: 2,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 5,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.01 },
+        },
+      });
+    });
+
+    oracleMock.promptFn.mockResolvedValue({
+      text: "oracle answer",
+      stopReason: "stop",
+      usage: {
+        input: 10,
+        output: 5,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 15,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.1 },
+      },
+      bumpSessionLimits: vi.fn(),
+      session: {
+        messages: sessionMessages,
+        prompt: summaryPrompt,
+        dispose: vi.fn(),
+      },
+    });
+
+    const executor = createDefaultOracleExecutor(
+      { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }, logger: { info: vi.fn(), debug: vi.fn(), error: vi.fn() } },
+      {
+        conversationContext: [],
+        getToolSet: () => ({
+          tools: [{ name: "web_search", persistType: "summary" }] as any[],
+          systemPromptSuffix: "Filesystem: /workspace/.sessions/session-parent is your working directory.",
+          sessionHostDir: "/tmp/session-parent",
+        }),
+      },
+    );
+
+    let output = "";
+    await withCostSpan("execute", { arc: TEST_ARC }, async (span) => {
+      output = await executor({ query: "research this" });
+      expect(span.allEntries()).toMatchObject([
+        {
+          callType: LLM_CALL_TYPE.TOOL_SUMMARY,
+          model: "openai:gpt-4o-mini",
+          usage: { input: 3, output: 2, cost: { total: 0.01 } },
+        },
+      ]);
+    });
+
+    expect(output).toBe("oracle answer\n\nUsed web_search for current references.");
+    expect(summaryPrompt).toHaveBeenCalledWith(expect.stringContaining("web_search"));
+    expect(summaryPrompt).toHaveBeenCalledWith(expect.stringContaining("Use session_query id `session-parent/oracle-"));
   });
 
   it("passes conversation context and configured thinkingLevel to SessionRunner.prompt", async () => {
@@ -275,8 +354,7 @@ describe("oracle executor with invocation context", () => {
       { toolsConfig: { oracle: { model: "openai:gpt-4o-mini", thinkingLevel: "medium" } }, logger: { info: vi.fn() } },
       {
         conversationContext: context,
-        toolOptions: {},
-        buildTools: () => ({ tools: [], dispose: undefined }),
+        getToolSet: () => ({ tools: [], dispose: undefined }),
       },
     );
 
@@ -293,8 +371,7 @@ describe("oracle executor with invocation context", () => {
       { toolsConfig: { oracle: { model: "openai:gpt-4o-mini", thinkingLevel: "turbo" as any } }, logger: { info: vi.fn() } },
       {
         conversationContext: [],
-        toolOptions: {},
-        buildTools: () => ({ tools: [], dispose: undefined }),
+        getToolSet: () => ({ tools: [], dispose: undefined }),
       },
     );
 
@@ -311,7 +388,7 @@ describe("oracle executor with invocation context", () => {
 
     const executor = createDefaultOracleExecutor(
       { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }, logger },
-      { conversationContext: [], toolOptions: {}, buildTools: () => ({ tools: [], dispose: undefined }) },
+      { conversationContext: [], getToolSet: () => ({ tools: [], dispose: undefined }) },
     );
 
     await executor({ query: "deep question" });
@@ -332,7 +409,7 @@ describe("oracle executor with invocation context", () => {
 
     const executor = createDefaultOracleExecutor(
       { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }, logger },
-      { conversationContext: [], toolOptions: {}, buildTools: () => ({ tools: [], dispose: undefined }) },
+      { conversationContext: [], getToolSet: () => ({ tools: [], dispose: undefined }) },
     );
 
     await expect(executor({ query: "will fail" })).rejects.toThrow("connection refused");
@@ -349,7 +426,7 @@ describe("oracle executor with invocation context", () => {
 
     const executor = createDefaultOracleExecutor(
       { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }, logger },
-      { conversationContext: [], toolOptions: {}, buildTools: () => ({ tools: [], dispose: undefined }) },
+      { conversationContext: [], getToolSet: () => ({ tools: [], dispose: undefined }) },
     );
 
     const result = await executor({ query: "complex task" });
@@ -386,7 +463,7 @@ describe("oracle executor with invocation context", () => {
 
     const executor = createDefaultOracleExecutor(
       { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }, logger },
-      { conversationContext: [], toolOptions: {}, buildTools: () => ({ tools: [], dispose: undefined }) },
+      { conversationContext: [], getToolSet: () => ({ tools: [], dispose: undefined }) },
     );
 
     await executor({ query: "test" });
@@ -400,7 +477,7 @@ describe("oracle executor with invocation context", () => {
 
     const executor = createDefaultOracleExecutor(
       { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }, logger: { info: vi.fn() } },
-      { conversationContext: [], toolOptions: {}, buildTools: () => ({ tools: [], dispose: undefined }) },
+      { conversationContext: [], getToolSet: () => ({ tools: [], dispose: undefined }) },
     );
 
     await executor({ query: "test" });
@@ -413,7 +490,7 @@ describe("oracle executor with invocation context", () => {
 
     const executor = createDefaultOracleExecutor(
       { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }, logger: { info: vi.fn() } },
-      { conversationContext: [], toolOptions: {}, buildTools: () => ({ tools: [], dispose: undefined }) },
+      { conversationContext: [], getToolSet: () => ({ tools: [], dispose: undefined }) },
     );
 
     // On error path, result is undefined so dispose is a safe no-op — no crash
