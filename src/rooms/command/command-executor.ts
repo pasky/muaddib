@@ -975,9 +975,7 @@ export class CommandExecutor {
       }
 
       if (opts.toolSummary !== false) {
-        await withCostSpan(LLM_CALL_TYPE.TOOL_SUMMARY, {}, async () => {
-          await this.persistGeneratedToolSummary(message, agentResult, tools, opts.modelSpec ?? "unknown", triggerTs);
-        });
+        await this.persistGeneratedToolSummary(message, agentResult, tools, opts.modelSpec ?? "unknown", triggerTs);
       }
 
       agentResult.session?.dispose();
@@ -1283,11 +1281,13 @@ export class CommandExecutor {
       threadId: message.threadId,
     };
 
-    let toolSet: ToolSet;
-    toolSet = createBaselineAgentTools({
+    const toolSet: ToolSet = createBaselineAgentTools({
       ...invocationToolOptions,
       oracleInvocation: {
         conversationContext: conversationContext ?? [],
+        // Hands the oracle the full baseline tool set (the oracle applies its
+        // own ORACLE_EXCLUDED_TOOLS filter) — deliberately a superset of the
+        // parent's tools when `allowedTools` restricts the parent below.
         getToolSet: () => toolSet,
       },
       deepResearchInvocation: {

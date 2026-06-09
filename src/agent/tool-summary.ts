@@ -4,7 +4,7 @@ import { isAssistantMessage, responseText } from "./message.js";
 import type { MuaddibTool } from "./tools/baseline-tools.js";
 import type { PromptResult } from "./session-runner.js";
 import type { Logger } from "../app/logging.js";
-import { recordUsage } from "../cost/cost-span.js";
+import { recordUsage, withCostSpan } from "../cost/cost-span.js";
 import { LLM_CALL_TYPE } from "../cost/llm-call-type.js";
 import { sumAssistantUsage } from "../cost/usage.js";
 import { truncateForDebug } from "./debug-utils.js";
@@ -59,7 +59,11 @@ export async function generateToolSummaryFromSession(input: GenerateToolSummaryI
     return null;
   }
 
-  return generateInSessionToolSummary(result, summaryToolNames, logger, model, sessionQueryId, arc);
+  return await withCostSpan(
+    LLM_CALL_TYPE.TOOL_SUMMARY,
+    arc ? { arc } : {},
+    async () => await generateInSessionToolSummary(result, summaryToolNames, logger, model, sessionQueryId, arc),
+  );
 }
 
 /** In-session follow-up — reuses cached conversation context (cheap cache reads). */
@@ -81,12 +85,11 @@ async function generateInSessionToolSummary(
     );
     await session.prompt(buildToolSummaryFollowUpPrompt(summaryToolNames, { sessionQueryId }));
   } catch (error) {
-    recordToolSummaryUsage(session.messages.slice(preSummaryMsgCount), model);
     logger.error("In-session tool summary failed", error);
     return null;
+  } finally {
+    recordToolSummaryUsage(session.messages.slice(preSummaryMsgCount), model);
   }
-
-  recordToolSummaryUsage(session.messages.slice(preSummaryMsgCount), model);
 
   const summaryText = extractAssistantText(
     session.messages.slice(preSummaryMsgCount),

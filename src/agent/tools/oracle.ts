@@ -168,16 +168,15 @@ export function createDefaultOracleExecutor(
         thinkingLevel,
       }));
       logger.info(`${ORACLE_LOG_SEPARATOR} Oracle response: ${result.text.slice(0, 500)}...`);
-      const oracleResult = result;
-      const toolSummary = await withCostSpan(LLM_CALL_TYPE.TOOL_SUMMARY, { arc: options.arc }, async () => await generateToolSummaryFromSession({
-        result: oracleResult,
+      const toolSummary = await generateToolSummaryFromSession({
+        result,
         tools: oracleToolSet.tools,
         logger,
         model: configuredModel,
         sessionQueryId: oracleSessionQueryId,
         arc: options.arc,
-      }));
-      return toolSummary ? `${oracleResult.text}\n\n${toolSummary}` : oracleResult.text;
+      });
+      return toolSummary ? `${result.text}\n\n${toolSummary}` : result.text;
     } catch (error) {
       const message = stringifyError(error);
       if (message.includes("iteration") || message.includes("max")) {
