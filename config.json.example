@@ -166,7 +166,7 @@
               "!a": {
                 "autoReduceContext": true,
                 "reasoningEffort": "medium",
-                "model": "anthropic:claude-fable-5"
+                "model": "anthropic:claude-opus-4-8"
               }
             }
           },
