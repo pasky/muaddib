@@ -200,7 +200,8 @@ export async function createVmHttpHooks(opts: CreateVmHttpHooksOptions): Promise
 
   const fetchImpl = opts.fetchImpl ?? (globalThis.fetch as unknown as VmNetworkFetch);
   const trustAwareFetch: VmNetworkFetch = async (input, init) => {
-    const response = await fetchImpl(input, init);
+    const hostFetchInit = stripGuestHandledHeaders(await bufferStreamingRequestBody(init));
+    const response = await fetchImpl(input, hostFetchInit);
     const requestUrl = getFetchInputUrl(input);
     const redirectTarget = getRedirectTarget(response, requestUrl);
     if (redirectTarget) {
@@ -216,6 +217,106 @@ export async function createVmHttpHooks(opts: CreateVmHttpHooksOptions): Promise
   };
 
   return { httpHooks, env, fetch: trustAwareFetch };
+}
+
+const MAX_BUFFERED_STREAMING_REQUEST_BODY_BYTES = 64 * 1024 * 1024;
+
+type VmNetworkFetchInit = Parameters<VmNetworkFetch>[1];
+type VmNetworkFetchInitWithBody = NonNullable<VmNetworkFetchInit> & { body?: unknown };
+
+async function bufferStreamingRequestBody(init: VmNetworkFetchInit): Promise<VmNetworkFetchInit> {
+  if (!init) return init;
+
+  const body = (init as VmNetworkFetchInitWithBody).body;
+  if (!isReadableStreamLike(body)) return init;
+
+  return {
+    ...init,
+    body: await readStreamBody(body),
+  } as VmNetworkFetchInit;
+}
+
+function stripGuestHandledHeaders(init: VmNetworkFetchInit): VmNetworkFetchInit {
+  if (!init) return init;
+
+  const headers = (init as VmNetworkFetchInitWithBody & { headers?: unknown }).headers;
+  const strippedHeaders = stripHeader(headers, "expect");
+  if (strippedHeaders === headers) return init;
+
+  return {
+    ...init,
+    headers: strippedHeaders,
+  } as VmNetworkFetchInit;
+}
+
+function stripHeader(headers: unknown, headerName: string): unknown {
+  if (!headers) return headers;
+  const normalizedName = headerName.toLowerCase();
+
+  if (headers instanceof Headers) {
+    if (!headers.has(headerName)) return headers;
+    const nextHeaders = new Headers(headers);
+    nextHeaders.delete(headerName);
+    return nextHeaders;
+  }
+
+  if (Array.isArray(headers)) {
+    const nextHeaders = headers.filter((entry) => {
+      const name = Array.isArray(entry) ? entry[0] : undefined;
+      return typeof name !== "string" || name.toLowerCase() !== normalizedName;
+    });
+    return nextHeaders.length === headers.length ? headers : nextHeaders;
+  }
+
+  if (typeof headers !== "object") return headers;
+
+  let found = false;
+  const nextHeaders: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === normalizedName) {
+      found = true;
+      continue;
+    }
+    nextHeaders[key] = value;
+  }
+
+  return found ? nextHeaders : headers;
+}
+
+function isReadableStreamLike(value: unknown): value is ReadableStream<unknown> {
+  return typeof value === "object" && value !== null && typeof (value as { getReader?: unknown }).getReader === "function";
+}
+
+async function readStreamBody(stream: ReadableStream<unknown>): Promise<Buffer> {
+  const reader = stream.getReader();
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    const chunk = bodyChunkToBuffer(value);
+    totalBytes += chunk.length;
+    if (totalBytes > MAX_BUFFERED_STREAMING_REQUEST_BODY_BYTES) {
+      throw new Error(
+        `Gondolin streaming HTTP request body exceeds ${MAX_BUFFERED_STREAMING_REQUEST_BODY_BYTES} bytes`,
+      );
+    }
+    chunks.push(chunk);
+  }
+
+  return Buffer.concat(chunks, totalBytes);
+}
+
+function bodyChunkToBuffer(value: unknown): Buffer {
+  if (Buffer.isBuffer(value)) return value;
+  if (value instanceof Uint8Array) {
+    return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+  }
+  if (value instanceof ArrayBuffer) return Buffer.from(value);
+  if (typeof value === "string") return Buffer.from(value);
+  throw new Error(`Unsupported streaming HTTP request body chunk: ${typeof value}`);
 }
 
 function getFetchInputUrl(input: VmNetworkFetchInput): string {

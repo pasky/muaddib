@@ -553,6 +553,37 @@ describe("createVmHttpHooks network trust policy", () => {
     expect(await isUrlTrustedInArc("sandbox-allow-arc", "https://example.com/allowed?x=2")).toBe(true);
   });
 
+  it("buffers streaming request bodies before host fetch", async () => {
+    const upstreamFetch = vi.fn(async (_input: unknown, _init?: unknown) => new Response("ok"));
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("call=plugin_"));
+        controller.enqueue(new TextEncoder().encode("davcal"));
+        controller.close();
+      },
+    });
+
+    const { fetch: trustAwareFetch } = await createVmHttpHooks({
+      arc: "streaming-post-arc",
+      blockedCidrs: [],
+      fetchImpl: upstreamFetch as any,
+    });
+
+    const response = await trustAwareFetch("https://example.com/post", {
+      method: "POST",
+      headers: { expect: "100-continue" },
+      body,
+      duplex: "half",
+    } as any);
+
+    expect(await response.text()).toBe("ok");
+    expect(upstreamFetch).toHaveBeenCalledTimes(1);
+    const forwardedInit = upstreamFetch.mock.calls[0]?.[1] as { body?: BodyInit; headers?: Record<string, string> };
+    expect(forwardedInit.body).not.toBe(body);
+    expect(await new Response(forwardedInit.body).text()).toBe("call=plugin_davcal");
+    expect(forwardedInit.headers).not.toHaveProperty("expect");
+  });
+
   it("auto-trusts redirect targets for sandbox direct network", async () => {
     await trustUrl("https://source.example.com/start?token=1", "redirect-arc");
 
