@@ -240,13 +240,17 @@ function stripGuestHandledHeaders(init: VmNetworkFetchInit): VmNetworkFetchInit 
   if (!init) return init;
 
   const headers = (init as VmNetworkFetchInitWithBody & { headers?: unknown }).headers;
-  const strippedHeaders = stripHeader(headers, "expect");
+  const strippedHeaders = stripHeaders(headers, ["expect", "content-length"]);
   if (strippedHeaders === headers) return init;
 
   return {
     ...init,
     headers: strippedHeaders,
   } as VmNetworkFetchInit;
+}
+
+function stripHeaders(headers: unknown, headerNames: string[]): unknown {
+  return headerNames.reduce((nextHeaders, headerName) => stripHeader(nextHeaders, headerName), headers);
 }
 
 function stripHeader(headers: unknown, headerName: string): unknown {

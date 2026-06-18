@@ -571,7 +571,7 @@ describe("createVmHttpHooks network trust policy", () => {
 
     const response = await trustAwareFetch("https://example.com/post", {
       method: "POST",
-      headers: { expect: "100-continue" },
+      headers: { expect: "100-continue", "content-length": "18" },
       body,
       duplex: "half",
     } as any);
@@ -582,6 +582,7 @@ describe("createVmHttpHooks network trust policy", () => {
     expect(forwardedInit.body).not.toBe(body);
     expect(await new Response(forwardedInit.body).text()).toBe("call=plugin_davcal");
     expect(forwardedInit.headers).not.toHaveProperty("expect");
+    expect(forwardedInit.headers).not.toHaveProperty("content-length");
   });
 
   it("auto-trusts redirect targets for sandbox direct network", async () => {
