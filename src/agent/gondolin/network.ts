@@ -201,8 +201,30 @@ export async function createVmHttpHooks(opts: CreateVmHttpHooksOptions): Promise
   const fetchImpl = opts.fetchImpl ?? (globalThis.fetch as unknown as VmNetworkFetch);
   const trustAwareFetch: VmNetworkFetch = async (input, init) => {
     const hostFetchInit = stripGuestHandledHeaders(await bufferStreamingRequestBody(init));
-    const response = await fetchImpl(input, hostFetchInit);
     const requestUrl = getFetchInputUrl(input);
+    let response: Awaited<ReturnType<VmNetworkFetch>>;
+    try {
+      response = await fetchImpl(input, hostFetchInit);
+    } catch (err) {
+      let safeUrl = requestUrl;
+      try {
+        const parsed = new URL(requestUrl);
+        safeUrl = `${parsed.origin}${parsed.pathname}`;
+      } catch {
+        // best effort only; keep the original fetch error
+      }
+      const method = hostFetchInit?.method ?? (
+        typeof input === "object" && input !== null && "method" in input && typeof input.method === "string"
+          ? input.method
+          : "GET"
+      );
+      opts.logger?.warn(
+        `Gondolin host fetch failed ${method.toUpperCase()} ${safeUrl}`,
+        err,
+        err instanceof Error ? err.cause : undefined,
+      );
+      throw err;
+    }
     const redirectTarget = getRedirectTarget(response, requestUrl);
     if (redirectTarget) {
       await networkBoundary.recordRedirect(

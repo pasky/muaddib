@@ -585,6 +585,43 @@ describe("createVmHttpHooks network trust policy", () => {
     expect(forwardedInit.headers).not.toHaveProperty("content-length");
   });
 
+  it("logs host fetch failures with sanitized URL and error cause", async () => {
+    const cause = Object.assign(new Error("invalid content-length header"), {
+      code: "UND_ERR_INVALID_ARG",
+      name: "InvalidArgumentError",
+    });
+    const fetchError = new TypeError("fetch failed", { cause });
+    const upstreamFetch = vi.fn(async () => {
+      throw fetchError;
+    });
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    const { fetch: trustAwareFetch } = await createVmHttpHooks({
+      arc: "failing-post-arc",
+      blockedCidrs: [],
+      fetchImpl: upstreamFetch as any,
+      logger,
+    });
+
+    await expect(trustAwareFetch("https://user:pass@example.com/post?token=secret#frag", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer secret-token",
+        "content-length": "1",
+      },
+      body: "x",
+    } as any)).rejects.toThrow("fetch failed");
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Gondolin host fetch failed POST https://example.com/post",
+      fetchError,
+      cause,
+    );
+    const message = logger.warn.mock.calls[0]?.[0] as string;
+    expect(message).not.toContain("secret");
+    expect(message).not.toContain("user:pass");
+  });
+
   it("auto-trusts redirect targets for sandbox direct network", async () => {
     await trustUrl("https://source.example.com/start?token=1", "redirect-arc");
 
