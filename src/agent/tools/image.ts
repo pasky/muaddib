@@ -63,7 +63,7 @@ export function createGenerateImageTool(
     persistType: "summary",
     label: "Generate Image",
     description:
-      `Generate image(s) ${modelClause}. Optionally include reference image URLs for edits or variations.`,
+      `Generate image(s) ${modelClause}. Optionally include reference image URLs for edits or variations. This can easily take 5-10 minutes to complete, so bias towards telling the user you are generating an image before calling this tool, so they don't think you got stuck.`,
     parameters: GENERATE_IMAGE_PARAMETERS,
     execute: async (_toolCallId, params: GenerateImageInput) => {
       const output = await executors.generateImage(params);
