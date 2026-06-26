@@ -19,9 +19,11 @@ vi.mock("@earendil-works/pi-agent-core", () => ({
   },
 }));
 
-vi.mock("@earendil-works/pi-ai", () => ({
-  streamSimple: (model: unknown, context: unknown, options: unknown) =>
-    mockState.streamSimpleMock(model, context, options),
+vi.mock("../src/models/pi-ai-models.js", () => ({
+  piAiModels: {
+    streamSimple: (model: unknown, context: unknown, options: unknown) =>
+      mockState.streamSimpleMock(model, context, options),
+  },
 }));
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
@@ -51,7 +53,6 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
       remove: vi.fn(),
       login: vi.fn(),
       logout: vi.fn(),
-      setFallbackResolver: vi.fn(),
       getApiKey: vi.fn(async () => "test-key"),
     }),
   },
@@ -183,7 +184,6 @@ describe("createAgentSessionForInvocation", () => {
       remove: vi.fn(),
       login: vi.fn(),
       logout: vi.fn(),
-      setFallbackResolver: vi.fn(),
     };
     const ctx = createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",

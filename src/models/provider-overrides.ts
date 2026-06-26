@@ -1,4 +1,6 @@
-import { getModel, type Api, type KnownProvider, type Model, type OpenAICompletionsCompat } from "@earendil-works/pi-ai";
+import type { Api, Model, OpenAICompletionsCompat } from "@earendil-works/pi-ai";
+
+import { piAiModels } from "./pi-ai-models.js";
 
 const OPENROUTER_PROVIDER = "openrouter";
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
@@ -155,9 +157,7 @@ function resolveOpenRouterModel(modelId: string, providerRouting?: string[]): Mo
 
   // Cache cold: fall back to pi-ai's static registry entry if available.
   for (const candidate of candidates) {
-    const known = getModel(OPENROUTER_PROVIDER as KnownProvider, candidate as never) as
-      | Model<Api>
-      | undefined;
+    const known = piAiModels.getModel(OPENROUTER_PROVIDER, candidate);
     if (known) {
       return compat ? { ...known, compat } : known;
     }

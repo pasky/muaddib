@@ -15,7 +15,9 @@ import { remapToOpenRouter } from "../src/cost/model-remap.js";
 import { fetchOpenRouterEndpoints, resolveProviderOverrideModel } from "../src/models/provider-overrides.js";
 import { LLM_CALL_TYPE, isLlmCallType } from "../src/cost/llm-call-type.js";
 import { UserCostLedger } from "../src/cost/user-cost-ledger.js";
-import { UserKeyStore } from "../src/cost/user-key-store.js";
+import { AuthStorage } from "@earendil-works/pi-coding-agent";
+
+import { UserKeyStore, createOpenRouterAuthStorageOverride } from "../src/cost/user-key-store.js";
 import { UserPolicyStore } from "../src/cost/user-policy-store.js";
 import { buildArc } from "../src/rooms/message.js";
 
@@ -298,6 +300,55 @@ describe("UserKeyStore", () => {
     } finally {
       rmSync(muaddibHome, { recursive: true, force: true });
     }
+  });
+});
+
+describe("createOpenRouterAuthStorageOverride", () => {
+  function makeBase(): AuthStorage {
+    return AuthStorage.inMemory({
+      anthropic: { type: "api_key", key: "ant-key", env: { ANTHROPIC_REGION: "eu" } },
+    });
+  }
+
+  it("overrides openrouter and delegates other providers to the base instance", async () => {
+    const base = makeBase();
+    const override = createOpenRouterAuthStorageOverride(base, "or-key");
+
+    expect(override.get("openrouter")).toEqual({ type: "api_key", key: "or-key" });
+    expect(await override.getApiKey("openrouter")).toBe("or-key");
+    expect(override.has("openrouter")).toBe(true);
+    expect(override.hasAuth("openrouter")).toBe(true);
+    expect(override.list()).toEqual(expect.arrayContaining(["openrouter", "anthropic"]));
+    expect(override.getAll().openrouter).toEqual({ type: "api_key", key: "or-key" });
+
+    // Non-openrouter providers delegate unchanged to the wrapped instance.
+    expect(override.get("anthropic")).toEqual(base.get("anthropic"));
+    expect(await override.getApiKey("anthropic")).toBe("ant-key");
+  });
+
+  it("delegates 0.80 AuthStorage methods and getApiKey options to the base instance", async () => {
+    const base = makeBase();
+    const getApiKeySpy = vi.spyOn(base, "getApiKey");
+    const override = createOpenRouterAuthStorageOverride(base, "or-key");
+
+    // Methods not intercepted by the override (including ones added in 0.80
+    // that read the instance's private state) must reach the real instance.
+    expect(override.getProviderEnv("anthropic")).toEqual({ ANTHROPIC_REGION: "eu" });
+    expect(override.getAuthStatus("anthropic")).toEqual(base.getAuthStatus("anthropic"));
+
+    // getApiKey options are forwarded for delegated providers.
+    await override.getApiKey("anthropic", { includeFallback: false });
+    expect(getApiKeySpy).toHaveBeenLastCalledWith("anthropic", { includeFallback: false });
+  });
+
+  it("clears the openrouter override on remove without touching the base", () => {
+    const base = makeBase();
+    const override = createOpenRouterAuthStorageOverride(base, "or-key");
+
+    override.remove("openrouter");
+    expect(override.get("openrouter")).toBeUndefined();
+    expect(override.has("openrouter")).toBe(false);
+    expect(override.get("anthropic")).toEqual(base.get("anthropic"));
   });
 });
 

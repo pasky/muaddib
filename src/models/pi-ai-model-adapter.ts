@@ -1,16 +1,14 @@
-import {
-  completeSimple,
-  getModel,
-  getProviders,
-  type Api,
-  type AssistantMessage,
-  type Context,
-  type KnownProvider,
-  type Model,
-  type SimpleStreamOptions,
+import type {
+  Api,
+  AssistantMessage,
+  Context,
+  Model,
+  SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
 
 import type { AuthStorage } from "@earendil-works/pi-coding-agent";
+
+import { piAiModels } from "./pi-ai-models.js";
 
 import type { Logger } from "../app/logging.js";
 import { stripBinaryContent } from "../agent/debug-utils.js";
@@ -49,7 +47,7 @@ let supportedProviders: Set<string> | undefined;
 
 function getSupportedProviders(): Set<string> {
   if (!supportedProviders) {
-    supportedProviders = new Set<string>(getProviders() as string[]);
+    supportedProviders = new Set<string>(piAiModels.getProviders().map((p) => p.id));
     for (const provider of getOverriddenProviders()) {
       supportedProviders.add(provider);
     }
@@ -87,9 +85,7 @@ export class PiAiModelAdapter {
       return { spec, model: providerOverrideModel };
     }
 
-    const model = getModel(spec.provider as KnownProvider, spec.modelId as never) as
-      | Model<Api>
-      | undefined;
+    const model = piAiModels.getModel(spec.provider, spec.modelId);
 
     if (!model) {
       throw new PiAiModelResolutionError(
@@ -107,7 +103,7 @@ export class PiAiModelAdapter {
     const maxChars = Math.max(500, Math.floor(options.maxChars ?? 120_000));
 
     try {
-      const response = await completeSimple(
+      const response = await piAiModels.completeSimple(
         resolved.model,
         context,
         {

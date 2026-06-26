@@ -5,7 +5,7 @@
  * the real RoomMessageHandler, CommandExecutor, SessionRunner, and Agent loop.
  *
  * Mock boundaries:
- *   - `streamSimple` from `@earendil-works/pi-ai` (scripted LLM responses)
+ *   - `streamSimple` on the shared `piAiModels` instance (scripted LLM responses)
  *   - `authStorage` on runtime (returns fake keys)
  *
  * Verification:
@@ -35,15 +35,14 @@ import {
 
 const mockState: StreamMockState = createStreamMockState();
 
-vi.mock("@earendil-works/pi-ai", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@earendil-works/pi-ai")>();
-  return {
-    ...original,
+vi.mock("../../src/models/pi-ai-models.js", async () => {
+  const { buildPiAiModelsMock } = await import("../pi-ai-models-mock.js");
+  return buildPiAiModelsMock({
     streamSimple: (...args: unknown[]) => handleStreamSimpleCall(mockState, ...args),
     completeSimple: async () => {
       throw new Error("completeSimple should not be called in this test");
     },
-  };
+  });
 });
 
 // ── Test suite ──

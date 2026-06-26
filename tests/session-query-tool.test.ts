@@ -27,8 +27,9 @@ if (!globalAny.__sessionQueryCaptured) {
 }
 const captured: CapturedContext[] = globalAny.__sessionQueryCaptured;
 
-vi.mock("@earendil-works/pi-ai", async () => {
+vi.mock("../src/models/pi-ai-models.js", async () => {
   const actual = await vi.importActual<typeof import("@earendil-works/pi-ai")>("@earendil-works/pi-ai");
+  const { buildPiAiModelsMock } = await import("./pi-ai-models-mock.js");
   const streamSimple = (_model: unknown, context: { systemPrompt?: string; messages: unknown[]; tools?: unknown[] }, _options?: unknown) => {
     const g = globalThis as unknown as { __sessionQueryCaptured?: { systemPrompt?: string; messages: unknown[]; tools: unknown[] }[] };
     if (!g.__sessionQueryCaptured) {
@@ -55,7 +56,7 @@ vi.mock("@earendil-works/pi-ai", async () => {
     });
     return stream;
   };
-  return { ...actual, streamSimple, stream: streamSimple };
+  return buildPiAiModelsMock({ streamSimple });
 });
 
 import { PiAiModelAdapter } from "../src/models/pi-ai-model-adapter.js";

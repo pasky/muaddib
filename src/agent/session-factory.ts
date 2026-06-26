@@ -1,5 +1,5 @@
 import { Agent, type AgentMessage, type AgentTool, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { streamSimple, type Message } from "@earendil-works/pi-ai";
+import type { Message } from "@earendil-works/pi-ai";
 import { isAssistantMessage } from "./message.js";
 import {
   AgentSession,
@@ -14,6 +14,7 @@ import {
 
 
 import { PiAiModelAdapter, type ResolvedPiAiModel } from "../models/pi-ai-model-adapter.js";
+import { piAiModels } from "../models/pi-ai-models.js";
 import type { Logger } from "../app/logging.js";
 import { safeJson } from "./debug-utils.js";
 import type { SessionLimitsConfig } from "../config/muaddib-config.js";
@@ -483,7 +484,7 @@ function createTracingStreamFn(
 ): StreamFn {
   return (model, context, options) => {
     const effectiveModel = (visionState.activated && visionState.model) ? visionState.model : model;
-    return streamSimple(effectiveModel, context, {
+    return piAiModels.streamSimple(effectiveModel, context, {
       ...options,
       onPayload: (payload: unknown) => {
         logger.debug("llm_io payload agent_stream", safeJson(payload, maxChars));

@@ -6,8 +6,8 @@
  * in-session tool summary persisted as internal monologue.
  *
  * Mock boundaries:
- *   - `streamSimple` from `@earendil-works/pi-ai` (scripted LLM responses)
- *   - `completeSimple` from `@earendil-works/pi-ai` (context reducer)
+ *   - `streamSimple` on the shared `piAiModels` instance (scripted LLM responses)
+ *   - `completeSimple` on the shared `piAiModels` instance (context reducer)
  *   - global `fetch` (for Jina web search API)
  */
 
@@ -41,10 +41,9 @@ const completeSimpleCalls: Array<{ model: unknown; context: unknown; options: un
 let completeSimpleResponses: Array<() => ReturnType<typeof makeAssistantMessage>> = [];
 let completeSimpleIndex = 0;
 
-vi.mock("@earendil-works/pi-ai", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@earendil-works/pi-ai")>();
-  return {
-    ...original,
+vi.mock("../../src/models/pi-ai-models.js", async () => {
+  const { buildPiAiModelsMock } = await import("../pi-ai-models-mock.js");
+  return buildPiAiModelsMock({
     streamSimple: (...args: unknown[]) => handleStreamSimpleCall(mockState, ...args),
     completeSimple: async (...args: unknown[]) => {
       completeSimpleCalls.push({
@@ -59,7 +58,7 @@ vi.mock("@earendil-works/pi-ai", async (importOriginal) => {
       completeSimpleIndex += 1;
       return factory();
     },
-  };
+  });
 });
 
 // ── Test data ──

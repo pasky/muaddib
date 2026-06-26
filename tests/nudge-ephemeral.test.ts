@@ -48,12 +48,11 @@ import { PiAiModelAdapter } from "../src/models/pi-ai-model-adapter.js";
 
 const mockState: StreamMockState = createStreamMockState();
 
-vi.mock("@earendil-works/pi-ai", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@earendil-works/pi-ai")>();
-  return {
-    ...original,
+vi.mock("../src/models/pi-ai-models.js", async () => {
+  const { buildPiAiModelsMock } = await import("./pi-ai-models-mock.js");
+  return buildPiAiModelsMock({
     streamSimple: (...args: unknown[]) => handleStreamSimpleCall(mockState, ...args),
-  };
+  });
 });
 
 // ── Helpers ──

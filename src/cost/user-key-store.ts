@@ -73,6 +73,17 @@ export class UserKeyStore {
   }
 }
 
+/**
+ * Wrap a base {@link AuthStorage} so the `openrouter` provider resolves to a
+ * per-session key, while every other provider — and any method not listed here
+ * (e.g. `getProviderEnv`, `getAuthStatus`, OAuth) — delegates to the base
+ * instance unchanged.
+ *
+ * `AuthStorage` is a class with private state and a private constructor, so it
+ * cannot be subclassed or duck-typed. A `Proxy` over the real instance keeps
+ * its class identity, forwards unknown members verbatim (future-proof), and
+ * only intercepts the openrouter-aware accessors below.
+ */
 export function createOpenRouterAuthStorageOverride(
   baseAuthStorage: AuthStorage,
   openRouterKey: string,
@@ -80,14 +91,9 @@ export function createOpenRouterAuthStorageOverride(
   let overrideKey: string | undefined = openRouterKey;
 
   const getOverrideCredential = (): AuthCredential | undefined =>
-    overrideKey
-      ? {
-          type: "api_key",
-          key: overrideKey,
-        }
-      : undefined;
+    overrideKey ? { type: "api_key", key: overrideKey } : undefined;
 
-  return {
+  const overrides: Partial<AuthStorage> = {
     get: (provider: string) =>
       provider === "openrouter" ? getOverrideCredential() : baseAuthStorage.get(provider),
     set: (provider: string, credential: AuthCredential) => {
@@ -128,8 +134,6 @@ export function createOpenRouterAuthStorageOverride(
       }
       return data;
     },
-    drainErrors: () => baseAuthStorage.drainErrors(),
-    login: (providerId, callbacks) => baseAuthStorage.login(providerId, callbacks),
     logout: (provider: string) => {
       if (provider === "openrouter") {
         overrideKey = undefined;
@@ -137,13 +141,10 @@ export function createOpenRouterAuthStorageOverride(
       }
       baseAuthStorage.logout(provider);
     },
-    getApiKey: async (provider: string) =>
+    getApiKey: (provider: string, options) =>
       provider === "openrouter"
-        ? overrideKey ?? baseAuthStorage.getApiKey(provider)
-        : baseAuthStorage.getApiKey(provider),
-    getOAuthProviders: () => baseAuthStorage.getOAuthProviders(),
-    reload: () => baseAuthStorage.reload(),
-    setFallbackResolver: (resolver) => baseAuthStorage.setFallbackResolver(resolver),
+        ? Promise.resolve(overrideKey ?? baseAuthStorage.getApiKey(provider, options))
+        : baseAuthStorage.getApiKey(provider, options),
     setRuntimeApiKey: (provider: string, apiKey: string) => {
       if (provider === "openrouter") {
         overrideKey = apiKey;
@@ -158,5 +159,17 @@ export function createOpenRouterAuthStorageOverride(
       }
       baseAuthStorage.removeRuntimeApiKey(provider);
     },
-  } as AuthStorage;
+  };
+
+  return new Proxy(baseAuthStorage, {
+    get(target, prop) {
+      if (Object.prototype.hasOwnProperty.call(overrides, prop)) {
+        return overrides[prop as keyof AuthStorage];
+      }
+      // Resolve with `target` as receiver so any class accessors that read
+      // private fields run against the real instance, not the proxy.
+      const value = Reflect.get(target, prop, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
 }
