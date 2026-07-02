@@ -119,6 +119,8 @@ export interface QuietExecuteParams {
   historySize: number;
   reasoningEffort: string;
   allowedTools: string[] | null;
+  /** `null` = inherit global, `""` = disabled, else `provider:model`. */
+  refusalFallbackModel: string | null;
   promptReminder?: string;
   /** When true, extract <thinking> tags from responses and persist them
    *  as [internal monologue] history entries instead of sending to room. */
@@ -249,23 +251,16 @@ export class CommandExecutor {
       overrides?.rateLimiter ??
       new RateLimiter(rateLimit, ratePeriod);
 
-    const configuredRefusalFallbackModel = agentConfig.refusalFallbackModel;
-    if (configuredRefusalFallbackModel === undefined || configuredRefusalFallbackModel === null) {
-      this.refusalFallbackModel = null;
-    } else {
-      if (typeof configuredRefusalFallbackModel !== "string") {
-        throw new Error(
-          "agent.refusalFallbackModel must be a string fully qualified as provider:model (or \"\" to disable).",
-        );
-      }
-
-      const trimmedRefusalFallbackModel = configuredRefusalFallbackModel.trim();
-      if (trimmedRefusalFallbackModel.length === 0) {
-        this.refusalFallbackModel = null;
-      } else {
-        const spec = parseModelSpec(trimmedRefusalFallbackModel);
-        this.refusalFallbackModel = `${spec.provider}:${spec.modelId}`;
-      }
+    // Global default; per-mode overrides are resolved lazily like visionModel.
+    const globalRefusalFallback = agentConfig.refusalFallbackModel;
+    if (globalRefusalFallback != null && typeof globalRefusalFallback !== "string") {
+      throw new Error(
+        "agent.refusalFallbackModel must be a string fully qualified as provider:model (or \"\" to disable).",
+      );
+    }
+    this.refusalFallbackModel = globalRefusalFallback?.trim() || null;
+    if (this.refusalFallbackModel) {
+      parseModelSpec(this.refusalFallbackModel);
     }
 
     const configuredResponseMaxBytes = this.commandConfig.responseMaxBytes;
@@ -676,6 +671,7 @@ export class CommandExecutor {
           runner, message, queryLine, runnerContext, toolSet.tools, {
             reasoningEffort: resolvedRuntime.reasoningEffort,
             visionModel: resolvedRuntime.visionModel ?? undefined,
+            refusalFallbackModel: resolvedRuntime.refusalFallbackModel ?? this.refusalFallbackModel ?? undefined,
             memoryUpdate: resolvedRuntime.memoryUpdate,
             toolSummary: resolvedRuntime.toolSummary,
             modelSpec: effectiveModelSpec,
@@ -737,7 +733,7 @@ export class CommandExecutor {
     onAgentCreated?: (agent: Agent) => void,
   ): Promise<boolean> {
     const { logger } = this;
-    const { modelSpec, trigger, source, systemPrompt, historySize, reasoningEffort, allowedTools, promptReminder, persistThinking } = params;
+    const { modelSpec, trigger, source, systemPrompt, historySize, reasoningEffort, allowedTools, refusalFallbackModel, promptReminder, persistThinking } = params;
 
     const context = await this.history.getContextForMessage(message, historySize);
 
@@ -819,6 +815,7 @@ export class CommandExecutor {
             toolSet.tools,
             {
               reasoningEffort,
+              refusalFallbackModel: refusalFallbackModel ?? this.refusalFallbackModel ?? undefined,
               modelSpec,
             },
             async () => {
@@ -892,6 +889,7 @@ export class CommandExecutor {
       historySize: resolvedRuntime.historySize,
       reasoningEffort: resolvedRuntime.reasoningEffort,
       allowedTools: resolvedRuntime.allowedTools,
+      refusalFallbackModel: resolvedRuntime.refusalFallbackModel,
       promptReminder: modeConfig.promptReminder,
       persistThinking: true,
     });
@@ -910,7 +908,7 @@ export class CommandExecutor {
     queryText: string,
     contextMessages: Message[],
     tools: MuaddibTool[],
-    opts: { reasoningEffort: string; visionModel?: string; memoryUpdate?: boolean; toolSummary?: boolean; modelSpec?: string },
+    opts: { reasoningEffort: string; visionModel?: string; refusalFallbackModel?: string; memoryUpdate?: boolean; toolSummary?: boolean; modelSpec?: string },
     afterResponse: (result: PromptRunResult) => Promise<void>,
     triggerTs?: string,
   ): Promise<PromptRunResult> {
@@ -925,7 +923,7 @@ export class CommandExecutor {
       contextMessages,
       thinkingLevel: opts.reasoningEffort as ThinkingLevel,
       visionFallbackModel: opts.visionModel,
-      refusalFallbackModel: this.refusalFallbackModel ?? undefined,
+      refusalFallbackModel: opts.refusalFallbackModel,
     });
 
     // Record top-level usage into the active cost span.  The session runner
@@ -1314,8 +1312,6 @@ export class CommandExecutor {
 export function modelStrCore(model: unknown): string {
   return String(model).replace(/(?:[-.\w]*:)?(?:[-.\w]*\/)?([-.\w]+)(?:#[-\w,/]*)?/, "$1");
 }
-
-
 
 function isNullSentinel(text: string): boolean {
   const trimmed = text.trim();

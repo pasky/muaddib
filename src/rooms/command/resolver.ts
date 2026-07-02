@@ -38,6 +38,8 @@ export interface RuntimeSettings {
   toolSummary: boolean;
   model: string | null;
   visionModel: string | null;
+  /** `null` = inherit global agent.refusalFallbackModel; `""` = disabled. */
+  refusalFallbackModel: string | null;
   historySize: number;
   /** Partial tool config overrides, deep-merged over the global agent.tools config. */
   toolsOverrides: Record<string, unknown> | null;
@@ -199,6 +201,10 @@ export class CommandResolver {
         model: (overrides.model as string | undefined) ?? null,
         visionModel:
           (overrides.visionModel as string | undefined) ?? modeConfig.visionModel ?? null,
+        refusalFallbackModel:
+          (overrides.refusalFallbackModel as string | undefined) ??
+          modeConfig.refusalFallbackModel ??
+          null,
         historySize: Number(modeConfig.historySize ?? this.commandConfig.historySize),
         toolsOverrides:
           (overrides.tools as Record<string, unknown> | undefined) ?? null,

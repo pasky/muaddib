@@ -207,6 +207,8 @@ export interface ModeConfig {
   autoReduceContext?: boolean;
   includeChapterSummary?: boolean;
   visionModel?: string;
+  /** Per-mode override for agent.refusalFallbackModel. Empty string disables refusal fallback for this mode. */
+  refusalFallbackModel?: string;
   prompt?: string;
   promptReminder?: string;
   memoryUpdate?: boolean;

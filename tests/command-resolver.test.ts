@@ -397,6 +397,54 @@ describe("CommandResolver runtimeForTrigger toolsOverrides", () => {
   });
 });
 
+describe("CommandResolver runtimeForTrigger refusalFallbackModel", () => {
+  it("returns null when no refusal fallback is configured", () => {
+    const resolver = new CommandResolver(
+      commandConfig as any,
+      async () => "EASY_SERIOUS",
+      "!h",
+      new Set(["!c"]),
+      (model) => String(model),
+    );
+
+    const { runtime } = resolver.runtimeForTrigger("!s");
+    expect(runtime.refusalFallbackModel).toBeNull();
+  });
+
+  it("resolves per-mode refusalFallbackModel with trigger override taking precedence", () => {
+    const config = {
+      ...commandConfig,
+      modes: {
+        ...commandConfig.modes,
+        serious: {
+          ...commandConfig.modes.serious,
+          refusalFallbackModel: "anthropic:claude-sonnet-4",
+          triggers: {
+            "!s": {},
+            "!a": { refusalFallbackModel: "anthropic:claude-opus-4-8" },
+          },
+        },
+      },
+    };
+
+    const resolver = new CommandResolver(
+      config as any,
+      async () => "EASY_SERIOUS",
+      "!h",
+      new Set(["!c"]),
+      (model) => String(model),
+    );
+
+    // !s inherits the mode-level fallback
+    const { runtime: sRuntime } = resolver.runtimeForTrigger("!s");
+    expect(sRuntime.refusalFallbackModel).toBe("anthropic:claude-sonnet-4");
+
+    // !a overrides it
+    const { runtime: aRuntime } = resolver.runtimeForTrigger("!a");
+    expect(aRuntime.refusalFallbackModel).toBe("anthropic:claude-opus-4-8");
+  });
+});
+
 describe("modelStrCore", () => {
   it("strips provider prefix", () => {
     expect(modelStrCore("anthropic:claude-opus-4-6")).toBe("claude-opus-4-6");
