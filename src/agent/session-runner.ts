@@ -3,7 +3,7 @@ import type { AgentSession, AuthStorage } from "@earendil-works/pi-coding-agent"
 import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai";
 
 import { isAssistantMessage, isTextContent, isToolCall, responseText } from "./message.js";
-import { detectRefusalSignal } from "./refusal-detection.js";
+import { detectRefusalErrorSignal, detectRefusalSignal } from "./refusal-detection.js";
 import { stringifyError } from "../utils/index.js";
 import { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
 import { parseModelSpec } from "../models/model-spec.js";
@@ -423,12 +423,19 @@ export class SessionRunner {
     try {
       await session.prompt(prompt);
 
-      const text = extractLastAssistantText(session.messages);
-      if (!refusalFallbackModel || !detectRefusalSignal(text)) {
+      // Anthropic refusals arrive as an empty message with stopReason "error"
+      // and the refusal in errorMessage, not the body — probe both.
+      const lastMessage = findLastAssistantMessage(session.messages);
+      const bodyRefusal = detectRefusalSignal(extractLastAssistantText(session.messages));
+      const errorRefusal =
+        lastMessage?.stopReason === "error"
+          ? detectRefusalErrorSignal(lastMessage.errorMessage ?? "")
+          : null;
+      if (!refusalFallbackModel || !(bodyRefusal ?? errorRefusal)) {
         return false;
       }
     } catch (error) {
-      if (!refusalFallbackModel || !detectRefusalSignal(stringifyError(error))) {
+      if (!refusalFallbackModel || !detectRefusalErrorSignal(stringifyError(error))) {
         throw error;
       }
     }

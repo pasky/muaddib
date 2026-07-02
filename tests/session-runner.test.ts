@@ -259,6 +259,54 @@ describe("SessionRunner", () => {
     expect(ctx.agent.state.model).toEqual({ provider: "anthropic", id: "claude-sonnet-4" });
   });
 
+  it("switches to refusal fallback when refusal arrives as an error message (stopReason=error)", async () => {
+    // Anthropic refusal: prompt resolves, text empty, refusal only in errorMessage.
+    const ctx = makeMockSession({
+      promptImpl: async (c) => {
+        if (c.agent.state.model?.provider === "anthropic") {
+          c.session.messages.push({
+            role: "assistant", content: [{ type: "text", text: "the real answer" }],
+            usage: makeUsage(), stopReason: "stop",
+          });
+        } else {
+          c.session.messages.push({
+            role: "assistant", content: [], usage: makeUsage(),
+            stopReason: "error",
+            errorMessage:
+              "API integrators: you can reduce refusals for your users by configuring a fallback model — see https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback",
+          });
+        }
+      },
+    });
+
+    const runner = makeRunner();
+    const result = await runner.prompt("hello", { refusalFallbackModel: "anthropic:claude-sonnet-4" });
+
+    expect(result.refusalFallbackActivated).toBe(true);
+    expect(result.refusalFallbackModel).toBe("anthropic:claude-sonnet-4");
+    expect(result.text).toBe("the real answer");
+    expect(ctx.ensureProviderKey).toHaveBeenCalledWith("anthropic");
+    expect(ctx.agent.state.model).toEqual({ provider: "anthropic", id: "claude-sonnet-4" });
+  });
+
+  it("does not trigger refusal fallback when a valid answer mentions refusal phrases", async () => {
+    // stopReason "stop" body text about Anthropic's docs must not be treated
+    // as a refusal — those phrases only count inside an error's errorMessage.
+    const ctx = makeMockSession();
+    ctx.session.messages.push({
+      role: "assistant",
+      content: [{ type: "text", text: "See the refusals-and-fallback docs to reduce refusals for your users." }],
+      usage: makeUsage(), stopReason: "stop",
+    });
+
+    const runner = makeRunner();
+    const result = await runner.prompt("hello", { refusalFallbackModel: "anthropic:claude-sonnet-4" });
+
+    expect(result.refusalFallbackActivated).toBe(false);
+    expect(ctx.session.prompt).toHaveBeenCalledTimes(1);
+    expect(ctx.ensureProviderKey).not.toHaveBeenCalledWith("anthropic");
+  });
+
   it("drains steering messages that raced with the agent loop's final poll", async () => {
     // Simulate: agent's final turn_end polled the steering queue when empty,
     // then a steer() arrived and was enqueued into the (now-terminated) agent.
