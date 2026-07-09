@@ -151,7 +151,7 @@ describe("E2E: Oracle with nested web_search", () => {
 
     // Call 0: outer agent (openai:gpt-4o-mini)
     expect(modelProvider(0)).toBe("openai");
-    // Call 1: inner oracle agent (anthropic:claude-sonnet-4-20250514)
+    // Call 1: inner oracle agent (anthropic:claude-sonnet-5)
     expect(modelProvider(1)).toBe("anthropic");
     // Call 2: inner oracle agent again (after web_search result)
     expect(modelProvider(2)).toBe("anthropic");

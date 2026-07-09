@@ -9,6 +9,8 @@ describe("cost/usage", () => {
       output: 2,
       cacheRead: 3,
       cacheWrite: 4,
+      cacheWrite1h: 1,
+      reasoning: 2,
       totalTokens: 10,
       cost: { input: 0.1, output: 0.2, cacheRead: 0.3, cacheWrite: 0.4, total: 1 },
     };
@@ -17,6 +19,8 @@ describe("cost/usage", () => {
       output: 20,
       cacheRead: 30,
       cacheWrite: 40,
+      cacheWrite1h: 10,
+      reasoning: 20,
       totalTokens: 100,
       cost: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4, total: 10 },
     };
@@ -27,6 +31,8 @@ describe("cost/usage", () => {
       output: 22,
       cacheRead: 33,
       cacheWrite: 44,
+      cacheWrite1h: 11,
+      reasoning: 22,
       totalTokens: 110,
       cost: { input: 1.1, output: 2.2, cacheRead: 3.3, cacheWrite: 4.4, total: 11 },
     });

@@ -101,7 +101,7 @@ describe("E2E: Refusal → fallback → annotated response", () => {
     expect(mainResponse.server).toBe("libera");
     expect(mainResponse.message).toContain("The answer to your question is 42.");
     expect(mainResponse.message).toContain("[refusal fallback to");
-    expect(mainResponse.message).toContain("claude-3-5-sonnet-20241022");
+    expect(mainResponse.message).toContain("claude-sonnet-5");
 
     // Verify history has the persisted messages (both refusal + fallback answer)
     const historyRows = await ctx.history.getFullHistory(buildArc("libera", "#test"));

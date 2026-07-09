@@ -26,6 +26,12 @@ export function accumulateUsage(target: Usage, source: Usage): Usage {
   target.output += source.output;
   target.cacheRead += source.cacheRead;
   target.cacheWrite += source.cacheWrite;
+  if (source.cacheWrite1h !== undefined) {
+    target.cacheWrite1h = (target.cacheWrite1h ?? 0) + source.cacheWrite1h;
+  }
+  if (source.reasoning !== undefined) {
+    target.reasoning = (target.reasoning ?? 0) + source.reasoning;
+  }
   target.totalTokens += source.totalTokens;
   target.cost.input += source.cost.input;
   target.cost.output += source.cost.output;
