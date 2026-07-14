@@ -641,6 +641,23 @@ describe("SessionRunner", () => {
     }
   });
 
+  it.each([
+    ['402: {"message":"This request requires more credits, or fewer max_tokens. You requested up to 65536 tokens, but can only afford 966."}'],
+    ["402 Payment Required"],
+    ["Account has insufficient credits"],
+  ])("throws immediately without retrying on non-retriable billing errors (%s)", async (errorMessage) => {
+    const ctx = makeMockSession({
+      messages: [{
+        role: "assistant", content: [], usage: makeUsage(), stopReason: "error", errorMessage,
+      }],
+    });
+
+    const runner = makeRunner();
+    await expect(runner.prompt("hello")).rejects.toThrow(/non-retriable error/);
+    // No empty-completion retry prompt was issued.
+    expect(ctx.session.prompt).toHaveBeenCalledTimes(1);
+  });
+
   it("retries when share_artifact URL is missing from response", async () => {
     let promptCount = 0;
     const artifactUrl = "https://example.com/artifacts/?abc123.csv";

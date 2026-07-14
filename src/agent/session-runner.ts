@@ -306,6 +306,13 @@ export class SessionRunner {
         const emptyMsg = findLastAssistantMessage(session.messages);
         const reason = emptyMsg?.stopReason ?? "unknown";
         const errorDetail = emptyMsg?.errorMessage ? `: ${emptyMsg.errorMessage}` : "";
+        // Hard billing failures (HTTP 402, e.g. OpenRouter "requires more
+        // credits") won't resolve on retry — fail fast instead of burning
+        // through the delays. Status is only matched at the start to avoid
+        // false positives on numbers in message bodies.
+        if (emptyMsg?.errorMessage && /^\s*(?:error\s*:?\s*)?402\b|requires more credits|insufficient credits|payment required/iu.test(emptyMsg.errorMessage)) {
+          throw new Error(`Agent completion failed with non-retriable error: stopReason=${reason}${errorDetail}`);
+        }
         const delaySec = EMPTY_RETRY_DELAYS_MS[i] / 1_000;
         const retryMsg = `Error: empty assistant text (stopReason=${reason}${errorDetail}), retrying in ${delaySec}s (${i + 1}/${EMPTY_RETRY_DELAYS_MS.length})`;
         this.logger.error(retryMsg);
