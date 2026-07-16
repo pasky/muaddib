@@ -1836,6 +1836,49 @@ describe("RoomMessageHandler", () => {
     }
   });
 
+  it("@model override skips automatic memory/skill maintenance", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const sessionPrompts: string[] = [];
+    const runnerFactory: CommandRunnerFactory = (input) => ({
+      prompt: async () => {
+        const result = makeRunnerResult("done");
+        await input.onResponse(result.text);
+        return {
+          ...result,
+          session: {
+            messages: [],
+            prompt: async (p: string) => { sessionPrompts.push(p); },
+            dispose: vi.fn(),
+          } as any,
+          muteResponses: vi.fn(),
+          bumpSessionLimits: vi.fn(),
+        };
+      },
+    });
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory,
+    });
+
+    const sent: string[] = [];
+    await handler.handleIncomingMessage(makeMessage("!s @openrouter:google/gemini-flash hello", { isDirect: true }), {
+      sendResponse: async (text) => { sent.push(text); },
+    });
+    expect(sessionPrompts).toEqual([]);
+
+    await handler.handleIncomingMessage(makeMessage("!s hello again", { isDirect: true }), {
+      sendResponse: async (text) => { sent.push(text); },
+    });
+    expect(sessionPrompts.some((p) => p.includes("Session complete"))).toBe(true);
+
+    await history.close();
+  });
+
   it("refuses over-budget free users before runner creation", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();

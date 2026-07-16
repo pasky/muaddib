@@ -672,7 +672,9 @@ export class CommandExecutor {
             reasoningEffort: resolvedRuntime.reasoningEffort,
             visionModel: resolvedRuntime.visionModel ?? undefined,
             refusalFallbackModel: resolvedRuntime.refusalFallbackModel ?? this.refusalFallbackModel ?? undefined,
-            memoryUpdate: resolvedRuntime.memoryUpdate,
+            // @model override means unknown model quality — skip automatic
+            // memory/skill maintenance (the memory prompt covers both).
+            memoryUpdate: resolved.modelOverride ? false : resolvedRuntime.memoryUpdate,
             toolSummary: resolvedRuntime.toolSummary,
             modelSpec: effectiveModelSpec,
           },
