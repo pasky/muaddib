@@ -14,8 +14,9 @@ import {
   createEditTool,
   createReadTool,
   createWriteTool,
-  type AuthStorage,
 } from "@earendil-works/pi-coding-agent";
+
+import type { AuthStore } from "../../auth/auth-store.js";
 
 import type { GondolinConfig } from "../../config/muaddib-config.js";
 import type { ToolsConfig } from "../../config/muaddib-config.js";
@@ -54,7 +55,7 @@ export interface GondolinToolsOptions {
   serverTag?: string;
   channelName?: string;
   config: GondolinConfig;
-  authStorage?: AuthStorage;
+  authStorage?: AuthStore;
   toolsConfig?: ToolsConfig;
   logger?: Logger;
   eventsWatcher?: ArcEventsWatcher;

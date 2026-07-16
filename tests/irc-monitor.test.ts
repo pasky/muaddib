@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { AuthStore } from "../src/auth/auth-store.js";
 import { RuntimeLogWriter } from "../src/app/logging.js";
 import type { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { RoomMessageHandler } from "../src/rooms/command/message-handler.js";
@@ -33,7 +33,7 @@ function createDeferred<T = void>() {
 }
 
 function buildRuntime(configData: Record<string, unknown>, history: ChatHistoryStore): MuaddibRuntime {
-  return createTestRuntime({ history, configData, authStorage: AuthStorage.inMemory() });
+  return createTestRuntime({ history, configData, authStorage: AuthStore.inMemory() });
 }
 
 describe("IrcRoomMonitor", () => {

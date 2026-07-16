@@ -15,9 +15,9 @@ import { remapToOpenRouter } from "../src/cost/model-remap.js";
 import { fetchOpenRouterEndpoints, resolveProviderOverrideModel } from "../src/models/provider-overrides.js";
 import { LLM_CALL_TYPE, isLlmCallType } from "../src/cost/llm-call-type.js";
 import { UserCostLedger } from "../src/cost/user-cost-ledger.js";
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { AuthStore } from "../src/auth/auth-store.js";
 
-import { UserKeyStore, createOpenRouterAuthStorageOverride } from "../src/cost/user-key-store.js";
+import { UserKeyStore } from "../src/cost/user-key-store.js";
 import { UserPolicyStore } from "../src/cost/user-policy-store.js";
 import { buildArc } from "../src/rooms/message.js";
 
@@ -303,52 +303,42 @@ describe("UserKeyStore", () => {
   });
 });
 
-describe("createOpenRouterAuthStorageOverride", () => {
-  function makeBase(): AuthStorage {
-    return AuthStorage.inMemory({
+describe("AuthStore.withOpenRouterOverride", () => {
+  function makeBase(): AuthStore {
+    return AuthStore.inMemory({
       anthropic: { type: "api_key", key: "ant-key", env: { ANTHROPIC_REGION: "eu" } },
     });
   }
 
-  it("overrides openrouter and delegates other providers to the base instance", async () => {
+  it("overrides openrouter and delegates other providers to the base store", async () => {
     const base = makeBase();
-    const override = createOpenRouterAuthStorageOverride(base, "or-key");
+    const override = base.withOpenRouterOverride("or-key");
 
-    expect(override.get("openrouter")).toEqual({ type: "api_key", key: "or-key" });
+    expect(await override.credentials.read("openrouter")).toEqual({ type: "api_key", key: "or-key" });
     expect(await override.getApiKey("openrouter")).toBe("or-key");
-    expect(override.has("openrouter")).toBe(true);
-    expect(override.hasAuth("openrouter")).toBe(true);
-    expect(override.list()).toEqual(expect.arrayContaining(["openrouter", "anthropic"]));
-    expect(override.getAll().openrouter).toEqual({ type: "api_key", key: "or-key" });
+    expect(await override.credentials.list()).toEqual(
+      expect.arrayContaining([
+        { providerId: "openrouter", type: "api_key" },
+        { providerId: "anthropic", type: "api_key" },
+      ]),
+    );
 
-    // Non-openrouter providers delegate unchanged to the wrapped instance.
-    expect(override.get("anthropic")).toEqual(base.get("anthropic"));
+    // Non-openrouter providers delegate unchanged to the wrapped store.
+    expect(await override.credentials.read("anthropic")).toEqual(await base.credentials.read("anthropic"));
     expect(await override.getApiKey("anthropic")).toBe("ant-key");
   });
 
-  it("delegates 0.80 AuthStorage methods and getApiKey options to the base instance", async () => {
+  it("writes to non-overridden providers reach the base store", async () => {
     const base = makeBase();
-    const getApiKeySpy = vi.spyOn(base, "getApiKey");
-    const override = createOpenRouterAuthStorageOverride(base, "or-key");
+    const override = base.withOpenRouterOverride("or-key");
 
-    // Methods not intercepted by the override (including ones added in 0.80
-    // that read the instance's private state) must reach the real instance.
-    expect(override.getProviderEnv("anthropic")).toEqual({ ANTHROPIC_REGION: "eu" });
-    expect(override.getAuthStatus("anthropic")).toEqual(base.getAuthStatus("anthropic"));
+    await override.credentials.modify("jina", async () => ({ type: "api_key", key: "jina-key" }));
+    expect(await base.credentials.read("jina")).toEqual({ type: "api_key", key: "jina-key" });
 
-    // getApiKey options are forwarded for delegated providers.
-    await override.getApiKey("anthropic", { includeFallback: false });
-    expect(getApiKeySpy).toHaveBeenLastCalledWith("anthropic", { includeFallback: false });
-  });
-
-  it("clears the openrouter override on remove without touching the base", () => {
-    const base = makeBase();
-    const override = createOpenRouterAuthStorageOverride(base, "or-key");
-
-    override.remove("openrouter");
-    expect(override.get("openrouter")).toBeUndefined();
-    expect(override.has("openrouter")).toBe(false);
-    expect(override.get("anthropic")).toEqual(base.get("anthropic"));
+    // The overridden provider is session-scoped: writes stay off the base.
+    await override.credentials.modify("openrouter", async () => ({ type: "api_key", key: "rotated" }));
+    expect(await override.getApiKey("openrouter")).toBe("rotated");
+    expect(await base.credentials.read("openrouter")).toBeUndefined();
   });
 });
 

@@ -11,7 +11,7 @@
 import { join } from "node:path";
 
 import type { Agent, ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { AuthStorage } from "@earendil-works/pi-coding-agent";
+import type { AuthStore } from "../../auth/auth-store.js";
 import { type Usage } from "@earendil-works/pi-ai";
 
 import { deepMerge, formatUtcTime, messageText } from "../../utils/index.js";
@@ -37,11 +37,7 @@ import {
   shouldEmitQuotaWarning,
 } from "../../cost/cost-policy.js";
 import { remapToOpenRouter } from "../../cost/model-remap.js";
-import {
-  buildUserArc,
-  createOpenRouterAuthStorageOverride,
-  UserKeyStore,
-} from "../../cost/user-key-store.js";
+import { buildUserArc, UserKeyStore } from "../../cost/user-key-store.js";
 import { UserPolicyStore } from "../../cost/user-policy-store.js";
 import { UserCostLedger } from "../../cost/user-cost-ledger.js";
 import { withPersistedCostSpan, recordUsage, withCostSpan, currentCostSpan } from "../../cost/cost-span.js";
@@ -92,7 +88,7 @@ export interface CommandRunnerFactoryInput {
   model: string;
   systemPrompt: string;
   toolSet: ToolSet;
-  authStorage?: AuthStorage;
+  authStorage?: AuthStore;
   metaReminder?: string;
   progressThresholdSeconds?: number;
   onResponse: (text: string) => void | Promise<void>;
@@ -288,7 +284,7 @@ export class CommandExecutor {
     this.userCostLedger = new UserCostLedger(runtime.muaddibHome);
   }
 
-  private buildToolOptions(authStorage: AuthStorage = this.runtime.authStorage, networkAccessApprover?: NetworkAccessApprover): Omit<BaselineToolOptions, "arc"> {
+  private buildToolOptions(authStorage: AuthStore = this.runtime.authStorage, networkAccessApprover?: NetworkAccessApprover): Omit<BaselineToolOptions, "arc"> {
     return {
       toolsConfig: this.agentConfig.tools,
       authStorage,
@@ -535,7 +531,7 @@ export class CommandExecutor {
 
     const effectiveAuthStorage =
       budgetStatus.state === "byok" && budgetStatus.openRouterKey
-        ? createOpenRouterAuthStorageOverride(this.runtime.authStorage, budgetStatus.openRouterKey)
+        ? this.runtime.authStorage.withOpenRouterOverride(budgetStatus.openRouterKey)
         : this.runtime.authStorage;
 
     // ── BYOK user model remap ──
@@ -914,7 +910,7 @@ export class CommandExecutor {
     afterResponse: (result: PromptRunResult) => Promise<void>,
     triggerTs?: string,
   ): Promise<PromptRunResult> {
-    const validThinkingLevels = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh"]);
+    const validThinkingLevels = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
     if (!validThinkingLevels.has(opts.reasoningEffort as ThinkingLevel)) {
       throw new Error(
         `Invalid reasoningEffort '${opts.reasoningEffort}'. Valid values: ${[...validThinkingLevels].join(", ")}`,
@@ -1259,7 +1255,7 @@ export class CommandExecutor {
     conversationContext?: Message[],
     toolsOverrides?: Record<string, unknown> | null,
     skipMemory?: boolean,
-    authStorage?: AuthStorage,
+    authStorage?: AuthStore,
     networkAccessApprover?: NetworkAccessApprover,
   ): ToolSet {
     const baseOptions = this.buildToolOptions(authStorage, networkAccessApprover);

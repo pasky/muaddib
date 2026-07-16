@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { AuthStore } from "../src/auth/auth-store.js";
 import { RoomMessageHandler } from "../src/rooms/command/message-handler.js";
 import { buildArc } from "../src/rooms/message.js";
 import { DiscordRoomMonitor } from "../src/rooms/discord/monitor.js";
@@ -72,7 +72,7 @@ describe("room adapters share RoomMessageHandler behavior", () => {
     await history.initialize();
 
     const handler = new RoomMessageHandler(
-      createTestRuntime({ authStorage: AuthStorage.inMemory(),
+      createTestRuntime({ authStorage: AuthStore.inMemory(),
         history,
         configData: {
           rooms: {
@@ -133,7 +133,7 @@ describe("room adapters share RoomMessageHandler behavior", () => {
     await history.initialize();
 
     const handler = new RoomMessageHandler(
-      createTestRuntime({ authStorage: AuthStorage.inMemory(),
+      createTestRuntime({ authStorage: AuthStore.inMemory(),
         history,
         configData: {
           rooms: {

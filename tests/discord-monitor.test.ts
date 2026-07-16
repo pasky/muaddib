@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { AuthStore } from "../src/auth/auth-store.js";
 import { RuntimeLogWriter } from "../src/app/logging.js";
 import { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { DiscordRoomMonitor } from "../src/rooms/discord/monitor.js";
@@ -36,7 +36,7 @@ function baseCommandConfig() {
   };
 }
 
-function buildRuntime(configData: Record<string, unknown>, history: ChatHistoryStore, authStorage: AuthStorage = AuthStorage.inMemory()) {
+function buildRuntime(configData: Record<string, unknown>, history: ChatHistoryStore, authStorage: AuthStore = AuthStore.inMemory()) {
   return createTestRuntime({ history, configData, authStorage });
 }
 
@@ -89,7 +89,7 @@ describe("DiscordRoomMonitor", () => {
           botName: "muaddib",
         },
       },
-    }, history, AuthStorage.inMemory({ discord: { type: "api_key", key: "discord-token" } })));
+    }, history, AuthStore.inMemory({ discord: { type: "api_key", key: "discord-token" } })));
 
     expect(monitors).toHaveLength(1);
     await history.close();

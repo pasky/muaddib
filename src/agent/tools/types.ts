@@ -1,6 +1,6 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import type { AuthStorage } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
+import type { AuthStore } from "../../auth/auth-store.js";
 import type { ToolsConfig } from "../../config/muaddib-config.js";
 import type { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import type { Logger } from "../../app/logging.js";
@@ -60,7 +60,7 @@ export interface ToolContext extends ArtifactContext {
   // Widens ArtifactContext's Pick<ToolsConfig, "artifacts"> to the full config.
   toolsConfig?: ToolsConfig;
   // ── Runtime services ──
-  authStorage: AuthStorage;
+  authStorage: AuthStore;
   modelAdapter: PiAiModelAdapter;
 
   // ── Per-invocation context ──

@@ -30,7 +30,7 @@
 
 import { Type } from "typebox";
 
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { AuthStore } from "../src/auth/auth-store.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -107,10 +107,10 @@ describe("internal nudge ephemerality", () => {
       }),
     };
 
-    const authStorage = AuthStorage.inMemory({ openai: { type: "api_key", key: "sk-fake" } });
+    const authStorage = AuthStore.inMemory({ openai: { type: "api_key", key: "sk-fake" } });
     const modelAdapter = new PiAiModelAdapter();
 
-    const { session, dispose } = createAgentSessionForInvocation({
+    const { session, dispose } = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "You are a bot.",
       tools: [pingTool],

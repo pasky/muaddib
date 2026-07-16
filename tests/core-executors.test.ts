@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { AuthStore } from "../src/auth/auth-store.js";
 import { createDefaultToolExecutors as createDefaultToolExecutorsRaw } from "../src/agent/tools/baseline-tools.js";
 import { createDefaultShareArtifactExecutor } from "../src/agent/tools/artifact.js";
 import { createDefaultOracleExecutor as createDefaultOracleExecutorRaw } from "../src/agent/tools/oracle.js";
@@ -59,7 +59,7 @@ function extractFilenameFromViewerUrl(url: string): string {
 function createDefaultToolExecutors(options: Record<string, unknown> = {}) {
   return createDefaultToolExecutorsRaw({
     modelAdapter: new PiAiModelAdapter(),
-    authStorage: AuthStorage.inMemory(),
+    authStorage: AuthStore.inMemory(),
     arc: TEST_ARC,
     ...(options as any),
   });
@@ -75,7 +75,7 @@ async function trustUrl(url: string, arc = TEST_ARC, now = new Date()): Promise<
 function createDefaultOracleExecutor(options: Record<string, unknown> = {}, invocation?: any) {
   return createDefaultOracleExecutorRaw({
     modelAdapter: new PiAiModelAdapter(),
-    authStorage: AuthStorage.inMemory(),
+    authStorage: AuthStore.inMemory(),
     arc: TEST_ARC,
     ...(options as any),
   } as any, invocation);
@@ -552,7 +552,7 @@ describe("core tool executors web_search support", () => {
       return new Response("results", { status: 200 });
     });
 
-    const executors = createDefaultToolExecutors({ authStorage: AuthStorage.inMemory({ jina: { type: "api_key", key: "jina-key-123" } }) });
+    const executors = createDefaultToolExecutors({ authStorage: AuthStore.inMemory({ jina: { type: "api_key", key: "jina-key-123" } }) });
     await executors.webSearch("test");
   });
 });
@@ -932,7 +932,7 @@ describe("core tool executors visit_webpage LLM transcription", () => {
 
     const executors = createDefaultToolExecutorsRaw({
       modelAdapter: modelAdapter as any,
-      authStorage: AuthStorage.inMemory(),
+      authStorage: AuthStore.inMemory(),
       arc: "test-arc",
       toolsConfig: { visitWebpage: { model: "anthropic:claude-haiku" } },
     });
@@ -969,7 +969,7 @@ describe("core tool executors visit_webpage LLM transcription", () => {
 
     const executors = createDefaultToolExecutorsRaw({
       modelAdapter: modelAdapter as any,
-      authStorage: AuthStorage.inMemory(),
+      authStorage: AuthStore.inMemory(),
       arc: "test-arc",
       toolsConfig: { visitWebpage: { model: "anthropic:claude-haiku" } },
     });
@@ -996,7 +996,7 @@ describe("core tool executors visit_webpage LLM transcription", () => {
 
     const executors = createDefaultToolExecutorsRaw({
       modelAdapter: modelAdapter as any,
-      authStorage: AuthStorage.inMemory(),
+      authStorage: AuthStore.inMemory(),
       arc: "test-arc",
       toolsConfig: { visitWebpage: { model: "anthropic:claude-haiku" } },
     });
@@ -1020,7 +1020,7 @@ describe("core tool executors visit_webpage LLM transcription", () => {
 
     const executors = createDefaultToolExecutorsRaw({
       modelAdapter: modelAdapter as any,
-      authStorage: AuthStorage.inMemory(),
+      authStorage: AuthStore.inMemory(),
       arc: "test-arc",
     });
 
@@ -1218,7 +1218,7 @@ describe("core tool executors generate_image support", () => {
     });
 
     const executors = createDefaultToolExecutors({ toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" }, imageGen: { model: "openrouter:google/gemini-3-pro-image-preview" } },
-      authStorage: AuthStorage.inMemory({ openrouter: { type: "api_key", key: "or-key" } }),
+      authStorage: AuthStore.inMemory({ openrouter: { type: "api_key", key: "or-key" } }),
     });
 
     const result = await executors.generateImage({
@@ -1304,7 +1304,7 @@ describe("core tool executors generate_image support", () => {
     });
 
     const executors = createDefaultToolExecutors({ toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" }, imageGen: { model: "openrouter:google/gemini-3-pro-image-preview" } },
-      authStorage: AuthStorage.inMemory({ openrouter: { type: "api_key", key: "or-key" } }),
+      authStorage: AuthStore.inMemory({ openrouter: { type: "api_key", key: "or-key" } }),
     });
 
     await executors.generateImage({
@@ -1368,7 +1368,7 @@ fs.appendFileSync(args[args.length - 1], "\\nWATERMARKED");
     });
 
     const executors = createDefaultToolExecutors({ toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" }, imageGen: { model: "openrouter:google/gemini-3-pro-image-preview" } },
-      authStorage: AuthStorage.inMemory({ openrouter: { type: "api_key", key: "or-key" } }),
+      authStorage: AuthStore.inMemory({ openrouter: { type: "api_key", key: "or-key" } }),
     });
 
     const previousPath = process.env.PATH;
@@ -1405,7 +1405,7 @@ fs.appendFileSync(args[args.length - 1], "\\nWATERMARKED");
   it("generate_image rejects non-openrouter model providers", async () => {
     const executors = createDefaultToolExecutors({
       toolsConfig: { imageGen: { model: "openai:gpt-image-1" } },
-      authStorage: AuthStorage.inMemory({ openai: { type: "api_key", key: "demo" } }),
+      authStorage: AuthStore.inMemory({ openai: { type: "api_key", key: "demo" } }),
     });
 
     await expect(
@@ -1445,7 +1445,7 @@ fs.appendFileSync(args[args.length - 1], "\\nWATERMARKED");
     });
 
     const executors = createDefaultToolExecutors({ toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" }, imageGen: { model: "openrouter:google/gemini-3-pro-image-preview" } },
-      authStorage: AuthStorage.inMemory({ openrouter: { type: "api_key", key: "or-key" } }),
+      authStorage: AuthStore.inMemory({ openrouter: { type: "api_key", key: "or-key" } }),
     });
 
     await expect(

@@ -42,7 +42,7 @@ export const ORACLE_EXCLUDED_TOOLS = new Set([
 ]);
 
 const ORACLE_LOG_SEPARATOR = "----------------------------------------------";
-const VALID_ORACLE_THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh"]);
+const VALID_ORACLE_THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 function getOracleThinkingLevel(value: unknown): ThinkingLevel {
   if (value === undefined) {

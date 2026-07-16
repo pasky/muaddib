@@ -6,7 +6,7 @@ import type {
   SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
 
-import type { AuthStorage } from "@earendil-works/pi-coding-agent";
+import type { AuthStore } from "../auth/auth-store.js";
 
 import { piAiModels } from "./pi-ai-models.js";
 
@@ -28,7 +28,7 @@ export class PiAiModelResolutionError extends Error {
 }
 
 export interface PiAiModelAdapterOptions {
-  authStorage?: AuthStorage;
+  authStorage?: AuthStore;
 }
 
 export interface ResolvedPiAiModel {

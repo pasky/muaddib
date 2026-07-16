@@ -3,14 +3,14 @@ import type { Message } from "@earendil-works/pi-ai";
 import { isAssistantMessage } from "./message.js";
 import {
   AgentSession,
-  AuthStorage,
-  ModelRegistry,
   SessionManager,
   SettingsManager,
   convertToLlm,
   createExtensionRuntime,
   type ResourceLoader,
 } from "@earendil-works/pi-coding-agent";
+
+import type { AuthStore } from "../auth/auth-store.js";
 
 
 import { PiAiModelAdapter, type ResolvedPiAiModel } from "../models/pi-ai-model-adapter.js";
@@ -125,7 +125,8 @@ function createNudgeDecider(
       const lastActivity = Math.max(sessionStartTime, responseTimestamp.lastResponseAt);
       const elapsedSinceLastReport = (now - lastActivity) / 1000;
       const isFirstTurnHighReasoning =
-        turnCount === 1 && (thinkingLevel === "medium" || thinkingLevel === "high" || thinkingLevel === "xhigh");
+        turnCount === 1 &&
+        (thinkingLevel === "medium" || thinkingLevel === "high" || thinkingLevel === "xhigh" || thinkingLevel === "max");
 
       if (isFirstTurnHighReasoning || elapsedSinceLastReport >= progressThresholdSeconds) {
         parts.push("If you are going to call more tools, write also an extremely brief one-line status of what you are doing and why.");
@@ -225,7 +226,7 @@ interface CreateAgentSessionInput {
   model: string;
   systemPrompt: string;
   tools: AgentTool<any>[];
-  authStorage: AuthStorage;
+  authStorage: AuthStore;
   modelAdapter: PiAiModelAdapter;
   contextMessages?: Message[];
   thinkingLevel?: ThinkingLevel;
@@ -258,7 +259,9 @@ interface CreateAgentSessionResult {
   sessionId: string;
 }
 
-export function createAgentSessionForInvocation(input: CreateAgentSessionInput): CreateAgentSessionResult {
+export async function createAgentSessionForInvocation(
+  input: CreateAgentSessionInput,
+): Promise<CreateAgentSessionResult> {
   const logger = input.logger ?? console;
   const resolvedModel = input.modelAdapter.resolve(input.model);
   const sessionManager = input.sessionFile
@@ -300,7 +303,7 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
     getSystemPrompt: () => input.systemPrompt,
   };
 
-  const modelRegistry = ModelRegistry.inMemory(input.authStorage);
+  const modelRuntime = await input.authStorage.getModelRuntime();
   const llmDebugMaxChars = Math.max(500, Math.floor(input.llmDebugMaxChars ?? 120_000));
 
   // Mutable vision-fallback state: when activated, prepareNextTurn switches
@@ -373,7 +376,7 @@ export function createAgentSessionForInvocation(input: CreateAgentSessionInput):
     settingsManager,
     cwd: process.cwd(),
     resourceLoader,
-    modelRegistry,
+    modelRuntime,
     baseToolsOverride: Object.fromEntries(input.tools.map((tool) => [tool.name, tool])),
   });
 

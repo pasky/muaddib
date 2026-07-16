@@ -1,7 +1,7 @@
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { AuthStore } from "../src/auth/auth-store.js";
 
 import { RuntimeLogWriter } from "../src/app/logging.js";
 import { MuaddibConfig } from "../src/config/muaddib-config.js";
@@ -12,7 +12,7 @@ import type { MuaddibRuntime } from "../src/runtime.js";
 interface CreateTestRuntimeOptions {
   history: ChatHistoryStore;
   configData?: Record<string, unknown>;
-  authStorage: AuthStorage;
+  authStorage: AuthStore;
   logger?: RuntimeLogWriter;
   muaddibHome?: string;
 }

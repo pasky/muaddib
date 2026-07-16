@@ -19,7 +19,9 @@ import {
   type Usage,
 } from "@earendil-works/pi-ai";
 
-import { AuthStorage, type ApiKeyCredential } from "@earendil-works/pi-coding-agent";
+import type { ApiKeyCredential } from "@earendil-works/pi-ai";
+
+import { AuthStore } from "../../src/auth/auth-store.js";
 import { RuntimeLogWriter } from "../../src/app/logging.js";
 import { MuaddibConfig } from "../../src/config/muaddib-config.js";
 import { ChatHistoryStore } from "../../src/history/chat-history-store.js";
@@ -319,7 +321,7 @@ export function buildRuntime(
     config: MuaddibConfig.inMemory(configData),
     history: ctx.history,
     modelAdapter: new PiAiModelAdapter(),
-    authStorage: AuthStorage.inMemory(extractAuthData(configData)),
+    authStorage: AuthStore.inMemory(extractAuthData(configData)),
     logger: new RuntimeLogWriter({
       muaddibHome: ctx.tmpHome,
       stdout: { write: () => true } as unknown as NodeJS.WriteStream,

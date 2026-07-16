@@ -2,7 +2,8 @@ import { mkdir, mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { AuthStorage, SessionManager } from "@earendil-works/pi-coding-agent";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { AuthStore } from "../src/auth/auth-store.js";
 import { Type } from "@earendil-works/pi-ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -161,7 +162,7 @@ describe("session_query prompt-cache prefix guarantee", () => {
     await mkdir(dir, { recursive: true });
     const sessionFile = join(dir, ".session-record.jsonl");
 
-    const authStorage = AuthStorage.inMemory({
+    const authStorage = AuthStore.inMemory({
       anthropic: { type: "api_key", key: "unit-test" },
     });
     const modelAdapter = new PiAiModelAdapter({ authStorage });
@@ -191,7 +192,7 @@ describe("session_query prompt-cache prefix guarantee", () => {
       "You are Muaddib, ruler of Arrakis. Current arc: testsrv##chan. Stay on mission.";
 
     // ── Phase 1: run the original session through a real createAgentSessionForInvocation ──
-    const origCtx = createAgentSessionForInvocation({
+    const origCtx = await createAgentSessionForInvocation({
       model: "anthropic:claude-sonnet-4-5",
       systemPrompt: originalSystemPrompt,
       tools: [searchTool, readTool],

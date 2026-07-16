@@ -2,7 +2,7 @@ import { readFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { AuthStore } from "../src/auth/auth-store.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PiAiModelAdapter } from "../src/models/pi-ai-model-adapter.js";
@@ -42,7 +42,7 @@ const originalMuaddibHome = process.env.MUADDIB_HOME;
 function createTools(options: Record<string, unknown>) {
   return createBaselineAgentTools({
     modelAdapter: new PiAiModelAdapter(),
-    authStorage: AuthStorage.inMemory(),
+    authStorage: AuthStore.inMemory(),
     arc: "test-arc",
     ...(options as any),
   }).tools;

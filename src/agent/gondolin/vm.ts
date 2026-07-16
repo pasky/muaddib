@@ -11,13 +11,14 @@ import { readFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, posix, resolve } from "node:path";
 
 import type {
-  AuthStorage,
   BashOperations,
   EditOperations,
   ReadOperations,
   WriteOperations,
 } from "@earendil-works/pi-coding-agent";
 import type { HttpFetch, VM } from "@earendil-works/gondolin";
+
+import type { AuthStore } from "../../auth/auth-store.js";
 
 import type { GondolinConfig } from "../../config/muaddib-config.js";
 import type { Logger } from "../../app/logging.js";
@@ -777,7 +778,7 @@ export interface VmSessionOptions {
   serverTag?: string;
   channelName?: string;
   config: GondolinConfig;
-  authStorage?: AuthStorage;
+  authStorage?: AuthStore;
   artifactsPath?: string;
   artifactsUrl?: string;
   vmOpTimeoutMs: number;

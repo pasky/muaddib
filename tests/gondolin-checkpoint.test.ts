@@ -10,7 +10,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSy
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { AuthStore } from "../src/auth/auth-store.js";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ── pull the internals we need ─────────────────────────────────────────────
@@ -801,7 +801,7 @@ describe("gondolin per-arc env injection", () => {
       arc: buildArc(serverTag, channelName),
       serverTag,
       channelName,
-      authStorage: AuthStorage.inMemory(),
+      authStorage: AuthStore.inMemory(),
       config: {
         ...gondolinConfig,
         profiles: {
@@ -905,7 +905,7 @@ describe("gondolin per-arc env injection", () => {
       arc: buildArc(serverTag, channelName),
       serverTag,
       channelName,
-      authStorage: AuthStorage.inMemory({
+      authStorage: AuthStore.inMemory({
         "gitlab-corp": { type: "api_key", key: "glpat-secret" },
         "atlassian-corp": { type: "api_key", key: "atl-secret" },
       }),
@@ -969,7 +969,7 @@ describe("gondolin per-arc env injection", () => {
       arc: buildArc(serverTag, channelName),
       serverTag,
       channelName,
-      authStorage: AuthStorage.inMemory(),
+      authStorage: AuthStore.inMemory(),
       config: {
         ...gondolinConfig,
         arcs: {

@@ -1,4 +1,4 @@
-import type { AuthStorage } from "@earendil-works/pi-coding-agent";
+import type { AuthStore } from "../../auth/auth-store.js";
 
 import type {
   GondolinConfig,
@@ -22,7 +22,7 @@ interface ResolveGondolinArcOptions {
 }
 
 interface ResolveGondolinEnvOptions extends ResolveGondolinArcOptions {
-  authStorage?: AuthStorage;
+  authStorage?: AuthStore;
 }
 
 interface ResolvedGondolinArcFragments {

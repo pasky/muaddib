@@ -260,7 +260,7 @@ export function createSessionQueryTool(options: ToolContext): MuaddibTool<typeof
         const result = await withCostSpan(LLM_CALL_TYPE.SESSION_QUERY, { arc: options.arc }, async () => {
           const resumedSystemPrompt = findSessionSystemPrompt(branch) ?? FALLBACK_QUERY_SYSTEM_PROMPT;
           const replayedTools = findSessionToolSchemas(branch).map(replayStoredTool);
-          const ctx = createAgentSessionForInvocation({
+          const ctx = await createAgentSessionForInvocation({
             model: modelSpec,
             systemPrompt: resumedSystemPrompt,
             tools: replayedTools,

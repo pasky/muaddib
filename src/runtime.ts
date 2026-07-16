@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { AuthStore } from "./auth/auth-store.js";
 
 import { getMuaddibHome } from "./config/paths.js";
 import { RuntimeLogWriter } from "./app/logging.js";
@@ -15,7 +15,7 @@ export interface MuaddibRuntime {
   config: MuaddibConfig;
   history: ChatHistoryStore;
   modelAdapter: PiAiModelAdapter;
-  authStorage: AuthStorage;
+  authStorage: AuthStore;
   logger: RuntimeLogWriter;
   chronicle?: ChronicleSubsystem;
   networkAccessApprover?: NetworkAccessApprover;
@@ -39,7 +39,7 @@ export async function createMuaddibRuntime(
 
   const config = MuaddibConfig.load(options.configPath);
 
-  const authStorage = AuthStorage.create(join(muaddibHome, "auth.json"));
+  const authStorage = AuthStore.create(join(muaddibHome, "auth.json"));
   const modelAdapter = new PiAiModelAdapter({ authStorage });
 
   const arcsPath = options.arcsPath ?? join(muaddibHome, "arcs");

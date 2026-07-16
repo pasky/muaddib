@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
 
 const mockState = vi.hoisted(() => ({
   streamSimpleMock: vi.fn((_model, _context, options) => {
@@ -46,18 +45,6 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
     emit(event: any): void {
       this.callbacks.forEach((cb) => cb(event));
     }
-  },
-  AuthStorage: {
-    inMemory: () => ({
-      set: vi.fn(),
-      remove: vi.fn(),
-      login: vi.fn(),
-      logout: vi.fn(),
-      getApiKey: vi.fn(async () => "test-key"),
-    }),
-  },
-  ModelRegistry: {
-    inMemory: (_authStorage: unknown) => ({}),
   },
   SessionManager: {
     inMemory: vi.fn(() => ({
@@ -117,7 +104,7 @@ function toolUseContext(extraAssistantTurns = 0): Record<string, unknown>[] {
   return msgs;
 }
 
-async function getTransform(ctx: ReturnType<typeof createAgentSessionForInvocation>) {
+async function getTransform(ctx: Awaited<ReturnType<typeof createAgentSessionForInvocation>>) {
   // The mocked Agent stores constructor options at agent.config
   return (ctx.agent as any).config.transformContext as
     (messages: unknown[]) => Promise<unknown[]>;
@@ -141,6 +128,13 @@ function mockUsage(input = 1000, cacheRead = 0, cacheWrite = 0, costTotal = 0.01
   };
 }
 
+function fakeAuthStore() {
+  return {
+    getApiKey: vi.fn(async () => "test-key"),
+    getModelRuntime: vi.fn(async () => ({})),
+  } as any;
+}
+
 const defaultModelAdapter = { resolve: vi.fn(() => ({
   spec: { provider: "openai", modelId: "gpt-4o-mini" },
   model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
@@ -152,17 +146,17 @@ describe("createAgentSessionForInvocation", () => {
     mockState.streamSimpleMock.mockClear();
   });
 
-  it("converts context messages and preserves provider/model metadata", () => {
+  it("converts context messages and preserves provider/model metadata", async () => {
     const resolved = {
       spec: { provider: "openai", modelId: "gpt-4o-mini" },
       model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
     };
 
-    const ctx = createAgentSessionForInvocation({
+    const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
-      authStorage: AuthStorage.inMemory(),
+      authStorage: fakeAuthStore(),
       modelAdapter: { resolve: vi.fn(() => resolved) } as any,
       contextMessages: [
         { role: "user", content: "hello", timestamp: 0 },
@@ -180,12 +174,9 @@ describe("createAgentSessionForInvocation", () => {
   it("validates provider key via ensureProviderKey", async () => {
     const authStorage = {
       getApiKey: vi.fn(async (provider: string) => `${provider}-key`),
-      set: vi.fn(),
-      remove: vi.fn(),
-      login: vi.fn(),
-      logout: vi.fn(),
+      getModelRuntime: vi.fn(async () => ({})),
     };
-    const ctx = createAgentSessionForInvocation({
+    const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
@@ -203,7 +194,7 @@ describe("createAgentSessionForInvocation", () => {
     expect(authStorage.getApiKey).toHaveBeenCalledWith("openai");
   });
 
-  it("activates vision fallback model on image tool output and enforces session-limit abort", () => {
+  it("activates vision fallback model on image tool output and enforces session-limit abort", async () => {
     const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const visionModel = {
       provider: "anthropic",
@@ -224,11 +215,11 @@ describe("createAgentSessionForInvocation", () => {
     });
 
     // Set token limit low enough to trigger after first turn_end with usage
-    const ctx = createAgentSessionForInvocation({
+    const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
-      authStorage: AuthStorage.inMemory(),
+      authStorage: fakeAuthStore(),
       modelAdapter: { resolve } as any,
       visionFallbackModel: "anthropic:claude-sonnet-4",
       sessionLimits: { maxContextLength: 5000, maxCostUsd: 10 },
@@ -330,11 +321,11 @@ describe("createAgentSessionForInvocation", () => {
 
   it("triggers soft limit on cost threshold via transformContext", async () => {
     const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-    const ctx = createAgentSessionForInvocation({
+    const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
-      authStorage: AuthStorage.inMemory(),
+      authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
       sessionLimits: { maxContextLength: 1_000_000, maxCostUsd: 0.05 },
       logger,
@@ -381,17 +372,17 @@ describe("createAgentSessionForInvocation", () => {
     expect((out2.at(-1) as any).content[0].text).toContain("session limit");
   });
 
-  it("streamFn uses original model when vision fallback is not activated", () => {
+  it("streamFn uses original model when vision fallback is not activated", async () => {
     const resolve = vi.fn(() => ({
       spec: { provider: "openai", modelId: "gpt-4o-mini" },
       model: { provider: "openai", id: "gpt-4o-mini", api: "responses" },
     }));
 
-    const ctx = createAgentSessionForInvocation({
+    const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
-      authStorage: AuthStorage.inMemory(),
+      authStorage: fakeAuthStore(),
       modelAdapter: { resolve } as any,
     });
 
@@ -407,11 +398,11 @@ describe("createAgentSessionForInvocation", () => {
 
   it("transformContext injects metaReminder on first turn, after toolUse, but not after stop or at session limit", async () => {
     const REMINDER = "Stay focused on the quest.";
-    const ctx = createAgentSessionForInvocation({
+    const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
-      authStorage: AuthStorage.inMemory(),
+      authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
       sessionLimits: { maxContextLength: 500_000, maxCostUsd: 10 },
       metaReminder: REMINDER,
@@ -453,11 +444,11 @@ describe("createAgentSessionForInvocation", () => {
 
   it("transformContext replaces regular nudges with session-limit message when limit is reached", async () => {
     const REMINDER = "Stay focused on the quest.";
-    const ctx = createAgentSessionForInvocation({
+    const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
-      authStorage: AuthStorage.inMemory(),
+      authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
       sessionLimits: { maxContextLength: 5000, maxCostUsd: 10 },
       metaReminder: REMINDER,
@@ -488,11 +479,11 @@ describe("createAgentSessionForInvocation", () => {
   });
 
   it("transformContext does NOT inject on first turn when no metaReminder is set", async () => {
-    const ctx = createAgentSessionForInvocation({
+    const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
-      authStorage: AuthStorage.inMemory(),
+      authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
       sessionLimits: { maxContextLength: 500_000, maxCostUsd: 10 },
       // no metaReminder
@@ -506,11 +497,11 @@ describe("createAgentSessionForInvocation", () => {
   });
 
   it("transformContext injects both reminder and progress nudge when threshold elapsed", async () => {
-    const ctx = createAgentSessionForInvocation({
+    const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
-      authStorage: AuthStorage.inMemory(),
+      authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
       sessionLimits: { maxContextLength: 500_000, maxCostUsd: 10 },
       metaReminder: "Stay focused.",
@@ -526,11 +517,11 @@ describe("createAgentSessionForInvocation", () => {
   });
 
   it("transformContext nudges are ephemeral: each call is independent and does not accumulate", async () => {
-    const ctx = createAgentSessionForInvocation({
+    const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
-      authStorage: AuthStorage.inMemory(),
+      authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
       sessionLimits: { maxContextLength: 500_000, maxCostUsd: 10 },
       metaReminder: "Stay focused.",
@@ -558,12 +549,12 @@ describe("createAgentSessionForInvocation", () => {
     expect(agent.hasQueuedMessages).not.toHaveBeenCalled();
   });
 
-  it("does not inject progress nudge after a non-tool assistant turn", () => {
-    createAgentSessionForInvocation({
+  it("does not inject progress nudge after a non-tool assistant turn", async () => {
+    await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
-      authStorage: AuthStorage.inMemory(),
+      authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
       sessionLimits: { maxContextLength: 500_000, maxCostUsd: 10 },
       progressThresholdSeconds: 0,
@@ -587,11 +578,11 @@ describe("createAgentSessionForInvocation", () => {
   });
 
   it("transformContext injects progress nudge on first tool-using turn with high reasoning, not on second", async () => {
-    const ctx = createAgentSessionForInvocation({
+    const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
-      authStorage: AuthStorage.inMemory(),
+      authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
       sessionLimits: { maxContextLength: 500_000, maxCostUsd: 10 },
       progressThresholdSeconds: 9999, // won't trigger by elapsed time alone
@@ -614,11 +605,11 @@ describe("createAgentSessionForInvocation", () => {
   });
 
   it("suppresses progress nudge near session limit (80% of token budget)", async () => {
-    const ctx = createAgentSessionForInvocation({
+    const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
-      authStorage: AuthStorage.inMemory(),
+      authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
       sessionLimits: { maxContextLength: 10_000, maxCostUsd: 10 },
       progressThresholdSeconds: 0,
@@ -649,11 +640,11 @@ describe("createAgentSessionForInvocation", () => {
   });
 
   it("transformContext injects progress nudge with text output instruction", async () => {
-    const ctx = createAgentSessionForInvocation({
+    const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
-      authStorage: AuthStorage.inMemory(),
+      authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
       sessionLimits: { maxContextLength: 500_000, maxCostUsd: 10 },
       progressThresholdSeconds: 0,
@@ -666,11 +657,11 @@ describe("createAgentSessionForInvocation", () => {
   });
 
   it("resets progress nudge debounce when responseTimestamp is bumped", async () => {
-    const ctx = createAgentSessionForInvocation({
+    const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
-      authStorage: AuthStorage.inMemory(),
+      authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
       sessionLimits: { maxContextLength: 500_000, maxCostUsd: 10 },
       progressThresholdSeconds: 1, // 1 second threshold
@@ -686,12 +677,12 @@ describe("createAgentSessionForInvocation", () => {
     expect(hasMetaInLast(out)).toBe(false);
   });
 
-  it("does not inject metaReminder when not configured", () => {
-    createAgentSessionForInvocation({
+  it("does not inject metaReminder when not configured", async () => {
+    await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
-      authStorage: AuthStorage.inMemory(),
+      authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
     });
 
@@ -712,11 +703,11 @@ describe("createAgentSessionForInvocation", () => {
   });
 
   it("bumpSessionLimits increases both token and cost limits", async () => {
-    const ctx = createAgentSessionForInvocation({
+    const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
-      authStorage: AuthStorage.inMemory(),
+      authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
       sessionLimits: { maxContextLength: 5000, maxCostUsd: 0.05 },
     });
@@ -751,11 +742,11 @@ describe("createAgentSessionForInvocation", () => {
 
   it("bumpSessionLimits floors at 10% of initial configured limit", async () => {
     // maxContextLength=100000, maxCostUsd=1.0 → floor is 10000 tokens, $0.10
-    const ctx = createAgentSessionForInvocation({
+    const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: "system",
       tools: [],
-      authStorage: AuthStorage.inMemory(),
+      authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
       sessionLimits: { maxContextLength: 100_000, maxCostUsd: 1.0 },
     });

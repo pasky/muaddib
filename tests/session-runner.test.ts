@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Usage } from "@earendil-works/pi-ai";
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { AuthStore } from "../src/auth/auth-store.js";
 
 import type { Mock } from "vitest";
 
@@ -132,7 +132,7 @@ function makeRunner(overrides: Record<string, any> = {}): SessionRunner {
   return new SessionRunner({
     model: "openai:gpt-4o-mini",
     systemPrompt: "sys",
-    authStorage: AuthStorage.inMemory(),
+    authStorage: AuthStore.inMemory(),
     logger: defaultLogger(),
     modelAdapter: defaultModelAdapter,
     ...overrides,

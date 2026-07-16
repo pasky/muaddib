@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { AuthStore } from "../src/auth/auth-store.js";
 import type { ChatHistoryStore } from "../src/history/chat-history-store.js";
 import { buildArc } from "../src/rooms/message.js";
 import { SlackRoomMonitor, findArtifactUrls, replaceArtifactUrlsWithUploads, postProcessOutgoingSlackMessage } from "../src/rooms/slack/monitor.js";
@@ -34,7 +34,7 @@ function baseCommandConfig() {
   };
 }
 
-function buildRuntime(configData: Record<string, unknown>, history: ChatHistoryStore, authStorage: AuthStorage = AuthStorage.inMemory()) {
+function buildRuntime(configData: Record<string, unknown>, history: ChatHistoryStore, authStorage: AuthStore = AuthStore.inMemory()) {
   return createTestRuntime({ history, configData, authStorage });
 }
 
@@ -80,7 +80,7 @@ describe("SlackRoomMonitor", () => {
           enabled: true,
         },
       },
-    }, history, AuthStorage.inMemory({ "slack-app": { type: "api_key", key: "xapp-test" } })))).rejects.toThrow("Slack room is enabled but rooms.slack.workspaces is missing.");
+    }, history, AuthStore.inMemory({ "slack-app": { type: "api_key", key: "xapp-test" } })))).rejects.toThrow("Slack room is enabled but rooms.slack.workspaces is missing.");
 
     await expect(SlackRoomMonitor.fromRuntime(buildRuntime({
       rooms: {
@@ -94,7 +94,7 @@ describe("SlackRoomMonitor", () => {
           },
         },
       },
-    }, history, AuthStorage.inMemory({ "slack-app": { type: "api_key", key: "xapp-test" } })))).rejects.toThrow("'slack-T123' API key is missing from auth.json");
+    }, history, AuthStore.inMemory({ "slack-app": { type: "api_key", key: "xapp-test" } })))).rejects.toThrow("'slack-T123' API key is missing from auth.json");
 
     await history.close();
   });
@@ -115,7 +115,7 @@ describe("SlackRoomMonitor", () => {
           },
         },
       },
-    }, history, AuthStorage.inMemory({
+    }, history, AuthStore.inMemory({
       "slack-app": { type: "api_key", key: "xapp-test" },
       "slack-T123": { type: "api_key", key: "xoxb-1" },
       "slack-T456": { type: "api_key", key: "xoxb-2" },

@@ -1,5 +1,7 @@
 import { type Agent, type AgentMessage, type AgentTool, type ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { AgentSession, AuthStorage } from "@earendil-works/pi-coding-agent";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
+
+import type { AuthStore } from "../auth/auth-store.js";
 import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai";
 
 import { isAssistantMessage, isTextContent, isToolCall, responseText } from "./message.js";
@@ -34,7 +36,7 @@ export interface SessionRunnerOptions {
    */
   toolSet?: ToolSet;
   modelAdapter: PiAiModelAdapter;
-  authStorage: AuthStorage;
+  authStorage: AuthStore;
   sessionLimits?: SessionLimitsConfig;
   emptyCompletionRetryPrompt?: string;
   /**
@@ -117,7 +119,7 @@ export class SessionRunner {
     const systemPrompt = suffix
       ? `${this.options.systemPrompt}\n\n${suffix}`
       : this.options.systemPrompt;
-    const sessionCtx = createAgentSessionForInvocation({
+    const sessionCtx = await createAgentSessionForInvocation({
       model: this.model,
       systemPrompt,
       tools: this.tools,

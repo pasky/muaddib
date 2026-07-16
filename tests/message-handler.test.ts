@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { AuthStorage } from "@earendil-works/pi-coding-agent";
+import { AuthStore, saveCredentialsFile } from "../src/auth/auth-store.js";
 import { RuntimeLogWriter } from "../src/app/logging.js";
 import { currentCostSpan, recordUsage } from "../src/cost/cost-span.js";
 import { LLM_CALL_TYPE, isLlmCallType } from "../src/cost/llm-call-type.js";
@@ -88,14 +88,14 @@ function createHandler(options: {
   logger?: unknown;
   toolOptions?: unknown;
 
-  authStorage?: AuthStorage;
+  authStorage?: AuthStore;
   modelAdapter?: unknown;
   runtimeLogger?: RuntimeLogWriter;
   configData?: Record<string, unknown>;
   muaddibHome?: string;
 }): RoomMessageHandler {
   const runtime = createTestRuntime({
-    authStorage: options.authStorage ?? AuthStorage.inMemory(),
+    authStorage: options.authStorage ?? AuthStore.inMemory(),
     history: options.history,
     configData: {
       ...(options.configData ?? {}),
@@ -1531,10 +1531,10 @@ describe("RoomMessageHandler", () => {
 
     try {
       const userArc = buildArc("libera", "alice");
-      AuthStorage.create(join(muaddibHome, "users", userArc, "auth.json")).set("openrouter", {
+      saveCredentialsFile(join(muaddibHome, "users", userArc, "auth.json"), { openrouter: {
         type: "api_key",
         key: "sk-or-v1-user",
-      });
+      } });
 
       let runnerModel: string | null = null;
       let runnerOpenRouterKey: string | undefined;
@@ -1545,7 +1545,7 @@ describe("RoomMessageHandler", () => {
         roomConfig: roomConfig as any,
         history,
         muaddibHome,
-        authStorage: AuthStorage.inMemory({
+        authStorage: AuthStore.inMemory({
           openrouter: { type: "api_key", key: "sk-or-v1-operator" },
           anthropic: { type: "api_key", key: "sk-ant-operator" },
         }),
@@ -1626,10 +1626,10 @@ describe("RoomMessageHandler", () => {
 
     try {
       const userArc = buildArc("libera", "alice");
-      AuthStorage.create(join(muaddibHome, "users", userArc, "auth.json")).set("openrouter", {
+      saveCredentialsFile(join(muaddibHome, "users", userArc, "auth.json"), { openrouter: {
         type: "api_key",
         key: "sk-or-v1-user",
-      });
+      } });
 
       const sent: string[] = [];
       const handler = createHandler({
@@ -1674,10 +1674,10 @@ describe("RoomMessageHandler", () => {
 
     try {
       const userArc = buildArc("libera", "alice");
-      AuthStorage.create(join(muaddibHome, "users", userArc, "auth.json")).set("openrouter", {
+      saveCredentialsFile(join(muaddibHome, "users", userArc, "auth.json"), { openrouter: {
         type: "api_key",
         key: "sk-or-v1-user",
-      });
+      } });
 
       const sent: string[] = [];
       const handler = createHandler({
@@ -1705,10 +1705,10 @@ describe("RoomMessageHandler", () => {
 
     try {
       const userArc = buildArc("libera", "alice");
-      AuthStorage.create(join(muaddibHome, "users", userArc, "auth.json")).set("openrouter", {
+      saveCredentialsFile(join(muaddibHome, "users", userArc, "auth.json"), { openrouter: {
         type: "api_key",
         key: "sk-or-v1-user",
-      });
+      } });
 
       const sent: string[] = [];
       const handler = createHandler({
@@ -1736,10 +1736,10 @@ describe("RoomMessageHandler", () => {
 
     try {
       const userArc = buildArc("libera", "alice");
-      AuthStorage.create(join(muaddibHome, "users", userArc, "auth.json")).set("openrouter", {
+      saveCredentialsFile(join(muaddibHome, "users", userArc, "auth.json"), { openrouter: {
         type: "api_key",
         key: "sk-or-v1-user",
-      });
+      } });
 
       // Pre-set a trigger model remap
       const { UserPolicyStore } = await import("../src/cost/user-policy-store.js");
@@ -1757,7 +1757,7 @@ describe("RoomMessageHandler", () => {
         roomConfig: roomConfig as any,
         history,
         muaddibHome,
-        authStorage: AuthStorage.inMemory({
+        authStorage: AuthStore.inMemory({
           openrouter: { type: "api_key", key: "sk-or-v1-operator" },
         }),
         classifyMode: async () => "EASY_SERIOUS",
@@ -1790,10 +1790,10 @@ describe("RoomMessageHandler", () => {
 
     try {
       const userArc = buildArc("libera", "alice");
-      AuthStorage.create(join(muaddibHome, "users", userArc, "auth.json")).set("openrouter", {
+      saveCredentialsFile(join(muaddibHome, "users", userArc, "auth.json"), { openrouter: {
         type: "api_key",
         key: "sk-or-v1-user",
-      });
+      } });
 
       const { UserPolicyStore } = await import("../src/cost/user-policy-store.js");
       const policyStore = new UserPolicyStore(muaddibHome);
@@ -1810,7 +1810,7 @@ describe("RoomMessageHandler", () => {
         roomConfig: roomConfig as any,
         history,
         muaddibHome,
-        authStorage: AuthStorage.inMemory({
+        authStorage: AuthStore.inMemory({
           openrouter: { type: "api_key", key: "sk-or-v1-operator" },
         }),
         classifyMode: async () => "EASY_SERIOUS",
