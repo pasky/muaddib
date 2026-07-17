@@ -12,13 +12,19 @@ in false negatives (going silent where opus-4-5 would speak).
   README.md for method + caveats). Silver standard = opus-4-5's production
   decision.
 - Dev subset: 60 null + 60 interject; finals: 226 null + 300 interject.
-- Replay: single tool-less completion, reasoning=low.
+- Replay: single tool-less completion, reasoning=low. This differs from
+  production (full agent session with tools, memory, skills; ~40% of logged
+  sessions used tools before deciding), so all rates below are **silver-label
+  disagreement rates under harness shift**, not true production FP/FN rates.
 - FP% = P(interject | silver NULL); FN% = P(NULL | silver interject).
-  Refusals count as NULL but are tracked separately.
-- **Calibration floor**: opus-4-5 replayed through the harness against its own
-  production decisions gives FP 17.7 / FN 19.0 (full set) — pure harness noise
-  (sampling variance + no tools). Candidates should be compared to that floor,
-  not to 0/0.
+  Refusals count as NULL but are tracked separately (note: production
+  currently retries refusals via `refusalFallbackModel`, which could itself
+  interject — deploying a refusal-prone model would need that suppressed for
+  proactive runs).
+- **Replay baseline**: opus-4-5 replayed through the harness against its own
+  production decisions gives FP 17.7 / FN 19.0 (full set). That gap bundles
+  sampling nondeterminism *and* the systematic harness shift; candidates are
+  compared against this baseline, not against 0/0.
 
 ## Dev-subset sweep (60+60), FP%/FN%
 
@@ -46,16 +52,25 @@ Findings:
 | **opus-4-8 strict-v2** | **19.5 (44/226)** | 33.0 (99/300) | 4.3s | $0.013 |
 | opus-4-8 strict-v4     | 20.4 (46/226) | 37.0 (111/300) | 4.2s | $0.013 |
 
-opus-4-8 + strict-v2 lands within statistical noise of the opus-4-5
-calibration floor on FP (Δ1.8pp, SE≈3.7pp), i.e. it matches opus-4-5's
-false-positive behavior, while being ~3x faster and ~30% cheaper per decision.
-It goes silent moderately more often (FN 33% vs 19% floor) — the safe
-direction of error.
+Because dev cases are a (nested) subset of the finals, the honest comparison
+is on the 406 held-out cases never used for prompt selection: there
+**opus-4-8+strict-v2 and the opus-4-5 replay baseline have identical FP,
+33/166 (19.9%)** (paired discordance on all 226 NULLs: 23 baseline-only vs 27
+candidate-only — no detectable difference; McNemar p≈0.7). No equivalence
+margin was pre-registered, so the claim is "no detected FP regression", not
+proven equivalence. FN on held-out: 31.7% vs 17.1% baseline — it goes silent
+moderately more often, the safe direction of error. Replay latency/cost
+(~3x faster, ~30% cheaper than opus-4-5 replay) are indicative only, as
+production runs include tool use.
 
 ## Recommendation (applied)
 
 - `rooms.common.proactive.models.serious` → `anthropic:claude-opus-4-8`
 - `rooms.common.proactive.prompts.seriousExtra` → `prompts/strict-v2.txt`
+
+Applied to `config.json.example` (template for new installs) and to the live
+`~/.muaddib-profiles/MuaddibLLM/config.json` (backup:
+`config.json.bak-interject-backtest`; takes effect on restart).
 
 Not chosen: fable-5 (refusal overhead + FP not controllable below ~30%),
 glm-5.2 / gemini-3.5-flash (FP only controllable via a prompt that induces

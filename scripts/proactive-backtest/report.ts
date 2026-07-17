@@ -134,9 +134,10 @@ if (disFor) {
   const disOut = argValue("--disagreements-out") ?? disFor.replace(/\.jsonl$/, "-disagreements.md");
   const disMax = argValue("--disagreements-max") ? Number(argValue("--disagreements-max")) : Infinity;
   // FP-type disagreements (candidate spoke where reference stayed silent) first —
-  // they are the annotation priority.
+  // they are the annotation priority; then deterministic by id (results files
+  // are in concurrent-completion order).
   const recs = loadRun(disFor).sort((a, b) =>
-    Number(b.label === "null") - Number(a.label === "null"));
+    Number(b.label === "null") - Number(a.label === "null") || (a.id < b.id ? -1 : 1));
   const lines: string[] = [
     `# Disagreements: ${basename(disFor)}`,
     "",

@@ -22,10 +22,18 @@ False negatives (going silent where opus-4-5 spoke) are the secondary metric.
   this harness gap, re-run the silver model itself through the harness and
   compare candidates against its in-harness rates, not against 0/0.
 - Refusals (relevant for e.g. claude-fable-5) are detected via
-  `src/agent/refusal-detection.ts` and scored as NULL decisions (production
-  must suppress them the same way), but reported separately — a high refusal
-  rate is still bad (latency, cost, and it needs `refusalFallbackModel`
-  handling to not leak error text).
+  `src/agent/refusal-detection.ts` and scored as NULL decisions, but reported
+  separately. NOTE: production does NOT currently do this — it retries
+  refusals via `refusalFallbackModel`, which could itself interject. Deploying
+  a refusal-prone model proactively would require suppressing that fallback
+  for proactive runs; also a high refusal rate is bad by itself (latency,
+  cost).
+- run.ts writes a `<out>.meta.json` manifest (model, prompt hash, reasoning,
+  seed, dataset hash) and refuses to resume a results file whose manifest
+  doesn't match; resumed rows outside the currently sampled ids are dropped.
+- Dev-subset caps produce nested subsets of larger runs (same seed), so a
+  "full" run reuses dev cases — for unbiased final numbers, also compare on
+  the held-out complement (see RESULTS.md).
 
 ## Workflow
 

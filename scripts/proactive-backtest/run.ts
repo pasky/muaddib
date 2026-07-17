@@ -17,6 +17,7 @@
  *     [--concurrency 4] [--out scripts/proactive-backtest/results/foo.jsonl]
  */
 
+import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { basename, dirname } from "node:path";
 
@@ -72,14 +73,36 @@ const all: DatasetExample[] = readFileSync(datasetPath, "utf8")
   .trim().split("\n").map((l) => JSON.parse(l) as DatasetExample);
 const examples = sampleDataset(all, { null: maxNull, interject: maxInterject }, seed);
 
-// Resume support: skip ids already present in the output file.
+// Run identity manifest — refuses to resume into a file produced under
+// different experiment parameters (in-place prompt edits, seed changes, ...).
+const manifest = {
+  model: modelSpec,
+  promptSha1: promptVariant ? createHash("sha1").update(promptVariant).digest("hex") : null,
+  reasoning,
+  seed,
+  datasetSha1: createHash("sha1").update(readFileSync(datasetPath)).digest("hex"),
+};
+const metaPath = outPath.replace(/\.jsonl$/, "") + ".meta.json";
+if (existsSync(metaPath)) {
+  const prev = JSON.parse(readFileSync(metaPath, "utf8")) as typeof manifest;
+  if (JSON.stringify(prev) !== JSON.stringify(manifest)) {
+    console.error(`Refusing to resume: ${metaPath} was produced under different parameters:\n  previous: ${JSON.stringify(prev)}\n  current:  ${JSON.stringify(manifest)}`);
+    process.exit(1);
+  }
+}
+
+// Resume support: skip ids already present in the output file (restricted to
+// the currently sampled ids so stale rows don't contaminate metrics).
+const sampledIds = new Set(examples.map((ex) => ex.id));
 const done = new Map<string, RunRecord>();
 if (existsSync(outPath)) {
+  let stale = 0;
   for (const line of readFileSync(outPath, "utf8").trim().split("\n").filter(Boolean)) {
     const r = JSON.parse(line) as RunRecord;
-    done.set(r.id, r);
+    if (sampledIds.has(r.id)) done.set(r.id, r);
+    else stale++;
   }
-  console.log(`Resuming: ${done.size} results already in ${outPath}`);
+  console.log(`Resuming: ${done.size} results already in ${outPath}${stale ? ` (dropping ${stale} outside current sample)` : ""}`);
 }
 
 const adapter = new PiAiModelAdapter({ authStorage: AuthStore.create(authPath.replace(/^~/, process.env.HOME ?? "~")) });
@@ -143,6 +166,7 @@ async function runOne(ex: DatasetExample): Promise<RunRecord> {
 const pending = examples.filter((ex) => !done.has(ex.id));
 console.log(`Run ${runName}: model=${modelSpec} reasoning=${reasoning} prompt=${promptPath ?? "(logged)"} examples=${examples.length} pending=${pending.length}`);
 mkdirSync(dirname(outPath), { recursive: true });
+writeFileSync(metaPath, JSON.stringify(manifest, null, 2) + "\n");
 
 let completed = 0;
 let totalCost = 0;
