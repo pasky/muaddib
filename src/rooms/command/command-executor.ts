@@ -1311,7 +1311,7 @@ export function modelStrCore(model: unknown): string {
   return String(model).replace(/(?:[-.\w]*:)?(?:[-.\w]*\/)?([-.\w]+)(?:#[-\w,/]*)?/, "$1");
 }
 
-function isNullSentinel(text: string): boolean {
+export function isNullSentinel(text: string): boolean {
   const trimmed = text.trim();
   const unquoted = trimmed.replace(/^["'`]|["'`]$/g, "").trim();
   return /^null$/iu.test(unquoted);
