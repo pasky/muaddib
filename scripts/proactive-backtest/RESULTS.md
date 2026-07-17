@@ -7,10 +7,12 @@ in false negatives (going silent where opus-4-5 would speak).
 
 ## Setup
 
-- Dataset: 810 serious-stage decisions (584 interject / 226 NULL) extracted
+- Dataset: 809 serious-stage decisions (582 interject / 227 NULL) extracted
   from production logs 2026-04-01..2026-07-17 (opus-4-5 decisions only; see
   README.md for method + caveats). Silver standard = opus-4-5's production
-  decision.
+  decision. (Regenerated post-review to exclude 2 sessions decided by a
+  refusal-fallback model; neither had been sampled into any published run,
+  so all numbers below stand.)
 - Dev subset: 60 null + 60 interject; finals: 226 null + 300 interject.
 - Replay: single tool-less completion, reasoning=low. This differs from
   production (full agent session with tools, memory, skills; ~40% of logged
@@ -55,8 +57,8 @@ Findings:
 Because dev cases are a (nested) subset of the finals, the honest comparison
 is on the 406 held-out cases never used for prompt selection: there
 **opus-4-8+strict-v2 and the opus-4-5 replay baseline have identical FP,
-33/166 (19.9%)** (paired discordance on all 226 NULLs: 23 baseline-only vs 27
-candidate-only — no detectable difference; McNemar p≈0.7). No equivalence
+33/166 (19.9%)** (paired discordance on those 166 held-out NULLs: 19
+baseline-only vs 19 candidate-only — no detectable difference). No equivalence
 margin was pre-registered, so the claim is "no detected FP regression", not
 proven equivalence. FN on held-out: 31.7% vs 17.1% baseline — it goes silent
 moderately more often, the safe direction of error. Replay latency/cost
@@ -83,8 +85,14 @@ the same silver-error effect would likely shrink the FN gap too.
 ² strict-v5 adds a check: on fast-moving topics (LLMs, tooling, prices),
 verify with live search before interjecting, else NULL (pasky's suggestion
 after annotating stale-tech-answer FPs — it flips 2 of the 3 gold-null cases
-to NULL). The harness has no tools, so its in-harness FN is an **upper
-bound**; in production the model can search and then interject.
+to NULL). Caveats: this is in-sample evidence (the prompt was written after
+inspecting those very cases, and its 25-vs-27 FP edge over v2 is not
+significant), and the harness has no tools, so "search first" can only
+resolve to NULL here — in-harness FN is an upper bound and the tool-enabled
+behavior is untested by this backtest. v5 adoption is therefore a
+**production canary based on pasky's explicit preference**, not a
+backtest-proven improvement; strict-v2 is the evidence-backed fallback if
+production proves too quiet (or if search-spam becomes an issue).
 
 All three gold-null FPs were confident-but-outdated tech answers — the most
 egregious FP flavor (unprompted + wrong).

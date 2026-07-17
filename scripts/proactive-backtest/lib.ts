@@ -161,6 +161,12 @@ export function extractExample(
   }
 
   const silverModel = String(first.json.model ?? "unknown");
+  // If the session involved multiple models (refusal fallback retried with a
+  // different model), the final decision cannot be attributed to silverModel.
+  const models = new Set(agentPayloads.map((b) => String(b.json.model ?? "unknown")));
+  if (models.size > 1) {
+    return { skip: { id, reason: `mixed-models-${[...models].sort().join("+")}` } };
+  }
   const rawMessages = Array.isArray(first.json.messages) ? first.json.messages : [];
   const messages: DatasetMessage[] = [];
   for (const raw of rawMessages as Array<{ role?: string; content?: unknown }>) {
@@ -248,6 +254,11 @@ export function classifyDecision(response: {
     return { decision: "refusal", text: `${bodyRefusal}: ${response.text}` };
   }
   let cleaned = response.text.replace(THINKING_RE, "").trim();
+  if (cleaned.startsWith("Error: ")) {
+    // executeQuiet suppresses Error:-prefixed output — treat as an error
+    // (excluded from rates), not as a NULL decision.
+    return { decision: "error", text: cleaned };
+  }
   if (!cleaned || isNullSentinel(cleaned)) {
     return { decision: "null", text: cleaned };
   }

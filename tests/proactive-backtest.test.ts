@@ -12,7 +12,7 @@ import {
 
 const SYSTEM = "You are IRC user MuaddibLLM. Persona stuff here. Current time: 2026-07-01 23:18 UTC. NOTE: This is a proactive interjection. Respond NULL when unsure!\n\nFilesystem: $HOME=/workspace blah\n<memory>secret workspace noise</memory>";
 
-function logFor(opts: { delivered?: string; responseText?: string; thinking?: string }): string {
+function logFor(opts: { delivered?: string; responseText?: string; thinking?: string; extraModel?: string }): string {
   const payload = {
     model: "claude-opus-4-5",
     messages: [
@@ -31,6 +31,9 @@ function logFor(opts: { delivered?: string; responseText?: string; thinking?: st
     "2026-07-16 22:52:53,099 - muaddib.rooms.command.irc - DEBUG - llm_io payload agent_stream " + JSON.stringify(payload, null, 2),
     "2026-07-16 22:52:55,000 - muaddib.rooms.command.irc - DEBUG - llm_io response agent_stream " + JSON.stringify(response, null, 2),
   ];
+  if (opts.extraModel) {
+    lines.push("2026-07-16 22:52:55,500 - muaddib.rooms.command.irc - DEBUG - llm_io payload agent_stream " + JSON.stringify({ ...payload, model: opts.extraModel }, null, 2));
+  }
   if (opts.delivered) {
     lines.push(`2026-07-16 22:52:56,000 - muaddib.rooms.command.irc - INFO - Delivering response arc=libera##retwin response=${opts.delivered}`);
   }
@@ -82,6 +85,15 @@ describe("extractExample", () => {
   it("skips logs without the interjecting marker", () => {
     expect(extractExample("some unrelated log", "x1").skip?.reason).toBe("no-interjecting-marker");
   });
+
+  it("skips sessions where a refusal fallback switched models mid-decision", () => {
+    const { example, skip } = extractExample(
+      logFor({ delivered: "[deepseek-v4-pro] something", extraModel: "deepseek-v4-pro" }),
+      "m1",
+    );
+    expect(example).toBeUndefined();
+    expect(skip?.reason).toBe("mixed-models-claude-opus-4-5+deepseek-v4-pro");
+  });
 });
 
 describe("canonicalizeSystemPrompt / applyPromptVariant", () => {
@@ -119,6 +131,10 @@ describe("classifyDecision", () => {
 
   it("classifies other errors as error", () => {
     expect(classifyDecision({ text: "", stopReason: "error", errorMessage: "429 too many requests" }).decision).toBe("error");
+  });
+
+  it("classifies Error:-prefixed output as error (production suppresses it)", () => {
+    expect(classifyDecision({ text: "Error: tool exploded", stopReason: "stop" }).decision).toBe("error");
   });
 });
 

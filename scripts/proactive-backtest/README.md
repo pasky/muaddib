@@ -53,9 +53,12 @@ npx tsx scripts/proactive-backtest/run.ts \
   --dataset $BACKTEST_DIR/dataset.jsonl \
   --auth ~/.muaddib-profiles/MuaddibLLM/auth.json \
   --model anthropic:claude-fable-5 --reasoning low \
-  --max-null 60 --max-interject 60
-# Optional: --prompt prompts/<variant>.txt replaces the "NOTE: This is a
-# proactive interjection..." tail of the system prompt (the seriousExtra).
+  --max-null 60 --max-interject 60 \
+  --out $BACKTEST_DIR/results/claude-fable-5-low.jsonl
+# (without --out, results land in the in-repo scripts/proactive-backtest/results/)
+# Optional: --prompt scripts/proactive-backtest/prompts/<variant>.txt replaces
+# the "NOTE: This is a proactive interjection..." tail of the system prompt
+# (the seriousExtra).
 
 # 3. Score all runs (sorted by FP rate)
 npx tsx scripts/proactive-backtest/report.ts \

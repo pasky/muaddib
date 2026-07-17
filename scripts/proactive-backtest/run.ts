@@ -89,6 +89,11 @@ if (existsSync(metaPath)) {
     console.error(`Refusing to resume: ${metaPath} was produced under different parameters:\n  previous: ${JSON.stringify(prev)}\n  current:  ${JSON.stringify(manifest)}`);
     process.exit(1);
   }
+} else if (existsSync(outPath)) {
+  // A results file without a manifest cannot be verified to match this run's
+  // parameters — refuse rather than silently "blessing" foreign results.
+  console.error(`Refusing to resume: ${outPath} exists but has no ${metaPath}. Delete or rename it (or restore its manifest) first.`);
+  process.exit(1);
 }
 
 // Resume support: skip ids already present in the output file (restricted to
@@ -167,6 +172,10 @@ const pending = examples.filter((ex) => !done.has(ex.id));
 console.log(`Run ${runName}: model=${modelSpec} reasoning=${reasoning} prompt=${promptPath ?? "(logged)"} examples=${examples.length} pending=${pending.length}`);
 mkdirSync(dirname(outPath), { recursive: true });
 writeFileSync(metaPath, JSON.stringify(manifest, null, 2) + "\n");
+// Persist the filtered resumed set immediately — even with no pending work,
+// stale rows outside the current sample must not linger on disk.
+const resumed = [...done.values()];
+writeFileSync(outPath, resumed.length ? resumed.map((r) => JSON.stringify(r)).join("\n") + "\n" : "");
 
 let completed = 0;
 let totalCost = 0;
