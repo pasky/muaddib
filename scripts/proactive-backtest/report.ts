@@ -41,7 +41,7 @@ if (!datasetPath) {
   console.error("Usage: report.ts --dataset <jsonl> [--annotations <md>] [--disagreements-for <run.jsonl> --disagreements-out <md>] <results.jsonl>...");
   process.exit(1);
 }
-const flagsWithValue = new Set(["--dataset", "--annotations", "--disagreements-for", "--disagreements-out"]);
+const flagsWithValue = new Set(["--dataset", "--annotations", "--disagreements-for", "--disagreements-out", "--disagreements-max"]);
 const resultPaths: string[] = [];
 for (let i = 2; i < process.argv.length; i++) {
   if (flagsWithValue.has(process.argv[i])) { i++; continue; }
@@ -132,7 +132,11 @@ for (const row of table) {
 const disFor = argValue("--disagreements-for");
 if (disFor) {
   const disOut = argValue("--disagreements-out") ?? disFor.replace(/\.jsonl$/, "-disagreements.md");
-  const recs = loadRun(disFor);
+  const disMax = argValue("--disagreements-max") ? Number(argValue("--disagreements-max")) : Infinity;
+  // FP-type disagreements (candidate spoke where reference stayed silent) first —
+  // they are the annotation priority.
+  const recs = loadRun(disFor).sort((a, b) =>
+    Number(b.label === "null") - Number(a.label === "null"));
   const lines: string[] = [
     `# Disagreements: ${basename(disFor)}`,
     "",
@@ -143,6 +147,7 @@ if (disFor) {
   ];
   let count = 0;
   for (const r of recs) {
+    if (count >= disMax) break;
     if (r.decision === "error") continue;
     const decided = r.decision === "refusal" ? "null" : r.decision;
     if (decided === r.label) continue;
