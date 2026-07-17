@@ -1,6 +1,5 @@
 import { Agent, type AgentMessage, type AgentTool, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { Message } from "@earendil-works/pi-ai";
-import { isAssistantMessage } from "./message.js";
+import type { Message, StopReason } from "@earendil-works/pi-ai";
 import {
   AgentSession,
   SessionManager,
@@ -11,8 +10,13 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 import type { AuthStore } from "../auth/auth-store.js";
-
-
+import {
+  SessionLimits,
+  createInternalNudgeTransform,
+  createNudgeDecider,
+  type ResponseTimestamp,
+  type TurnUsage,
+} from "./session-limits.js";
 import { PiAiModelAdapter, type ResolvedPiAiModel } from "../models/pi-ai-model-adapter.js";
 import { piAiModels } from "../models/pi-ai-models.js";
 import type { Logger } from "../app/logging.js";
@@ -77,138 +81,6 @@ export const MUADDIB_SYSTEM_PROMPT_CUSTOM_TYPE = "muaddib.system_prompt";
  * replays these so the provider sees byte-for-byte the same `tools` list and
  * can hit its prompt cache on the resumed prefix. */
 export const MUADDIB_TOOL_SCHEMAS_CUSTOM_TYPE = "muaddib.tool_schemas";
-
-// ── Internal nudge transform ──
-
-/**
- * Build a function that decides what nudge text (if any) to inject for a given
- * assistant turn count. Encapsulates all policy: metaReminder, progress threshold,
- * high-reasoning first-turn special case, and near-limit suppression.
- */
-/** Mutable session-limit state shared between turn_end subscriber and nudge logic. */
-interface SessionLimitState {
-  maxContextLength: number;
-  maxCostUsd: number;
-  /** Peak context length (input + cacheRead + cacheWrite) seen in any single turn. */
-  peakContextLength: number;
-  cumulativeCost: number;
-  turnsSinceSoftLimit: number;
-}
-
-/** Mutable timestamp holder — bumped externally when a response is delivered. */
-export interface ResponseTimestamp {
-  lastResponseAt: number;
-}
-
-function createNudgeDecider(
-  limitState: SessionLimitState,
-  sessionStartTime: number,
-  thinkingLevel: NonNullable<CreateAgentSessionInput["thinkingLevel"]>,
-  responseTimestamp: ResponseTimestamp,
-  metaReminder?: string,
-  progressThresholdSeconds?: number,
-): (turnCount: number) => string | null {
-  return (turnCount: number): string | null => {
-    const parts: string[] = [];
-
-    if (metaReminder) {
-      parts.push(metaReminder);
-    }
-
-    // Suppress progress nudges when within 80% of either limit.
-    const nearLimit =
-      limitState.peakContextLength >= limitState.maxContextLength * 0.8 ||
-      limitState.cumulativeCost >= limitState.maxCostUsd * 0.8;
-
-    if (progressThresholdSeconds != null && !nearLimit) {
-      const now = Date.now();
-      const lastActivity = Math.max(sessionStartTime, responseTimestamp.lastResponseAt);
-      const elapsedSinceLastReport = (now - lastActivity) / 1000;
-      const isFirstTurnHighReasoning =
-        turnCount === 1 &&
-        (thinkingLevel === "medium" || thinkingLevel === "high" || thinkingLevel === "xhigh" || thinkingLevel === "max");
-
-      if (isFirstTurnHighReasoning || elapsedSinceLastReport >= progressThresholdSeconds) {
-        parts.push("If you are going to call more tools, write also an extremely brief one-line status of what you are doing and why.");
-      }
-    }
-
-    return parts.length > 0 ? parts.join(" ") : null;
-  };
-}
-
-/**
- * Build a transformContext function that injects internal <meta> nudges
- * (and session-limit messages) ephemerally into the LLM context just before
- * each assistant call.  The injected message is visible to the LLM but never
- * persisted into agent.state.messages, so it cannot trigger extra turns.
- */
-function createInternalNudgeTransform(
-  invocationStartMessageCount: number,
-  limitState: SessionLimitState,
-  getNudgeText: (turnCount: number) => string | null,
-  logger: Logger,
-) {
-
-  return async (messages: AgentMessage[]): Promise<AgentMessage[]> => {
-    // Count assistant turns produced in this invocation (not from preloaded context).
-    const invocationMessages = messages.slice(invocationStartMessageCount);
-    const turnCount = invocationMessages.filter(isAssistantMessage).length;
-
-    const limitReached =
-      limitState.peakContextLength >= limitState.maxContextLength ||
-      limitState.cumulativeCost >= limitState.maxCostUsd;
-
-    // When session limit is reached, inject the limit message instead of
-    // regular nudges.
-    if (limitReached) {
-      const lastMsg = invocationMessages.at(-1) as { role?: string } | undefined;
-      const lastIsToolResult = lastMsg?.role === "toolResult";
-      if (!lastIsToolResult) return messages;
-
-      logger.debug("session_limit_nudge_injected via transformContext");
-      return [
-        ...messages,
-        {
-          role: "user",
-          content: [{ type: "text", text: "<meta>You have reached your session limit - time to provide your final text response.</meta>" }],
-          timestamp: Date.now(),
-        } as AgentMessage,
-      ];
-    }
-
-    const isFirstTurn = turnCount === 0;
-    const lastMsg = invocationMessages.at(-1) as { role?: string; stopReason?: string } | undefined;
-    const lastIsToolResult = lastMsg?.role === "toolResult";
-    // The most recent assistant message (immediately before the toolResult block)
-    const lastAssistant = [...invocationMessages].reverse().find(isAssistantMessage);
-    const lastStopReason = lastAssistant?.stopReason;
-    const isAfterToolUse = lastIsToolResult && lastStopReason === "toolUse";
-
-    if (!isFirstTurn && !isAfterToolUse) {
-      return messages;
-    }
-
-    const nudgeContent = getNudgeText(turnCount);
-    if (nudgeContent === null) {
-      return messages;
-    }
-
-    const nudgeText = `<meta>${nudgeContent}</meta>`;
-    logger.debug(
-      `internal_nudge_injected turnCount=${turnCount} isFirstTurn=${isFirstTurn} lastStopReason=${lastStopReason}`,
-    );
-
-    return [
-      ...messages,
-      {
-        role: "user",
-        content: [{ type: "text", text: nudgeText }],
-        timestamp: Date.now(),
-      } as AgentMessage,
-    ];
-  };
-}
 
 const EMPTY_RESOURCE_LOADER_BASE: Omit<ResourceLoader, "getExtensions" | "getSystemPrompt"> = {
   getSkills: () => ({ skills: [], diagnostics: [] }),
@@ -315,21 +187,16 @@ export async function createAgentSessionForInvocation(
 
   // Compute session limits, session start, and nudge state before Agent construction
   // so they can be captured in the transformContext closure.
-  const limitState: SessionLimitState = {
-    maxContextLength: input.sessionLimits?.maxContextLength ?? DEFAULT_MAX_CONTEXT_LENGTH,
-    maxCostUsd: input.sessionLimits?.maxCostUsd ?? DEFAULT_MAX_COST_USD,
-    peakContextLength: 0,
-    cumulativeCost: 0,
-    turnsSinceSoftLimit: 0,
-  };
-  const initialMaxContextLength = limitState.maxContextLength;
-  const initialMaxCostUsd = limitState.maxCostUsd;
+  const limits = new SessionLimits(
+    input.sessionLimits?.maxContextLength ?? DEFAULT_MAX_CONTEXT_LENGTH,
+    input.sessionLimits?.maxCostUsd ?? DEFAULT_MAX_COST_USD,
+  );
   const sessionStartTime = Date.now();
   const responseTimestamp: ResponseTimestamp = { lastResponseAt: 0 };
   const invocationStartMessageCount = input.contextMessages?.length ?? 0;
 
   const getNudgeText = createNudgeDecider(
-    limitState,
+    limits,
     sessionStartTime,
     input.thinkingLevel ?? "off",
     responseTimestamp,
@@ -337,7 +204,7 @@ export async function createAgentSessionForInvocation(
     input.progressThresholdSeconds,
   );
 
-  const transformContext = createInternalNudgeTransform(invocationStartMessageCount, limitState, getNudgeText, logger);
+  const transformContext = createInternalNudgeTransform(invocationStartMessageCount, limits, getNudgeText, logger);
 
   const agent = new Agent({
     initialState: {
@@ -391,27 +258,13 @@ export async function createAgentSessionForInvocation(
 
   const unsubscribe = session.subscribe((event) => {
     if (event.type === "turn_end") {
-      // Track peak context length and cumulative cost from this assistant turn.
-      const msg = event.message as { usage?: { input: number; cacheRead: number; cacheWrite: number; cost: { total: number } }; stopReason?: string };
-      if (msg.usage) {
-        const turnContext = msg.usage.input + msg.usage.cacheRead + msg.usage.cacheWrite;
-        limitState.peakContextLength = Math.max(limitState.peakContextLength, turnContext);
-        limitState.cumulativeCost += msg.usage.cost.total;
-      }
-
-      const stopReason = msg.stopReason;
-      const limitReached =
-        limitState.peakContextLength >= limitState.maxContextLength ||
-        limitState.cumulativeCost >= limitState.maxCostUsd;
-
+      const msg = event.message as { usage?: TurnUsage; stopReason?: StopReason };
       // Session-limit nudges are injected ephemerally via transformContext
-      // (see createInternalNudgeTransform above).  They appear in LLM context
-      // but are never queued as steering messages, so they cannot trigger
-      // extra turns or cause off-topic replies.
-      if (limitReached && stopReason === "toolUse") {
-        limitState.turnsSinceSoftLimit += 1;
-      }
-      if (limitReached && limitState.turnsSinceSoftLimit >= 10) { // purely a safety vent
+      // (see createInternalNudgeTransform in session-limits.ts).  They appear
+      // in LLM context but are never queued as steering messages, so they
+      // cannot trigger extra turns or cause off-topic replies.  recordTurn
+      // returns true only when the post-limit safety vent trips.
+      if (limits.recordTurn(msg.usage, msg.stopReason)) {
         logger.warn("Exceeding session limits, aborting session prompt loop.");
         void session.abort();
       }
@@ -444,13 +297,7 @@ export async function createAgentSessionForInvocation(
       }
     },
     getVisionFallbackActivated: () => visionState.activated,
-    bumpSessionLimits: (tokens: number, costUsd: number) => {
-      // Floor: bump by at least 10% of the original configured limit.
-      const minTokens = Math.ceil(initialMaxContextLength * 0.1);
-      const minCost = initialMaxCostUsd * 0.1;
-      limitState.maxContextLength += Math.max(tokens, minTokens);
-      limitState.maxCostUsd += Math.max(costUsd, minCost);
-    },
+    bumpSessionLimits: (tokens: number, costUsd: number) => limits.bump(tokens, costUsd),
     dispose: () => {
       unsubscribe();
       session.dispose();

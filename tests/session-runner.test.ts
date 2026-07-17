@@ -395,6 +395,44 @@ describe("SessionRunner", () => {
     expect(dispose).toHaveBeenCalledTimes(1);
   });
 
+  it("disposes toolSet and session when the provider key preflight fails before prompting", async () => {
+    const toolSetDispose = vi.fn(async () => {});
+    const sessionDispose = vi.fn(async () => {});
+    const ctx = makeMockSession({ dispose: sessionDispose });
+    ctx.ensureProviderKey.mockRejectedValue(
+      new Error("No API key configured for provider 'openai'. Add it to auth.json."),
+    );
+
+    const runner = makeRunner({ toolSet: { tools: [], dispose: toolSetDispose } });
+    await expect(runner.prompt("hello")).rejects.toThrow("No API key");
+    expect(toolSetDispose).toHaveBeenCalledTimes(1);
+    expect(sessionDispose).toHaveBeenCalledTimes(1);
+    expect(ctx.session.prompt).not.toHaveBeenCalled();
+  });
+
+  it("preserves the primary error and still disposes the session when toolSet cleanup throws", async () => {
+    const toolSetDispose = vi.fn(async () => { throw new Error("dispose exploded"); });
+    const sessionDispose = vi.fn(async () => {});
+    makeMockSession({
+      promptImpl: async () => { throw new Error("network failure"); },
+      dispose: sessionDispose,
+    });
+
+    const runner = makeRunner({ toolSet: { tools: [], dispose: toolSetDispose } });
+    await expect(runner.prompt("hello")).rejects.toThrow("network failure");
+    expect(toolSetDispose).toHaveBeenCalledTimes(1);
+    expect(sessionDispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases the toolSet when session creation itself fails", async () => {
+    const toolSetDispose = vi.fn(async () => {});
+    mockCreateAgentSessionForInvocation.mockRejectedValue(new Error("factory blew up"));
+
+    const runner = makeRunner({ toolSet: { tools: [], dispose: toolSetDispose } });
+    await expect(runner.prompt("hello")).rejects.toThrow("factory blew up");
+    expect(toolSetDispose).toHaveBeenCalledTimes(1);
+  });
+
   it("logs full assistant metadata and preserves long content text/thinking in message_end debug", async () => {
     const longText = "L".repeat(5000);
     const longThinking = "T".repeat(5000);

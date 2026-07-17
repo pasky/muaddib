@@ -119,173 +119,201 @@ export class SessionRunner {
     const systemPrompt = suffix
       ? `${this.options.systemPrompt}\n\n${suffix}`
       : this.options.systemPrompt;
-    const sessionCtx = await createAgentSessionForInvocation({
-      model: this.model,
-      systemPrompt,
-      tools: this.tools,
-      modelAdapter: this.modelAdapter,
-      authStorage: this.options.authStorage,
-      contextMessages: options.contextMessages,
-      thinkingLevel: options.thinkingLevel,
-      sessionLimits: this.options.sessionLimits,
-      visionFallbackModel: options.visionFallbackModel,
-      llmDebugMaxChars: this.llmDebugMaxChars,
-      metaReminder: this.options.metaReminder,
-      progressThresholdSeconds: this.options.progressThresholdSeconds,
-      logger: this.logger,
-      sessionFile: this.options.sessionFile,
-    });
+    const toolSet = this.options.toolSet;
+    let sessionCtx: Awaited<ReturnType<typeof createAgentSessionForInvocation>>;
+    try {
+      sessionCtx = await createAgentSessionForInvocation({
+        model: this.model,
+        systemPrompt,
+        tools: this.tools,
+        modelAdapter: this.modelAdapter,
+        authStorage: this.options.authStorage,
+        contextMessages: options.contextMessages,
+        thinkingLevel: options.thinkingLevel,
+        sessionLimits: this.options.sessionLimits,
+        visionFallbackModel: options.visionFallbackModel,
+        llmDebugMaxChars: this.llmDebugMaxChars,
+        metaReminder: this.options.metaReminder,
+        progressThresholdSeconds: this.options.progressThresholdSeconds,
+        logger: this.logger,
+        sessionFile: this.options.sessionFile,
+      });
+    } catch (error) {
+      // Session creation failed: no session to dispose, but the toolSet
+      // (e.g. a Gondolin VM refcount) is ours to release.
+      if (toolSet?.dispose) {
+        try {
+          await toolSet.dispose();
+        } catch (cleanupError) {
+          this.logger.warn(`toolSet cleanup after failed session creation threw: ${stringifyError(cleanupError)}`);
+        }
+      }
+      throw error;
+    }
 
     const { session, agent } = sessionCtx;
-    this.options.onAgentCreated?.(agent);
-    const primaryProvider = this.modelAdapter.resolve(this.model).spec.provider;
-    await sessionCtx.ensureProviderKey(primaryProvider);
-    let iterations = 0;
-    let toolCallsCount = 0;
 
-    // Mutable suffix appended to every onResponse call.  Updated by
-    // promptWithRefusalFallback (refusal) and the tool_execution_end
-    // handler (vision) so that all messages after a fallback carry the
-    // annotation — not just the final response.
-    let responseSuffix = "";
-    let lastCreatedArtifactUrl: string | undefined;
-    // When true, onResponse is skipped and text is logged at INFO instead.
-    // Toggled by the muteResponses() handle returned in PromptResult so
-    // callers can silence delivery before background work (memory update).
-    let responseMuted = false;
-
-    // Queue async onResponse deliveries and flush them before prompt() returns.
-    // This guarantees callers don't observe "prompt completed" before room sends
-    // and history persistence have finished.
-    let pendingResponseDelivery: Promise<void> = Promise.resolve();
-    let pendingResponseError: unknown = null;
-    const deliveredAssistantMessages = new WeakSet<object>();
-    const queueResponseDelivery = (text: string): void => {
-      pendingResponseDelivery = pendingResponseDelivery
-        .then(async () => {
-          sessionCtx.responseTimestamp.lastResponseAt = Date.now();
-          await this.onResponse?.(text);
-        })
-        .catch((error) => {
-          if (pendingResponseError === null) {
-            pendingResponseError = error;
-          }
-        });
-    };
-
-    let pendingArtifactUrlRetry: string | undefined;
-    let artifactUrlRetryAttempted = false;
-    const queueArtifactUrlRetryIfNeeded = (assistantMessage: unknown, text: string): boolean => {
-      if (!lastCreatedArtifactUrl || artifactUrlRetryAttempted || pendingArtifactUrlRetry ||
-          !isPotentialFinalAssistantMessage(assistantMessage) || text.includes(lastCreatedArtifactUrl)) {
-        return false;
-      }
-      pendingArtifactUrlRetry = lastCreatedArtifactUrl;
-      return true;
-    };
-
-    const unsubscribe = session.subscribe((event) => {
-      if (event.type === "turn_end") {
-        iterations += 1;
-        return;
-      }
-
-      if (event.type === "tool_execution_start") {
-        toolCallsCount += 1;
-        this.logger.info(`Tool ${event.toolName} started: ${summarizeToolPayload(event.args, this.llmDebugMaxChars)}`);
-        return;
-      }
-
-      if (event.type === "message_end") {
-        const message = event.message as { role?: string };
-        if (message.role === "assistant") {
-          const text = extractAssistantTextFromEvent(event.message).trim();
-          const assistantMessageObj = event.message && typeof event.message === "object"
-            ? event.message as object
-            : null;
-          const queuedArtifactRetry = text && !responseMuted
-            ? queueArtifactUrlRetryIfNeeded(event.message, text)
-            : false;
-          if (text && this.onResponse && !responseMuted) {
-            if (!assistantMessageObj || !deliveredAssistantMessages.has(assistantMessageObj)) {
-              if (queuedArtifactRetry) {
-                this.logger.debug("Deferring assistant response missing last artifact URL", `url=${pendingArtifactUrlRetry ?? "unknown"}`);
-              } else {
-                if (assistantMessageObj) {
-                  deliveredAssistantMessages.add(assistantMessageObj);
-                }
-                // Don't decorate NULL sentinel responses with suffixes — they must
-                // pass through to onResponse unchanged so callers can suppress them.
-                const decorated = responseSuffix && !/^["'`]?\s*null\s*["'`]?$/iu.test(text)
-                  ? `${text} ${responseSuffix}`
-                  : text;
-                queueResponseDelivery(decorated);
-              }
-            }
-          } else if (text && responseMuted) {
-            this.logger.info("Suppressing post-response text", truncateForDebug(text, 200));
-          }
-
-          this.logger.debug(
-            "llm_io response agent_stream",
-            safeJson(renderMessageForDebug(event.message, this.llmDebugMaxChars), this.llmDebugMaxChars),
-          );
-        }
-        return;
-      }
-
-      if (event.type === "tool_execution_end") {
-        if (event.isError) {
-          this.logger.warn(`Tool ${event.toolName} failed: ${summarizeToolPayload(event.result, this.llmDebugMaxChars)}`);
-        } else {
-          this.logger.info(`Tool ${event.toolName} executed: ${summarizeToolPayload(event.result, this.llmDebugMaxChars)}`);
-        }
-        this.logger.debug(
-          "tool_execution_end details",
-          safeJson({
-            toolName: event.toolName,
-            isError: event.isError,
-            result: event.result,
-          }, this.llmDebugMaxChars),
-        );
-
-        if (!event.isError && ARTIFACT_TOOLS.has(event.toolName)) {
-          lastCreatedArtifactUrl = extractCreatedArtifactUrl(event.result) ?? lastCreatedArtifactUrl;
-        }
-
-        // Vision fallback: once activated, annotate all subsequent responses.
-        if (!event.isError && !responseSuffix.includes("vision fallback") &&
-            sessionCtx.getVisionFallbackActivated() && options.visionFallbackModel) {
-          const spec = parseModelSpec(options.visionFallbackModel);
-          responseSuffix = `${responseSuffix} [vision fallback to ${spec.modelId}]`.trim();
-        }
-      }
-    });
-
-    // Wrap session.dispose so it chains toolSet.dispose() (e.g. Gondolin checkpoint)
-    // before the original dispose.  This keeps the VM alive until the caller is done
-    // with the session (e.g. for a memory-update prompt after the main response).
-    const toolSet = this.options.toolSet;
+    // Wrap session.dispose immediately after creation (plain assignments, cannot
+    // throw) so every later failure path has a single full-cleanup entrypoint.
+    // It chains unsubscribe + toolSet.dispose() (e.g. Gondolin checkpoint)
+    // before the original dispose; the inner try/finally guarantees the
+    // AgentSession is disposed even when toolSet cleanup throws.  On the
+    // success path this keeps the VM alive until the caller is done with the
+    // session (e.g. for a memory-update prompt after the main response).
     const origDispose = typeof session.dispose === "function"
       ? session.dispose.bind(session)
       : undefined;
     let toolSetDisposed = false;
     let unsubscribed = false;
+    let unsubscribe: (() => void) | undefined;
     session.dispose = async () => {
       if (!unsubscribed) {
         unsubscribed = true;
-        unsubscribe();
+        unsubscribe?.();
       }
-      if (!toolSetDisposed && toolSet?.dispose) {
-        toolSetDisposed = true;
-        await toolSet.dispose();
+      try {
+        if (!toolSetDisposed && toolSet?.dispose) {
+          toolSetDisposed = true;
+          await toolSet.dispose();
+        }
+      } finally {
+        await origDispose?.();
       }
-      await origDispose?.();
     };
 
     let sessionReturned = false;
     let usageRecorded = false;
+    let promptAttempted = false;
     try {
+      this.options.onAgentCreated?.(agent);
+      let iterations = 0;
+      let toolCallsCount = 0;
+
+      // Mutable suffix appended to every onResponse call.  Updated by
+      // promptWithRefusalFallback (refusal) and the tool_execution_end
+      // handler (vision) so that all messages after a fallback carry the
+      // annotation — not just the final response.
+      let responseSuffix = "";
+      let lastCreatedArtifactUrl: string | undefined;
+      // When true, onResponse is skipped and text is logged at INFO instead.
+      // Toggled by the muteResponses() handle returned in PromptResult so
+      // callers can silence delivery before background work (memory update).
+      let responseMuted = false;
+
+      // Queue async onResponse deliveries and flush them before prompt() returns.
+      // This guarantees callers don't observe "prompt completed" before room sends
+      // and history persistence have finished.
+      let pendingResponseDelivery: Promise<void> = Promise.resolve();
+      let pendingResponseError: unknown = null;
+      const deliveredAssistantMessages = new WeakSet<object>();
+      const queueResponseDelivery = (text: string): void => {
+        pendingResponseDelivery = pendingResponseDelivery
+          .then(async () => {
+            sessionCtx.responseTimestamp.lastResponseAt = Date.now();
+            await this.onResponse?.(text);
+          })
+          .catch((error) => {
+            if (pendingResponseError === null) {
+              pendingResponseError = error;
+            }
+          });
+      };
+
+      let pendingArtifactUrlRetry: string | undefined;
+      let artifactUrlRetryAttempted = false;
+      const queueArtifactUrlRetryIfNeeded = (assistantMessage: unknown, text: string): boolean => {
+        if (!lastCreatedArtifactUrl || artifactUrlRetryAttempted || pendingArtifactUrlRetry ||
+            !isPotentialFinalAssistantMessage(assistantMessage) || text.includes(lastCreatedArtifactUrl)) {
+          return false;
+        }
+        pendingArtifactUrlRetry = lastCreatedArtifactUrl;
+        return true;
+      };
+
+      unsubscribe = session.subscribe((event) => {
+        if (event.type === "turn_end") {
+          iterations += 1;
+          return;
+        }
+
+        if (event.type === "tool_execution_start") {
+          toolCallsCount += 1;
+          this.logger.info(`Tool ${event.toolName} started: ${summarizeToolPayload(event.args, this.llmDebugMaxChars)}`);
+          return;
+        }
+
+        if (event.type === "message_end") {
+          const message = event.message as { role?: string };
+          if (message.role === "assistant") {
+            const text = extractAssistantTextFromEvent(event.message).trim();
+            const assistantMessageObj = event.message && typeof event.message === "object"
+              ? event.message as object
+              : null;
+            const queuedArtifactRetry = text && !responseMuted
+              ? queueArtifactUrlRetryIfNeeded(event.message, text)
+              : false;
+            if (text && this.onResponse && !responseMuted) {
+              if (!assistantMessageObj || !deliveredAssistantMessages.has(assistantMessageObj)) {
+                if (queuedArtifactRetry) {
+                  this.logger.debug("Deferring assistant response missing last artifact URL", `url=${pendingArtifactUrlRetry ?? "unknown"}`);
+                } else {
+                  if (assistantMessageObj) {
+                    deliveredAssistantMessages.add(assistantMessageObj);
+                  }
+                  // Don't decorate NULL sentinel responses with suffixes — they must
+                  // pass through to onResponse unchanged so callers can suppress them.
+                  const decorated = responseSuffix && !/^["'`]?\s*null\s*["'`]?$/iu.test(text)
+                    ? `${text} ${responseSuffix}`
+                    : text;
+                  queueResponseDelivery(decorated);
+                }
+              }
+            } else if (text && responseMuted) {
+              this.logger.info("Suppressing post-response text", truncateForDebug(text, 200));
+            }
+
+            this.logger.debug(
+              "llm_io response agent_stream",
+              safeJson(renderMessageForDebug(event.message, this.llmDebugMaxChars), this.llmDebugMaxChars),
+            );
+          }
+          return;
+        }
+
+        if (event.type === "tool_execution_end") {
+          if (event.isError) {
+            this.logger.warn(`Tool ${event.toolName} failed: ${summarizeToolPayload(event.result, this.llmDebugMaxChars)}`);
+          } else {
+            this.logger.info(`Tool ${event.toolName} executed: ${summarizeToolPayload(event.result, this.llmDebugMaxChars)}`);
+          }
+          this.logger.debug(
+            "tool_execution_end details",
+            safeJson({
+              toolName: event.toolName,
+              isError: event.isError,
+              result: event.result,
+            }, this.llmDebugMaxChars),
+          );
+
+          if (!event.isError && ARTIFACT_TOOLS.has(event.toolName)) {
+            lastCreatedArtifactUrl = extractCreatedArtifactUrl(event.result) ?? lastCreatedArtifactUrl;
+          }
+
+          // Vision fallback: once activated, annotate all subsequent responses.
+          if (!event.isError && !responseSuffix.includes("vision fallback") &&
+              sessionCtx.getVisionFallbackActivated() && options.visionFallbackModel) {
+            const spec = parseModelSpec(options.visionFallbackModel);
+            responseSuffix = `${responseSuffix} [vision fallback to ${spec.modelId}]`.trim();
+          }
+        }
+      });
+
+      // Provider-key preflight: inside the try so a missing key still runs the
+      // finally cleanup instead of leaking the freshly created session.
+      const primaryProvider = this.modelAdapter.resolve(this.model).spec.provider;
+      await sessionCtx.ensureProviderKey(primaryProvider);
+      promptAttempted = true;
+
       const refusalFallbackActivated = await this.promptWithRefusalFallback(
         session,
         agent,
@@ -392,22 +420,26 @@ export class SessionRunner {
         },
       };
     } finally {
-      if (!usageRecorded) {
+      // Only account usage when the preflight passed — a failed key check made
+      // no LLM calls, and session.messages may contain preloaded context or
+      // resumed history whose usage must not be double-counted.
+      if (!usageRecorded && promptAttempted) {
         const usageSummary = sumAssistantUsage(session.messages);
         if (usageSummary.usage.totalTokens > 0 || usageSummary.usage.cost.total > 0) {
           recordUsage(resolveCurrentLlmCallType(), this.model, usageSummary.usage);
         }
       }
-      // Error-path safety: if the session is never returned (exception before return),
-      // unsubscribe and ensure toolSet is still cleaned up.  On the success path,
-      // both are deferred — the caller triggers them via session.dispose().
-      if (!sessionReturned && !unsubscribed) {
-        unsubscribed = true;
-        unsubscribe();
-      }
-      if (!sessionReturned && !toolSetDisposed && toolSet?.dispose) {
-        toolSetDisposed = true;
-        await toolSet.dispose();
+      // Error-path safety: if the session is never returned (exception before
+      // return), run the full wrapped dispose (unsubscribe + toolSet.dispose +
+      // AgentSession.dispose).  On the success path it is deferred — the
+      // caller triggers it via session.dispose().  Cleanup failures are logged
+      // rather than thrown so they cannot mask the primary error.
+      if (!sessionReturned) {
+        try {
+          await session.dispose();
+        } catch (cleanupError) {
+          this.logger.warn(`Session cleanup after failed prompt() threw: ${stringifyError(cleanupError)}`);
+        }
       }
     }
   }
