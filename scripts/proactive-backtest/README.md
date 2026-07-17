@@ -37,16 +37,20 @@ False negatives (going silent where opus-4-5 spoke) are the secondary metric.
 
 ## Workflow
 
+All datasets/results/annotation sheets contain private chat logs and live
+outside the repo (worktrees are ephemeral anyway):
+`BACKTEST_DIR=~/.muaddib-profiles/MuaddibLLM/backtest-proactive-2026-07`.
+
 ```sh
 # 1. Extract dataset (silver labels from production opus-4-5 decisions)
 npx tsx scripts/proactive-backtest/extract.ts \
   --logs ~/.muaddib-profiles/MuaddibLLM/logs --from 2026-04-01 \
-  --out scripts/proactive-backtest/data/dataset.jsonl
+  --out $BACKTEST_DIR/dataset.jsonl
 
 # 2. Run a candidate (dev subset: --max-null 60 --max-interject 60;
 #    omit caps for a full run). Results append + resume on rerun.
 npx tsx scripts/proactive-backtest/run.ts \
-  --dataset scripts/proactive-backtest/data/dataset.jsonl \
+  --dataset $BACKTEST_DIR/dataset.jsonl \
   --auth ~/.muaddib-profiles/MuaddibLLM/auth.json \
   --model anthropic:claude-fable-5 --reasoning low \
   --max-null 60 --max-interject 60
@@ -55,16 +59,17 @@ npx tsx scripts/proactive-backtest/run.ts \
 
 # 3. Score all runs (sorted by FP rate)
 npx tsx scripts/proactive-backtest/report.ts \
-  --dataset scripts/proactive-backtest/data/dataset.jsonl \
-  scripts/proactive-backtest/results/*.jsonl
+  --dataset $BACKTEST_DIR/dataset.jsonl \
+  $BACKTEST_DIR/results/*.jsonl
 
 # 4. Optionally generate an annotation sheet for a run's disagreements,
 #    fill in the gold[...] lines, and feed back via --annotations
 npx tsx scripts/proactive-backtest/report.ts \
-  --dataset scripts/proactive-backtest/data/dataset.jsonl \
-  --disagreements-for scripts/proactive-backtest/results/<run>.jsonl \
-  scripts/proactive-backtest/results/<run>.jsonl
+  --dataset $BACKTEST_DIR/dataset.jsonl \
+  --disagreements-for $BACKTEST_DIR/results/<run>.jsonl \
+  $BACKTEST_DIR/results/<run>.jsonl
 ```
 
-`data/` and `results/` are gitignored (chat logs are private); the dataset is
-reproducible from the profile logs via extract.ts.
+The dataset is reproducible from the profile logs via extract.ts.
+(`data/` and `results/` are additionally gitignored as a safety net in case
+something gets generated in-repo by accident.)

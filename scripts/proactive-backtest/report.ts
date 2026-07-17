@@ -41,7 +41,7 @@ if (!datasetPath) {
   console.error("Usage: report.ts --dataset <jsonl> [--annotations <md>] [--disagreements-for <run.jsonl> --disagreements-out <md>] <results.jsonl>...");
   process.exit(1);
 }
-const flagsWithValue = new Set(["--dataset", "--annotations", "--disagreements-for", "--disagreements-out", "--disagreements-max"]);
+const flagsWithValue = new Set(["--dataset", "--annotations", "--disagreements-for", "--disagreements-out", "--disagreements-max", "--disagreements-type"]);
 const resultPaths: string[] = [];
 for (let i = 2; i < process.argv.length; i++) {
   if (flagsWithValue.has(process.argv[i])) { i++; continue; }
@@ -133,11 +133,14 @@ const disFor = argValue("--disagreements-for");
 if (disFor) {
   const disOut = argValue("--disagreements-out") ?? disFor.replace(/\.jsonl$/, "-disagreements.md");
   const disMax = argValue("--disagreements-max") ? Number(argValue("--disagreements-max")) : Infinity;
-  // FP-type disagreements (candidate spoke where reference stayed silent) first —
-  // they are the annotation priority; then deterministic by id (results files
-  // are in concurrent-completion order).
-  const recs = loadRun(disFor).sort((a, b) =>
-    Number(b.label === "null") - Number(a.label === "null") || (a.id < b.id ? -1 : 1));
+  // "fp" = candidate spoke where silver stayed silent; "fn" = the reverse.
+  const disType = argValue("--disagreements-type") ?? "all";
+  // FP-type first (annotation priority), then deterministic by id (results
+  // files are in concurrent-completion order).
+  const recs = loadRun(disFor)
+    .filter((r) => disType === "all" || (disType === "fp" ? r.label === "null" : r.label === "interject"))
+    .sort((a, b) =>
+      Number(b.label === "null") - Number(a.label === "null") || (a.id < b.id ? -1 : 1));
   const lines: string[] = [
     `# Disagreements: ${basename(disFor)}`,
     "",

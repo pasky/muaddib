@@ -63,10 +63,43 @@ moderately more often, the safe direction of error. Replay latency/cost
 (~3x faster, ~30% cheaper than opus-4-5 replay) are indicative only, as
 production runs include tool use.
 
+## Annotation round (2026-07-17)
+
+pasky annotated the top-20 FP-type disagreements of opus-4-8+v2 (sheet now at
+`~/.muaddib-profiles/MuaddibLLM/backtest-proactive-2026-07/annotate-opus48-v2.md`):
+**8 interject / 9 either / 3 null** — i.e. only 3/20 of the candidate's
+alleged FPs were genuinely bad, 8 were production opus-4-5's own missed
+interjections, 9 don't matter. Gold-adjusted full-set scores:
+
+| run                    | FP% (gold)   | FN% (silver, one-sided¹) |
+|------------------------|--------------|--------------------------|
+| opus-4-8 strict-v5     | **12.0** (25/209) | 42.9² (132/308)     |
+| opus-4-8 strict-v2     | 12.9 (27/209)| 32.1 (99/308)            |
+| opus-4-5 replay        | 16.3 (34/209)| 20.1 (62/308)            |
+
+¹ FN-type disagreements were not annotated (sheet ready at
+`annotate-opus48-v2-FN.md`), so FN rates still take silver at face value —
+the same silver-error effect would likely shrink the FN gap too.
+² strict-v5 adds a check: on fast-moving topics (LLMs, tooling, prices),
+verify with live search before interjecting, else NULL (pasky's suggestion
+after annotating stale-tech-answer FPs — it flips 2 of the 3 gold-null cases
+to NULL). The harness has no tools, so its in-harness FN is an **upper
+bound**; in production the model can search and then interject.
+
+All three gold-null FPs were confident-but-outdated tech answers — the most
+egregious FP flavor (unprompted + wrong).
+
 ## Recommendation (applied)
 
 - `rooms.common.proactive.models.serious` → `anthropic:claude-opus-4-8`
-- `rooms.common.proactive.prompts.seriousExtra` → `prompts/strict-v2.txt`
+- `rooms.common.proactive.prompts.seriousExtra` → `prompts/strict-v5.txt`
+  (strict-v2 + live-search check for fast-moving topics; fall back to
+  `strict-v2.txt` if production proves too quiet)
+
+In practice (108-day dataset, ~8 channels): production opus-4-5 interjected
+~5.4x/day; the opus-4-5 tool-less replay ~4.8x/day; opus-4-8+v2 replay
+~4.0x/day; opus-4-8+v5 replay ~3.5x/day (production will land above this
+since tools recover part of check-5's NULLs).
 
 Applied to `config.json.example` (template for new installs) and to the live
 `~/.muaddib-profiles/MuaddibLLM/config.json` (backup:
