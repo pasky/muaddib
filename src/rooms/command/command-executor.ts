@@ -34,6 +34,7 @@ import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { parseModelSpec } from "../../models/model-spec.js";
 import {
   checkUserBudget,
+  resolveCostPolicyConfig,
   shouldEmitQuotaWarning,
 } from "../../cost/cost-policy.js";
 import { remapToOpenRouter } from "../../cost/model-remap.js";
@@ -355,7 +356,7 @@ export class CommandExecutor {
 
     if (resolved.helpRequested) {
       logger.debug("Sending help message", `nick=${message.nick}`);
-      await deliver(this.resolver.buildHelpMessage(message.serverTag, message.channelName));
+      await deliver(this.resolver.buildHelpMessage(message.serverTag, message.channelName, this.buildHelpNotes()));
       return null;
     }
 
@@ -429,11 +430,38 @@ export class CommandExecutor {
     };
   }
 
+  /** Terse extra segments appended to the !h help message. */
+  private buildHelpNotes(): string[] {
+    const notes: string[] = [];
+
+    const policy = resolveCostPolicyConfig(this.runtime.config.getCostPolicyConfig());
+    if (policy) {
+      notes.push(`free usage $${policy.freeTierBudgetUsd}/${policy.freeTierWindowHours}h (see !balance, !setkey, !setmodel)`);
+    }
+
+    const tools = this.agentConfig.tools;
+    const subagents = [
+      tools?.deepResearch?.model ? `deep research (${modelStrCore(tools.deepResearch.model)})` : null,
+      tools?.oracle?.model ? `oracle (${modelStrCore(tools.oracle.model)})` : null,
+    ].filter((s): s is string => s !== null);
+    if (subagents.length > 0) {
+      notes.push(`agents can use ${subagents.join(" and ")} subagents`);
+    }
+
+    return notes;
+  }
+
   private async handleBuiltinCommand(
     message: RoomMessage,
     resolved: import("./resolver.js").ResolvedCommand,
     deliver: (text: string) => Promise<void>,
   ): Promise<void> {
+    const isKeyOrBalance = resolved.builtinCommand === "!setkey" || resolved.builtinCommand === "!balance";
+    if (isKeyOrBalance && !message.isPrivate) {
+      await deliver(`${message.nick}: in private, please — /msg ${message.mynick} ${resolved.builtinCommand}`);
+      return;
+    }
+
     const costPolicy = this.runtime.config.getCostPolicyConfig();
     switch (resolved.builtinCommand) {
       case "!setkey":

@@ -401,6 +401,7 @@ export class SlackRoomMonitor {
       mynick: event.mynick,
       content: cleanedContent,
       isDirect,
+      isPrivate: isDirectMessageChannel(event.channelType, event.isDirectMessage),
       trusted,
       // Preserve the mention context for history and LLM (e.g. "@MuaddibLLM keeppandoraopen.org").
       // Only set for channel mentions (not DMs where there is no mention to preserve).

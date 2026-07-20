@@ -10,6 +10,8 @@ export interface RoomMessage {
   originalContent?: string;
   /** Whether the message is a direct command (mention, DM) vs passive channel noise. Set at construction by the monitor. */
   isDirect?: boolean;
+  /** Whether the message arrived via a private conversation (DM/query) rather than a channel. Set at construction by the monitor. */
+  isPrivate?: boolean;
   /** Whether the user is trusted per the room's userAllowlist. Undefined when no allowlist is configured, true/false when it is. */
   trusted?: boolean;
   platformId?: string;

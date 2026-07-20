@@ -23,6 +23,14 @@ import type { CommandConfig } from "./resolver.js";
 
 // ── Builtin command handlers ──
 
+const BYOK_GUIDE = [
+  "To bring your own OpenRouter key:",
+  "1. Sign up at https://openrouter.ai/ - there is a variety of payment options including Stripe and LN",
+  "2. Go to https://openrouter.ai/keys to create an API key",
+  "3. IMPORTANT: set a tight budget limit on this key (bot operator assumes no responsibility; keys may leak, bot may be buggy, ...)",
+  "4. Send me the key via DM: /msg <me> !setkey openrouter <your-key>",
+].join("\n");
+
 export async function handleSetKeyCommand(
   userKeyStore: UserKeyStore,
   message: RoomMessage,
@@ -31,7 +39,7 @@ export async function handleSetKeyCommand(
 ): Promise<void> {
   const args = parseSetKeyArgs(queryText);
   if (!args || args.provider !== "openrouter") {
-    await deliver(`${message.nick}: usage: !setkey openrouter <key> (omit <key> to clear)`);
+    await deliver(`${message.nick}: usage: !setkey openrouter <key> (omit <key> to clear)\n${BYOK_GUIDE}`);
     return;
   }
 
@@ -71,13 +79,7 @@ export async function handleBalanceCommand(
     ledger,
   });
 
-  const byokGuide = [
-    "To bring your own OpenRouter key:",
-    "1. Sign up at https://openrouter.ai/ - there is a variety of payment options including Stripe and LN",
-    "2. Go to https://openrouter.ai/keys to create an API key",
-    "3. IMPORTANT: set a tight budget limit on this key (bot operator assumes no responsibility; keys may leak, bot may be buggy, ...)",
-    "4. Send me the key via DM: /msg <me> !setkey openrouter <your-key>",
-  ].join("\n");
+  const byokRef = "To bring your own OpenRouter key, see: !setkey";
 
   if (status.state === "byok") {
     const policy = resolveCostPolicyConfig(costPolicy);
@@ -106,7 +108,7 @@ export async function handleBalanceCommand(
 
   const policy = resolveCostPolicyConfig(costPolicy);
   if (!policy) {
-    await deliver(`${message.nick}: free-tier budget enforcement is disabled on this bot.\n${byokGuide}`);
+    await deliver(`${message.nick}: free-tier budget enforcement is disabled on this bot. ${byokRef}`);
     return;
   }
 
@@ -114,11 +116,11 @@ export async function handleBalanceCommand(
   const remaining = status.remaining ?? Math.max(0, policy.freeTierBudgetUsd - spent);
 
   if (status.state === "over_budget") {
-    await deliver(`${message.nick}: your free tier budget is exhausted — $${spent.toFixed(4)} / $${policy.freeTierBudgetUsd.toFixed(2)} in the last ${policy.freeTierWindowHours}h. To keep using me, bring your own OpenRouter key:\n${byokGuide}`);
+    await deliver(`${message.nick}: your free tier budget is exhausted — $${spent.toFixed(4)} / $${policy.freeTierBudgetUsd.toFixed(2)} in the last ${policy.freeTierWindowHours}h. To keep using me, bring your own OpenRouter key — see: !setkey`);
     return;
   }
 
-  await deliver(`${message.nick}: free tier usage is $${spent.toFixed(4)} / $${policy.freeTierBudgetUsd.toFixed(2)} in the last ${policy.freeTierWindowHours}h; $${remaining.toFixed(4)} remaining.\n${byokGuide}`);
+  await deliver(`${message.nick}: free tier usage is $${spent.toFixed(4)} / $${policy.freeTierBudgetUsd.toFixed(2)} in the last ${policy.freeTierWindowHours}h; $${remaining.toFixed(4)} remaining. ${byokRef}`);
 }
 
 export async function handleSetModelCommand(

@@ -79,6 +79,7 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
       mynick: options.mynick ?? "testbot",
       content: options.message,
       isDirect: true,
+      isPrivate: true,
     };
 
     const arc = message.arc;

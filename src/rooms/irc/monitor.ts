@@ -275,6 +275,7 @@ export class IrcRoomMonitor {
       mynick,
       content: isDirect ? cleanedMessage : normalizedMessage,
       isDirect,
+      isPrivate,
       trusted,
       // Preserve the full channel message (e.g. "MuaddibLLM: keeppandoraopen.org") for history
       // and LLM context; only set when the bot-nick prefix was actually stripped.

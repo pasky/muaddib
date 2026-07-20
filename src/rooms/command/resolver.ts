@@ -288,7 +288,7 @@ export class CommandResolver {
     return token != null && this.builtinTokens.has(token);
   }
 
-  buildHelpMessage(serverTag: string, channelName: string): string {
+  buildHelpMessage(serverTag: string, channelName: string, extraNotes: string[] = []): string {
     const channelMode = this.getChannelMode(serverTag, channelName);
     const classifierModel = this.commandConfig.modeClassifier.model;
 
@@ -316,9 +316,11 @@ export class CommandResolver {
       })
       .join(", ");
 
-    return `${
-      `default is ${defaultDescription}; modes: ${modeParts}; `
-    }use @modelid to override model; !c disables context; !balance shows your budget status; !setmodel remaps prefixes to your own model (BYOK)`;
+    const segments = [
+      `default is ${defaultDescription}; modes: ${modeParts}; use @modelid to override model; !c disables context`,
+      ...extraNotes,
+    ];
+    return segments.join("; ");
   }
 
   async resolve(input: {

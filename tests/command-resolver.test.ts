@@ -201,6 +201,10 @@ describe("CommandResolver", () => {
     // !s and !a share the mode-default model (no model override on !a in base config)
     expect(help).toContain("!s/!a = serious");
     expect(help).not.toMatch(/!s = serious.*!a = serious/);
+
+    // Extra notes are appended as additional segments
+    const helpWithNotes = resolver.buildHelpMessage("libera", "#general", ["free usage $10/72h"]);
+    expect(helpWithNotes).toContain("!c disables context; free usage $10/72h");
   });
 
   it("supports steering bypass detection for non-steering mode", () => {

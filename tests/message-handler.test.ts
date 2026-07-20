@@ -1408,6 +1408,15 @@ describe("RoomMessageHandler", () => {
     const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
+      configData: {
+        costPolicy: { freeTierBudgetUsd: 10 },
+        agent: {
+          tools: {
+            deepResearch: { model: "openrouter:x-ai/grok-4" },
+            oracle: { model: "anthropic:claude-opus-4" },
+          },
+        },
+      },
       classifyMode: async () => "EASY_SERIOUS",
       runnerFactory: () => {
         throw new Error("runner should not be called for help");
@@ -1419,6 +1428,8 @@ describe("RoomMessageHandler", () => {
     await handler.handleIncomingMessage(incoming, { sendResponse: async (text) => { sent.push(text); } });
 
     expect(sent[0]).toContain("default is");
+    expect(sent[0]).toContain("free usage $10/72h (see !balance, !setkey, !setmodel)");
+    expect(sent[0]).toContain("agents can use deep research (grok-4) and oracle (claude-opus-4) subagents");
 
     await history.close();
   });
@@ -1429,7 +1440,7 @@ describe("RoomMessageHandler", () => {
     const muaddibHome = await mkdtemp(join(tmpdir(), "muaddib-setkey-"));
 
     try {
-      const incoming = makeMessage("!setkey openrouter sk-or-v1-secret", { isDirect: true });
+      const incoming = makeMessage("!setkey openrouter sk-or-v1-secret", { isDirect: true, isPrivate: true });
       const sent: string[] = [];
 
       const handler = createHandler({
@@ -1487,7 +1498,7 @@ describe("RoomMessageHandler", () => {
         model: "openai:gpt-4o-mini",
       });
 
-      const incoming = makeMessage("!balance", { isDirect: true });
+      const incoming = makeMessage("!balance", { isDirect: true, isPrivate: true });
       const sent: string[] = [];
       const handler = createHandler({
         roomConfig: roomConfig as any,
@@ -1513,11 +1524,48 @@ describe("RoomMessageHandler", () => {
       expect(sent[0]).toContain("free tier");
       expect(sent[0]).toContain("$0.7500 / $2.00");
       expect(sent[0]).toContain("last 72h");
-      expect(sent[0]).toContain("openrouter.ai");
-      expect(sent[0]).toContain("/msg");
-      expect(sent[0]).toContain("!setkey openrouter");
-      expect(sent[0]).toContain("budget limit");
-      expect(sent[0]).toContain("no responsibility");
+      expect(sent[0]).toContain("see: !setkey");
+      expect(sent[0]).not.toContain("openrouter.ai");
+    } finally {
+      await rm(muaddibHome, { recursive: true, force: true });
+      await history.close();
+    }
+  });
+
+  it("refuses !balance and !setkey in channels with a terse /msg pointer", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+    const muaddibHome = await mkdtemp(join(tmpdir(), "muaddib-builtin-channel-"));
+
+    try {
+      const handler = createHandler({
+        roomConfig: roomConfig as any,
+        history,
+        muaddibHome,
+        classifyMode: async () => "EASY_SERIOUS",
+        runnerFactory: () => {
+          throw new Error("runner should not be called for channel builtins");
+        },
+      });
+
+      const sent: string[] = [];
+      const sendResponse = async (text: string) => { sent.push(text); };
+
+      await handler.handleIncomingMessage(
+        makeMessage("!balance", { isDirect: true }),
+        { sendResponse },
+      );
+      await handler.handleIncomingMessage(
+        makeMessage("!setkey openrouter sk-or-v1-secret", { isDirect: true }),
+        { sendResponse },
+      );
+
+      expect(sent[0]).toContain("/msg muaddib !balance");
+      expect(sent[1]).toContain("/msg muaddib !setkey");
+      // The key must not be stored when refused.
+      await expect(
+        readFile(join(muaddibHome, "users", buildArc("libera", "alice"), "auth.json"), "utf-8"),
+      ).rejects.toThrow();
     } finally {
       await rm(muaddibHome, { recursive: true, force: true });
       await history.close();
