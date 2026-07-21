@@ -1428,7 +1428,7 @@ describe("RoomMessageHandler", () => {
     await handler.handleIncomingMessage(incoming, { sendResponse: async (text) => { sent.push(text); } });
 
     expect(sent[0]).toContain("default is");
-    expect(sent[0]).toContain("free usage $10/72h (see !balance, !setkey, !setmodel)");
+    expect(sent[0]).toContain("free usage $10/72h (/msg muaddib !balance, !setkey, !setmodel)");
     expect(sent[0]).toContain("agents can use deep research (grok-4) and oracle (claude-opus-4) subagents");
 
     await history.close();
@@ -1521,10 +1521,10 @@ describe("RoomMessageHandler", () => {
         },
       });
 
-      expect(sent[0]).toContain("free tier");
+      expect(sent[0]).toContain("free usage");
       expect(sent[0]).toContain("$0.7500 / $2.00");
       expect(sent[0]).toContain("last 72h");
-      expect(sent[0]).toContain("see: !setkey");
+      expect(sent[0]).toContain("/msg muaddib !setkey");
       expect(sent[0]).not.toContain("openrouter.ai");
     } finally {
       await rm(muaddibHome, { recursive: true, force: true });
@@ -1967,9 +1967,9 @@ describe("RoomMessageHandler", () => {
       });
 
       expect(sent).toHaveLength(1);
-      expect(sent[0]).toContain("free tier budget is exhausted");
+      expect(sent[0]).toContain("free budget is exhausted");
       expect(sent[0]).toContain("$2.1000 / $2.00");
-      expect(sent[0]).toContain("/msg <me> !balance for more details");
+      expect(sent[0]).toContain("/msg muaddib !balance for more details");
     } finally {
       await rm(muaddibHome, { recursive: true, force: true });
       await history.close();
@@ -2026,7 +2026,7 @@ describe("RoomMessageHandler", () => {
       const warningMsg = sent.find((s) => s.includes("heads up"));
       expect(warningMsg).toBeDefined();
       expect(warningMsg).toContain("93%");
-      expect(warningMsg).toContain("/msg <me> !balance for more details");
+      expect(warningMsg).toContain("/msg muaddib !balance for more details");
     } finally {
       await rm(muaddibHome, { recursive: true, force: true });
       await history.close();

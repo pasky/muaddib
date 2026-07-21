@@ -23,13 +23,15 @@ import type { CommandConfig } from "./resolver.js";
 
 // ── Builtin command handlers ──
 
-const BYOK_GUIDE = [
-  "To bring your own OpenRouter key:",
-  "1. Sign up at https://openrouter.ai/ - there is a variety of payment options including Stripe and LN",
-  "2. Go to https://openrouter.ai/keys to create an API key",
-  "3. IMPORTANT: set a tight budget limit on this key (bot operator assumes no responsibility; keys may leak, bot may be buggy, ...)",
-  "4. Send me the key via DM: /msg <me> !setkey openrouter <your-key>",
-].join("\n");
+function byokGuide(mynick: string): string {
+  return [
+    "To bring your own OpenRouter key:",
+    "1. Sign up at https://openrouter.ai/ - there is a variety of payment options including Stripe and LN",
+    "2. Go to https://openrouter.ai/keys to create an API key",
+    "3. IMPORTANT: set a tight budget limit on this key (bot operator assumes no responsibility; keys may leak, bot may be buggy, ...)",
+    `4. Send me the key via DM: /msg ${mynick} !setkey openrouter <your-key>`,
+  ].join("\n");
+}
 
 export async function handleSetKeyCommand(
   userKeyStore: UserKeyStore,
@@ -39,7 +41,7 @@ export async function handleSetKeyCommand(
 ): Promise<void> {
   const args = parseSetKeyArgs(queryText);
   if (!args || args.provider !== "openrouter") {
-    await deliver(`${message.nick}: usage: !setkey openrouter <key> (omit <key> to clear)\n${BYOK_GUIDE}`);
+    await deliver(`${message.nick}: usage: !setkey openrouter <key> (omit <key> to clear)\n${byokGuide(message.mynick)}`);
     return;
   }
 
@@ -51,7 +53,7 @@ export async function handleSetKeyCommand(
 
   if (key) {
     userKeyStore.setOpenRouterKey(userArc, key);
-    await deliver(`${message.nick}: saved your OpenRouter key. Future commands will use OpenRouter on your dime. To clear it: /msg <me> !setkey openrouter`);
+    await deliver(`${message.nick}: saved your OpenRouter key. Future commands will use OpenRouter on your dime. To clear it: /msg ${message.mynick} !setkey openrouter`);
     return;
   }
 
@@ -79,25 +81,25 @@ export async function handleBalanceCommand(
     ledger,
   });
 
-  const byokRef = "To bring your own OpenRouter key, see: !setkey";
+  const byokRef = `To bring your own OpenRouter key: /msg ${message.mynick} !setkey`;
 
   if (status.state === "byok") {
     const policy = resolveCostPolicyConfig(costPolicy);
     if (!policy) {
-      await deliver(`${message.nick}: BYOK is active via OpenRouter. Free-tier budget enforcement is disabled on this bot. To clear your key: /msg <me> !setkey openrouter`);
+      await deliver(`${message.nick}: BYOK is active via OpenRouter. Free budget enforcement is disabled on this bot. To clear your key: /msg ${message.mynick} !setkey openrouter`);
       return;
     }
 
     const freeSpend = await ledger.getUserCostInWindow(userArc, policy.freeTierWindowHours, { byok: false });
     const byokSpend = await ledger.getUserCostInWindow(userArc, policy.freeTierWindowHours, { byok: true });
-    await deliver(`${message.nick}: BYOK is active via OpenRouter. Free tier usage in the last ${policy.freeTierWindowHours}h: $${freeSpend.toFixed(4)} / $${policy.freeTierBudgetUsd.toFixed(2)}. BYOK usage in the same window: $${byokSpend.toFixed(4)}. To clear your key: /msg <me> !setkey openrouter`);
+    await deliver(`${message.nick}: BYOK is active via OpenRouter. Free usage in the last ${policy.freeTierWindowHours}h: $${freeSpend.toFixed(4)} / $${policy.freeTierBudgetUsd.toFixed(2)}. BYOK usage in the same window: $${byokSpend.toFixed(4)}. To clear your key: /msg ${message.mynick} !setkey openrouter`);
     return;
   }
 
   if (status.state === "exempt") {
     const policy = resolveCostPolicyConfig(costPolicy);
     if (!policy) {
-      await deliver(`${message.nick}: operator-funded access is enabled for you (exempt), and free-tier budget enforcement is disabled on this bot.`);
+      await deliver(`${message.nick}: operator-funded access is enabled for you (exempt), and free budget enforcement is disabled on this bot.`);
       return;
     }
 
@@ -108,7 +110,7 @@ export async function handleBalanceCommand(
 
   const policy = resolveCostPolicyConfig(costPolicy);
   if (!policy) {
-    await deliver(`${message.nick}: free-tier budget enforcement is disabled on this bot. ${byokRef}`);
+    await deliver(`${message.nick}: free budget enforcement is disabled on this bot. ${byokRef}`);
     return;
   }
 
@@ -116,11 +118,11 @@ export async function handleBalanceCommand(
   const remaining = status.remaining ?? Math.max(0, policy.freeTierBudgetUsd - spent);
 
   if (status.state === "over_budget") {
-    await deliver(`${message.nick}: your free tier budget is exhausted — $${spent.toFixed(4)} / $${policy.freeTierBudgetUsd.toFixed(2)} in the last ${policy.freeTierWindowHours}h. To keep using me, bring your own OpenRouter key — see: !setkey`);
+    await deliver(`${message.nick}: your free budget is exhausted — $${spent.toFixed(4)} / $${policy.freeTierBudgetUsd.toFixed(2)} in the last ${policy.freeTierWindowHours}h. To keep using me, bring your own OpenRouter key: /msg ${message.mynick} !setkey`);
     return;
   }
 
-  await deliver(`${message.nick}: free tier usage is $${spent.toFixed(4)} / $${policy.freeTierBudgetUsd.toFixed(2)} in the last ${policy.freeTierWindowHours}h; $${remaining.toFixed(4)} remaining. ${byokRef}`);
+  await deliver(`${message.nick}: free usage is $${spent.toFixed(4)} / $${policy.freeTierBudgetUsd.toFixed(2)} in the last ${policy.freeTierWindowHours}h; $${remaining.toFixed(4)} remaining. ${byokRef}`);
 }
 
 export async function handleSetModelCommand(
@@ -274,6 +276,7 @@ export function resolveByokRemap(
   triggerOverrides: Record<string, Record<string, unknown>>,
   userArc: string,
   nick: string,
+  mynick: string,
   trigger: string,
   modelSpec: string,
   modeConfig: { model?: string },
@@ -301,7 +304,7 @@ export function resolveByokRemap(
 
   let driftWarning: string | null = null;
   if (currentOperatorDefault !== userRemap.systemDefaultAtSet) {
-    driftWarning = `${nick}: heads up \u2014 operator changed default for ${trigger} from ${userRemap.systemDefaultAtSet} to ${currentOperatorDefault}. Your remap ${userRemap.model} is still active. Clear with: /msg <me> !setmodel ${trigger}`;
+    driftWarning = `${nick}: heads up \u2014 operator changed default for ${trigger} from ${userRemap.systemDefaultAtSet} to ${currentOperatorDefault}. Your remap ${userRemap.model} is still active. Clear with: /msg ${mynick} !setmodel ${trigger}`;
     policyStore.markSystemDefaultNotified(userArc, trigger, currentOperatorDefault);
   }
 

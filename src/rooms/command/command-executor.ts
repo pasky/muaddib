@@ -356,7 +356,7 @@ export class CommandExecutor {
 
     if (resolved.helpRequested) {
       logger.debug("Sending help message", `nick=${message.nick}`);
-      await deliver(this.resolver.buildHelpMessage(message.serverTag, message.channelName, this.buildHelpNotes()));
+      await deliver(this.resolver.buildHelpMessage(message.serverTag, message.channelName, this.buildHelpNotes(message.mynick)));
       return null;
     }
 
@@ -431,12 +431,12 @@ export class CommandExecutor {
   }
 
   /** Terse extra segments appended to the !h help message. */
-  private buildHelpNotes(): string[] {
+  private buildHelpNotes(mynick: string): string[] {
     const notes: string[] = [];
 
     const policy = resolveCostPolicyConfig(this.runtime.config.getCostPolicyConfig());
     if (policy) {
-      notes.push(`free usage $${policy.freeTierBudgetUsd}/${policy.freeTierWindowHours}h (see !balance, !setkey, !setmodel)`);
+      notes.push(`free usage $${policy.freeTierBudgetUsd}/${policy.freeTierWindowHours}h (/msg ${mynick} !balance, !setkey, !setmodel)`);
     }
 
     const tools = this.agentConfig.tools;
@@ -538,7 +538,7 @@ export class CommandExecutor {
       const spent = budgetStatus.spent ?? 0;
       const budget = budgetStatus.budget ?? 0;
       const windowHours = budgetStatus.windowHours ?? 0;
-      await deliver(`${message.nick}: your free tier budget is exhausted ($${spent.toFixed(4)} / $${budget.toFixed(2)} in the last ${windowHours}h). /msg <me> !balance for more details.`);
+      await deliver(`${message.nick}: your free budget is exhausted ($${spent.toFixed(4)} / $${budget.toFixed(2)} in the last ${windowHours}h). /msg ${message.mynick} !balance for more details.`);
       return;
     }
 
@@ -554,7 +554,7 @@ export class CommandExecutor {
       )
     ) {
       const pct = Math.round(budgetStatus.usageFraction * 100);
-      await deliver(`${message.nick}: heads up — you've used ${pct}% of your free tier budget ($${(budgetStatus.spent ?? 0).toFixed(4)} / $${(budgetStatus.budget ?? 0).toFixed(2)}). /msg <me> !balance for more details.`);
+      await deliver(`${message.nick}: heads up — you've used ${pct}% of your free budget ($${(budgetStatus.spent ?? 0).toFixed(4)} / $${(budgetStatus.budget ?? 0).toFixed(2)}). /msg ${message.mynick} !balance for more details.`);
     }
 
     const effectiveAuthStorage =
@@ -568,7 +568,7 @@ export class CommandExecutor {
     if (budgetStatus.state === "byok" && !resolved.modelOverride && trigger) {
       const remap = resolveByokRemap(
         this.userPolicyStore, this.resolver.triggerOverrides,
-        userArc, message.nick, trigger, modelSpec, modeConfig, logger,
+        userArc, message.nick, message.mynick, trigger, modelSpec, modeConfig, logger,
       );
       remappedModelSpec = remap.remappedModelSpec;
       driftWarning = remap.driftWarning;
