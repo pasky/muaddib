@@ -30,6 +30,19 @@ export function buildArc(serverTag: string, channelName: string): string {
 }
 
 /**
+ * Platform-appropriate reference telling a user to run a command in a private
+ * conversation: `/msg <mynick> <command>` on IRC-style transports, `DM me:
+ * <command>` on Discord/Slack (which have no /msg).
+ */
+export function dmCommandReference(
+  message: Pick<RoomMessage, "serverTag" | "mynick">,
+  command: string,
+): string {
+  const isDmNative = message.serverTag.startsWith("discord:") || message.serverTag.startsWith("slack:");
+  return isDmNative ? `DM me: ${command}` : `/msg ${message.mynick} ${command}`;
+}
+
+/**
  * Check if a user identifier matches any entry in a platform allowlist (case-insensitive exact match).
  * Used by Discord and Slack monitors. Returns false if identifier is unavailable.
  */

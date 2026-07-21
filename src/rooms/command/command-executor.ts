@@ -44,7 +44,7 @@ import { UserCostLedger } from "../../cost/user-cost-ledger.js";
 import { withPersistedCostSpan, recordUsage, withCostSpan, currentCostSpan } from "../../cost/cost-span.js";
 import { LLM_CALL_TYPE, COST_SOURCE, type CostSource } from "../../cost/llm-call-type.js";
 import { ContextReducerTs, type ContextReducer } from "./context-reducer.js";
-import type { RoomMessage } from "../message.js";
+import { dmCommandReference, type RoomMessage } from "../message.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import type { NetworkAccessApprover } from "../../agent/network-boundary.js";
 import { createModeClassifier } from "./classifier.js";
@@ -356,7 +356,7 @@ export class CommandExecutor {
 
     if (resolved.helpRequested) {
       logger.debug("Sending help message", `nick=${message.nick}`);
-      await deliver(this.resolver.buildHelpMessage(message.serverTag, message.channelName, this.buildHelpNotes(message.mynick)));
+      await deliver(this.resolver.buildHelpMessage(message.serverTag, message.channelName, this.buildHelpNotes(message)));
       return null;
     }
 
@@ -431,12 +431,12 @@ export class CommandExecutor {
   }
 
   /** Terse extra segments appended to the !h help message. */
-  private buildHelpNotes(mynick: string): string[] {
+  private buildHelpNotes(message: Pick<RoomMessage, "serverTag" | "mynick">): string[] {
     const notes: string[] = [];
 
     const policy = resolveCostPolicyConfig(this.runtime.config.getCostPolicyConfig());
     if (policy) {
-      notes.push(`free usage $${policy.freeTierBudgetUsd}/${policy.freeTierWindowHours}h (/msg ${mynick} !balance, !setkey, !setmodel)`);
+      notes.push(`free usage $${policy.freeTierBudgetUsd}/${policy.freeTierWindowHours}h (${dmCommandReference(message, "!balance, !setkey, !setmodel")})`);
     }
 
     const tools = this.agentConfig.tools;
@@ -456,9 +456,9 @@ export class CommandExecutor {
     resolved: import("./resolver.js").ResolvedCommand,
     deliver: (text: string) => Promise<void>,
   ): Promise<void> {
-    const isKeyOrBalance = resolved.builtinCommand === "!setkey" || resolved.builtinCommand === "!balance";
-    if (isKeyOrBalance && !message.isPrivate) {
-      await deliver(`${message.nick}: in private, please — /msg ${message.mynick} ${resolved.builtinCommand}`);
+    const cmd = resolved.builtinCommand;
+    if ((cmd === "!setkey" || cmd === "!balance") && !message.isPrivate) {
+      await deliver(`${message.nick}: in private, please — ${dmCommandReference(message, cmd)}`);
       return;
     }
 
@@ -538,7 +538,7 @@ export class CommandExecutor {
       const spent = budgetStatus.spent ?? 0;
       const budget = budgetStatus.budget ?? 0;
       const windowHours = budgetStatus.windowHours ?? 0;
-      await deliver(`${message.nick}: your free budget is exhausted ($${spent.toFixed(4)} / $${budget.toFixed(2)} in the last ${windowHours}h). /msg ${message.mynick} !balance for more details.`);
+      await deliver(`${message.nick}: your free budget is exhausted ($${spent.toFixed(4)} / $${budget.toFixed(2)} in the last ${windowHours}h). ${dmCommandReference(message, "!balance")} for more details.`);
       return;
     }
 
@@ -554,7 +554,7 @@ export class CommandExecutor {
       )
     ) {
       const pct = Math.round(budgetStatus.usageFraction * 100);
-      await deliver(`${message.nick}: heads up — you've used ${pct}% of your free budget ($${(budgetStatus.spent ?? 0).toFixed(4)} / $${(budgetStatus.budget ?? 0).toFixed(2)}). /msg ${message.mynick} !balance for more details.`);
+      await deliver(`${message.nick}: heads up — you've used ${pct}% of your free budget ($${(budgetStatus.spent ?? 0).toFixed(4)} / $${(budgetStatus.budget ?? 0).toFixed(2)}). ${dmCommandReference(message, "!balance")} for more details.`);
     }
 
     const effectiveAuthStorage =
@@ -568,7 +568,7 @@ export class CommandExecutor {
     if (budgetStatus.state === "byok" && !resolved.modelOverride && trigger) {
       const remap = resolveByokRemap(
         this.userPolicyStore, this.resolver.triggerOverrides,
-        userArc, message.nick, message.mynick, trigger, modelSpec, modeConfig, logger,
+        userArc, message, trigger, modelSpec, modeConfig, logger,
       );
       remappedModelSpec = remap.remappedModelSpec;
       driftWarning = remap.driftWarning;

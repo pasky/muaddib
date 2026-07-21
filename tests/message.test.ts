@@ -9,9 +9,24 @@ import {
 import { createSteeredPassiveAwareConvertToLlm } from "../src/agent/session-factory.js";
 import {
   buildSteeredPassiveMessage,
+  dmCommandReference,
   MUADDIB_STEERED_PASSIVE_CUSTOM_TYPE,
   renderSteeredPassive,
 } from "../src/rooms/message.js";
+
+describe("dmCommandReference", () => {
+  it("uses /msg on IRC-style transports", () => {
+    expect(dmCommandReference({ serverTag: "libera", mynick: "muaddib" }, "!balance"))
+      .toBe("/msg muaddib !balance");
+  });
+
+  it("uses DM wording on Discord and Slack (no /msg there)", () => {
+    expect(dmCommandReference({ serverTag: "discord:HomeGuild", mynick: "Muaddib" }, "!setkey"))
+      .toBe("DM me: !setkey");
+    expect(dmCommandReference({ serverTag: "slack:workspace", mynick: "muaddib" }, "!balance"))
+      .toBe("DM me: !balance");
+  });
+});
 
 import type { AssistantMessage, TextContent, ToolCall } from "@earendil-works/pi-ai";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
