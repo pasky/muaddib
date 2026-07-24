@@ -310,7 +310,7 @@ export class SessionRunner {
 
       // Provider-key preflight: inside the try so a missing key still runs the
       // finally cleanup instead of leaking the freshly created session.
-      const primaryProvider = this.modelAdapter.resolve(this.model).spec.provider;
+      const primaryProvider = (await this.modelAdapter.resolve(this.model)).spec.provider;
       await sessionCtx.ensureProviderKey(primaryProvider);
       promptAttempted = true;
 
@@ -481,7 +481,7 @@ export class SessionRunner {
       }
     }
 
-    const fallbackModel = this.modelAdapter.resolve(refusalFallbackModel);
+    const fallbackModel = await this.modelAdapter.resolve(refusalFallbackModel);
     await ensureProviderKey(fallbackModel.spec.provider);
     agent.state.model = fallbackModel.model;
     addSuffix(`[refusal fallback to ${fallbackModel.spec.modelId}]`);

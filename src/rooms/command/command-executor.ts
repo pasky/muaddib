@@ -722,7 +722,7 @@ export class CommandExecutor {
         let ctxStr = peakTurnInput > 0 ? `${Math.round(peakTurnInput / 1000)}k` : "?";
         if (peakTurnInput > 0) {
           try {
-            const ctxWindow = this.modelAdapter.resolve(effectiveModelSpec).model.contextWindow;
+            const ctxWindow = (await this.modelAdapter.resolve(effectiveModelSpec)).model.contextWindow;
             if (ctxWindow > 0) {
               ctxStr += `/${Math.round(ctxWindow / 1000)}k(${Math.round((peakTurnInput / ctxWindow) * 100)}%)`;
             }

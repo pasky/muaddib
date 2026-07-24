@@ -13,10 +13,8 @@
  * refetched at most every `REMOTE_CATALOG_REFRESH_INTERVAL_MS`, so restarts and
  * short-lived CLI runs resolve new models straight from disk.
  *
- * Known limitation: remote entries always win over same-id static ones, so a
- * cached entry older than a freshly upgraded pi-ai catalog shadows it until the
- * next successful refresh (at most 4h online). pi-coding-agent guards this with
- * `getBuiltinModelDataGeneratedAt()`, which pi-ai only exports from 0.82.
+ * A catalog older than the baked-in one is ignored entirely (pi-coding-agent's
+ * shadowing gate), so upgrading pi-ai can never be undone by a stale cache.
  */
 
 import { randomBytes } from "node:crypto";
@@ -24,6 +22,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import type { Api, Model, MutableModels, Provider } from "@earendil-works/pi-ai";
+import { getBuiltinModelDataGeneratedAt } from "@earendil-works/pi-ai/providers/all";
 
 export const PI_DEV_CATALOG_BASE_URL = "https://pi.dev";
 export const REMOTE_CATALOG_REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1000;
@@ -40,6 +39,11 @@ export interface RemoteModelCatalogOptions {
   baseUrl?: string;
   fetchImpl?: typeof fetch;
   now?: () => number;
+  /**
+   * Generation timestamp of pi-ai's baked catalog; remote entries no newer than
+   * this are ignored so an upgraded pi-ai is never shadowed by a stale cache.
+   */
+  builtinGeneratedAt?: number;
 }
 
 export interface RemoteCatalogRefreshResult {
@@ -53,29 +57,48 @@ export interface RemoteCatalogRefreshResult {
 }
 
 export interface RemoteCatalogRefreshOptions {
-  /** Cache file to restore from and persist to. */
-  cachePath: string;
-  /** Ignore the freshness interval and refetch every requested provider. */
-  force?: boolean;
+  /** Cache file to restore from and persist to. Memory-only when absent. */
+  cachePath?: string;
+  /** Refetch providers whose entry is older than this. Default: 4h. */
+  maxAgeMs?: number;
   signal?: AbortSignal;
 }
 
 export class RemoteModelCatalog {
   private readonly baseUrl: string;
-  private readonly fetchImpl: typeof fetch;
+  private readonly fetchImpl?: typeof fetch;
   private readonly now: () => number;
+  private readonly builtinGeneratedAt?: number;
   private readonly entries = new Map<string, CatalogEntry>();
+  private readonly failures = new Map<string, string>();
   private loadedPath?: string;
   private loading?: Promise<void>;
 
   constructor(options: RemoteModelCatalogOptions = {}) {
     this.baseUrl = options.baseUrl ?? PI_DEV_CATALOG_BASE_URL;
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.fetchImpl = options.fetchImpl;
     this.now = options.now ?? Date.now;
+    this.builtinGeneratedAt = options.builtinGeneratedAt ?? getBuiltinModelDataGeneratedAt();
   }
 
   getModels(providerId: string): readonly Model<Api>[] {
-    return this.entries.get(providerId)?.models ?? [];
+    const entry = this.entries.get(providerId);
+    if (!entry) {
+      return [];
+    }
+    // Older than what pi-ai baked in: the static catalog is the better source.
+    if (this.builtinGeneratedAt !== undefined && entry.lastModified <= this.builtinGeneratedAt) {
+      return [];
+    }
+    return entry.models;
+  }
+
+  /**
+   * Error text of the most recent failed fetch for a provider, so a resolution
+   * failure can say "catalog unavailable" instead of "model does not exist".
+   */
+  getFailure(providerId: string): string | undefined {
+    return this.failures.get(providerId);
   }
 
   /**
@@ -93,8 +116,8 @@ export class RemoteModelCatalog {
    * Restore the persisted catalog. Reads each cache file at most once and
    * coalesces concurrent callers onto the in-flight read.
    */
-  async load(cachePath: string): Promise<void> {
-    if (this.loadedPath === cachePath) {
+  async load(cachePath: string | undefined): Promise<void> {
+    if (cachePath === undefined || this.loadedPath === cachePath) {
       return;
     }
     this.loading ??= this.readCache(cachePath).finally(() => {
@@ -161,6 +184,7 @@ export class RemoteModelCatalog {
     options: RemoteCatalogRefreshOptions,
   ): Promise<RemoteCatalogRefreshResult> {
     await this.load(options.cachePath);
+    const maxAgeMs = options.maxAgeMs ?? REMOTE_CATALOG_REFRESH_INTERVAL_MS;
 
     const fetched: string[] = [];
     const errors = new Map<string, Error>();
@@ -171,26 +195,37 @@ export class RemoteModelCatalog {
         if (options.signal?.aborted) {
           return;
         }
-        if (!options.force && this.isFresh(providerId)) {
+        if (this.isFresh(providerId, maxAgeMs)) {
           return;
         }
         try {
           const entry = await this.fetchProvider(providerId, options.signal);
           this.entries.set(providerId, entry);
+          this.failures.delete(providerId);
           changed = true;
           if (entry.models.length > 0) {
             fetched.push(providerId);
           }
         } catch (error) {
+          const failure = error instanceof Error ? error : new Error(String(error));
+          // Remember the attempt so a persistent outage is not re-probed on
+          // every resolve, and so callers can tell an outage from a typo.
+          this.failures.set(providerId, failure.message);
+          const previous = this.entries.get(providerId);
+          this.entries.set(providerId, {
+            models: previous?.models ?? [],
+            checkedAt: this.now(),
+            lastModified: previous?.lastModified ?? 0,
+          });
           if (options.signal?.aborted) {
             return;
           }
-          errors.set(providerId, error instanceof Error ? error : new Error(String(error)));
+          errors.set(providerId, failure);
         }
       }),
     );
 
-    if (changed) {
+    if (changed && options.cachePath !== undefined) {
       await this.persist(options.cachePath);
     }
 
@@ -201,14 +236,16 @@ export class RemoteModelCatalog {
     return { fetched: fetched.sort(), models, errors, aborted: options.signal?.aborted ?? false };
   }
 
-  private isFresh(providerId: string): boolean {
+  private isFresh(providerId: string, maxAgeMs: number): boolean {
     const entry = this.entries.get(providerId);
-    return entry !== undefined && this.now() - entry.checkedAt < REMOTE_CATALOG_REFRESH_INTERVAL_MS;
+    return entry !== undefined && this.now() - entry.checkedAt < maxAgeMs;
   }
 
   private async fetchProvider(providerId: string, signal: AbortSignal | undefined): Promise<CatalogEntry> {
     const url = new URL(`/api/models/providers/${encodeURIComponent(providerId)}`, this.baseUrl);
-    const response = await this.fetchImpl(url, { headers: { accept: "application/json" }, signal });
+    // Resolved per call so a test-time `fetch` stub is honored.
+    const doFetch = this.fetchImpl ?? globalThis.fetch;
+    const response = await doFetch(url, { headers: { accept: "application/json" }, signal });
     const checkedAt = this.now();
 
     // Providers pi.dev does not publish a catalog for: remember the miss so we

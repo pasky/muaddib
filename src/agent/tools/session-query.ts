@@ -273,7 +273,7 @@ export function createSessionQueryTool(options: ToolContext): MuaddibTool<typeof
           const { session } = ctx;
           const preCount = session.messages.length;
           try {
-            await ctx.ensureProviderKey(modelAdapter.resolve(modelSpec).spec.provider);
+            await ctx.ensureProviderKey((await modelAdapter.resolve(modelSpec)).spec.provider);
             await session.prompt(QUESTION_ENVELOPE(question));
 
             const newMessages = session.messages.slice(preCount);

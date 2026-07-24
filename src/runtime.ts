@@ -46,7 +46,7 @@ export async function createMuaddibRuntime(
   // Overlay the live pi.dev catalog so models newer than the pinned pi-ai
   // release resolve. Best-effort: a failure just leaves the static catalog.
   try {
-    const catalog = await refreshModelCatalog({ muaddibHome });
+    const catalog = await refreshModelCatalog(muaddibHome);
     log.info(
       "Model catalog refreshed",
       `fetched=${catalog.fetched.length}`,

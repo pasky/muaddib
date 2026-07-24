@@ -135,7 +135,7 @@ export async function createAgentSessionForInvocation(
   input: CreateAgentSessionInput,
 ): Promise<CreateAgentSessionResult> {
   const logger = input.logger ?? console;
-  const resolvedModel = input.modelAdapter.resolve(input.model);
+  const resolvedModel = await input.modelAdapter.resolve(input.model);
   const sessionManager = input.sessionFile
     ? SessionManager.open(input.sessionFile)
     : SessionManager.inMemory();
@@ -249,7 +249,7 @@ export async function createAgentSessionForInvocation(
 
   applySystemPromptOverrideToSession(session, input.systemPrompt);
 
-  const visionFallbackModel = resolveVisionFallbackModel(
+  const visionFallbackModel = await resolveVisionFallbackModel(
     input.modelAdapter,
     input.visionFallbackModel,
     resolvedModel.spec.provider,
@@ -343,18 +343,18 @@ function createTracingStreamFn(
   };
 }
 
-function resolveVisionFallbackModel(
+async function resolveVisionFallbackModel(
   modelAdapter: PiAiModelAdapter,
   visionFallbackModel: string | undefined,
   primaryProvider: string,
   primaryModelId: string,
-): ResolvedPiAiModel | null {
+): Promise<ResolvedPiAiModel | null> {
   const candidate = visionFallbackModel?.trim();
   if (!candidate) {
     return null;
   }
 
-  const resolved = modelAdapter.resolve(candidate);
+  const resolved = await modelAdapter.resolve(candidate);
   if (resolved.spec.provider === primaryProvider && resolved.spec.modelId === primaryModelId) {
     return null;
   }

@@ -8,7 +8,7 @@ import type {
 
 import type { AuthStore } from "../auth/auth-store.js";
 
-import { piAiModels } from "./pi-ai-models.js";
+import { modelCatalog, piAiModels, refreshProviderCatalog } from "./pi-ai-models.js";
 
 import type { Logger } from "../app/logging.js";
 import { stripBinaryContent } from "../agent/debug-utils.js";
@@ -19,6 +19,7 @@ import {
   getOverriddenProviders,
   resolveProviderOverrideModel,
 } from "./provider-overrides.js";
+
 
 export class PiAiModelResolutionError extends Error {
   constructor(message: string) {
@@ -65,7 +66,7 @@ export class PiAiModelAdapter {
     this.options = options;
   }
 
-  resolve(modelSpec: string): ResolvedPiAiModel {
+  async resolve(modelSpec: string): Promise<ResolvedPiAiModel> {
     const spec = parseModelSpec(modelSpec);
     const providers = getSupportedProviders();
 
@@ -85,11 +86,22 @@ export class PiAiModelAdapter {
       return { spec, model: providerOverrideModel };
     }
 
-    const model = piAiModels.getModel(spec.provider, spec.modelId);
+    // A miss can simply mean "released after this process started" — a user can
+    // name any model through the `@provider:model` override — so refetch that
+    // provider's catalog (throttled) before giving up.
+    let model = piAiModels.getModel(spec.provider, spec.modelId);
+    if (!model) {
+      await refreshProviderCatalog(spec.provider);
+      model = piAiModels.getModel(spec.provider, spec.modelId);
+    }
 
     if (!model) {
+      const catalogFailure = modelCatalog.getFailure(spec.provider);
       throw new PiAiModelResolutionError(
-        `Unknown model '${spec.modelId}' for provider '${spec.provider}' in '${spec.raw}'.`,
+        `Unknown model '${spec.modelId}' for provider '${spec.provider}' in '${spec.raw}' ` +
+          (catalogFailure
+            ? `(not in the static registry; pi.dev catalog unavailable: ${catalogFailure}).`
+            : `(not in the static registry nor the pi.dev catalog).`),
       );
     }
 
@@ -97,7 +109,7 @@ export class PiAiModelAdapter {
   }
 
   async completeSimple(modelSpec: string, context: Context, options: CompleteSimpleOptions): Promise<AssistantMessage> {
-    const resolved = this.resolve(modelSpec);
+    const resolved = await this.resolve(modelSpec);
     const callType = options.callType;
     const logger = options.logger;
     const maxChars = Math.max(500, Math.floor(options.maxChars ?? 120_000));

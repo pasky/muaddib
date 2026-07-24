@@ -2,7 +2,6 @@ import { join } from "node:path";
 
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 
-import { getMuaddibHome } from "../config/paths.js";
 import { RemoteModelCatalog, type RemoteCatalogRefreshResult } from "./remote-catalog.js";
 
 /**
@@ -21,26 +20,57 @@ import { RemoteModelCatalog, type RemoteCatalogRefreshResult } from "./remote-ca
  */
 export const piAiModels = builtinModels();
 
-const modelCatalog = new RemoteModelCatalog();
+export const modelCatalog = new RemoteModelCatalog();
 modelCatalog.attach(piAiModels);
 
+/** On-miss refetch throttle: an unknown model must not re-probe pi.dev per resolve. */
+const MISS_REFETCH_INTERVAL_MS = 60_000;
+
+/** A user is waiting on the message that triggered an on-miss refresh. */
+const MISS_REFRESH_TIMEOUT_MS = 5_000;
+
+const STARTUP_REFRESH_TIMEOUT_MS = 10_000;
+
 /**
- * Bring the pi.dev overlay up to date (cache-only while entries are fresh).
- * Best-effort: the timeout and per-provider errors leave the static catalog in
- * place rather than blocking startup.
+ * Cache file the runtime configured. Until then the catalog stays memory-only,
+ * so importing this module never touches (or creates) a muaddib home.
  */
-export async function refreshModelCatalog(
-  options: { muaddibHome?: string; timeoutMs?: number } = {},
+let cachePath: string | undefined;
+
+async function refresh(
+  providerIds: readonly string[],
+  maxAgeMs: number | undefined,
+  timeoutMs: number,
 ): Promise<RemoteCatalogRefreshResult> {
-  const cachePath = join(options.muaddibHome ?? getMuaddibHome(), "models-store.json");
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 10_000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await modelCatalog.refresh(
-      piAiModels.getProviders().map((provider) => provider.id),
-      { cachePath, signal: controller.signal },
-    );
+    return await modelCatalog.refresh(providerIds, { cachePath, maxAgeMs, signal: controller.signal });
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/**
+ * Bring the pi.dev overlay up to date for every provider and start persisting
+ * to `<muaddibHome>/models-store.json`. Best-effort: the timeout and
+ * per-provider errors leave the static catalog in place rather than blocking
+ * startup.
+ */
+export async function refreshModelCatalog(muaddibHome: string): Promise<RemoteCatalogRefreshResult> {
+  cachePath = join(muaddibHome, "models-store.json");
+  return await refresh(
+    piAiModels.getProviders().map((provider) => provider.id),
+    undefined,
+    STARTUP_REFRESH_TIMEOUT_MS,
+  );
+}
+
+/**
+ * Refetch one provider's catalog after a model id missed both the static
+ * registry and the overlay — the `@provider:model` override lets a user name a
+ * model that was released after this process started.
+ */
+export async function refreshProviderCatalog(providerId: string): Promise<void> {
+  await refresh([providerId], MISS_REFETCH_INTERVAL_MS, MISS_REFRESH_TIMEOUT_MS);
 }

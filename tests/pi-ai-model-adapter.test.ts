@@ -14,8 +14,8 @@ import { RemoteModelCatalog } from "../src/models/remote-catalog.js";
 describe("PiAiModelAdapter", () => {
   const adapter = new PiAiModelAdapter();
 
-  it("resolves a known provider:model spec via pi-ai registry", () => {
-    const resolved = adapter.resolve("openai:gpt-4o-mini");
+  it("resolves a known provider:model spec via pi-ai registry", async () => {
+    const resolved = await adapter.resolve("openai:gpt-4o-mini");
 
     expect(resolved.spec.provider).toBe("openai");
     expect(resolved.spec.modelId).toBe("gpt-4o-mini");
@@ -23,8 +23,8 @@ describe("PiAiModelAdapter", () => {
     expect(resolved.model.id).toBe("gpt-4o-mini");
   });
 
-  it("resolves DeepSeek V4 Flash via pi-ai registry", () => {
-    const resolved = adapter.resolve("deepseek:deepseek-v4-flash");
+  it("resolves DeepSeek V4 Flash via pi-ai registry", async () => {
+    const resolved = await adapter.resolve("deepseek:deepseek-v4-flash");
     const compat = resolved.model.compat as { thinkingFormat?: string } | undefined;
 
     expect(resolved.spec.provider).toBe("deepseek");
@@ -36,8 +36,8 @@ describe("PiAiModelAdapter", () => {
     expect(resolved.model.reasoning).toBe(true);
   });
 
-  it("resolves DeepSeek V4 Pro with current pricing and limits", () => {
-    const resolved = adapter.resolve("deepseek:deepseek-v4-pro");
+  it("resolves DeepSeek V4 Pro with current pricing and limits", async () => {
+    const resolved = await adapter.resolve("deepseek:deepseek-v4-pro");
     const compat = resolved.model.compat as { thinkingFormat?: string } | undefined;
 
     expect(resolved.spec.provider).toBe("deepseek");
@@ -54,28 +54,84 @@ describe("PiAiModelAdapter", () => {
     expect(resolved.model.maxTokens).toBe(384_000);
   });
 
-  it("throws explicit error for unknown provider", () => {
-    expect(() => adapter.resolve("nonexistent-provider:model")).toThrow(PiAiModelResolutionError);
-    expect(() => adapter.resolve("nonexistent-provider:model")).toThrow("Unknown provider");
+  it("throws explicit error for unknown provider", async () => {
+    await expect(adapter.resolve("nonexistent-provider:model")).rejects.toThrow(PiAiModelResolutionError);
+    await expect(adapter.resolve("nonexistent-provider:model")).rejects.toThrow("Unknown provider");
   });
 
-  it("throws explicit error for unknown model under a known provider", () => {
-    expect(() => adapter.resolve("openai:not-a-real-model")).toThrow(PiAiModelResolutionError);
-    expect(() => adapter.resolve("openai:not-a-real-model")).toThrow("Unknown model");
+  it("throws explicit error for unknown model under a known provider", async () => {
+    // The catalog is consulted on a miss; an empty response keeps it a miss.
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ models: [] }), { status: 200 })));
+
+    await expect(adapter.resolve("openai:not-a-real-model")).rejects.toThrow(PiAiModelResolutionError);
+    await expect(adapter.resolve("openai:not-a-real-model")).rejects.toThrow("Unknown model");
+    vi.unstubAllGlobals();
   });
 
-  it("resolves known openrouter model via static registry", () => {
-    const resolved = adapter.resolve("openrouter:openrouter/auto");
+  it("resolves a model missing from the static registry via an on-miss catalog fetch", async () => {
+    // The @provider:model override lets a user name a model released after
+    // this process started, so a miss must refetch that provider's catalog.
+    const model = {
+      id: "claude-opus-99",
+      name: "Claude Opus 99",
+      api: "anthropic-messages",
+      provider: "anthropic",
+      baseUrl: "https://api.anthropic.com",
+      reasoning: true,
+      input: ["text"],
+      cost: { input: 30, output: 150, cacheRead: 3, cacheWrite: 37.5 },
+      contextWindow: 1_000_000,
+      maxTokens: 128_000,
+    };
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ models: [model] }), {
+          status: 200,
+          headers: { "last-modified": new Date(Date.now() + 86_400_000).toUTCString() },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resolved = await adapter.resolve("anthropic:claude-opus-99");
+
+    expect(String(fetchMock.mock.calls[0])).toContain("/api/models/providers/anthropic");
+    expect(resolved.model.cost.input).toBe(30);
+    expect(resolved.model.contextWindow).toBe(1_000_000);
+
+    // Served from the overlay afterwards, without refetching.
+    const again = await adapter.resolve("anthropic:claude-opus-99");
+    expect(again.model.id).toBe("claude-opus-99");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it("reports a catalog outage instead of claiming the model does not exist", async () => {
+    // Own provider (mistral) so the 60s miss throttle stays test-order independent.
+    const fetchMock = vi.fn(async () => {
+      throw new Error("network down");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(adapter.resolve("mistral:mistral-not-real")).rejects.toThrow("catalog unavailable");
+
+    // A persistent outage is throttled: the immediate retry must not refetch.
+    await expect(adapter.resolve("mistral:mistral-not-real")).rejects.toThrow(PiAiModelResolutionError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it("resolves known openrouter model via static registry", async () => {
+    const resolved = await adapter.resolve("openrouter:openrouter/auto");
 
     expect(resolved.spec.provider).toBe("openrouter");
     expect(resolved.model.provider).toBe("openrouter");
     expect(resolved.model.api).toBe("openai-completions");
   });
 
-  it("resolves unknown openrouter model via dynamic fallback (zero-cost if cache not ready)", () => {
+  it("resolves unknown openrouter model via dynamic fallback (zero-cost if cache not ready)", async () => {
     // In tests the background fetch may not have landed; either way the model must resolve.
     // Note: digit-hyphen-digit normalization converts 3-1 to 3.1 in the fallback ID.
-    const resolved = adapter.resolve("openrouter:google/gemini-3-1-pro-preview");
+    const resolved = await adapter.resolve("openrouter:google/gemini-3-1-pro-preview");
 
     expect(resolved.spec.provider).toBe("openrouter");
     expect(resolved.model.provider).toBe("openrouter");
@@ -126,7 +182,7 @@ describe("RemoteModelCatalog", () => {
   }
 
   function catalog(fetchImpl: unknown, now?: () => number): RemoteModelCatalog {
-    return new RemoteModelCatalog({ fetchImpl: fetchImpl as typeof fetch, now });
+    return new RemoteModelCatalog({ fetchImpl: fetchImpl as typeof fetch, now, builtinGeneratedAt: 0 });
   }
 
   it("serves models published after the static pi-ai catalog was baked", async () => {
@@ -250,7 +306,7 @@ describe("RemoteModelCatalog", () => {
     const models = builtinModels();
     const remote = catalog(async () => new Response("42", { status: 200 }));
     remote.attach(models);
-    const result = await remote.refresh(["anthropic"], { cachePath, force: true });
+    const result = await remote.refresh(["anthropic"], { cachePath, maxAgeMs: 0 });
 
     expect(result.errors.get("anthropic")?.message).toContain("unexpected shape");
     expect(models.getModel("anthropic", NEW_MODEL.id)).toBeDefined();
@@ -267,6 +323,20 @@ describe("RemoteModelCatalog", () => {
 
     expect(result.aborted).toBe(true);
     expect(result.errors.size).toBe(0);
+  });
+
+  it("ignores a catalog that is older than pi-ai's baked-in one", async () => {
+    const models = builtinModels();
+    // Baked data generated after the remote catalog was last modified.
+    const remote = new RemoteModelCatalog({
+      fetchImpl: (async () => catalogResponse([NEW_MODEL])) as unknown as typeof fetch,
+      builtinGeneratedAt: Date.parse("Sat, 25 Jul 2026 00:00:00 GMT"),
+    });
+    remote.attach(models);
+    await remote.refresh(["anthropic"], { cachePath });
+
+    expect(models.getModel("anthropic", NEW_MODEL.id)).toBeUndefined();
+    expect(models.getModel("anthropic", "claude-opus-4-5")).toBeDefined();
   });
 
   it("starts from scratch when the cache file is corrupt", async () => {
