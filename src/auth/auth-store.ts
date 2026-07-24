@@ -2,8 +2,16 @@ import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
-import type { Credential, CredentialInfo, CredentialStore } from "@earendil-works/pi-ai";
+import type {
+  Credential,
+  CredentialInfo,
+  CredentialStore,
+  ModelsStore,
+  ModelsStoreEntry,
+} from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
+
+import { modelCatalog } from "../models/pi-ai-models.js";
 
 export type CredentialData = Record<string, Credential>;
 
@@ -268,6 +276,35 @@ class OverrideCredentialStore implements CredentialStore {
 }
 
 /**
+ * ModelsStore view of muaddib's pi.dev catalog, handed to every per-session
+ * `ModelRuntime`.
+ *
+ * Session-scoped credential isolation (`withOpenRouterOverride`) means each
+ * session gets its own `ModelRuntime`, i.e. its own model registry. Without
+ * this bridge those registries would only ever see pi-ai's baked catalog while
+ * the process-wide `piAiModels` registry sees the pi.dev overlay. Reading
+ * straight from the shared in-memory catalog keeps one source of truth for
+ * *which models exist* while leaving *whose key pays* per session.
+ *
+ * Read-only by construction: the runtimes are created with
+ * `allowModelNetwork: false`, so pi never asks them to write.
+ */
+class SharedCatalogModelsStore implements ModelsStore {
+  async read(providerId: string): Promise<ModelsStoreEntry | undefined> {
+    const models = modelCatalog.getModels(providerId);
+    return models.length > 0 ? { models, lastModified: Number.MAX_SAFE_INTEGER } : undefined;
+  }
+
+  async write(): Promise<void> {
+    throw new Error("SharedCatalogModelsStore is read-only; refresh the catalog through pi-ai-models instead.");
+  }
+
+  async delete(): Promise<void> {
+    throw new Error("SharedCatalogModelsStore is read-only; refresh the catalog through pi-ai-models instead.");
+  }
+}
+
+/**
  * Muaddib's provider auth facade, replacing pi-coding-agent's removed
  * `AuthStorage` (pi 0.80.8). Owns the credential store and lazily builds the
  * `ModelRuntime` that `AgentSession` requires (offline: no models.json, no
@@ -292,6 +329,7 @@ export class AuthStore {
     this.modelRuntimePromise ??= ModelRuntime.create({
       credentials: this.credentials,
       modelsPath: null,
+      modelsStore: new SharedCatalogModelsStore(),
       allowModelNetwork: false,
     });
     return this.modelRuntimePromise;
