@@ -22,8 +22,9 @@
 - **Persistence**:
   - Chat history: `src/history/chat-history-store.ts`
   - Chronicle: `src/chronicle/*`
-- **Config & Data**: all runtime state lives under `$MUADDIB_HOME` (defaults to `~/.muaddib/`), including `config.json`, `arcs/` (per-arc JSONL chat history, markdown chronicle, Gondolin workspace and checkpoint), `artifacts/`, `logs/`. `config.json.example` documents every supported config field with comments — **keep it in sync when adding new config keys**.
+- **Config & Data**: all runtime state lives under `$MUADDIB_HOME` (defaults to `~/.muaddib/`), including `config.json`, `arcs/` (per-arc JSONL chat history, markdown chronicle, Gondolin workspace and checkpoint), `artifacts/`, `logs/`, `models-store.json` (pi.dev model catalog cache). `config.json.example` documents every supported config field with comments — **keep it in sync when adding new config keys**.
 - Models MUST be fully-qualified as `provider:model` (e.g. `anthropic:claude-sonnet-4`). No defaults.
+- **Model catalog**: pi-ai's built-in catalog is baked at package build time, so `src/models/remote-catalog.ts` overlays the live pi.dev catalog (`https://pi.dev/api/models/providers/<id>`) on top of it, cached in `$MUADDIB_HOME/models-store.json` and refreshed at most every 4h from `createMuaddibRuntime`. Newly released models therefore work without a pi-ai dependency bump.
 - No backwards compatibility shims for legacy config keys.
 
 ## Code Style

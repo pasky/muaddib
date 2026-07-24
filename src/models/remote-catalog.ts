@@ -1,0 +1,322 @@
+/**
+ * pi.dev remote model catalog overlay.
+ *
+ * pi-ai ships a *static* per-provider model catalog baked in at package build
+ * time, so any model released after the last pi-ai release (e.g.
+ * `anthropic:claude-opus-5`) is unresolvable until a dependency bump lands.
+ * pi-coding-agent avoids that by overlaying a live catalog fetched from
+ * `https://pi.dev/api/models/providers/<providerId>` on top of the static list,
+ * but that wrapper is package-internal (not reachable through its `exports`
+ * map), so muaddib keeps its own equivalent here.
+ *
+ * The fetched catalog is persisted to `$MUADDIB_HOME/models-store.json` and
+ * refetched at most every `REMOTE_CATALOG_REFRESH_INTERVAL_MS`, so restarts and
+ * short-lived CLI runs resolve new models straight from disk.
+ *
+ * Known limitation: remote entries always win over same-id static ones, so a
+ * cached entry older than a freshly upgraded pi-ai catalog shadows it until the
+ * next successful refresh (at most 4h online). pi-coding-agent guards this with
+ * `getBuiltinModelDataGeneratedAt()`, which pi-ai only exports from 0.82.
+ */
+
+import { randomBytes } from "node:crypto";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
+
+import type { Api, Model, MutableModels, Provider } from "@earendil-works/pi-ai";
+
+export const PI_DEV_CATALOG_BASE_URL = "https://pi.dev";
+export const REMOTE_CATALOG_REFRESH_INTERVAL_MS = 4 * 60 * 60 * 1000;
+
+interface CatalogEntry {
+  models: readonly Model<Api>[];
+  /** Unix ms of the last completed remote check (including empty results). */
+  checkedAt: number;
+  /** Unix ms from the catalog response's `Last-Modified` header, 0 when absent. */
+  lastModified: number;
+}
+
+export interface RemoteModelCatalogOptions {
+  baseUrl?: string;
+  fetchImpl?: typeof fetch;
+  now?: () => number;
+}
+
+export interface RemoteCatalogRefreshResult {
+  /** Providers whose catalog was (re)fetched with at least one model. */
+  fetched: string[];
+  /** Total models currently overlaid across all providers. */
+  models: number;
+  errors: Map<string, Error>;
+  /** True when the refresh budget ran out before every provider was checked. */
+  aborted: boolean;
+}
+
+export interface RemoteCatalogRefreshOptions {
+  /** Cache file to restore from and persist to. */
+  cachePath: string;
+  /** Ignore the freshness interval and refetch every requested provider. */
+  force?: boolean;
+  signal?: AbortSignal;
+}
+
+export class RemoteModelCatalog {
+  private readonly baseUrl: string;
+  private readonly fetchImpl: typeof fetch;
+  private readonly now: () => number;
+  private readonly entries = new Map<string, CatalogEntry>();
+  private loadedPath?: string;
+  private loading?: Promise<void>;
+
+  constructor(options: RemoteModelCatalogOptions = {}) {
+    this.baseUrl = options.baseUrl ?? PI_DEV_CATALOG_BASE_URL;
+    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.now = options.now ?? Date.now;
+  }
+
+  getModels(providerId: string): readonly Model<Api>[] {
+    return this.entries.get(providerId)?.models ?? [];
+  }
+
+  /**
+   * Overlay this catalog onto a pi-ai registry. Remote entries win over static
+   * ones with the same model id; the overlay is read live, so models fetched by
+   * a later `refresh()` become visible without re-attaching.
+   */
+  attach(models: MutableModels): void {
+    for (const provider of models.getProviders()) {
+      models.setProvider(this.overlayProvider(provider));
+    }
+  }
+
+  /**
+   * Restore the persisted catalog. Reads each cache file at most once and
+   * coalesces concurrent callers onto the in-flight read.
+   */
+  async load(cachePath: string): Promise<void> {
+    if (this.loadedPath === cachePath) {
+      return;
+    }
+    this.loading ??= this.readCache(cachePath).finally(() => {
+      this.loading = undefined;
+    });
+    await this.loading;
+  }
+
+  private async readCache(cachePath: string): Promise<void> {
+    let raw: string;
+    try {
+      raw = await readFile(cachePath, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        this.loadedPath = cachePath;
+        return;
+      }
+      throw error;
+    }
+
+    // The cache is derived data: a truncated/corrupt file must not wedge startup.
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      console.warn(`Model catalog cache '${cachePath}' is unreadable, refetching: ${error}`);
+      this.loadedPath = cachePath;
+      return;
+    }
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      console.warn(`Model catalog cache '${cachePath}' is not a provider map, refetching.`);
+      this.loadedPath = cachePath;
+      return;
+    }
+
+    for (const [providerId, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (value === null || typeof value !== "object") {
+        continue;
+      }
+      const entry = value as Partial<CatalogEntry>;
+      let models: readonly Model<Api>[];
+      try {
+        models = parseModels(providerId, entry.models);
+      } catch (error) {
+        console.warn(`Cached model catalog for provider '${providerId}' is unusable, refetching: ${error}`);
+        continue;
+      }
+      this.entries.set(providerId, {
+        models,
+        checkedAt: typeof entry.checkedAt === "number" ? entry.checkedAt : 0,
+        lastModified: typeof entry.lastModified === "number" ? entry.lastModified : 0,
+      });
+    }
+    this.loadedPath = cachePath;
+  }
+
+  /**
+   * Fetch the catalog of every requested provider whose cached entry is stale,
+   * then persist. Provider failures are collected, never thrown: a provider we
+   * cannot refresh keeps whatever pi-ai baked in.
+   */
+  async refresh(
+    providerIds: readonly string[],
+    options: RemoteCatalogRefreshOptions,
+  ): Promise<RemoteCatalogRefreshResult> {
+    await this.load(options.cachePath);
+
+    const fetched: string[] = [];
+    const errors = new Map<string, Error>();
+    let changed = false;
+
+    await Promise.all(
+      providerIds.map(async (providerId) => {
+        if (options.signal?.aborted) {
+          return;
+        }
+        if (!options.force && this.isFresh(providerId)) {
+          return;
+        }
+        try {
+          const entry = await this.fetchProvider(providerId, options.signal);
+          this.entries.set(providerId, entry);
+          changed = true;
+          if (entry.models.length > 0) {
+            fetched.push(providerId);
+          }
+        } catch (error) {
+          if (options.signal?.aborted) {
+            return;
+          }
+          errors.set(providerId, error instanceof Error ? error : new Error(String(error)));
+        }
+      }),
+    );
+
+    if (changed) {
+      await this.persist(options.cachePath);
+    }
+
+    let models = 0;
+    for (const entry of this.entries.values()) {
+      models += entry.models.length;
+    }
+    return { fetched: fetched.sort(), models, errors, aborted: options.signal?.aborted ?? false };
+  }
+
+  private isFresh(providerId: string): boolean {
+    const entry = this.entries.get(providerId);
+    return entry !== undefined && this.now() - entry.checkedAt < REMOTE_CATALOG_REFRESH_INTERVAL_MS;
+  }
+
+  private async fetchProvider(providerId: string, signal: AbortSignal | undefined): Promise<CatalogEntry> {
+    const url = new URL(`/api/models/providers/${encodeURIComponent(providerId)}`, this.baseUrl);
+    const response = await this.fetchImpl(url, { headers: { accept: "application/json" }, signal });
+    const checkedAt = this.now();
+
+    // Providers pi.dev does not publish a catalog for: remember the miss so we
+    // do not re-ask on every start.
+    if (response.status === 404 || response.status === 501) {
+      return { models: [], checkedAt, lastModified: 0 };
+    }
+    if (!response.ok) {
+      throw new Error(`Model catalog request for '${providerId}' failed: ${response.status} ${response.statusText}`);
+    }
+
+    const payload = (await response.json()) as unknown;
+    const lastModified = Date.parse(response.headers.get("last-modified") ?? "");
+    return {
+      models: parseModels(providerId, payload),
+      checkedAt,
+      lastModified: Number.isNaN(lastModified) ? 0 : lastModified,
+    };
+  }
+
+  private async persist(cachePath: string): Promise<void> {
+    const serialized: Record<string, CatalogEntry> = {};
+    for (const [providerId, entry] of this.entries) {
+      serialized[providerId] = entry;
+    }
+    await mkdir(dirname(cachePath), { recursive: true });
+    // Unique per write: concurrent refreshes in one process must not share a
+    // temp file, and rename() keeps readers on a complete file either way.
+    const tmpPath = `${cachePath}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+    await writeFile(tmpPath, `${JSON.stringify(serialized, null, 2)}\n`, "utf8");
+    await rename(tmpPath, cachePath);
+  }
+
+  private overlayProvider(provider: Provider): Provider {
+    return {
+      ...provider,
+      getModels: () => mergeModels(provider.getModels(), this.getModels(provider.id)),
+    };
+  }
+}
+
+function mergeModels(base: readonly Model<Api>[], overlay: readonly Model<Api>[]): readonly Model<Api>[] {
+  if (overlay.length === 0) {
+    return base;
+  }
+  const merged = [...base];
+  for (const model of overlay) {
+    const index = merged.findIndex((entry) => entry.id === model.id);
+    if (index >= 0) {
+      merged[index] = model;
+    } else {
+      merged.push(model);
+    }
+  }
+  return merged;
+}
+
+/**
+ * Accept the shapes pi.dev serves (`{ models: [...] }`, a bare array, or an
+ * id-keyed object) and pin every entry to the provider it was fetched for.
+ * Throws on an unrecognizable payload so the caller keeps the previous entry
+ * instead of persisting an empty catalog.
+ */
+function parseModels(providerId: string, payload: unknown): readonly Model<Api>[] {
+  const entries = Array.isArray(payload)
+    ? payload
+    : payload !== null && typeof payload === "object"
+      ? Array.isArray((payload as { models?: unknown }).models)
+        ? ((payload as { models: unknown[] }).models)
+        : Object.values(payload as Record<string, unknown>)
+      : undefined;
+
+  if (!entries) {
+    throw new Error(`Model catalog for provider '${providerId}' has an unexpected shape.`);
+  }
+
+  const models: Model<Api>[] = [];
+  for (const entry of entries) {
+    if (!isCompleteModel(entry)) {
+      // A partial entry would replace a complete static model with one missing
+      // its api/baseUrl/cost, so drop it and keep whatever pi-ai baked in.
+      console.warn(
+        `Model catalog for provider '${providerId}' has an incomplete model entry, ignoring it: ${JSON.stringify(entry)?.slice(0, 200)}`,
+      );
+      continue;
+    }
+    models.push({ ...entry, provider: providerId });
+  }
+  return models;
+}
+
+function isCompleteModel(value: unknown): value is Model<Api> {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+  const model = value as Partial<Model<Api>>;
+  return (
+    typeof model.id === "string" &&
+    typeof model.name === "string" &&
+    typeof model.api === "string" &&
+    typeof model.baseUrl === "string" &&
+    typeof model.reasoning === "boolean" &&
+    Array.isArray(model.input) &&
+    typeof model.contextWindow === "number" &&
+    typeof model.maxTokens === "number" &&
+    model.cost !== null &&
+    typeof model.cost === "object" &&
+    typeof model.cost.input === "number" &&
+    typeof model.cost.output === "number"
+  );
+}

@@ -57,6 +57,7 @@ For Docker, mount a local directory as the muaddib home:
   - `arcs/` - Per-arc chat history (JSONL), chronicle (markdown), workspace, and VM checkpoint (auto-created)
   - `artifacts/` - Shared artifacts directory (auto-created)
   - `logs/` - Per-message log files (auto-created)
+  - `models-store.json` - Cached pi.dev model catalog, refreshed at most every 4h (auto-created)
 - **Irssi data:** `./irssi-data/` (bind-mounted to `/home/irssi/.irssi/`)
 
 Note: Relative paths in `config.json` (like `"path": "artifacts"`) are resolved against `$MUADDIB_HOME`.

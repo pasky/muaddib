@@ -24,9 +24,15 @@ export interface PiAiModelsOverrides {
  * (`getModel`/`getProviders`) keep working, while `streamSimple` /
  * `completeSimple` are replaced by the supplied scripted test doubles.
  */
-export async function buildPiAiModelsMock(
-  overrides: PiAiModelsOverrides,
-): Promise<{ piAiModels: MutableModels }> {
+export async function buildPiAiModelsMock(overrides: PiAiModelsOverrides): Promise<{
+  piAiModels: MutableModels;
+  refreshModelCatalog: () => Promise<{
+    fetched: string[];
+    models: number;
+    errors: Map<string, Error>;
+    aborted: boolean;
+  }>;
+}> {
   const { builtinModels } = await import("@earendil-works/pi-ai/providers/all");
   const real = builtinModels();
   const piAiModels = new Proxy(real, {
@@ -37,5 +43,12 @@ export async function buildPiAiModelsMock(
       return typeof value === "function" ? value.bind(target) : value;
     },
   });
-  return { piAiModels };
+  // Tests never touch the pi.dev catalog; the static registry is enough.
+  const refreshModelCatalog = async () => ({
+    fetched: [],
+    models: 0,
+    errors: new Map<string, Error>(),
+    aborted: false,
+  });
+  return { piAiModels, refreshModelCatalog };
 }
