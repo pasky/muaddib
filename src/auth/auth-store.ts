@@ -286,8 +286,16 @@ class OverrideCredentialStore implements CredentialStore {
  * straight from the shared in-memory catalog keeps one source of truth for
  * *which models exist* while leaving *whose key pays* per session.
  *
- * Read-only by construction: the runtimes are created with
- * `allowModelNetwork: false`, so pi never asks them to write.
+ * `lastModified` is reported as "newest possible" because
+ * `modelCatalog.getModels()` has already applied the staleness gate against
+ * pi-ai's baked catalog; applying it twice would drop valid overlays.
+ *
+ * Writes are ignored rather than persisted or thrown: muaddib refreshes the
+ * catalog itself, and pi's write paths (login/logout/setRuntimeApiKey, which
+ * re-refresh with network enabled regardless of `allowModelNetwork`) must not
+ * be able to take a room down. Reads are live, but pi snapshots them into each
+ * provider closure at refresh time, so a runtime created before an on-miss
+ * fetch keeps its snapshot until something refreshes it.
  */
 class SharedCatalogModelsStore implements ModelsStore {
   async read(providerId: string): Promise<ModelsStoreEntry | undefined> {
@@ -295,13 +303,11 @@ class SharedCatalogModelsStore implements ModelsStore {
     return models.length > 0 ? { models, lastModified: Number.MAX_SAFE_INTEGER } : undefined;
   }
 
-  async write(): Promise<void> {
-    throw new Error("SharedCatalogModelsStore is read-only; refresh the catalog through pi-ai-models instead.");
+  async write(providerId: string): Promise<void> {
+    console.warn(`Ignoring pi model-store write for '${providerId}': muaddib owns the pi.dev catalog.`);
   }
 
-  async delete(): Promise<void> {
-    throw new Error("SharedCatalogModelsStore is read-only; refresh the catalog through pi-ai-models instead.");
-  }
+  async delete(): Promise<void> {}
 }
 
 /**

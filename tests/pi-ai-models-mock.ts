@@ -26,6 +26,8 @@ export interface PiAiModelsOverrides {
  */
 export async function buildPiAiModelsMock(overrides: PiAiModelsOverrides): Promise<{
   piAiModels: MutableModels;
+  modelCatalog: { getFailure: () => undefined };
+  refreshProviderCatalog: () => Promise<void>;
   refreshModelCatalog: () => Promise<{
     fetched: string[];
     models: number;
@@ -43,12 +45,15 @@ export async function buildPiAiModelsMock(overrides: PiAiModelsOverrides): Promi
       return typeof value === "function" ? value.bind(target) : value;
     },
   });
-  // Tests never touch the pi.dev catalog; the static registry is enough.
+  // Tests never touch the pi.dev catalog; the static registry is enough, so the
+  // on-miss refresh is a no-op and resolution misses stay misses.
   const refreshModelCatalog = async () => ({
     fetched: [],
     models: 0,
     errors: new Map<string, Error>(),
     aborted: false,
   });
-  return { piAiModels, refreshModelCatalog };
+  const refreshProviderCatalog = async () => {};
+  const modelCatalog = { getFailure: () => undefined };
+  return { piAiModels, modelCatalog, refreshProviderCatalog, refreshModelCatalog };
 }

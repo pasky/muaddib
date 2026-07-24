@@ -325,6 +325,42 @@ describe("RemoteModelCatalog", () => {
     expect(result.errors.size).toBe(0);
   });
 
+  it("coalesces concurrent misses for one provider into a single request", async () => {
+    let resolveFetch: (() => void) | undefined;
+    const gate = new Promise<void>((r) => {
+      resolveFetch = r;
+    });
+    const fetchImpl = vi.fn(async () => {
+      await gate;
+      return catalogResponse([NEW_MODEL]);
+    });
+    const remote = catalog(fetchImpl);
+
+    const both = Promise.all([
+      remote.refresh(["anthropic"], { cachePath, maxAgeMs: 0 }),
+      remote.refresh(["anthropic"], { cachePath, maxAgeMs: 0 }),
+    ]);
+    resolveFetch!();
+    await both;
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps serving a refreshed catalog when the cache cannot be written", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const models = builtinModels();
+    const remote = catalog(async () => catalogResponse([NEW_MODEL]));
+    remote.attach(models);
+
+    // A directory where the cache file should be: writing must fail.
+    const result = await remote.refresh(["anthropic"], { cachePath: tmpdir() });
+
+    expect(result.errors.size).toBe(0);
+    expect(models.getModel("anthropic", NEW_MODEL.id)).toBeDefined();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it("ignores a catalog that is older than pi-ai's baked-in one", async () => {
     const models = builtinModels();
     // Baked data generated after the remote catalog was last modified.

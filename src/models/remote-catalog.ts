@@ -71,6 +71,7 @@ export class RemoteModelCatalog {
   private readonly builtinGeneratedAt?: number;
   private readonly entries = new Map<string, CatalogEntry>();
   private readonly failures = new Map<string, string>();
+  private readonly inflight = new Map<string, Promise<CatalogEntry>>();
   private loadedPath?: string;
   private loading?: Promise<void>;
 
@@ -131,11 +132,13 @@ export class RemoteModelCatalog {
     try {
       raw = await readFile(cachePath, "utf8");
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        this.loadedPath = cachePath;
-        return;
+      // Any unreadable cache (absent, wrong type, no permission) degrades to
+      // memory-only; it must never fail the resolution waiting on this load.
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        console.warn(`Model catalog cache '${cachePath}' could not be read: ${error}`);
       }
-      throw error;
+      this.loadedPath = cachePath;
+      return;
     }
 
     // The cache is derived data: a truncated/corrupt file must not wedge startup.
@@ -199,7 +202,7 @@ export class RemoteModelCatalog {
           return;
         }
         try {
-          const entry = await this.fetchProvider(providerId, options.signal);
+          const entry = await this.fetchProviderOnce(providerId, options.signal);
           this.entries.set(providerId, entry);
           this.failures.delete(providerId);
           changed = true;
@@ -226,12 +229,18 @@ export class RemoteModelCatalog {
     );
 
     if (changed && options.cachePath !== undefined) {
-      await this.persist(options.cachePath);
+      try {
+        await this.persist(options.cachePath);
+      } catch (error) {
+        // The models are already usable in memory; an unwritable cache must not
+        // fail the message that is waiting on this refresh.
+        console.warn(`Model catalog cache '${options.cachePath}' could not be written: ${error}`);
+      }
     }
 
     let models = 0;
-    for (const entry of this.entries.values()) {
-      models += entry.models.length;
+    for (const providerId of this.entries.keys()) {
+      models += this.getModels(providerId).length;
     }
     return { fetched: fetched.sort(), models, errors, aborted: options.signal?.aborted ?? false };
   }
@@ -239,6 +248,19 @@ export class RemoteModelCatalog {
   private isFresh(providerId: string, maxAgeMs: number): boolean {
     const entry = this.entries.get(providerId);
     return entry !== undefined && this.now() - entry.checkedAt < maxAgeMs;
+  }
+
+  /** Coalesce concurrent misses for one provider onto a single request. */
+  private fetchProviderOnce(providerId: string, signal: AbortSignal | undefined): Promise<CatalogEntry> {
+    const existing = this.inflight.get(providerId);
+    if (existing) {
+      return existing;
+    }
+    const promise = this.fetchProvider(providerId, signal).finally(() => {
+      this.inflight.delete(providerId);
+    });
+    this.inflight.set(providerId, promise);
+    return promise;
   }
 
   private async fetchProvider(providerId: string, signal: AbortSignal | undefined): Promise<CatalogEntry> {

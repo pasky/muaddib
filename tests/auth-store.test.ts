@@ -2,9 +2,10 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { AuthStore, loadCredentialsFile, saveCredentialsFile } from "../src/auth/auth-store.js";
+import { modelCatalog } from "../src/models/pi-ai-models.js";
 
 function makeTempDir(): string {
   return mkdtempSync(join(tmpdir(), "muaddib-auth-store-"));
@@ -110,5 +111,44 @@ describe("AuthStore", () => {
     } finally {
       delete process.env.MUADDIB_TEST_AUTH_KEY;
     }
+  });
+});
+
+describe("AuthStore model catalog bridge", () => {
+  it("exposes muaddib's pi.dev catalog to the per-session ModelRuntime", async () => {
+    const model = {
+      id: "claude-bridge-test-9",
+      name: "Claude Bridge Test 9",
+      api: "anthropic-messages",
+      provider: "anthropic",
+      baseUrl: "https://api.anthropic.com",
+      reasoning: true,
+      input: ["text"],
+      cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+      contextWindow: 1_000_000,
+      maxTokens: 128_000,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ models: [model] }), {
+            status: 200,
+            headers: { "last-modified": new Date(Date.now() + 86_400_000).toUTCString() },
+          }),
+      ),
+    );
+    // Memory-only refresh (no cachePath): nothing is written to a muaddib home.
+    await modelCatalog.refresh(["anthropic"], { maxAgeMs: 0 });
+
+    // Per-session runtimes exist for credential isolation, but must agree with
+    // the process-wide registry about which models exist. pi snapshots the
+    // store when the runtime is built, hence refresh-then-create.
+    const store = AuthStore.inMemory({ anthropic: { type: "api_key", key: "sk-test" } });
+    const runtime = await store.getModelRuntime();
+
+    expect(runtime.getModel("anthropic", model.id)).toBeDefined();
+    expect(runtime.getModel("anthropic", "claude-opus-4-5")).toBeDefined();
+    vi.unstubAllGlobals();
   });
 });
