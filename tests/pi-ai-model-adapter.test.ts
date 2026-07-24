@@ -14,6 +14,12 @@ import { RemoteModelCatalog } from "../src/models/remote-catalog.js";
 describe("PiAiModelAdapter", () => {
   const adapter = new PiAiModelAdapter();
 
+  // Central cleanup: an assertion failure mid-test must not leak a fetch stub
+  // into later tests.
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("resolves a known provider:model spec via pi-ai registry", async () => {
     const resolved = await adapter.resolve("openai:gpt-4o-mini");
 
@@ -65,7 +71,6 @@ describe("PiAiModelAdapter", () => {
 
     await expect(adapter.resolve("openai:not-a-real-model")).rejects.toThrow(PiAiModelResolutionError);
     await expect(adapter.resolve("openai:not-a-real-model")).rejects.toThrow("Unknown model");
-    vi.unstubAllGlobals();
   });
 
   it("resolves a model missing from the static registry via an on-miss catalog fetch", async () => {
@@ -102,7 +107,6 @@ describe("PiAiModelAdapter", () => {
     const again = await adapter.resolve("anthropic:claude-opus-99");
     expect(again.model.id).toBe("claude-opus-99");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    vi.unstubAllGlobals();
   });
 
   it("reports a catalog outage instead of claiming the model does not exist", async () => {
@@ -117,7 +121,6 @@ describe("PiAiModelAdapter", () => {
     // A persistent outage is throttled: the immediate retry must not refetch.
     await expect(adapter.resolve("mistral:mistral-not-real")).rejects.toThrow(PiAiModelResolutionError);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    vi.unstubAllGlobals();
   });
 
   it("resolves known openrouter model via static registry", async () => {

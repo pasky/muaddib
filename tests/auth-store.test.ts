@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AuthStore, loadCredentialsFile, saveCredentialsFile } from "../src/auth/auth-store.js";
 import { modelCatalog } from "../src/models/pi-ai-models.js";
@@ -114,20 +114,29 @@ describe("AuthStore", () => {
   });
 });
 
+function bridgeModel(id: string) {
+  return {
+    id,
+    name: id,
+    api: "anthropic-messages",
+    provider: "anthropic",
+    baseUrl: "https://api.anthropic.com",
+    reasoning: true,
+    input: ["text"],
+    cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+    contextWindow: 1_000_000,
+    maxTokens: 128_000,
+  };
+}
+
 describe("AuthStore model catalog bridge", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
   it("exposes muaddib's pi.dev catalog to the per-session ModelRuntime", async () => {
-    const model = {
-      id: "claude-bridge-test-9",
-      name: "Claude Bridge Test 9",
-      api: "anthropic-messages",
-      provider: "anthropic",
-      baseUrl: "https://api.anthropic.com",
-      reasoning: true,
-      input: ["text"],
-      cost: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
-      contextWindow: 1_000_000,
-      maxTokens: 128_000,
-    };
+    const model = bridgeModel("claude-bridge-test-9");
     vi.stubGlobal(
       "fetch",
       vi.fn(
@@ -149,6 +158,30 @@ describe("AuthStore model catalog bridge", () => {
 
     expect(runtime.getModel("anthropic", model.id)).toBeDefined();
     expect(runtime.getModel("anthropic", "claude-opus-4-5")).toBeDefined();
-    vi.unstubAllGlobals();
+  });
+
+  it("skips the overlay for providers with no credential (upstream refresh gating)", async () => {
+    // pi's Models.refresh() resolves a credential per provider and skips the
+    // ones it cannot: an uncredentialed provider keeps the static catalog only.
+    // Harmless (no key means no request anyway), but pinned so an upstream
+    // change to that gating is caught here rather than in production.
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    vi.stubEnv("ANTHROPIC_OAUTH_TOKEN", "");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ models: [bridgeModel("claude-bridge-test-uncredentialed")] }), {
+            status: 200,
+            headers: { "last-modified": new Date(Date.now() + 86_400_000).toUTCString() },
+          }),
+      ),
+    );
+    await modelCatalog.refresh(["anthropic"], { maxAgeMs: 0 });
+
+    const runtime = await AuthStore.inMemory({}).getModelRuntime();
+
+    expect(runtime.getModel("anthropic", "claude-bridge-test-uncredentialed")).toBeUndefined();
+    expect(runtime.getModel("anthropic", "claude-opus-4-5")).toBeDefined();
   });
 });
