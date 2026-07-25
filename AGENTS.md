@@ -52,6 +52,7 @@
 ## Final Guidelines
 - All new changes follow the red-green-refactor TDD approach!
 - For AI agents: When user is frustrated, stop and think: why? Consider whether not to append an additional behavioral instruction to this AGENTS.md file.
+- Never present work you could do yourself as a question or a blocker for the user. If an open item can be settled by reading the code, read the code and settle it; ask only for decisions that genuinely need the user's preference, and say plainly which it is.
 - Never rewrite hand-maintained config files (e.g. `$MUADDIB_HOME/config.json`) by parse-and-re-serialize round-trips — it destroys formatting, comments spacing, and unicode. Make targeted textual edits to the specific lines instead, and keep a backup copy.
 - Every time after committing your work, stop and think: how could I improve the codebase I just touched? Did I notice any case of spaghetti code, useless adapters, wrong decoupling, invalid separation of concerns? Propose concrete ideas to the user.
 - When debugging a runtime issue, check logs and actual output first before reading source code. If the user provides a log path or timestamp, start there.
