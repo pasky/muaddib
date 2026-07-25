@@ -303,6 +303,69 @@ describe("RemoteModelCatalog", () => {
     expect(models.getModel("anthropic", NEW_MODEL.id)).toBeDefined();
   });
 
+  it("rejects a remote model whose cost rates are incomplete", async () => {
+    // pi's calculateCost() multiplies all four rates unguarded: a missing rate
+    // makes the total NaN, and NaN quietly defeats every budget comparison.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const models = builtinModels();
+    const staticModel = models.getModel("anthropic", "claude-opus-4-5")!;
+    const remote = catalog(async () =>
+      catalogResponse([
+        { ...staticModel, cost: { input: 1, output: 2 } },
+        NEW_MODEL,
+      ]),
+    );
+    remote.attach(models);
+    await remote.refresh(["anthropic"], { cachePath });
+
+    expect(models.getModel("anthropic", "claude-opus-4-5")?.cost.cacheRead).toBe(staticModel.cost.cacheRead);
+    expect(models.getModel("anthropic", NEW_MODEL.id)).toBeDefined();
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("accepts models with an empty baseUrl", async () => {
+    // Azure deployments legitimately publish baseUrl: "" and take the real URL
+    // from user config; rejecting them would drop that provider's whole catalog.
+    const models = builtinModels();
+    const remote = catalog(async () => catalogResponse([{ ...NEW_MODEL, baseUrl: "" }]));
+    remote.attach(models);
+    await remote.refresh(["anthropic"], { cachePath });
+
+    expect(models.getModel("anthropic", NEW_MODEL.id)?.baseUrl).toBe("");
+  });
+
+  it("keeps the cached catalog when a 200 response carries no usable entries", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await catalog(async () => catalogResponse([NEW_MODEL])).refresh(["anthropic"], { cachePath });
+
+    const models = builtinModels();
+    // An error body served as 200: zero valid entries must not be cached as a
+    // successful (and therefore fresh-for-4h) empty catalog.
+    const remote = catalog(async () => new Response(JSON.stringify({ error: "temporary failure" }), { status: 200 }));
+    remote.attach(models);
+    const result = await remote.refresh(["anthropic"], { cachePath, maxAgeMs: 0 });
+
+    expect(result.errors.get("anthropic")?.message).toContain("no usable model entries");
+    expect(models.getModel("anthropic", NEW_MODEL.id)).toBeDefined();
+    warn.mockRestore();
+  });
+
+  it("restores from cache without any network when offline", async () => {
+    await catalog(async () => catalogResponse([NEW_MODEL])).refresh(["anthropic"], { cachePath });
+
+    const models = builtinModels();
+    const remote = catalog(() => {
+      throw new Error("network must not be used");
+    });
+    remote.attach(models);
+    const result = await remote.refresh(["anthropic"], { cachePath, maxAgeMs: 0, allowNetwork: false });
+
+    expect(result.fetched).toEqual([]);
+    expect(result.models).toBeGreaterThan(0);
+    expect(models.getModel("anthropic", NEW_MODEL.id)).toBeDefined();
+  });
+
   it("keeps the cached catalog when the response payload is unusable", async () => {
     await catalog(async () => catalogResponse([NEW_MODEL])).refresh(["anthropic"], { cachePath });
 

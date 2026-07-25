@@ -45,7 +45,13 @@ async function refresh(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await modelCatalog.refresh(providerIds, { cachePath, maxAgeMs, signal: controller.signal });
+    return await modelCatalog.refresh(providerIds, {
+      cachePath,
+      maxAgeMs,
+      // pi's convention: PI_OFFLINE means "never reach for the network".
+      allowNetwork: process.env.PI_OFFLINE === undefined,
+      signal: controller.signal,
+    });
   } finally {
     clearTimeout(timeout);
   }

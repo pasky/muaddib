@@ -59,6 +59,8 @@ export interface RemoteCatalogRefreshResult {
 export interface RemoteCatalogRefreshOptions {
   /** Cache file to restore from and persist to. Memory-only when absent. */
   cachePath?: string;
+  /** When false, restore from cache only (pi's `PI_OFFLINE` convention). */
+  allowNetwork?: boolean;
   /** Refetch providers whose entry is older than this. Default: 4h. */
   maxAgeMs?: number;
   signal?: AbortSignal;
@@ -72,6 +74,7 @@ export class RemoteModelCatalog {
   private readonly entries = new Map<string, CatalogEntry>();
   private readonly failures = new Map<string, string>();
   private readonly inflight = new Map<string, Promise<CatalogEntry>>();
+  private persisting: Promise<void> = Promise.resolve();
   private loadedPath?: string;
   private loading?: Promise<void>;
 
@@ -189,6 +192,10 @@ export class RemoteModelCatalog {
     await this.load(options.cachePath);
     const maxAgeMs = options.maxAgeMs ?? REMOTE_CATALOG_REFRESH_INTERVAL_MS;
 
+    if (options.allowNetwork === false) {
+      return { fetched: [], models: this.overlaidModelCount(), errors: new Map(), aborted: false };
+    }
+
     const fetched: string[] = [];
     const errors = new Map<string, Error>();
     let changed = false;
@@ -238,11 +245,20 @@ export class RemoteModelCatalog {
       }
     }
 
+    return {
+      fetched: fetched.sort(),
+      models: this.overlaidModelCount(),
+      errors,
+      aborted: options.signal?.aborted ?? false,
+    };
+  }
+
+  private overlaidModelCount(): number {
     let models = 0;
     for (const providerId of this.entries.keys()) {
       models += this.getModels(providerId).length;
     }
-    return { fetched: fetched.sort(), models, errors, aborted: options.signal?.aborted ?? false };
+    return models;
   }
 
   private isFresh(providerId: string, maxAgeMs: number): boolean {
@@ -288,7 +304,19 @@ export class RemoteModelCatalog {
     };
   }
 
-  private async persist(cachePath: string): Promise<void> {
+  /**
+   * Serialized against itself: concurrent refreshes each snapshot the whole
+   * entry map, so an older snapshot renaming last would drop another
+   * provider's freshly fetched catalog.
+   */
+  private persist(cachePath: string): Promise<void> {
+    this.persisting = this.persisting
+      .catch(() => {})
+      .then(async () => await this.writeCache(cachePath));
+    return this.persisting;
+  }
+
+  private async writeCache(cachePath: string): Promise<void> {
     const serialized: Record<string, CatalogEntry> = {};
     for (const [providerId, entry] of this.entries) {
       serialized[providerId] = entry;
@@ -345,37 +373,72 @@ function parseModels(providerId: string, payload: unknown): readonly Model<Api>[
   }
 
   const models: Model<Api>[] = [];
+  const dropped: string[] = [];
   for (const entry of entries) {
     if (!isCompleteModel(entry)) {
       // A partial entry would replace a complete static model with one missing
-      // its api/baseUrl/cost, so drop it and keep whatever pi-ai baked in.
-      console.warn(
-        `Model catalog for provider '${providerId}' has an incomplete model entry, ignoring it: ${JSON.stringify(entry)?.slice(0, 200)}`,
-      );
+      // its api/cost, so drop it and keep whatever pi-ai baked in.
+      dropped.push(describeEntry(entry));
       continue;
     }
     models.push({ ...entry, provider: providerId });
   }
+  if (dropped.length > 0) {
+    console.warn(
+      `Model catalog for provider '${providerId}': ignoring ${dropped.length} incomplete entries (${dropped.slice(0, 5).join(", ")}${dropped.length > 5 ? ", ..." : ""}).`,
+    );
+  }
+
+  // Entries that all failed validation mean the payload was not a catalog at
+  // all (an error body, a schema change): keep the previous entry rather than
+  // caching emptiness as a successful check. An explicitly empty catalog
+  // (`{ models: [] }`) is still a valid answer and passes through.
+  if (entries.length > 0 && models.length === 0) {
+    throw new Error(`Model catalog for provider '${providerId}' contained no usable model entries.`);
+  }
+
   return models;
 }
 
+/**
+ * Every field pi needs at request and accounting time. All four cost rates are
+ * mandatory: `calculateCost()` multiplies them unguarded, so a missing rate
+ * yields a NaN total, and NaN silently defeats every budget comparison.
+ */
 function isCompleteModel(value: unknown): value is Model<Api> {
   if (value === null || typeof value !== "object") {
     return false;
   }
   const model = value as Partial<Model<Api>>;
   return (
-    typeof model.id === "string" &&
-    typeof model.name === "string" &&
-    typeof model.api === "string" &&
+    isNonEmptyString(model.id) &&
+    isNonEmptyString(model.name) &&
+    isNonEmptyString(model.api) &&
+    // Empty is legitimate: Azure deployments take their base URL from config.
     typeof model.baseUrl === "string" &&
     typeof model.reasoning === "boolean" &&
     Array.isArray(model.input) &&
-    typeof model.contextWindow === "number" &&
-    typeof model.maxTokens === "number" &&
+    model.input.every((modality) => modality === "text" || modality === "image") &&
+    isPositiveNumber(model.contextWindow) &&
+    isPositiveNumber(model.maxTokens) &&
     model.cost !== null &&
     typeof model.cost === "object" &&
-    typeof model.cost.input === "number" &&
-    typeof model.cost.output === "number"
+    Number.isFinite(model.cost.input) &&
+    Number.isFinite(model.cost.output) &&
+    Number.isFinite(model.cost.cacheRead) &&
+    Number.isFinite(model.cost.cacheWrite)
   );
+}
+
+function isNonEmptyString(value: unknown): boolean {
+  return typeof value === "string" && value.length > 0;
+}
+
+function isPositiveNumber(value: unknown): boolean {
+  return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+function describeEntry(entry: unknown): string {
+  const id = (entry as { id?: unknown } | null)?.id;
+  return typeof id === "string" && id.length > 0 ? id : JSON.stringify(entry)?.slice(0, 60) ?? "<unserializable>";
 }

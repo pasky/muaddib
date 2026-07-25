@@ -74,6 +74,7 @@ All muaddib data lives in `$MUADDIB_HOME` (defaults to `~/.muaddib/`):
 │       ├── workspace/      # Gondolin VM persistent workspace (mounted at /workspace)
 │       └── checkpoint.qcow2  # Gondolin VM disk checkpoint
 ├── artifacts/          # Published artifacts
+├── models-store.json   # Cached pi.dev model catalog (refreshed at most every 4h)
 └── logs/               # Per-message log files
 ```
 
