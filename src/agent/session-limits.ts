@@ -112,7 +112,7 @@ export function createNudgeDecider(
         (thinkingLevel === "medium" || thinkingLevel === "high" || thinkingLevel === "xhigh" || thinkingLevel === "max");
 
       if (isFirstTurnHighReasoning || elapsedSinceLastReport >= progressThresholdSeconds) {
-        parts.push("If you are going to call more tools, write also an extremely brief one-line status of what you are doing and why.");
+        parts.push("*If* you are going to call more tools, write also an extremely brief one-line status of what you are doing and why. Continue now.");
       }
     }
 
