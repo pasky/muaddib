@@ -70,7 +70,8 @@
     "typebox": "^1.1.33"
   },
   "overrides": {
-    "fast-xml-parser": "5.5.9"
+    "fast-xml-parser": "5.5.9",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
