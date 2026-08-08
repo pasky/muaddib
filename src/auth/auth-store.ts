@@ -290,11 +290,10 @@ class OverrideCredentialStore implements CredentialStore {
  * `modelCatalog.getModels()` has already applied the staleness gate against
  * pi-ai's baked catalog; applying it twice would drop valid overlays.
  *
- * Only providers with a resolvable credential get the overlay: pi's
- * `Models.refresh()` skips providers it cannot authenticate, so an
- * uncredentialed provider keeps the static catalog. Harmless in practice (no
- * key means no request either way), but it is why this bridge is not visible
- * for every provider in `piAiModels`.
+ * The overlay is credential-independent: `modelCatalog` fetches pi.dev (which
+ * needs no provider key) and pi's `Models.refresh()` no longer gates on a
+ * resolvable credential, so every provider muaddib has fetched shows the same
+ * model list here regardless of whether it can be authenticated.
  *
  * Writes are ignored rather than persisted or thrown: muaddib refreshes the
  * catalog itself, and pi's write paths (login/logout/setRuntimeApiKey, which

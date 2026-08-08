@@ -166,6 +166,7 @@ describe("AuthStore model catalog bridge", () => {
     // upstream change to that behavior is caught here rather than in production.
     vi.stubEnv("ANTHROPIC_API_KEY", "");
     vi.stubEnv("ANTHROPIC_OAUTH_TOKEN", "");
+    vi.stubEnv("ANTHROPIC_AUTH_TOKEN", "");
     vi.stubGlobal(
       "fetch",
       vi.fn(
