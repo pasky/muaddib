@@ -1,12 +1,20 @@
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { ArtifactContext } from "./types.js";
 
 const ARTIFACT_ID_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+/**
+ * Extensions Apache may execute server-side (mod_php family). Publishing
+ * these would yield a broken URL — the .htaccess hardening denies them —
+ * or worse, execute wherever the deny is missing. Keep in sync with the
+ * FilesMatch in artifact-htaccess.
+ */
+const EXECUTABLE_SUFFIX = /\.(?:php\d*|phar|phps|phtml|pht)$/i;
 const ARTIFACT_VIEWER_HTML = loadToolAsset("artifact-viewer.html");
 const ARTIFACT_HTACCESS = loadToolAsset("artifact-htaccess");
 
@@ -35,7 +43,7 @@ export async function writeArtifactText(
   content: string,
   suffix: string,
 ): Promise<string> {
-  return writeArtifact(options, content, suffix, "utf-8");
+  return writeArtifact(options, content, suffix);
 }
 
 export async function writeArtifactBytes(
@@ -50,7 +58,6 @@ async function writeArtifact(
   options: ArtifactContext,
   data: string | Buffer,
   suffix: string,
-  encoding?: BufferEncoding,
 ): Promise<string> {
   const artifactsPath = options.toolsConfig?.artifacts?.path;
   const artifactsUrl = options.toolsConfig?.artifacts?.url;
@@ -63,28 +70,36 @@ async function writeArtifact(
 
   const artifactId = generateArtifactId();
   const normalizedSuffix = suffix.startsWith(".") ? suffix : `.${suffix}`;
+
+  if (EXECUTABLE_SUFFIX.test(normalizedSuffix)) {
+    throw new Error(
+      `Refusing to publish artifact with server-executable extension "${normalizedSuffix}". ` +
+        `Rename it to an inert name (e.g. "${normalizedSuffix}.txt") so it is served as plain text.`,
+    );
+  }
+
   const filename = `${artifactId}${normalizedSuffix}`;
   const filePath = join(artifactsPath, filename);
 
-  await writeFile(filePath, data, encoding);
+  await writeFileAtomic(filePath, data);
   options.logger?.info(`Created artifact file: ${filePath}`);
 
   return toArtifactViewerUrl(artifactsUrl, filename);
 }
 
-/** Track directories where the bootstrap files have already been written this process. */
-const bootstrappedPaths = new Set<string>();
-
-async function ensureArtifactsDirectory(path: string): Promise<void> {
+export async function ensureArtifactsDirectory(path: string): Promise<void> {
   await mkdir(path, { recursive: true });
+  // (Re)written on every publish and at startup so neither the viewer nor
+  // the hardening can go stale or stay silently removed between runs.
+  await writeFileAtomic(join(path, "index.html"), ARTIFACT_VIEWER_HTML);
+  await writeFileAtomic(join(path, ".htaccess"), ARTIFACT_HTACCESS);
+}
 
-  if (bootstrappedPaths.has(path)) return;
-
-  await writeFile(join(path, "index.html"), ARTIFACT_VIEWER_HTML, "utf-8");
-  // Hardening is always (re)written so the script-execution deny cannot go
-  // stale on deployments that already have an older .htaccess in place.
-  await writeFile(join(path, ".htaccess"), ARTIFACT_HTACCESS, "utf-8");
-  bootstrappedPaths.add(path);
+/** Write via a temp file + rename so a partial file is never served. */
+async function writeFileAtomic(path: string, data: string | Buffer): Promise<void> {
+  const tempPath = `${path}.tmp-${process.pid}-${randomBytes(4).toString("hex")}`;
+  await writeFile(tempPath, data);
+  await rename(tempPath, path);
 }
 
 function toArtifactViewerUrl(baseUrl: string, filename: string): string {

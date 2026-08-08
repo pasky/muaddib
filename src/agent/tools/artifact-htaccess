@@ -3,6 +3,7 @@ AddDefaultCharset UTF-8
 # File-drop hardening: this directory holds untrusted, agent/user-generated
 # uploads. Never serve server-side script files from it — direct-path
 # requests bypass the /? viewer and would otherwise hit mod_php.
-<FilesMatch "\.ph(?:ar|p|ps|tml)$">
+# Keep in sync with EXECUTABLE_SUFFIX in artifact-storage.ts.
+<FilesMatch "\.(?:php\d*|phar|phps|phtml|pht)$">
     Require all denied
 </FilesMatch>

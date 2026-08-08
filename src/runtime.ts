@@ -1,6 +1,7 @@
 import { join } from "node:path";
 
 import { AuthStore } from "./auth/auth-store.js";
+import { ensureArtifactsDirectory } from "./agent/tools/artifact-storage.js";
 
 import { getMuaddibHome } from "./config/paths.js";
 import { RuntimeLogWriter } from "./app/logging.js";
@@ -39,6 +40,14 @@ export async function createMuaddibRuntime(
   const log = runtimeLogger.getLogger("muaddib.runtime");
 
   const config = MuaddibConfig.load(options.configPath);
+
+  // Provision the artifacts directory (viewer + .htaccess script-execution
+  // deny) at startup so the hardening is in place before the first artifact
+  // is published, not lazily on first use.
+  const artifactsPath = config.getAgentConfig().tools?.artifacts?.path;
+  if (artifactsPath) {
+    await ensureArtifactsDirectory(artifactsPath);
+  }
 
   const authStorage = AuthStore.create(join(muaddibHome, "auth.json"));
   const modelAdapter = new PiAiModelAdapter({ authStorage });

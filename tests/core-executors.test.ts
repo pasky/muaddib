@@ -113,9 +113,50 @@ describe("core tool executors artifact support", () => {
     // Hardening: uploads dir must never serve server-side scripts (direct
     // paths bypass the /? viewer and would otherwise hit mod_php).
     const htaccess = await readFile(join(artifactsPath, ".htaccess"), "utf-8");
-    expect(htaccess).toContain('FilesMatch "\\.ph(?:ar|p|ps|tml)$"');
+    expect(htaccess).toContain('FilesMatch "\\.(?:php\\d*|phar|phps|phtml|pht)$"');
     expect(htaccess).toContain("Require all denied");
     expect(logger.info).toHaveBeenCalledWith(expect.stringMatching(/^Created artifact file: /));
+  });
+
+  it("share_artifact refuses server-executable extensions instead of publishing a broken URL", async () => {
+    const { artifactsPath } = await makeArtifactsDir();
+    const mockReadFile = vi.fn(async () => Buffer.from("<?php echo 1; ?>"));
+    const executor = createDefaultShareArtifactExecutor(
+      {
+        toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" } },
+      },
+      mockReadFile,
+    );
+
+    for (const ext of [".php", ".php5", ".phtml", ".phar", ".phps", ".pht", ".PHP"]) {
+      await expect(executor({ file_path: `/workspace/evil${ext}` })).rejects.toThrow(
+        /server-executable extension/,
+      );
+    }
+  });
+
+  it("share_artifact repairs a stale or deleted .htaccess on every publish", async () => {
+    const { artifactsPath } = await makeArtifactsDir();
+    const mockReadFile = vi.fn(async () => Buffer.from("payload"));
+    const executor = createDefaultShareArtifactExecutor(
+      {
+        toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" } },
+      },
+      mockReadFile,
+    );
+
+    await executor({ file_path: "/workspace/first.txt" });
+
+    const htaccessPath = join(artifactsPath, ".htaccess");
+    await writeFile(htaccessPath, "# attacker-neutralized\n", "utf-8");
+    await rm(join(artifactsPath, "index.html"));
+
+    await executor({ file_path: "/workspace/second.txt" });
+
+    const htaccess = await readFile(htaccessPath, "utf-8");
+    expect(htaccess).toContain("Require all denied");
+    const indexHtml = await readFile(join(artifactsPath, "index.html"), "utf-8");
+    expect(indexHtml).toContain("<title>Artifact Viewer</title>");
   });
 
   it("fails fast when share_artifact is called without artifacts config", async () => {

@@ -153,6 +153,33 @@ describe("createSendRetryEventLogger", () => {
 });
 
 describe("runMuaddibMain", () => {
+  it("provisions the artifacts directory (viewer + .htaccess hardening) at startup", async () => {
+    const artifactsPath = join(await mkdtemp(join(tmpdir(), "muaddib-artifacts-provision-")), "artifacts");
+
+    await expect(
+      runWithConfig({
+        agent: {
+          tools: {
+            artifacts: { path: artifactsPath, url: "https://example.com/artifacts" },
+          },
+        },
+        rooms: {
+          common: {
+            command: baseCommandConfig(),
+          },
+          irc: { enabled: false },
+          discord: { enabled: false },
+          slack: { enabled: false },
+        },
+      }),
+    ).rejects.toThrow("No room monitors enabled.");
+
+    const htaccess = await readFile(join(artifactsPath, ".htaccess"), "utf-8");
+    expect(htaccess).toContain("Require all denied");
+    const indexHtml = await readFile(join(artifactsPath, "index.html"), "utf-8");
+    expect(indexHtml).toContain("<title>Artifact Viewer</title>");
+  });
+
   it("writes startup and failure logs to $MUADDIB_HOME/logs/YYYY-MM-DD/system.log", async () => {
     const { dir, configPath } = await createConfigDir({
       rooms: {
