@@ -109,6 +109,12 @@ describe("core tool executors artifact support", () => {
     const indexHtml = await readFile(join(artifactsPath, "index.html"), "utf-8");
     expect(indexHtml).toContain("<title>Artifact Viewer</title>");
     expect(indexHtml).toContain("Download raw file");
+
+    // Hardening: uploads dir must never serve server-side scripts (direct
+    // paths bypass the /? viewer and would otherwise hit mod_php).
+    const htaccess = await readFile(join(artifactsPath, ".htaccess"), "utf-8");
+    expect(htaccess).toContain('FilesMatch "\\.ph(?:ar|p|ps|tml)$"');
+    expect(htaccess).toContain("Require all denied");
     expect(logger.info).toHaveBeenCalledWith(expect.stringMatching(/^Created artifact file: /));
   });
 

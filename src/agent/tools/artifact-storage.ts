@@ -7,13 +7,14 @@ import { fileURLToPath } from "node:url";
 import type { ArtifactContext } from "./types.js";
 
 const ARTIFACT_ID_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-const ARTIFACT_VIEWER_HTML = loadArtifactViewerHtml();
+const ARTIFACT_VIEWER_HTML = loadToolAsset("artifact-viewer.html");
+const ARTIFACT_HTACCESS = loadToolAsset("artifact-htaccess");
 
-function loadArtifactViewerHtml(): string {
+function loadToolAsset(filename: string): string {
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   const candidatePaths = [
-    join(moduleDir, "artifact-viewer.html"),
-    join(moduleDir, "../../../src/agent/tools/artifact-viewer.html"),
+    join(moduleDir, filename),
+    join(moduleDir, "../../../src/agent/tools", filename),
   ];
 
   for (const candidatePath of candidatePaths) {
@@ -25,7 +26,7 @@ function loadArtifactViewerHtml(): string {
   }
 
   throw new Error(
-    `Failed to load artifact viewer HTML. Checked: ${candidatePaths.join(", ")}`,
+    `Failed to load ${filename}. Checked: ${candidatePaths.join(", ")}`,
   );
 }
 
@@ -71,17 +72,19 @@ async function writeArtifact(
   return toArtifactViewerUrl(artifactsUrl, filename);
 }
 
-/** Track directories where index.html has already been written this process. */
-const indexWrittenPaths = new Set<string>();
+/** Track directories where the bootstrap files have already been written this process. */
+const bootstrappedPaths = new Set<string>();
 
 async function ensureArtifactsDirectory(path: string): Promise<void> {
   await mkdir(path, { recursive: true });
 
-  if (indexWrittenPaths.has(path)) return;
+  if (bootstrappedPaths.has(path)) return;
 
-  const indexPath = join(path, "index.html");
-  await writeFile(indexPath, ARTIFACT_VIEWER_HTML, "utf-8");
-  indexWrittenPaths.add(path);
+  await writeFile(join(path, "index.html"), ARTIFACT_VIEWER_HTML, "utf-8");
+  // Hardening is always (re)written so the script-execution deny cannot go
+  // stale on deployments that already have an older .htaccess in place.
+  await writeFile(join(path, ".htaccess"), ARTIFACT_HTACCESS, "utf-8");
+  bootstrappedPaths.add(path);
 }
 
 function toArtifactViewerUrl(baseUrl: string, filename: string): string {

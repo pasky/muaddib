@@ -1,0 +1,8 @@
+AddDefaultCharset UTF-8
+
+# File-drop hardening: this directory holds untrusted, agent/user-generated
+# uploads. Never serve server-side script files from it — direct-path
+# requests bypass the /? viewer and would otherwise hit mod_php.
+<FilesMatch "\.ph(?:ar|p|ps|tml)$">
+    Require all denied
+</FilesMatch>
