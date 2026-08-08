@@ -87,7 +87,9 @@ const EMPTY_RESOURCE_LOADER_BASE: Omit<ResourceLoader, "getExtensions" | "getSys
   getPrompts: () => ({ prompts: [], diagnostics: [] }),
   getThemes: () => ({ themes: [], diagnostics: [] }),
   getAgentsFiles: () => ({ agentsFiles: [] }),
+  getSystemPromptSource: () => undefined,
   getAppendSystemPrompt: () => [],
+  getAppendSystemPromptSources: () => [],
   extendResources: () => {},
   reload: async () => {},
 };

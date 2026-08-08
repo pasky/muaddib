@@ -160,11 +160,10 @@ describe("AuthStore model catalog bridge", () => {
     expect(runtime.getModel("anthropic", "claude-opus-4-5")).toBeDefined();
   });
 
-  it("skips the overlay for providers with no credential (upstream refresh gating)", async () => {
-    // pi's Models.refresh() resolves a credential per provider and skips the
-    // ones it cannot: an uncredentialed provider keeps the static catalog only.
-    // Harmless (no key means no request anyway), but pinned so an upstream
-    // change to that gating is caught here rather than in production.
+  it("applies the overlay for providers with no credential", async () => {
+    // pi's Models.refresh() no longer gates on a resolvable credential, so the
+    // pi.dev overlay lands even for uncredentialed providers. Pinned so an
+    // upstream change to that behavior is caught here rather than in production.
     vi.stubEnv("ANTHROPIC_API_KEY", "");
     vi.stubEnv("ANTHROPIC_OAUTH_TOKEN", "");
     vi.stubGlobal(
@@ -181,7 +180,7 @@ describe("AuthStore model catalog bridge", () => {
 
     const runtime = await AuthStore.inMemory({}).getModelRuntime();
 
-    expect(runtime.getModel("anthropic", "claude-bridge-test-uncredentialed")).toBeUndefined();
+    expect(runtime.getModel("anthropic", "claude-bridge-test-uncredentialed")).toBeDefined();
     expect(runtime.getModel("anthropic", "claude-opus-4-5")).toBeDefined();
   });
 });
