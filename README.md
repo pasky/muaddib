@@ -1,4 +1,6 @@
-# 🐁 Muaddib - a secure, multi-user AI assistant
+# 🐁 Muaddib
+
+A secure, multi-user AI assistant for IRC, Discord, and Slack.
 
 <p align="center">
   <a href="https://discord.gg/rGABHaDEww"><img src="https://img.shields.io/badge/Discord-Join-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
@@ -7,55 +9,116 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="MIT License"></a>
 </p>
 
-**Muaddib** is an AI agent that's been built from the ground up *not* as a private single-user assistant (such as OpenClaw), but as a resilient entity operating in an inherently untrusted public environment (public IRC / Discord / Slack servers).
+Muaddib is an AI agent that's been built from the ground up *not* as a
+private single-user assistant (such as OpenClaw), but as a resilient
+entity operating in an inherently untrusted public environment (public
+IRC / Discord / Slack servers).
 
 What does it take to talk to many strangers?
 
 1. It operates sandboxed, and with complete channel isolation.
-2. It has been optimized for high cost and token efficiency (using a variety of context engineering etc. techniques).
-3. It operates in "lurk" mode by default (rather than replying to everything, Muaddib replies when highlighted, but can also interject proactively when it seems useful).
+2. It has been optimized for high cost and token efficiency (using a
+   variety of context engineering etc. techniques).
+3. It operates in "lurk" mode by default (rather than replying to
+   everything, Muaddib replies when highlighted, but can also interject
+   proactively when it seems useful).
 
-Of course, this means a tradeoff. Muaddib is not designed to sift through your email and manage your personal calendar!
+Of course, this means a tradeoff. Muaddib is not designed to sift
+through your email and manage your personal calendar!
 
-It is tailored for **public and team environments, where it's useful to have an AI agent as a "virtual teammate"** - both as an AI colleague in chat for public many-to-many collaboration, and allowing personal or per-channel contexts.
+It is tailored for **public and team environments, where it's useful
+to have an AI agent as a "virtual teammate"** - both as an AI colleague
+in chat for public many-to-many collaboration, and allowing personal or
+per-channel contexts.
+
+---
+
+## Contents
+
+- [Quick Demo](#quick-demo)
+- [Features](#features)
+- [Getting Started](#getting-started)
+  - [Configuration](#configuration)
+  - [Installation](#installation)
+  - [Commands](#commands)
+- [Architecture](#architecture)
+- [Development](#development)
+
+---
 
 ## Quick Demo
 
-Muaddib maintains a refreshing, very un-assistanty tone of voice that **optimizes for short, curt responses** (sometimes sarcastic, always informative) with great information density.
-And you may quickly find that Muaddib (in this case equipped with Opus 4.5) can [do things](https://x.com/xpasky/status/2009380722855890959?s=20) that official Claude app does much worse (let alone other apps like ChatGPT or Gemini!).
+Muaddib maintains a refreshing, very un-assistanty tone of voice that
+**optimizes for short, curt responses** (sometimes sarcastic, always
+informative) with great information density. And you may quickly find
+that Muaddib (in this case equipped with Opus 4.5) can
+[do things][demo-tweet] that official Claude app does much worse (let
+alone other apps like ChatGPT or Gemini!).
 
-![An example interaction](https://pbs.twimg.com/media/G-LAw3NXIAA-uSm?format=jpg&name=large)
+![An example interaction][demo-1]
 
-[➜ Generated image](https://pbs.twimg.com/media/G-LAy5yXcAAhV4d?format=jpg&name=large)
+[➜ Generated image][demo-1-gen]
 
 _(By the way, the token usage has been optimized since!)_
 
-Of course, as with any AI agent, the real magic is in chatting back and forth. (Multiple conversations with several people involved can go on simultaneously on a channel and Muaddib will keep track!)
+Of course, as with any AI agent, the real magic is in chatting back and
+forth. (Multiple conversations with several people involved can go on
+simultaneously on a channel and Muaddib will keep track!)
 
-![A followup discussion](https://pbs.twimg.com/media/G-LA59SXAAAv_5w?format=png&name=4096x4096)
+![A followup discussion][demo-2]
 
-[(➜ Generated image, in case you are curious)](https://pbs.twimg.com/media/G-LA8VGWAAED6sn?format=jpg&name=large)
+[(➜ Generated image, in case you are curious)][demo-2-gen]
 
-_(Note that this particular task is on the edge of raw Opus 4.5 capability and all other harnesses and apps I tried failed it completely.)_
+_(Note that this particular task is on the edge of raw Opus 4.5
+capability and all other harnesses and apps I tried failed it
+completely.)_
 
 Discord is of course supported:
 
-![Discord screenshot](docs/images/discord-screenshot.jpg)
+![Discord screenshot][discord-screenshot]
 
 So is Slack - including threads:
 
-![Slack screenshot](docs/images/slack-screenshot.jpg)
+![Slack screenshot][slack-screenshot]
+
+---
 
 ## Features
 
-- **AI Integrations**: Anthropic Claude (Opus 4.6 recommended), OpenAI, DeepSeek, any OpenRouter model (including Gemini models)
-- **Agentic Capability**: Ability to visit websites, view images, perform deep research, fully sandboxed and isolated code execution and long-term state maintenance, publish artifacts; each channel/DM gets a persistent sandboxed workspace with long-term state (code, data, installed packages)
-- **Continuous Learning**: AI agent maintains short-term memory (smart context engineering), mid-term memory (a scratchpad), and long-term memory both episodic (a continuous chronicle of events and experiences) and procedural (automatically maintained skills)
-- **Command System**: Automatic model routing (to balance cost, speed and intelligence) plus multiple, extensible "command modes" based on specific prefixes
-- **Proactive Interjecting**: Lurk-by-default with a opt-in automatic participation in relevant conversations
-- **Semi-Secure Enclaves**: Hardening for environments with secrets (Gondolin-based tokens injection without sandbox exposure) and opt-in manual network access approval mechanism
+- **AI Integrations**: Anthropic Claude (Opus 4.6 recommended), OpenAI,
+  DeepSeek, any OpenRouter model (including Gemini models).
 
-Muaddib has been **battle-tested since July 2025** in a (slightly) hostile IRC environment, lurking at a variety of [libera.chat](https://libera.chat/) channels.  However, bugs are possible (no warranty etc.) and LLM usage carries some inherent risks (e.g. a code execution sandbox with your API keys preloaded *plus* an access to the internet [*can* be fooled](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/) by a highly crafted malicious website that the agent visits to upload these API keys somewhere).
+- **Agentic Capability**: Ability to visit websites, view images,
+  perform deep research, fully sandboxed and isolated code execution
+  and long-term state maintenance, publish artifacts; each channel/DM
+  gets a persistent sandboxed workspace with long-term state (code,
+  data, installed packages).
+
+- **Continuous Learning**: AI agent maintains short-term memory (smart
+  context engineering), mid-term memory (a scratchpad), and long-term
+  memory both episodic (a continuous chronicle of events and
+  experiences) and procedural (automatically maintained skills).
+
+- **Command System**: Automatic model routing (to balance cost, speed
+  and intelligence) plus multiple, extensible "command modes" based on
+  specific prefixes.
+
+- **Proactive Interjecting**: Lurk-by-default with a opt-in automatic
+  participation in relevant conversations.
+
+- **Semi-Secure Enclaves**: Hardening for environments with secrets
+  (Gondolin-based tokens injection without sandbox exposure) and opt-in
+  manual network access approval mechanism.
+
+Muaddib has been **battle-tested since July 2025** in a (slightly)
+hostile IRC environment, lurking at a variety of [libera.chat] channels.
+However, bugs are possible (no warranty etc.) and LLM usage carries
+some inherent risks (e.g. a code execution sandbox with your API keys
+preloaded *plus* an access to the internet [*can* be fooled][trifecta]
+by a highly crafted malicious website that the agent visits to upload
+these API keys somewhere).
+
+---
 
 ## Getting Started
 
@@ -71,31 +134,41 @@ All muaddib data lives in `$MUADDIB_HOME` (defaults to `~/.muaddib/`):
 │   └── <arc>/
 │       ├── chat_history/   # JSONL chat logs (one file per day)
 │       ├── chronicle/      # Markdown chronicle entries
-│       ├── workspace/      # Gondolin VM persistent workspace (mounted at /workspace)
+│       ├── workspace/      # Gondolin VM workspace (at /workspace)
 │       └── checkpoint.qcow2  # Gondolin VM disk checkpoint
 ├── artifacts/          # Published artifacts
-├── models-store.json   # Cached pi.dev model catalog (refreshed at most every 4h)
+├── models-store.json   # Cached pi.dev model catalog (refreshed every 4h)
 └── logs/               # Per-message log files
 ```
 
 1. Copy `config.json.example` to `~/.muaddib/config.json` and configure:
-   - Provider endpoints and model settings
-   - Paths for tools and artifacts (relative paths are resolved against `$MUADDIB_HOME`)
-   - Custom prompts for various modes
-   - Room integration settings (channels, modes, proactive behavior)
 
-2. Copy `auth.json.example` to `~/.muaddib/auth.json` and set your API keys:
-   - Provider keys (`anthropic`, `openai`, `openrouter`, `deepseek`, etc.)
-   - Tool keys (`jina`, `brave`)
-   - Room tokens (`discord`, `slack-app`, `slack-{workspaceId}`)
+   - Provider endpoints and model settings.
+   - Paths for tools and artifacts (relative paths are resolved against
+     `$MUADDIB_HOME`).
+   - Custom prompts for various modes.
+   - Room integration settings (channels, modes, proactive behavior).
 
-**Tip:** Set `MUADDIB_HOME=.` to use the current directory (useful for development).
+2. Copy `auth.json.example` to `~/.muaddib/auth.json` and set your API
+   keys:
 
-**Migrating from older versions:** If you previously had API keys in `config.json`, run `npx tsx scripts/migrate-auth.ts` to extract them into `auth.json`, then manually remove the secret fields from `config.json`.
+   - Provider keys (`anthropic`, `openai`, `openrouter`, `deepseek`,
+     etc.).
+   - Tool keys (`jina`, `brave`).
+   - Room tokens (`discord`, `slack-app`, `slack-{workspaceId}`).
+
+**Tip:** Set `MUADDIB_HOME=.` to use the current directory (useful for
+development).
+
+**Migrating from older versions:** If you previously had API keys in
+`config.json`, run `npx tsx scripts/migrate-auth.ts` to extract them
+into `auth.json`, then manually remove the secret fields from
+`config.json`.
 
 ### Installation
 
-First, Muaddib runs agent code in isolated QEMU micro-VMs (Gondolin) - to set it up:
+First, Muaddib runs agent code in isolated QEMU micro-VMs (Gondolin) -
+to set it up:
 
 ```bash
 sudo apt install qemu-system qemu-utils lz4
@@ -106,39 +179,54 @@ Then, combine one or more of the following:
 
 #### Discord
 
-1. Follow [Discord setup instructions](docs/discord.md) to create a bot account and obtain a token. Set it in `~/.muaddib/auth.json` as the `discord` key.
-2. Install dependencies: `npm ci`
-3. Build runtime: `npm run build`
-4. Run the service: `npm run start`
+1. Follow [Discord setup instructions][discord-setup] to create a bot
+   account and obtain a token. Set it in `~/.muaddib/auth.json` as the
+   `discord` key.
+2. Install dependencies: `npm ci`.
+3. Build runtime: `npm run build`.
+4. Run the service: `npm run start`.
 
 #### Slack
 
-1. Follow [Slack setup instructions](docs/slack.md) to create a Slack app, enable Socket Mode, and obtain tokens.
-2. Set the Slack config block in `~/.muaddib/config.json` and tokens in `~/.muaddib/auth.json`.
-3. Install dependencies: `npm ci`
-4. Build runtime: `npm run build`
-5. Run the service: `npm run start`
+1. Follow [Slack setup instructions][slack-setup] to create a Slack
+   app, enable Socket Mode, and obtain tokens.
+2. Set the Slack config block in `~/.muaddib/config.json` and tokens
+   in `~/.muaddib/auth.json`.
+3. Install dependencies: `npm ci`.
+4. Build runtime: `npm run build`.
+5. Run the service: `npm run start`.
 
 #### IRC
 
-Recommended for an IRC bot: See [Docker instructions](docs/docker.md) for running a Muaddib service + irssi in tandem in a Docker compose setup.
+Recommended for an IRC bot: see [Docker instructions][docker-setup] for
+running a Muaddib service + irssi in tandem in a Docker compose setup.
 
 Manual for IRC ("bring your own irssi"):
-1. Ensure `irssi-varlink` is loaded in your irssi, and your varlink path is set up properly in `~/.muaddib/config.json` IRC section.
-2. Install dependencies: `npm ci`
-3. Build runtime: `npm run build`
-4. Run the service: `npm run start`
+
+1. Ensure `irssi-varlink` is loaded in your irssi, and your varlink
+   path is set up properly in `~/.muaddib/config.json` IRC section.
+2. Install dependencies: `npm ci`.
+3. Build runtime: `npm run build`.
+4. Run the service: `npm run start`.
 
 ### Commands
 
 - `mynick: message` - Automatic mode
 - `mynick: !h` - Show help and info about other modes
-- `!balance / !setkey` - Manage per-user spending and custom openrouter keys
+- `!balance / !setkey` - Manage per-user spending and custom openrouter
+  keys
 - `!approve / !deny` - Approve/deny a blocked untrusted network request
+
+---
 
 ## Architecture
 
-Muaddib is built on the [`pi-coding-agent`](https://github.com/earendil-works/pi-mono) SDK (`@earendil-works/pi-agent-core` and `@earendil-works/pi-ai`) for its agent runtime, but defines its own complete tool set (code execution, web search, artifacts, etc.).
+Muaddib is built on the [`pi-coding-agent`][pi-sdk] SDK
+(`@earendil-works/pi-agent-core` and `@earendil-works/pi-ai`) for its
+agent runtime, but defines its own complete tool set (code execution,
+web search, artifacts, etc.).
+
+---
 
 ## Development
 
@@ -164,7 +252,26 @@ npm run cli:message -- --message "tell me a joke"
 npm run cli:message -- --message "!d tell me a joke"
 npm run cli:message -- --message "!a summarize https://python.org"
 # Or with explicit config:
-# npm run cli:message -- --message "!a summarize https://python.org" --config /path/to/config.json
+# npm run cli:message -- --message "!a summarize https://python.org" \
+#   --config /path/to/config.json
 ```
 
-This simulates full room command handling without running the full chat service.
+This simulates full room command handling without running the full chat
+service.
+
+---
+
+[libera.chat]: https://libera.chat/
+[trifecta]: https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/
+[discord-setup]: docs/discord.md
+[slack-setup]: docs/slack.md
+[docker-setup]: docs/docker.md
+[pi-sdk]: https://github.com/earendil-works/pi-mono
+
+[demo-tweet]: https://x.com/xpasky/status/2009380722855890959?s=20
+[demo-1]: https://pbs.twimg.com/media/G-LAw3NXIAA-uSm?format=jpg&name=large
+[demo-1-gen]: https://pbs.twimg.com/media/G-LAy5yXcAAhV4d?format=jpg&name=large
+[demo-2]: https://pbs.twimg.com/media/G-LA59SXAAAv_5w?format=png&name=4096x4096
+[demo-2-gen]: https://pbs.twimg.com/media/G-LA8VGWAAED6sn?format=jpg&name=large
+[discord-screenshot]: docs/images/discord-screenshot.jpg
+[slack-screenshot]: docs/images/slack-screenshot.jpg
