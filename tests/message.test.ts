@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  extractThinking,
   isAssistantMessage,
   isTextContent,
   isToolCall,
@@ -95,6 +96,50 @@ describe("isToolCall", () => {
 
   it("rejects non-toolCall blocks", () => {
     expect(isToolCall({ type: "text" })).toBe(false);
+  });
+});
+
+describe("extractThinking", () => {
+  it("extracts a balanced block and returns the visible remainder", () => {
+    const { text, thinking } = extractThinking(
+      "<thinking>Directly invited by name.</thinking>eren, mefistofeles: the math holds.",
+    );
+    expect(text).toBe("eren, mefistofeles: the math holds.");
+    expect(thinking).toBe("Directly invited by name.");
+  });
+
+  it("passes through text without thinking tags", () => {
+    const { text, thinking } = extractThinking("plain answer");
+    expect(text).toBe("plain answer");
+    expect(thinking).toBe("");
+  });
+
+  it("joins multiple blocks and preserves surrounding text", () => {
+    const { text, thinking } = extractThinking(
+      "<thinking>one</thinking>visible <thinking>two</thinking>tail",
+    );
+    expect(text).toBe("visible tail");
+    expect(thinking).toBe("one\ntwo");
+  });
+
+  it("swallows an unclosed <thinking> to end of text", () => {
+    const { text, thinking } = extractThinking("<thinking>never closed reasoning");
+    expect(text).toBe("");
+    expect(thinking).toBe("never closed reasoning");
+  });
+
+  it("treats text before a stray </thinking> as reasoning continuation", () => {
+    const { text, thinking } = extractThinking("continued reasoning</thinking>real answer");
+    expect(text).toBe("real answer");
+    expect(thinking).toBe("continued reasoning");
+  });
+
+  it("matches tag casing and inner whitespace variants", () => {
+    const { text, thinking } = extractThinking(
+      "<Thinking >secret stuff</ THINKING>answer",
+    );
+    expect(text).toBe("answer");
+    expect(thinking).toBe("secret stuff");
   });
 });
 

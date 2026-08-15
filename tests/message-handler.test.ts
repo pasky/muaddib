@@ -3578,6 +3578,147 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("executeEvent suppresses unclosed <thinking> instead of leaking it", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const sent: string[] = [];
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: (input) => ({
+        prompt: async () => {
+          // Model forgot the closing tag: everything after <thinking> is reasoning
+          const text = "<thinking>Checking whether to speak up at all here";
+          const result = makeRunnerResult(text, { totalCost: 0.01 });
+          await input.onResponse(result.text);
+          return result;
+        },
+      }),
+    });
+
+    await handler.executeEvent(
+      makeMessage("!s event command", { isDirect: true }),
+      async (text) => { sent.push(text); },
+    );
+
+    // Nothing visible must reach the room; reasoning goes to the monologue
+    expect(sent).toEqual([]);
+    const rows = await history.getFullHistory("libera##test");
+    const monologue = rows.find((r: any) => r.message.includes("[internal monologue]"));
+    expect(monologue).toBeDefined();
+    expect(monologue!.message).toContain("Checking whether to speak up");
+
+    await history.close();
+  });
+
+  it("direct command path strips inline <thinking> tags and persists them as internal monologue", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const incoming = makeMessage("!s what about resonance?");
+    const sent: string[] = [];
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: makeRunner("<thinking>VB theory says superposition is literal.</thinking>pasky: resonance is literal superposition."),
+    });
+
+    incoming.isDirect = true;
+    await handler.handleIncomingMessage(incoming, {
+      sendResponse: async (text) => { sent.push(text); },
+    });
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toBe("pasky: resonance is literal superposition.");
+    expect(sent[0]).not.toContain("thinking");
+
+    const rows = await history.getFullHistory("libera##test");
+    const monologue = rows.find((r: any) => r.message.includes("[internal monologue]"));
+    expect(monologue).toBeDefined();
+    expect(monologue!.message).toContain("VB theory says superposition is literal.");
+
+    await history.close();
+  });
+
+  it("proactive path strips inline <thinking> blocks instead of leaking them to the room", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const proactiveRoomConfig = {
+      ...roomConfig,
+      proactive: {
+        interjecting: ["libera##test"],
+        debounceSeconds: 0,
+        historySize: 10,
+        rateLimit: 10,
+        ratePeriod: 60,
+        interjectThreshold: 1,
+        models: {
+          validation: ["openai:gpt-4o-mini"],
+          serious: "openai:gpt-4o-mini",
+        },
+        prompts: {
+          interject: "Score this: {message}",
+          seriousExtra: "In your <thinking>, check the interjection criteria.",
+        },
+      },
+    };
+
+    const sent: string[] = [];
+    const proactivePromptReached = createDeferred<void>();
+
+    // Exact shape of the ##chemistry leak: inline <thinking> block followed
+    // by the real reply on the same line.
+    const leakedPayload = "<thinking>Directly invited by name, open technical question. Resonance in VB theory literally is a superposition.</thinking>eren, mefistofeles: actually resonance is literal superposition - the math holds.";
+
+    const handler = createHandler({
+      roomConfig: proactiveRoomConfig as any,
+      history,
+      runnerFactory: (input) => ({
+        prompt: async () => {
+          proactivePromptReached.resolve();
+          const result = makeRunnerResult(leakedPayload);
+          await input.onResponse(result.text);
+          return result;
+        },
+      }),
+      modelAdapter: {
+        completeSimple: async (_model: string, _payload: unknown, callOptions?: { callType?: string }) => {
+          if (callOptions?.callType === LLM_CALL_TYPE.MODE_CLASSIFIER) {
+            return { content: [{ type: "text", text: "EASY_SERIOUS" }] };
+          }
+          return { content: [{ type: "text", text: "Score: 9/10" }] };
+        },
+      },
+    });
+
+    await history.addMessage(makeMessage("seed message"));
+
+    await handler.handleIncomingMessage(makeMessage("i wonder what muaddib thinks about this"), {
+      sendResponse: async (text) => { sent.push(text); },
+    });
+
+    await proactivePromptReached.promise;
+    // Yield to let the fire-and-forget proactive pipeline finish delivery
+    await vi.waitFor(() => { expect(sent).toHaveLength(1); });
+
+    expect(sent[0]).toContain("eren, mefistofeles: actually resonance is literal superposition");
+    expect(sent[0]).not.toContain("thinking");
+    expect(sent[0]).not.toContain("Directly invited by name");
+
+    const rows = await history.getFullHistory("libera##test");
+    const monologue = rows.find((r: any) => r.message.includes("[internal monologue]"));
+    expect(monologue).toBeDefined();
+    expect(monologue!.message).toContain("Directly invited by name");
+
+    await history.close();
+  });
+
   it("drops proactive NULL sentinel responses instead of sending them", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();

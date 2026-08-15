@@ -28,6 +28,7 @@ import {
   type ToolSet,
 } from "../../agent/tools/baseline-tools.js";
 import { writeArtifactText } from "../../agent/tools/artifact-storage.js";
+import { extractThinking } from "../../agent/message.js";
 import type { Message } from "@earendil-works/pi-ai";
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
@@ -119,9 +120,6 @@ export interface QuietExecuteParams {
   /** `null` = inherit global, `""` = disabled, else `provider:model`. */
   refusalFallbackModel: string | null;
   promptReminder?: string;
-  /** When true, extract <thinking> tags from responses and persist them
-   *  as [internal monologue] history entries instead of sending to room. */
-  persistThinking?: boolean;
 }
 
 /** Result returned by resolveForExecution when resolution succeeds. */
@@ -637,11 +635,20 @@ export class CommandExecutor {
       ].join(" ");
     }
 
-    // Agent response callback: cleans text + applies length policy, then delivers.
-    // Used for all agent text (intermediate + final) and progress reports.
-    // NULL sentinels from steered background messages are suppressed.
+    // Agent response callback: extracts <thinking> blocks (persisted as
+    // internal monologue, never delivered), cleans text + applies length
+    // policy, then delivers. Used for all agent text (intermediate + final)
+    // and progress reports. NULL sentinels from steered background messages
+    // are suppressed.
     const onResponse = async (text: string): Promise<void> => {
-      let cleaned = this.cleanResponseText(text, message.nick);
+      const { text: raw, thinking } = extractThinking(text);
+      if (thinking) {
+        await this.persistBotResponse(message.arc, message, `[internal monologue] ${thinking}`, undefined, {
+          mode: trigger,
+        });
+      }
+      if (!raw) return;
+      let cleaned = this.cleanResponseText(raw, message.nick);
       cleaned = await this.applyResponseLengthPolicy(cleaned, message.arc);
       if (!cleaned || isNullSentinel(cleaned)) return;
       await deliver(cleaned, { mode: trigger });
@@ -759,7 +766,7 @@ export class CommandExecutor {
     onAgentCreated?: (agent: Agent) => void,
   ): Promise<boolean> {
     const { logger } = this;
-    const { modelSpec, trigger, source, systemPrompt, historySize, reasoningEffort, allowedTools, refusalFallbackModel, promptReminder, persistThinking } = params;
+    const { modelSpec, trigger, source, systemPrompt, historySize, reasoningEffort, allowedTools, refusalFallbackModel, promptReminder } = params;
 
     const context = await this.history.getContextForMessage(message, historySize);
 
@@ -781,22 +788,12 @@ export class CommandExecutor {
     // messages (e.g. "fixing dependency…") from leaking to the room.
     let lastValidResponse: string | null = null;
     let bufferedThinking: string | null = null;
-    const thinkingRe = /<thinking>[\s\S]*?<\/thinking>/g;
     const onResponse = async (text: string): Promise<void> => {
-      let raw = text;
-
-      // Extract <thinking> blocks from the raw text *before* response
-      // cleaning, which would mangle the tags (the IRC nick-strip regex
-      // matches `<thinking>` as if it were `<SomeUser>`).
-      if (persistThinking) {
-        const matches = raw.match(thinkingRe);
-        if (matches) {
-          const extracted = matches.map(m => m.replace(/<\/?thinking>/g, "")).join("\n").trim();
-          if (extracted) bufferedThinking = bufferedThinking ? `${bufferedThinking}\n${extracted}` : extracted;
-          raw = raw.replace(thinkingRe, "").trim();
-          if (!raw) return;
-        }
+      const { text: raw, thinking } = extractThinking(text);
+      if (thinking) {
+        bufferedThinking = bufferedThinking ? `${bufferedThinking}\n${thinking}` : thinking;
       }
+      if (!raw) return;
 
       let cleaned = this.cleanResponseText(raw, message.nick);
       cleaned = await this.applyResponseLengthPolicy(cleaned, message.arc);
@@ -917,7 +914,6 @@ export class CommandExecutor {
       allowedTools: resolvedRuntime.allowedTools,
       refusalFallbackModel: resolvedRuntime.refusalFallbackModel,
       promptReminder: modeConfig.promptReminder,
-      persistThinking: true,
     });
   }
 

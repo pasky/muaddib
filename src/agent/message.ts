@@ -39,3 +39,28 @@ export function responseText(response: AssistantMessage, sep = "\n"): string {
     .join(sep)
     .trim();
 }
+
+/**
+ * Extract inline <thinking> blocks from raw model text, returning the visible
+ * remainder and the joined thinking content. Must run on raw text *before*
+ * cleanResponseText() (command-executor.ts), whose IRC nick-strip regex would
+ * eat a leading `<thinking>` as if it were `<SomeUser>` and leak the
+ * reasoning body. Tags are matched case-insensitively with optional inner
+ * whitespace. An unclosed `<thinking>` swallows to end of text (silence beats
+ * leaking), and text preceding an unmatched `</thinking>` is treated as
+ * reasoning too (its opener was in an earlier chunk).
+ */
+export function extractThinking(text: string): { text: string; thinking: string } {
+  const parts: string[] = [];
+  const capture = (block: string): string => {
+    const inner = block.replace(/<\s*\/?\s*thinking\s*>/gi, "").trim();
+    if (inner) parts.push(inner);
+    return "";
+  };
+  const visible = text
+    .replace(/<\s*thinking\s*>[\s\S]*?(?:<\s*\/\s*thinking\s*>|$)/gi, capture)
+    // Anything left before a stray closer is reasoning continuation.
+    .replace(/^[\s\S]*<\s*\/\s*thinking\s*>/i, capture)
+    .trim();
+  return { text: visible, thinking: parts.join("\n") };
+}

@@ -4,7 +4,7 @@ import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { AuthStore } from "../auth/auth-store.js";
 import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai";
 
-import { isAssistantMessage, isTextContent, isToolCall, responseText } from "./message.js";
+import { extractThinking, isAssistantMessage, isTextContent, isToolCall, responseText } from "./message.js";
 import { detectRefusalErrorSignal, detectRefusalSignal } from "./refusal-detection.js";
 import { stringifyError } from "../utils/index.js";
 import { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
@@ -508,7 +508,10 @@ function extractLastAssistantText(messages: readonly AgentMessage[]): string {
  */
 function stripUndeliverableResponse(text: string): string {
   if (text.startsWith("[internal monologue]")) return "";
-  return text;
+  // A completion that is entirely an inline <thinking> block is stripped
+  // before room delivery (command-executor's onResponse), so treat it as
+  // empty here to trigger the retry loop instead of ending in silence.
+  return extractThinking(text).text;
 }
 
 function findLastAssistantMessage(messages: readonly AgentMessage[]): AssistantMessage | null {
