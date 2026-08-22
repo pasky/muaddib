@@ -317,7 +317,7 @@ export class CommandResolver {
       .join(", ");
 
     const segments = [
-      `default is ${defaultDescription}; modes: ${modeParts}; use @modelid to override model; !c disables context`,
+      `default is ${defaultDescription}; modes: ${modeParts}; start with @<provider>:<model> (e.g. @openrouter:anthropic/claude-fable-5) to override model; !c disables context`,
       ...extraNotes,
     ];
     return segments.join("; ");
