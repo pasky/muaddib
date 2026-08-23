@@ -575,10 +575,15 @@ function applyStatusPolicy(
   if (stillWorking) {
     return { text: body ? `${status}\n\n${body}` : status, interim: true };
   }
-  if (!body) {
+  // "Status-only" is judged on *visible* body: extractStatus preserves leading
+  // <thinking> blocks (they still have to reach monologue persistence), and
+  // mistaking those for an answer would drop the status and leave a completion
+  // that stripUndeliverableResponse() sees as empty - i.e. pointless retries.
+  if (!extractThinking(body).text) {
     // Nothing but a status note: deliver it (silence would be worse) but flag
     // it as interim so quiet/proactive callers don't publish it as an answer.
-    return { text: status, interim: true };
+    if (!status) return { text: body, interim: true };
+    return { text: body ? `${body}\n${status}` : status, interim: true };
   }
   if (status) {
     logger?.debug("Dropping status note from final answer", truncateForDebug(status, 200));

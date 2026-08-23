@@ -608,6 +608,28 @@ describe("SessionRunner", () => {
     expect(result.text).toBe("All done, nothing else to add.");
   });
 
+  it("treats thinking+status with no answer as status-only, keeping the thinking", async () => {
+    const delivered: Array<{ text: string; interim: boolean }> = [];
+    makeMockSession({
+      promptImpl: async (c) => {
+        emitAssistantResponse(c, "<thinking>Checked; nothing to report.</thinking><status>No update.</status>");
+      },
+    });
+
+    const runner = makeRunner({
+      onResponse: (text: string, meta: { interim: boolean }) => { delivered.push({ text, interim: meta.interim }); },
+    });
+    const result = await runner.prompt("hello");
+
+    // Status survives (otherwise the completion looks empty and we retry for
+    // 85s), thinking survives for monologue persistence, flagged interim.
+    expect(delivered).toEqual([{
+      text: "<thinking>Checked; nothing to report.</thinking>\nNo update.",
+      interim: true,
+    }]);
+    expect(result.text).toBe("No update.");
+  });
+
   it("keeps the interim flag on a status-only response delivered without message_end", async () => {
     const delivered: Array<{ text: string; interim: boolean }> = [];
     makeMockSession({
