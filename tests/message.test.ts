@@ -146,20 +146,39 @@ describe("extractThinking", () => {
 
 describe("extractStatus", () => {
   it("splits the status line from the rest of the message", () => {
-    const { text, status } = extractStatus("<status>Searching now.</status>\n\nkanzure: the answer.");
+    const { text, status, matched } = extractStatus("<status>Searching now.</status>\n\nkanzure: the answer.");
     expect(text).toBe("kanzure: the answer.");
     expect(status).toBe("Searching now.");
+    expect(matched).toBe(true);
   });
 
   it("passes through text without status tags", () => {
-    const { text, status } = extractStatus("plain answer");
+    const { text, status, matched } = extractStatus("plain answer");
     expect(text).toBe("plain answer");
     expect(status).toBe("");
+    expect(matched).toBe(false);
   });
 
   it("swallows an unclosed <status> to end of text and tolerates tag variants", () => {
-    expect(extractStatus("<status>never closed")).toEqual({ text: "", status: "never closed" });
-    expect(extractStatus("< Status >working</ STATUS >done")).toEqual({ text: "done", status: "working" });
+    expect(extractStatus("<status>never closed")).toEqual({ text: "", status: "never closed", matched: true });
+    expect(extractStatus("< Status >working</ STATUS >done")).toEqual({ text: "done", status: "working", matched: true });
+  });
+
+  it("never swallows the answer preceding a stray </status>", () => {
+    // Unlike <thinking>, a lone closer must not eat the real answer before it.
+    expect(extractStatus("kanzure: the real answer</status>")).toEqual({
+      text: "kanzure: the real answer</status>",
+      status: "",
+      matched: false,
+    });
+  });
+
+  it("reports matched for empty tags so they get stripped rather than leak", () => {
+    expect(extractStatus("<status></status>real answer")).toEqual({
+      text: "real answer",
+      status: "",
+      matched: true,
+    });
   });
 
   it("joins multiple status blocks", () => {

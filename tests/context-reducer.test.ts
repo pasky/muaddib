@@ -132,6 +132,24 @@ describe("ContextReducerTs", () => {
     ]);
   });
 
+  it("reduce treats mid-line role markers as content, not headers", async () => {
+    const modelAdapter = {
+      completeSimple: vi.fn(async () =>
+        assistantTextMessage("[USER]: he wrote [ASSISTANT] is a literal token here")),
+    } as any;
+
+    const reducer = new ContextReducerTs({
+      config: { model: "openai:gpt-4o-mini", prompt: "Condense" },
+      modelAdapter,
+    });
+
+    const result = await reducer.reduce(
+      [userMsg("long question"), assistantMsg("long answer"), userMsg("follow up")],
+      "sys",
+    );
+    expect(result).toEqual([userMsg("he wrote [ASSISTANT] is a literal token here")]);
+  });
+
   it("reduce discards a truncated summary and keeps the unreduced context", async () => {
     const truncated = assistantTextMessage("[USER]: summarized question\n[ASSISTANT]: cut off mid-sen");
     truncated.stopReason = "length" as any;

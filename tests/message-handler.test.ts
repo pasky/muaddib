@@ -3421,6 +3421,36 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("executeEvent quiet mode never publishes interim progress text when the final turn says NULL", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const sent: string[] = [];
+
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: (input) => ({
+        prompt: async () => {
+          await input.onResponse("Searching the logs.", { interim: true });
+          const result = makeRunnerResult("NULL");
+          await input.onResponse(result.text, { interim: false });
+          return result;
+        },
+      }),
+    });
+
+    await handler.executeEvent(
+      makeMessage("!s event command", { isDirect: true }),
+      async (text) => { sent.push(text); },
+    );
+
+    expect(sent).toEqual([]);
+
+    await history.close();
+  });
+
   it("persists background costs and rethrows delivery errors in executeEvent quiet mode", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();

@@ -93,7 +93,8 @@ export interface CommandRunnerFactoryInput {
   authStorage?: AuthStore;
   metaReminder?: string;
   progressThresholdSeconds?: number;
-  onResponse: (text: string) => void | Promise<void>;
+  /** `meta.interim` marks progress chatter (tool-turn note, <status>, retry notice). */
+  onResponse: (text: string, meta?: { interim: boolean }) => void | Promise<void>;
   logger?: Logger;
   onAgentCreated?: (agent: Agent) => void;
 }
@@ -788,7 +789,11 @@ export class CommandExecutor {
     // messages (e.g. "fixing dependency…") from leaking to the room.
     let lastValidResponse: string | null = null;
     let bufferedThinking: string | null = null;
-    const onResponse = async (text: string): Promise<void> => {
+    const onResponse = async (text: string, meta?: { interim: boolean }): Promise<void> => {
+      // Progress chatter (tool-turn notes, <status> lines, retry notices) is
+      // never an answer here: buffering it would publish it whenever the final
+      // turn declines to speak (NULL sentinel).
+      if (meta?.interim) return;
       const { text: raw, thinking } = extractThinking(text);
       if (thinking) {
         bufferedThinking = bufferedThinking ? `${bufferedThinking}\n${thinking}` : thinking;

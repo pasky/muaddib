@@ -99,7 +99,9 @@ function emitAssistantResponse(ctx: MockSessionCtx, text: string, opts?: {
   }
   session.messages.push({
     role: "assistant",
-    content: [{ type: "text", text }],
+    content: opts?.withToolCall
+      ? [{ type: "text", text }, { type: "toolCall", id: "tc1", name: opts.withToolCall.name, arguments: {} }]
+      : [{ type: "text", text }],
     usage: makeUsage(opts?.usageMultiplier ?? 1),
     stopReason: opts?.stopReason ?? "stop",
   });
@@ -567,31 +569,42 @@ describe("SessionRunner", () => {
     makeMockSession({
       promptImpl: async (c) => {
         emitAssistantResponse(c, "<status>Searching for the paper.</status>", {
-          stopReason: "tool_use", withToolCall: { name: "web_search" },
+          stopReason: "toolUse", withToolCall: { name: "web_search" },
         });
         emitAssistantResponse(c, "<status>Found it, answering now.</status>\n\nkanzure: here is the answer.");
       },
     });
 
-    const runner = makeRunner({ onResponse: (text: string) => { deliveredTexts.push(text); } });
+    const delivered: Array<{ text: string; interim: boolean }> = [];
+    const runner = makeRunner({
+      onResponse: (text: string, meta: { interim: boolean }) => {
+        deliveredTexts.push(text);
+        delivered.push({ text, interim: meta.interim });
+      },
+    });
     const result = await runner.prompt("hello");
 
     expect(deliveredTexts).toEqual(["Searching for the paper.", "kanzure: here is the answer."]);
+    expect(delivered.map((d) => d.interim)).toEqual([true, false]);
     expect(result.text).toBe("kanzure: here is the answer.");
   });
 
-  it("falls back to the <status> text when a final answer contains nothing else", async () => {
-    const deliveredTexts: string[] = [];
+  it("falls back to the <status> text when a final answer contains nothing else, flagged interim", async () => {
+    const delivered: Array<{ text: string; interim: boolean }> = [];
     makeMockSession({
       promptImpl: async (c) => {
         emitAssistantResponse(c, "<status>All done, nothing else to add.</status>");
       },
     });
 
-    const runner = makeRunner({ onResponse: (text: string) => { deliveredTexts.push(text); } });
+    const runner = makeRunner({
+      onResponse: (text: string, meta: { interim: boolean }) => { delivered.push({ text, interim: meta.interim }); },
+    });
     const result = await runner.prompt("hello");
 
-    expect(deliveredTexts).toEqual(["All done, nothing else to add."]);
+    // Delivered (silence would be worse) but marked interim so buffering
+    // callers (quiet/proactive mode) never publish it as an answer.
+    expect(delivered).toEqual([{ text: "All done, nothing else to add.", interim: true }]);
     expect(result.text).toBe("All done, nothing else to add.");
   });
 

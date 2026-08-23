@@ -51,7 +51,7 @@ export function responseText(response: AssistantMessage, sep = "\n"): string {
  * reasoning too (its opener was in an earlier chunk).
  */
 export function extractThinking(text: string): { text: string; thinking: string } {
-  const { text: visible, captured } = extractTagged(text, "thinking");
+  const { text: visible, captured } = extractTagged(text, "thinking", { strayCloser: true });
   return { text: visible, thinking: captured };
 }
 
@@ -61,23 +61,40 @@ export function extractThinking(text: string): { text: string; thinking: string 
  * runner can decide by itself whether it is deliverable: a status belongs to a
  * turn that goes on to call tools, and must be dropped when the model glues it
  * in front of its final answer.
+ *
+ * Unlike <thinking>, a stray `</status>` is NOT treated as "everything before
+ * it was a status": leaking a status note is cosmetic, while swallowing the
+ * answer that happened to precede a stray closer is not. `matched` reports
+ * whether any tag was present at all, so empty tags still get stripped.
  */
-export function extractStatus(text: string): { text: string; status: string } {
-  const { text: visible, captured } = extractTagged(text, "status");
-  return { text: visible, status: captured };
+export function extractStatus(text: string): { text: string; status: string; matched: boolean } {
+  const { text: visible, captured, matched } = extractTagged(text, "status", { strayCloser: false });
+  return { text: visible, status: captured, matched };
 }
 
-function extractTagged(text: string, tag: string): { text: string; captured: string } {
+function extractTagged(
+  text: string,
+  tag: string,
+  options: { strayCloser: boolean },
+): { text: string; captured: string; matched: boolean } {
   const parts: string[] = [];
   const capture = (block: string): string => {
     const inner = block.replace(new RegExp(`<\\s*/?\\s*${tag}\\s*>`, "gi"), "").trim();
     if (inner) parts.push(inner);
     return "";
   };
-  const visible = text
-    .replace(new RegExp(`<\\s*${tag}\\s*>[\\s\\S]*?(?:<\\s*/\\s*${tag}\\s*>|$)`, "gi"), capture)
+  let matched = false;
+  const trackedCapture = (block: string): string => {
+    matched = true;
+    return capture(block);
+  };
+  let visible = text.replace(
+    new RegExp(`<\\s*${tag}\\s*>[\\s\\S]*?(?:<\\s*/\\s*${tag}\\s*>|$)`, "gi"),
+    trackedCapture,
+  );
+  if (options.strayCloser) {
     // Anything left before a stray closer belongs to the tagged block too.
-    .replace(new RegExp(`^[\\s\\S]*<\\s*/\\s*${tag}\\s*>`, "i"), capture)
-    .trim();
-  return { text: visible, captured: parts.join("\n") };
+    visible = visible.replace(new RegExp(`^[\\s\\S]*<\\s*/\\s*${tag}\\s*>`, "i"), trackedCapture);
+  }
+  return { text: visible.trim(), captured: parts.join("\n"), matched };
 }

@@ -130,16 +130,20 @@ export class ContextReducerTs implements ContextReducer {
 
   private parseReducedContext(response: string): Message[] {
     const messages: Message[] = [];
-    // The colon is optional: reducer models routinely drop it and emit a bare
-    // `[USER]` header on its own line. Without this tolerance the whole
-    // transcript collapses into one <context_summary> blob (see fallback
-    // below), which makes the agent treat its own past IRC envelopes as
-    // quotable text and re-echo them.
-    const pattern = /\[(USER|ASSISTANT)\]:?[ \t]*(?:\n(?!\[(?:USER|ASSISTANT)\]))?(.*?)(?=\n\[(?:USER|ASSISTANT)\]:?|$)/gis;
+    // Headers must start a line, and the colon is optional: reducer models
+    // routinely drop it and emit a bare `[USER]` header on its own line.
+    // Without that tolerance the whole transcript collapses into one
+    // <context_summary> blob (see fallback below), which makes the agent treat
+    // its own past room envelopes as quotable text and re-echo them. Content
+    // runs from the end of one header to the start of the next.
+    const headerPattern = /^\[(USER|ASSISTANT)\]:?[ \t]*/gimu;
+    const headers = [...response.matchAll(headerPattern)];
 
-    for (const match of response.matchAll(pattern)) {
+    for (const [index, match] of headers.entries()) {
       const role = match[1]?.toLowerCase();
-      const content = match[2]?.trim() ?? "";
+      const start = (match.index ?? 0) + match[0].length;
+      const end = headers[index + 1]?.index ?? response.length;
+      const content = response.slice(start, end).trim();
       if (!content) {
         continue;
       }

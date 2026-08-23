@@ -45,7 +45,12 @@ export interface SessionRunnerOptions {
    * and progress reports.  Fallback suffixes (refusal / vision) are appended
    * automatically once the respective fallback activates.
    */
-  onResponse?: (text: string) => void | Promise<void>;
+  /**
+   * Delivery callback for assistant text. `interim` marks progress chatter
+   * (a turn that still calls tools, a <status> note, a retry notice) rather
+   * than the actual answer, so buffering callers can drop it.
+   */
+  onResponse?: (text: string, meta: { interim: boolean }) => void | Promise<void>;
   llmDebugMaxChars?: number;
   metaReminder?: string;
   progressThresholdSeconds?: number;
@@ -98,7 +103,7 @@ export class SessionRunner {
   private readonly modelAdapter: PiAiModelAdapter;
   private readonly logger: RunnerLogger;
   private readonly emptyCompletionRetryPrompt: string;
-  private readonly onResponse?: (text: string) => void | Promise<void>;
+  private readonly onResponse?: (text: string, meta: { interim: boolean }) => void | Promise<void>;
   private readonly llmDebugMaxChars: number;
   private readonly options: SessionRunnerOptions;
 
@@ -206,11 +211,11 @@ export class SessionRunner {
       let pendingResponseDelivery: Promise<void> = Promise.resolve();
       let pendingResponseError: unknown = null;
       const deliveredAssistantMessages = new WeakSet<object>();
-      const queueResponseDelivery = (text: string): void => {
+      const queueResponseDelivery = (text: string, interim = false): void => {
         pendingResponseDelivery = pendingResponseDelivery
           .then(async () => {
             sessionCtx.responseTimestamp.lastResponseAt = Date.now();
-            await this.onResponse?.(text);
+            await this.onResponse?.(text, { interim });
           })
           .catch((error) => {
             if (pendingResponseError === null) {
@@ -245,7 +250,7 @@ export class SessionRunner {
         if (event.type === "message_end") {
           const message = event.message as { role?: string };
           if (message.role === "assistant") {
-            const text = applyStatusPolicy(
+            const { text, interim } = applyStatusPolicy(
               extractAssistantTextFromEvent(event.message).trim(),
               event.message,
               this.logger,
@@ -269,7 +274,7 @@ export class SessionRunner {
                   const decorated = responseSuffix && !/^["'`]?\s*null\s*["'`]?$/iu.test(text)
                     ? `${text} ${responseSuffix}`
                     : text;
-                  queueResponseDelivery(decorated);
+                  queueResponseDelivery(decorated, interim);
                 }
               }
             } else if (text && responseMuted) {
@@ -350,7 +355,7 @@ export class SessionRunner {
         const delaySec = EMPTY_RETRY_DELAYS_MS[i] / 1_000;
         const retryMsg = `Error: empty assistant text (stopReason=${reason}${errorDetail}), retrying in ${delaySec}s (${i + 1}/${EMPTY_RETRY_DELAYS_MS.length})`;
         this.logger.error(retryMsg);
-        await this.onResponse?.(retryMsg);
+        await this.onResponse?.(retryMsg, { interim: true });
         await new Promise((resolve) => setTimeout(resolve, EMPTY_RETRY_DELAYS_MS[i]));
         await session.prompt(this.emptyCompletionRetryPrompt);
         this.logLlmIo(`after_empty_retry_${i + 1}`, session.messages);
@@ -502,7 +507,7 @@ export class SessionRunner {
  */
 function extractLastAssistantText(messages: readonly AgentMessage[]): string {
   const assistant = findLastAssistantMessage(messages);
-  return assistant ? applyStatusPolicy(responseText(assistant), assistant) : "";
+  return assistant ? applyStatusPolicy(responseText(assistant), assistant).text : "";
 }
 
 /**
@@ -554,15 +559,26 @@ function textPayload(value: unknown): string {
  * into the room's response length budget. A final message that is *only* a
  * status still gets delivered - silence would be worse.
  */
-function applyStatusPolicy(text: string, message: unknown, logger?: RunnerLogger): string {
-  const { text: body, status } = extractStatus(text);
-  if (!status) return text;
-  if (!isPotentialFinalAssistantMessage(message)) {
-    return body ? `${status}\n\n${body}` : status;
+function applyStatusPolicy(
+  text: string,
+  message: unknown,
+  logger?: RunnerLogger,
+): { text: string; interim: boolean } {
+  const stillWorking = !isPotentialFinalAssistantMessage(message);
+  const { text: body, status, matched } = extractStatus(text);
+  if (!matched) return { text, interim: stillWorking };
+  if (stillWorking) {
+    return { text: body ? `${status}\n\n${body}` : status, interim: true };
   }
-  if (!body) return status;
-  logger?.debug("Dropping status note from final answer", truncateForDebug(status, 200));
-  return body;
+  if (!body) {
+    // Nothing but a status note: deliver it (silence would be worse) but flag
+    // it as interim so quiet/proactive callers don't publish it as an answer.
+    return { text: status, interim: true };
+  }
+  if (status) {
+    logger?.debug("Dropping status note from final answer", truncateForDebug(status, 200));
+  }
+  return { text: body, interim: false };
 }
 
 function isPotentialFinalAssistantMessage(message: unknown): boolean {
