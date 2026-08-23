@@ -4,7 +4,7 @@ import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { AuthStore } from "../auth/auth-store.js";
 import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai";
 
-import { extractThinking, isAssistantMessage, isTextContent, isToolCall, responseText } from "./message.js";
+import { extractStatus, extractThinking, isAssistantMessage, isTextContent, isToolCall, responseText } from "./message.js";
 import { detectRefusalErrorSignal, detectRefusalSignal } from "./refusal-detection.js";
 import { stringifyError } from "../utils/index.js";
 import { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
@@ -245,7 +245,11 @@ export class SessionRunner {
         if (event.type === "message_end") {
           const message = event.message as { role?: string };
           if (message.role === "assistant") {
-            const text = extractAssistantTextFromEvent(event.message).trim();
+            const text = applyStatusPolicy(
+              extractAssistantTextFromEvent(event.message).trim(),
+              event.message,
+              this.logger,
+            );
             const assistantMessageObj = event.message && typeof event.message === "object"
               ? event.message as object
               : null;
@@ -498,7 +502,7 @@ export class SessionRunner {
  */
 function extractLastAssistantText(messages: readonly AgentMessage[]): string {
   const assistant = findLastAssistantMessage(messages);
-  return assistant ? responseText(assistant) : "";
+  return assistant ? applyStatusPolicy(responseText(assistant), assistant) : "";
 }
 
 /**
@@ -540,6 +544,25 @@ function textPayload(value: unknown): string {
     return textPayload((value as { content: unknown }).content);
   }
   return "";
+}
+
+/**
+ * Resolve `<status>` progress notes (requested by the progress nudge) against
+ * the turn they arrived in: keep them while the model is still working (this
+ * turn calls tools), drop them once it is answering, since a status line glued
+ * in front of the answer reaches the room as a redundant restatement and eats
+ * into the room's response length budget. A final message that is *only* a
+ * status still gets delivered - silence would be worse.
+ */
+function applyStatusPolicy(text: string, message: unknown, logger?: RunnerLogger): string {
+  const { text: body, status } = extractStatus(text);
+  if (!status) return text;
+  if (!isPotentialFinalAssistantMessage(message)) {
+    return body ? `${status}\n\n${body}` : status;
+  }
+  if (!body) return status;
+  logger?.debug("Dropping status note from final answer", truncateForDebug(status, 200));
+  return body;
 }
 
 function isPotentialFinalAssistantMessage(message: unknown): boolean {

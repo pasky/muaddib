@@ -72,7 +72,7 @@ export class ContextReducerTs implements ContextReducer {
         {
           callType: LLM_CALL_TYPE.CONTEXT_REDUCER,
           logger: this.logger,
-          streamOptions: { maxTokens: 2_048, reasoning: "low" },
+          streamOptions: { maxTokens: 4_096, reasoning: "low" },
         },
       );
 

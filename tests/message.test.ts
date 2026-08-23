@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  extractStatus,
   extractThinking,
   isAssistantMessage,
   isTextContent,
@@ -140,6 +141,31 @@ describe("extractThinking", () => {
     );
     expect(text).toBe("answer");
     expect(thinking).toBe("secret stuff");
+  });
+});
+
+describe("extractStatus", () => {
+  it("splits the status line from the rest of the message", () => {
+    const { text, status } = extractStatus("<status>Searching now.</status>\n\nkanzure: the answer.");
+    expect(text).toBe("kanzure: the answer.");
+    expect(status).toBe("Searching now.");
+  });
+
+  it("passes through text without status tags", () => {
+    const { text, status } = extractStatus("plain answer");
+    expect(text).toBe("plain answer");
+    expect(status).toBe("");
+  });
+
+  it("swallows an unclosed <status> to end of text and tolerates tag variants", () => {
+    expect(extractStatus("<status>never closed")).toEqual({ text: "", status: "never closed" });
+    expect(extractStatus("< Status >working</ STATUS >done")).toEqual({ text: "done", status: "working" });
+  });
+
+  it("joins multiple status blocks", () => {
+    const { text, status } = extractStatus("<status>one</status>body<status>two</status>");
+    expect(text).toBe("body");
+    expect(status).toBe("one\ntwo");
   });
 });
 

@@ -108,7 +108,7 @@ describe("ContextReducerTs", () => {
     expect(sentMessages[0].content).toContain("follow up");
 
     expect(firstCall[1].systemPrompt).toBe("Condense the conversation");
-    expect(firstCall[2]).toMatchObject({ streamOptions: { maxTokens: 2048 } });
+    expect(firstCall[2]).toMatchObject({ streamOptions: { maxTokens: 4096 } });
   });
 
   it("reduce parses colonless [USER]/[ASSISTANT] headers instead of blobbing them", async () => {

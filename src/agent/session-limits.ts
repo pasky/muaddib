@@ -112,7 +112,7 @@ export function createNudgeDecider(
         (thinkingLevel === "medium" || thinkingLevel === "high" || thinkingLevel === "xhigh" || thinkingLevel === "max");
 
       if (isFirstTurnHighReasoning || elapsedSinceLastReport >= progressThresholdSeconds) {
-        parts.push("*If* you are going to call more tools, write also an extremely brief one-line status of what you are doing and why. If you are instead ready to answer, output ONLY the answer - no status line, no preamble, no restating your reply twice. Continue now.");
+        parts.push("*If* you are going to call more tools, write also an extremely brief one-line status of what you are doing and why, wrapped in <status>...</status> tags (they are machine-readable: a status note is dropped instead of delivered when it turns out you are already answering). Never put your actual answer inside <status>. Continue now.");
       }
     }
 

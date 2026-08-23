@@ -562,6 +562,39 @@ describe("SessionRunner", () => {
     expect(result.text).toBe("Here is the final answer.");
   });
 
+  it("delivers <status> text when the turn also calls tools, and drops it from the final answer", async () => {
+    const deliveredTexts: string[] = [];
+    makeMockSession({
+      promptImpl: async (c) => {
+        emitAssistantResponse(c, "<status>Searching for the paper.</status>", {
+          stopReason: "tool_use", withToolCall: { name: "web_search" },
+        });
+        emitAssistantResponse(c, "<status>Found it, answering now.</status>\n\nkanzure: here is the answer.");
+      },
+    });
+
+    const runner = makeRunner({ onResponse: (text: string) => { deliveredTexts.push(text); } });
+    const result = await runner.prompt("hello");
+
+    expect(deliveredTexts).toEqual(["Searching for the paper.", "kanzure: here is the answer."]);
+    expect(result.text).toBe("kanzure: here is the answer.");
+  });
+
+  it("falls back to the <status> text when a final answer contains nothing else", async () => {
+    const deliveredTexts: string[] = [];
+    makeMockSession({
+      promptImpl: async (c) => {
+        emitAssistantResponse(c, "<status>All done, nothing else to add.</status>");
+      },
+    });
+
+    const runner = makeRunner({ onResponse: (text: string) => { deliveredTexts.push(text); } });
+    const result = await runner.prompt("hello");
+
+    expect(deliveredTexts).toEqual(["All done, nothing else to add."]);
+    expect(result.text).toBe("All done, nothing else to add.");
+  });
+
   it("delivers final assistant text even if message_end is missing", async () => {
     const deliveredTexts: string[] = [];
     makeMockSession({

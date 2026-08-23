@@ -71,7 +71,7 @@ describe("SessionLimits", () => {
     expect(limits.recordTurn(usage(1_000, 0), "toolUse")).toBe(true);
   });
 
-  it("progress nudge asks for a status line only alongside further tool calls", () => {
+  it("progress nudge asks for a machine-readable <status> tag alongside further tool calls", () => {
     const limits = new SessionLimits(100_000, 1.0);
     const decider = createNudgeDecider(
       limits,
@@ -83,10 +83,10 @@ describe("SessionLimits", () => {
     );
     const nudge = decider(1);
     expect(nudge).toBeTruthy();
-    // Must make it explicit that a final answer carries no status/preamble line,
-    // otherwise models glue the status line in front of the answer.
-    expect(nudge).toMatch(/only the answer/iu);
-    expect(nudge).toMatch(/no status line|without a status line/iu);
+    // The tag is what lets the runner drop a status line the model glued onto
+    // its final answer; plain prose instructions alone are not enforceable.
+    expect(nudge).toContain("<status>");
+    expect(nudge).toContain("</status>");
   });
 
   it("bump floors increments at 10% of the original limits", () => {

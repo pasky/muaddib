@@ -472,50 +472,6 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
-  it("drops a draft preamble that precedes a re-echoed IRC envelope", async () => {
-    const history = createTempHistoryStore(40);
-    await history.initialize();
-
-    const incoming = makeMessage("!s map it");
-
-    const handler = createHandler({
-      roomConfig: roomConfig as any,
-      history,
-      classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: makeRunner("Pulled current main - here's the map:\n\n!a [02:00] <MuaddibLLM> pasky: the actual answer"),
-    });
-
-    const sent: string[] = [];
-    incoming.isDirect = true;
-    await handler.handleIncomingMessage(incoming, { sendResponse: async (text) => { sent.push(text); } });
-
-    expect(sent[0]).toBe("pasky: the actual answer");
-
-    await history.close();
-  });
-
-  it("keeps multi-paragraph answers that contain no re-echoed envelope", async () => {
-    const history = createTempHistoryStore(40);
-    await history.initialize();
-
-    const incoming = makeMessage("!s explain");
-
-    const handler = createHandler({
-      roomConfig: roomConfig as any,
-      history,
-      classifyMode: async () => "EASY_SERIOUS",
-      runnerFactory: makeRunner("first part\n\nsecond part"),
-    });
-
-    const sent: string[] = [];
-    incoming.isDirect = true;
-    await handler.handleIncomingMessage(incoming, { sendResponse: async (text) => { sent.push(text); } });
-
-    expect(sent[0]).toBe("first part\n\nsecond part");
-
-    await history.close();
-  });
-
   it("strips bare command-dispatch prefix without angle brackets", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();

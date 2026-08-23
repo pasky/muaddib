@@ -51,16 +51,33 @@ export function responseText(response: AssistantMessage, sep = "\n"): string {
  * reasoning too (its opener was in an earlier chunk).
  */
 export function extractThinking(text: string): { text: string; thinking: string } {
+  const { text: visible, captured } = extractTagged(text, "thinking");
+  return { text: visible, thinking: captured };
+}
+
+/**
+ * Extract `<status>...</status>` progress notes from raw model text. The
+ * progress nudge asks for the one-line status in this tag precisely so the
+ * runner can decide by itself whether it is deliverable: a status belongs to a
+ * turn that goes on to call tools, and must be dropped when the model glues it
+ * in front of its final answer.
+ */
+export function extractStatus(text: string): { text: string; status: string } {
+  const { text: visible, captured } = extractTagged(text, "status");
+  return { text: visible, status: captured };
+}
+
+function extractTagged(text: string, tag: string): { text: string; captured: string } {
   const parts: string[] = [];
   const capture = (block: string): string => {
-    const inner = block.replace(/<\s*\/?\s*thinking\s*>/gi, "").trim();
+    const inner = block.replace(new RegExp(`<\\s*/?\\s*${tag}\\s*>`, "gi"), "").trim();
     if (inner) parts.push(inner);
     return "";
   };
   const visible = text
-    .replace(/<\s*thinking\s*>[\s\S]*?(?:<\s*\/\s*thinking\s*>|$)/gi, capture)
-    // Anything left before a stray closer is reasoning continuation.
-    .replace(/^[\s\S]*<\s*\/\s*thinking\s*>/i, capture)
+    .replace(new RegExp(`<\\s*${tag}\\s*>[\\s\\S]*?(?:<\\s*/\\s*${tag}\\s*>|$)`, "gi"), capture)
+    // Anything left before a stray closer belongs to the tagged block too.
+    .replace(new RegExp(`^[\\s\\S]*<\\s*/\\s*${tag}\\s*>`, "i"), capture)
     .trim();
-  return { text: visible, thinking: parts.join("\n") };
+  return { text: visible, captured: parts.join("\n") };
 }
