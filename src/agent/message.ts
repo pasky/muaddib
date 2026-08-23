@@ -70,11 +70,16 @@ export function extractThinking(text: string): { text: string; thinking: string 
  * whether such a block was present, so empty tags are stripped, not leaked.
  */
 export function extractStatus(text: string): { text: string; status: string; matched: boolean } {
-  const leading = /^\s*<\s*status\s*>([\s\S]*?)<\s*\/\s*status\s*>/i.exec(text);
+  // Closed leading <thinking> blocks are transparent here (models routinely
+  // emit inline reasoning first) but are preserved in the returned text, since
+  // extractThinking() runs later and persists them as internal monologue.
+  const leading = /^(\s*(?:<\s*thinking\s*>[\s\S]*?<\s*\/\s*thinking\s*>\s*)*)<\s*status\s*>([\s\S]*?)<\s*\/\s*status\s*>/i
+    .exec(text);
   if (!leading) return { text, status: "", matched: false };
+  const preserved = leading[1] ?? "";
   return {
-    text: text.slice(leading[0].length).trim(),
-    status: (leading[1] ?? "").trim(),
+    text: (preserved + text.slice(leading[0].length)).trim(),
+    status: (leading[2] ?? "").trim(),
     matched: true,
   };
 }

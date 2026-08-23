@@ -196,6 +196,16 @@ describe("extractStatus", () => {
     expect(status).toBe("one");
   });
 
+  it("sees through leading <thinking> and keeps it for later monologue extraction", () => {
+    const { text, status, matched } = extractStatus(
+      "<thinking>reasoning</thinking><status>Found it.</status>kanzure: answer",
+    );
+    expect(status).toBe("Found it.");
+    expect(matched).toBe(true);
+    expect(text).toBe("<thinking>reasoning</thinking>kanzure: answer");
+    expect(extractThinking(text)).toEqual({ text: "kanzure: answer", thinking: "reasoning" });
+  });
+
   it("ignores a <status> that is not the leading block (e.g. quoted XML)", () => {
     const answer = "the field <status>pending</status> means the job is queued";
     expect(extractStatus(answer)).toEqual({ text: answer, status: "", matched: false });
