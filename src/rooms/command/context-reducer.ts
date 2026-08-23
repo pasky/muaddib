@@ -136,7 +136,10 @@ export class ContextReducerTs implements ContextReducer {
     // <context_summary> blob (see fallback below), which makes the agent treat
     // its own past room envelopes as quotable text and re-echo them. Content
     // runs from the end of one header to the start of the next.
-    const headerPattern = /^\[(USER|ASSISTANT)\]:?[ \t]*/gimu;
+    // Either `[ROLE]: content` or a bare `[ROLE]` alone on its line; a line
+    // that merely starts with the marker and continues ("[ASSISTANT] is a
+    // literal token here") stays content instead of forging a turn.
+    const headerPattern = /^\[(USER|ASSISTANT)\](?::[ \t]*|[ \t]*$)/gimu;
     const headers = [...response.matchAll(headerPattern)];
 
     for (const [index, match] of headers.entries()) {

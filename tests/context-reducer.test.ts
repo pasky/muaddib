@@ -135,7 +135,7 @@ describe("ContextReducerTs", () => {
   it("reduce treats mid-line role markers as content, not headers", async () => {
     const modelAdapter = {
       completeSimple: vi.fn(async () =>
-        assistantTextMessage("[USER]: he wrote [ASSISTANT] is a literal token here")),
+        assistantTextMessage("[USER]: he wrote\n[ASSISTANT] is a literal token here")),
     } as any;
 
     const reducer = new ContextReducerTs({
@@ -147,7 +147,7 @@ describe("ContextReducerTs", () => {
       [userMsg("long question"), assistantMsg("long answer"), userMsg("follow up")],
       "sys",
     );
-    expect(result).toEqual([userMsg("he wrote [ASSISTANT] is a literal token here")]);
+    expect(result).toEqual([userMsg("he wrote\n[ASSISTANT] is a literal token here")]);
   });
 
   it("reduce discards a truncated summary and keeps the unreduced context", async () => {

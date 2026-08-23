@@ -210,6 +210,7 @@ describe("extractStatus", () => {
     const answer = "the field <status>pending</status> means the job is queued";
     expect(extractStatus(answer)).toEqual({ text: answer, status: "", matched: false });
   });
+
 });
 
 describe("responseText", () => {

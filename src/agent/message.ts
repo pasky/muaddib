@@ -68,6 +68,13 @@ export function extractThinking(text: string): { text: string; thinking: string 
  * opener, or `<status>` inside a sentence therefore never swallows an answer -
  * the worst case is a visible tag, not a lost message. `matched` reports
  * whether such a block was present, so empty tags are stripped, not leaked.
+ *
+ * Known and accepted tradeoff: an answer that *opens* with literal `<status>`
+ * XML ("<status>pending</status> means the job is queued") is read as the
+ * protocol and loses that fragment. Requiring the closer to end a line would
+ * avoid it, but would also miss the common contiguous form
+ * (`<status>note</status>answer`), i.e. the actual bug this protocol exists to
+ * kill - so the rare quoting case loses.
  */
 export function extractStatus(text: string): { text: string; status: string; matched: boolean } {
   // Closed leading <thinking> blocks are transparent here (models routinely
