@@ -159,9 +159,18 @@ describe("extractStatus", () => {
     expect(matched).toBe(false);
   });
 
-  it("swallows an unclosed <status> to end of text and tolerates tag variants", () => {
-    expect(extractStatus("<status>never closed")).toEqual({ text: "", status: "never closed", matched: true });
-    expect(extractStatus("< Status >working</ STATUS >done")).toEqual({ text: "done", status: "working", matched: true });
+  it("leaves an unclosed <status> alone and tolerates tag casing/whitespace", () => {
+    // Never swallow to EOF: a lost answer is far worse than a visible tag.
+    expect(extractStatus("<status>never closed")).toEqual({
+      text: "<status>never closed",
+      status: "",
+      matched: false,
+    });
+    expect(extractStatus("< Status >working</ STATUS >done")).toEqual({
+      text: "done",
+      status: "working",
+      matched: true,
+    });
   });
 
   it("never swallows the answer preceding a stray </status>", () => {
@@ -181,10 +190,15 @@ describe("extractStatus", () => {
     });
   });
 
-  it("joins multiple status blocks", () => {
+  it("only honours a leading block, so mid-answer tags stay untouched", () => {
     const { text, status } = extractStatus("<status>one</status>body<status>two</status>");
-    expect(text).toBe("body");
-    expect(status).toBe("one\ntwo");
+    expect(text).toBe("body<status>two</status>");
+    expect(status).toBe("one");
+  });
+
+  it("ignores a <status> that is not the leading block (e.g. quoted XML)", () => {
+    const answer = "the field <status>pending</status> means the job is queued";
+    expect(extractStatus(answer)).toEqual({ text: answer, status: "", matched: false });
   });
 });
 

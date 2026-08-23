@@ -85,7 +85,7 @@ describe("room adapters share RoomMessageHandler behavior", () => {
         runnerFactory: (input) => ({
           prompt: async () => {
             const result = makeRunnerResult("discord-shared");
-            await input.onResponse(result.text);
+            await input.onResponse(result.text, { interim: false });
             return result;
           },
         }),
@@ -146,7 +146,7 @@ describe("room adapters share RoomMessageHandler behavior", () => {
         runnerFactory: (input) => ({
           prompt: async () => {
             const result = makeRunnerResult("slack-shared");
-            await input.onResponse(result.text);
+            await input.onResponse(result.text, { interim: false });
             return result;
           },
         }),

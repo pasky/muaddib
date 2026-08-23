@@ -384,6 +384,11 @@ export class SessionRunner {
       }
 
       const lastAssistant = findLastAssistantMessage(session.messages);
+      // Recompute the status verdict for the missing-message_end fallback path,
+      // so a status-only final message stays flagged interim here too.
+      const finalInterim = lastAssistant
+        ? applyStatusPolicy(responseText(lastAssistant), lastAssistant).interim
+        : false;
       const finalResponseText = responseSuffix ? `${text} ${responseSuffix}` : text;
       const finalAlreadyDelivered =
         lastAssistant !== null && deliveredAssistantMessages.has(lastAssistant);
@@ -392,7 +397,7 @@ export class SessionRunner {
         if (lastAssistant) {
           deliveredAssistantMessages.add(lastAssistant);
         }
-        queueResponseDelivery(finalResponseText);
+        queueResponseDelivery(finalResponseText, finalInterim);
       }
 
       await pendingResponseDelivery;

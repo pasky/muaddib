@@ -94,7 +94,7 @@ export interface CommandRunnerFactoryInput {
   metaReminder?: string;
   progressThresholdSeconds?: number;
   /** `meta.interim` marks progress chatter (tool-turn note, <status>, retry notice). */
-  onResponse: (text: string, meta?: { interim: boolean }) => void | Promise<void>;
+  onResponse: (text: string, meta: { interim: boolean }) => void | Promise<void>;
   logger?: Logger;
   onAgentCreated?: (agent: Agent) => void;
 }
@@ -789,15 +789,16 @@ export class CommandExecutor {
     // messages (e.g. "fixing dependency…") from leaking to the room.
     let lastValidResponse: string | null = null;
     let bufferedThinking: string | null = null;
-    const onResponse = async (text: string, meta?: { interim: boolean }): Promise<void> => {
-      // Progress chatter (tool-turn notes, <status> lines, retry notices) is
-      // never an answer here: buffering it would publish it whenever the final
-      // turn declines to speak (NULL sentinel).
-      if (meta?.interim) return;
+    const onResponse = async (text: string, meta: { interim: boolean }): Promise<void> => {
       const { text: raw, thinking } = extractThinking(text);
       if (thinking) {
         bufferedThinking = bufferedThinking ? `${bufferedThinking}\n${thinking}` : thinking;
       }
+      // Progress chatter (tool-turn notes, <status> lines, retry notices) is
+      // never an answer here: buffering it would publish it whenever the final
+      // turn declines to speak (NULL sentinel). Thinking is buffered first, so
+      // interim monologues still reach persistence.
+      if (meta.interim) return;
       if (!raw) return;
 
       let cleaned = this.cleanResponseText(raw, message.nick);

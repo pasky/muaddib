@@ -226,7 +226,7 @@ function makeRunner(
   return (input) => ({
     prompt: async () => {
       const result = makeRunnerResult(text, options);
-      await input.onResponse(result.text);
+      await input.onResponse(result.text, { interim: false });
       return result;
     },
   });
@@ -309,7 +309,7 @@ function makeRunnerWithBlockedBackgroundWork(options: {
         totalCost: options.totalCost ?? 0.35,
         toolCallsCount: options.toolCallsCount ?? 1,
       });
-      await input.onResponse(result.text);
+      await input.onResponse(result.text, { interim: false });
       return {
         ...result,
         session,
@@ -360,7 +360,7 @@ describe("RoomMessageHandler", () => {
             runnerThinkingLevel = options?.thinkingLevel;
             runnerContextContents = (options?.contextMessages ?? []).map((entry) => typeof entry.content === 'string' ? entry.content : entry.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join(' '));
             const result = makeRunnerResult("done");
-            await input.onResponse(result.text);
+            await input.onResponse(result.text, { interim: false });
             return result;
           },
         };
@@ -765,7 +765,7 @@ describe("RoomMessageHandler", () => {
           runnerPrompt = prompt;
           runnerContextContents = (options?.contextMessages ?? []).map((entry) => typeof entry.content === 'string' ? entry.content : entry.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join(' '));
           const result = makeRunnerResult("done");
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -816,7 +816,7 @@ describe("RoomMessageHandler", () => {
         prompt: async (_prompt, options) => {
           runnerContextWithSummary.push((options?.contextMessages ?? []).map((entry) => typeof entry.content === 'string' ? entry.content : entry.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join(' ')));
           const result = makeRunnerResult("done");
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -918,7 +918,7 @@ describe("RoomMessageHandler", () => {
           prompt: async (_prompt: string, opts?: { contextMessages?: any[] }) => {
             seenContextMessages = opts?.contextMessages ?? [];
             const result = makeRunnerResult("done");
-            await input.onResponse(result.text);
+            await input.onResponse(result.text, { interim: false });
             return result;
           },
         };
@@ -964,7 +964,7 @@ describe("RoomMessageHandler", () => {
           firstStarted.resolve();
           await releaseFirst.promise;
           const result = makeRunnerResult("done");
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -1028,7 +1028,7 @@ describe("RoomMessageHandler", () => {
           firstStarted.resolve();
           await releaseFirst.promise;
           const result = makeRunnerResult("done");
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -1091,7 +1091,7 @@ describe("RoomMessageHandler", () => {
             );
             const textBlock = toolResult.content.find((block) => block.type === "text");
             const text = textBlock?.type === "text" ? textBlock.text : "missing tool result";
-            await input.onResponse(text);
+            await input.onResponse(text, { interim: false });
             return makeRunnerResult(text);
           },
         };
@@ -1197,7 +1197,7 @@ describe("RoomMessageHandler", () => {
             );
             const textBlock = toolResult.content.find((block) => block.type === "text");
             const text = textBlock?.type === "text" ? textBlock.text : "missing tool result";
-            await input.onResponse(text);
+            await input.onResponse(text, { interim: false });
             return makeRunnerResult(text);
           },
         };
@@ -1279,7 +1279,7 @@ describe("RoomMessageHandler", () => {
           firstStarted.resolve();
           await releaseFirst.promise;
           const result = makeRunnerResult("done");
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -1342,7 +1342,7 @@ describe("RoomMessageHandler", () => {
           firstStarted.resolve();
           await releaseFirst.promise;
           const result = makeRunnerResult("done");
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -1608,7 +1608,7 @@ describe("RoomMessageHandler", () => {
               outputTokens: 5,
               totalCost: 0.05,
             });
-            await input.onResponse(result.text);
+            await input.onResponse(result.text, { interim: false });
             return result;
           },
         }),
@@ -1813,7 +1813,7 @@ describe("RoomMessageHandler", () => {
           prompt: async () => {
             runnerModel = input.model;
             const result = makeRunnerResult("done");
-            await input.onResponse(result.text);
+            await input.onResponse(result.text, { interim: false });
             return result;
           },
         }),
@@ -1866,7 +1866,7 @@ describe("RoomMessageHandler", () => {
           prompt: async () => {
             runnerModel = input.model;
             const result = makeRunnerResult("done");
-            await input.onResponse(result.text);
+            await input.onResponse(result.text, { interim: false });
             return result;
           },
         }),
@@ -1892,7 +1892,7 @@ describe("RoomMessageHandler", () => {
     const runnerFactory: CommandRunnerFactory = (input) => ({
       prompt: async () => {
         const result = makeRunnerResult("done");
-        await input.onResponse(result.text);
+        await input.onResponse(result.text, { interim: false });
         return {
           ...result,
           session: {
@@ -2012,7 +2012,7 @@ describe("RoomMessageHandler", () => {
               outputTokens: 5,
               totalCost: 0.01,
             });
-            await input.onResponse(result.text);
+            await input.onResponse(result.text, { interim: false });
             return result;
           },
         }),
@@ -2067,7 +2067,7 @@ describe("RoomMessageHandler", () => {
               outputTokens: 5,
               totalCost: 0.001,
             });
-            await input.onResponse(result.text);
+            await input.onResponse(result.text, { interim: false });
             return result;
           },
         }),
@@ -2690,7 +2690,7 @@ describe("RoomMessageHandler", () => {
         prompt: async (_prompt, options) => {
           promptRefusalFallbackModel = options?.refusalFallbackModel;
           const result = makeRunnerResult("done");
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -2817,7 +2817,7 @@ describe("RoomMessageHandler", () => {
           firstStarted.resolve();
           await releaseFirst.promise;
           const result = makeRunnerResult("first response");
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -2873,7 +2873,7 @@ describe("RoomMessageHandler", () => {
           await releaseResolve.promise;
           input.onAgentCreated?.(mockAgent as any);
           const result = makeRunnerResult("done");
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -2933,7 +2933,7 @@ describe("RoomMessageHandler", () => {
           firstStarted.resolve();
           await releaseFirst.promise;
           const result = makeRunnerResult("first response");
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -2991,7 +2991,7 @@ describe("RoomMessageHandler", () => {
           firstStarted.resolve();
           await releaseFirst.promise;
           const result = makeRunnerResult("first response");
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -3068,7 +3068,7 @@ describe("RoomMessageHandler", () => {
           firstStarted.resolve();
           await releaseFirst.promise;
           const result = makeRunnerResult("done");
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -3123,7 +3123,7 @@ describe("RoomMessageHandler", () => {
           firstStarted.resolve();
           await releaseFirst.promise;
           const result = makeRunnerResult("done");
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -3223,14 +3223,14 @@ describe("RoomMessageHandler", () => {
             agentReady.resolve();
             await releaseAgent.promise;
             const result = makeRunnerResult("done");
-            await input.onResponse(result.text);
+            await input.onResponse(result.text, { interim: false });
             fireAgentEnd();
             return result;
           }
           const { agent: secondAgent, fireAgentEnd: fireSecondEnd } = makeMockAgent();
           input.onAgentCreated?.(secondAgent as any);
           const result = makeRunnerResult("second response");
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           fireSecondEnd();
           return result;
         },
@@ -3312,7 +3312,7 @@ describe("RoomMessageHandler", () => {
         prompt: async () => {
           runnerCalled = true;
           const result = makeRunnerResult("proactive response");
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -3353,9 +3353,9 @@ describe("RoomMessageHandler", () => {
       classifyMode: async () => "EASY_SERIOUS",
       runnerFactory: (input) => ({
         prompt: async () => {
-          await input.onResponse("NULL");
+          await input.onResponse("NULL", { interim: false });
           const result = makeRunnerResult("done");
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -3391,10 +3391,10 @@ describe("RoomMessageHandler", () => {
       runnerFactory: (input) => ({
         prompt: async () => {
           // Emit an error, a NULL, and a real response
-          await input.onResponse("Error: something went wrong");
-          await input.onResponse("NULL");
+          await input.onResponse("Error: something went wrong", { interim: true });
+          await input.onResponse("NULL", { interim: false });
           const result = makeRunnerResult("event output here", { totalCost: 0.50 });
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -3510,9 +3510,9 @@ describe("RoomMessageHandler", () => {
       runnerFactory: (input) => ({
         prompt: async () => {
           // Simulate intermediate "thinking out loud" then final answer
-          await input.onResponse("Fixing missing dependency, then rerunning the script.");
+          await input.onResponse("Fixing missing dependency, then rerunning the script.", { interim: true });
           const result = makeRunnerResult("calendar: 20:00 - Meetup", { totalCost: 0.01 });
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -3546,7 +3546,7 @@ describe("RoomMessageHandler", () => {
           // Agent appends NULL after real content
           const text = "calendar: 20:00 - Meetup\n\nNULL";
           const result = makeRunnerResult(text, { totalCost: 0.01 });
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -3576,12 +3576,12 @@ describe("RoomMessageHandler", () => {
       classifyMode: async () => "EASY_SERIOUS",
       runnerFactory: (input) => ({
         prompt: async () => {
-          // First response: thinking only, no visible output
-          await input.onResponse("<thinking>Checking if there are events today...</thinking>");
+          // First response (interim, mid tool work): thinking only, no visible output
+          await input.onResponse("<thinking>Checking if there are events today...</thinking>", { interim: true });
           // Final response: thinking + visible output
           const text = "<thinking>Let me check the calendar...</thinking>calendar: 20:00 - Meetup";
           const result = makeRunnerResult(text, { totalCost: 0.01 });
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -3623,7 +3623,7 @@ describe("RoomMessageHandler", () => {
           // Model forgot the closing tag: everything after <thinking> is reasoning
           const text = "<thinking>Checking whether to speak up at all here";
           const result = makeRunnerResult(text, { totalCost: 0.01 });
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -3713,7 +3713,7 @@ describe("RoomMessageHandler", () => {
         prompt: async () => {
           proactivePromptReached.resolve();
           const result = makeRunnerResult(leakedPayload);
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -3783,7 +3783,7 @@ describe("RoomMessageHandler", () => {
         prompt: async () => {
           proactivePromptReached.resolve();
           const result = makeRunnerResult("NULL");
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -3915,7 +3915,7 @@ describe("RoomMessageHandler", () => {
         prompt: async (prompt) => {
           runnerPrompts.push(prompt);
           const result = makeRunnerResult("command response");
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -3979,7 +3979,7 @@ describe("RoomMessageHandler", () => {
         prompt: async (prompt) => {
           runnerPrompts.push(prompt);
           const result = makeRunnerResult("command response");
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -4063,7 +4063,7 @@ describe("RoomMessageHandler", () => {
           agentStarted.resolve();
           await releaseAgent.promise;
           const result = makeRunnerResult("proactive response");
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -4158,13 +4158,13 @@ describe("RoomMessageHandler", () => {
             agentStarted.resolve();
             await releaseAgent.promise;
             const r = makeRunnerResult("proactive response");
-            await input.onResponse(r.text);
+            await input.onResponse(r.text, { interim: false });
             return r;
           }
           commandRunnerCalled = true;
           input.onAgentCreated?.({ steer() {}, subscribe: () => () => {} } as any);
           const r = makeRunnerResult("command response");
-          await input.onResponse(r.text);
+          await input.onResponse(r.text, { interim: false });
           return r;
         },
       }),
@@ -4220,11 +4220,11 @@ describe("RoomMessageHandler", () => {
             aliceStarted.resolve();
             await releaseAlice.promise;
             const result = makeRunnerResult("alice reply");
-            await input.onResponse(result.text);
+            await input.onResponse(result.text, { interim: false });
             return result;
           }
           const result = makeRunnerResult("bob reply");
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -4279,11 +4279,11 @@ describe("RoomMessageHandler", () => {
             firstStarted.resolve();
             await releaseFirst.promise;
             const result = makeRunnerResult("chan1 reply");
-            await input.onResponse(result.text);
+            await input.onResponse(result.text, { interim: false });
             return result;
           }
           const result = makeRunnerResult("chan2 reply");
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -4336,7 +4336,7 @@ describe("RoomMessageHandler", () => {
           firstStarted.resolve();
           await releaseFirst.promise;
           const result = makeRunnerResult("reply 1");
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),
@@ -4383,7 +4383,7 @@ describe("RoomMessageHandler", () => {
             throw new Error("runner exploded");
           }
           const result = makeRunnerResult("recovered");
-          await input.onResponse(result.text);
+          await input.onResponse(result.text, { interim: false });
           return result;
         },
       }),

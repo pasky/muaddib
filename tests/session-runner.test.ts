@@ -608,6 +608,27 @@ describe("SessionRunner", () => {
     expect(result.text).toBe("All done, nothing else to add.");
   });
 
+  it("keeps the interim flag on a status-only response delivered without message_end", async () => {
+    const delivered: Array<{ text: string; interim: boolean }> = [];
+    makeMockSession({
+      promptImpl: async (c) => {
+        c.session.messages.push({
+          role: "assistant", content: [{ type: "text", text: "<status>Still digging.</status>" }],
+          usage: makeUsage(), stopReason: "stop",
+        });
+        c.callbacks.forEach((cb) => cb({ type: "turn_end" }));
+      },
+    });
+
+    const runner = makeRunner({
+      onResponse: (text: string, meta: { interim: boolean }) => { delivered.push({ text, interim: meta.interim }); },
+    });
+    const result = await runner.prompt("hello");
+
+    expect(delivered).toEqual([{ text: "Still digging.", interim: true }]);
+    expect(result.text).toBe("Still digging.");
+  });
+
   it("delivers final assistant text even if message_end is missing", async () => {
     const deliveredTexts: string[] = [];
     makeMockSession({

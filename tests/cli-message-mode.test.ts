@@ -73,7 +73,7 @@ describe("runCliMessageMode", () => {
       message: "!s hi",
       runnerFactory: (input) => ({
         prompt: async () => {
-          await input.onResponse("cli ok");
+          await input.onResponse("cli ok", { interim: false });
           return {
             assistantMessage: {
               role: "assistant",
@@ -160,7 +160,7 @@ describe("runCliMessageMode", () => {
       arc: "libera##mychannel",
       runnerFactory: (input) => ({
         prompt: async () => {
-          await input.onResponse("arc ok");
+          await input.onResponse("arc ok", { interim: false });
           return {
             assistantMessage: {
               role: "assistant",
@@ -248,7 +248,7 @@ describe("runCliMessageMode", () => {
       arc: "discord:guild-1#general",
       runnerFactory: (input) => ({
         prompt: async () => {
-          await input.onResponse("discord ok");
+          await input.onResponse("discord ok", { interim: false });
           return {
             assistantMessage: {
               role: "assistant",
@@ -352,7 +352,7 @@ describe("runCliMessageMode", () => {
             );
             const textBlock = toolResult.content.find((block) => block.type === "text");
             const text = textBlock?.type === "text" ? textBlock.text : "missing tool result";
-            await input.onResponse(text);
+            await input.onResponse(text, { interim: false });
             return {
               assistantMessage: {
                 role: "assistant",
@@ -503,7 +503,7 @@ describe("runCliMessageMode", () => {
       message: "!s hi",
       runnerFactory: (input) => ({
         prompt: async () => {
-          await input.onResponse("cli ok");
+          await input.onResponse("cli ok", { interim: false });
           return {
             assistantMessage: {
               role: "assistant",
@@ -680,7 +680,7 @@ describe("runCliMessageMode", () => {
       runnerFactory: (input) => ({
         prompt: async (_prompt, options) => {
           expect(options?.refusalFallbackModel).toBeUndefined();
-          await input.onResponse("cli ok");
+          await input.onResponse("cli ok", { interim: false });
           return {
             assistantMessage: {
               role: "assistant",
@@ -766,7 +766,7 @@ describe("runCliMessageMode", () => {
       message: "!s hi",
       runnerFactory: (input) => ({
         prompt: async () => {
-          await input.onResponse("cli ok");
+          await input.onResponse("cli ok", { interim: false });
           return {
             assistantMessage: {
               role: "assistant",
