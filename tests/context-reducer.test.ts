@@ -111,6 +111,47 @@ describe("ContextReducerTs", () => {
     expect(firstCall[2]).toMatchObject({ streamOptions: { maxTokens: 2048 } });
   });
 
+  it("reduce parses colonless [USER]/[ASSISTANT] headers instead of blobbing them", async () => {
+    const modelAdapter = {
+      completeSimple: vi.fn(async () =>
+        assistantTextMessage("[USER]\nsummarized question\n\n[ASSISTANT]\nsummarized answer")),
+    } as any;
+
+    const reducer = new ContextReducerTs({
+      config: { model: "openai:gpt-4o-mini", prompt: "Condense the conversation" },
+      modelAdapter,
+    });
+
+    const result = await reducer.reduce(
+      [userMsg("long question"), assistantMsg("long answer"), userMsg("follow up")],
+      "sys",
+    );
+    expect(result).toEqual([
+      userMsg("summarized question"),
+      assistantMsg("summarized answer"),
+    ]);
+  });
+
+  it("reduce discards a truncated summary and keeps the unreduced context", async () => {
+    const truncated = assistantTextMessage("[USER]: summarized question\n[ASSISTANT]: cut off mid-sen");
+    truncated.stopReason = "length" as any;
+    const modelAdapter = { completeSimple: vi.fn(async () => truncated) } as any;
+    const warn = vi.fn();
+
+    const reducer = new ContextReducerTs({
+      config: { model: "openai:gpt-4o-mini", prompt: "Condense" },
+      modelAdapter,
+      logger: { warn } as any,
+    });
+
+    const result = await reducer.reduce(
+      [userMsg("long question"), assistantMsg("long answer"), userMsg("follow up")],
+      "sys",
+    );
+    expect(result).toEqual([userMsg("long question"), assistantMsg("long answer")]);
+    expect(warn).toHaveBeenCalled();
+  });
+
   it("reduce wraps plain text response in context_summary tag", async () => {
     const modelAdapter = {
       completeSimple: vi.fn(async () =>

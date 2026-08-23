@@ -82,6 +82,18 @@ export class ContextReducerTs implements ContextReducer {
         return contextToReduce;
       }
 
+      // A summary cut off by maxTokens loses the tail of the conversation -
+      // exactly the part that matters most - and ends mid-sentence, so the
+      // agent inherits a mangled context. Unreduced history beats that.
+      if (response.stopReason === "length") {
+        this.logger?.warn?.(
+          "Context reduction truncated at token cap, returning unreduced context",
+          `model=${reducerModelSpec}`,
+          `chars=${reducedText.length}`,
+        );
+        return contextToReduce;
+      }
+
       return this.parseReducedContext(reducedText);
     } catch (error) {
       this.logger?.error?.("Context reduction failed, returning unreduced context", error);
@@ -118,7 +130,12 @@ export class ContextReducerTs implements ContextReducer {
 
   private parseReducedContext(response: string): Message[] {
     const messages: Message[] = [];
-    const pattern = /\[(USER|ASSISTANT)\]:[ ]*(.*?)(?=\n\[(?:USER|ASSISTANT)\]:|$)/gis;
+    // The colon is optional: reducer models routinely drop it and emit a bare
+    // `[USER]` header on its own line. Without this tolerance the whole
+    // transcript collapses into one <context_summary> blob (see fallback
+    // below), which makes the agent treat its own past IRC envelopes as
+    // quotable text and re-echo them.
+    const pattern = /\[(USER|ASSISTANT)\]:?[ \t]*(?:\n(?!\[(?:USER|ASSISTANT)\]))?(.*?)(?=\n\[(?:USER|ASSISTANT)\]:?|$)/gis;
 
     for (const match of response.matchAll(pattern)) {
       const role = match[1]?.toLowerCase();
