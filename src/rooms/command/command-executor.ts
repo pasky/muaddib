@@ -1175,8 +1175,7 @@ export class CommandExecutor {
   }
 
   private cleanResponseText(text: string, nick: string): string {
-    const cleaned = text
-      .trim()
+    const cleaned = dropDraftPreamble(text.trim())
       // Strip echoed IRC-style context prefixes such as:
       //   "[12:34] <SomeUser>"
       //   "[claude-sonnet-4] !s <SomeUser>"
@@ -1330,6 +1329,23 @@ export class CommandExecutor {
 }
 
 // ── Module-level helpers ──
+
+/**
+ * Models nudged for a one-line progress status sometimes emit the status line
+ * and then "restart" the reply as a fresh IRC message, re-echoing the room
+ * envelope (`!a [02:00] <Bot> ...`). Everything before that envelope is draft
+ * noise: drop it so the room sees one message instead of two glued together.
+ * Only paragraphs after a blank line qualify, so ordinary multi-paragraph
+ * answers are untouched.
+ */
+export function dropDraftPreamble(text: string): string {
+  // At least one envelope marker (model tag, !trigger, timestamp) must precede
+  // the <nick>, so a paragraph merely starting with <angle brackets> survives.
+  const envelope = /\n\s*\n(?=(?:\[[^\]]+\]\s*|![A-Za-z][\w-]*\s+|\[?\d{1,2}:\d{2}\]?\s*)+<[^>]+>)/u;
+  const match = envelope.exec(text);
+  if (!match) return text;
+  return text.slice(match.index + match[0].length);
+}
 
 export function modelStrCore(model: unknown): string {
   return String(model).replace(/(?:[-.\w]*:)?(?:[-.\w]*\/)?([-.\w]+)(?:#[-\w,/]*)?/, "$1");

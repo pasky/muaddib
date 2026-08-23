@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { SessionLimits } from "../src/agent/session-limits.js";
+import { SessionLimits, createNudgeDecider } from "../src/agent/session-limits.js";
 
 describe("SessionLimits", () => {
   const usage = (input: number, costTotal: number) => ({
@@ -69,6 +69,24 @@ describe("SessionLimits", () => {
       expect(limits.recordTurn(usage(1_000, 0), "toolUse")).toBe(false);
     }
     expect(limits.recordTurn(usage(1_000, 0), "toolUse")).toBe(true);
+  });
+
+  it("progress nudge asks for a status line only alongside further tool calls", () => {
+    const limits = new SessionLimits(100_000, 1.0);
+    const decider = createNudgeDecider(
+      limits,
+      Date.now() - 60_000,
+      "high",
+      { lastResponseAt: Date.now() - 60_000 },
+      undefined,
+      10,
+    );
+    const nudge = decider(1);
+    expect(nudge).toBeTruthy();
+    // Must make it explicit that a final answer carries no status/preamble line,
+    // otherwise models glue the status line in front of the answer.
+    expect(nudge).toMatch(/only the answer/iu);
+    expect(nudge).toMatch(/no status line|without a status line/iu);
   });
 
   it("bump floors increments at 10% of the original limits", () => {
