@@ -3,11 +3,7 @@ import type { StopReason, Usage } from "@earendil-works/pi-ai";
 
 import { isAssistantMessage } from "./message.js";
 import type { Logger } from "../app/logging.js";
-
-/** Usage slice of an assistant turn_end message that session limits care about. */
-export interface TurnUsage extends Pick<Usage, "input" | "cacheRead" | "cacheWrite"> {
-  cost: Pick<Usage["cost"], "total">;
-}
+import { accumulateUsage, cloneUsage, emptyUsage } from "../cost/usage.js";
 
 /** Mutable timestamp holder — bumped externally when a response is delivered. */
 export interface ResponseTimestamp {
@@ -15,21 +11,38 @@ export interface ResponseTimestamp {
 }
 
 /**
- * Session budget tracking: peak context length (input + cacheRead + cacheWrite
- * of any single turn) and cumulative cost against configurable ceilings.
+ * Boundary between the preloaded context and this invocation's own turns,
+ * held as the identity of the last preloaded message rather than as an index:
+ * compaction rewrites the message list, and any index captured beforehand is
+ * meaningless afterwards. A message that compaction summarized away is simply
+ * no longer found, and everything left counts as invocation content.
+ */
+export interface InvocationStart {
+  boundary: AgentMessage | null;
+}
+
+/**
+ * Session budget tracking: billed usage accumulated from every LLM call of the
+ * session (agent turns and compaction summarizations alike), with peak context
+ * length (input + cacheRead + cacheWrite of any single call) and cumulative
+ * cost checked against configurable ceilings.
  *
  * Owned by the session factory; consulted by the nudge policy below. When the
  * budget is exhausted the agent is first nudged (ephemerally) to wrap up, and
  * `recordTurn` arms a safety vent that requests a hard abort if the agent
  * keeps calling tools for 10 more turns past the limit.
+ *
+ * This is also the source of truth for what the session cost: compaction
+ * truncates `session.messages` and its summarization call is never represented
+ * there, so summing usage over surviving messages undercounts.
  */
 export class SessionLimits {
   private readonly initialMaxContextLength: number;
   private readonly initialMaxCostUsd: number;
   private maxContextLength: number;
   private maxCostUsd: number;
+  private readonly usage = emptyUsage();
   private peakContextLength = 0;
-  private cumulativeCost = 0;
   private turnsSinceSoftLimit = 0;
 
   constructor(maxContextLength: number, maxCostUsd: number) {
@@ -41,26 +54,36 @@ export class SessionLimits {
 
   /** Either budget ceiling has been hit. */
   get reached(): boolean {
-    return this.peakContextLength >= this.maxContextLength || this.cumulativeCost >= this.maxCostUsd;
+    return this.peakContextLength >= this.maxContextLength || this.usage.cost.total >= this.maxCostUsd;
   }
 
   /** Within 80% of either ceiling — used to suppress progress nudges. */
   get nearLimit(): boolean {
     return (
       this.peakContextLength >= this.maxContextLength * 0.8 ||
-      this.cumulativeCost >= this.maxCostUsd * 0.8
+      this.usage.cost.total >= this.maxCostUsd * 0.8
     );
   }
 
   /**
-   * Record an assistant turn's usage. Returns true when the safety vent has
-   * tripped and the caller should abort the prompt loop.
+   * Snapshot of everything billed so far. A copy, not the live accumulator:
+   * follow-up prompts on the same session (memory update, tool summary) keep
+   * billing after a caller has taken its total.
    */
-  recordTurn(usage: TurnUsage | undefined, stopReason: StopReason | undefined): boolean {
+  usageSummary(): { usage: Usage; peakTurnInput: number } {
+    return { usage: cloneUsage(this.usage), peakTurnInput: this.peakContextLength };
+  }
+
+  /**
+   * Record an LLM call's usage. Pass the stop reason for assistant turns (it
+   * drives the safety vent); leave it undefined for compaction summarizations.
+   * Returns true when the safety vent has tripped and the caller should abort
+   * the prompt loop.
+   */
+  recordTurn(usage: Usage | undefined, stopReason: StopReason | undefined): boolean {
     if (usage) {
-      const turnContext = usage.input + usage.cacheRead + usage.cacheWrite;
-      this.peakContextLength = Math.max(this.peakContextLength, turnContext);
-      this.cumulativeCost += usage.cost.total;
+      accumulateUsage(this.usage, usage);
+      this.peakContextLength = Math.max(this.peakContextLength, usage.input + usage.cacheRead + usage.cacheWrite);
     }
     if (this.reached && stopReason === "toolUse") {
       this.turnsSinceSoftLimit += 1;
@@ -127,14 +150,15 @@ export function createNudgeDecider(
  * persisted into agent.state.messages, so it cannot trigger extra turns.
  */
 export function createInternalNudgeTransform(
-  invocationStartMessageCount: number,
+  invocationStart: InvocationStart,
   limits: SessionLimits,
   getNudgeText: (turnCount: number) => string | null,
   logger: Logger,
 ) {
   return async (messages: AgentMessage[]): Promise<AgentMessage[]> => {
     // Count assistant turns produced in this invocation (not from preloaded context).
-    const invocationMessages = messages.slice(invocationStartMessageCount);
+    const boundary = invocationStart.boundary ? messages.indexOf(invocationStart.boundary) : -1;
+    const invocationMessages = boundary >= 0 ? messages.slice(boundary + 1) : messages;
     const turnCount = invocationMessages.filter(isAssistantMessage).length;
 
     // When session limit is reached, inject the limit message instead of

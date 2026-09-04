@@ -6,6 +6,7 @@ const mockState = vi.hoisted(() => ({
     return { stream: true };
   }),
   sessions: [] as any[],
+  appendMessage: vi.fn(),
 }));
 
 vi.mock("@earendil-works/pi-agent-core", () => ({
@@ -51,11 +52,16 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
       type: "sessionManager",
       getSessionFile: () => undefined,
       getSessionId: () => "mock-session-id",
+      appendMessage: mockState.appendMessage,
     })),
     open: vi.fn((path: string) => ({
       type: "sessionManager",
       getSessionFile: () => path,
       getSessionId: () => "mock-session-id",
+      appendMessage: mockState.appendMessage,
+      appendCustomEntry: vi.fn(),
+      appendModelChange: vi.fn(),
+      getBranch: () => [],
     })),
   },
   SettingsManager: { inMemory: vi.fn(() => ({ type: "settingsManager" })) },
@@ -144,6 +150,7 @@ describe("createAgentSessionForInvocation", () => {
   beforeEach(() => {
     mockState.sessions.length = 0;
     mockState.streamSimpleMock.mockClear();
+    mockState.appendMessage.mockClear();
   });
 
   it("converts context messages and preserves provider/model metadata", async () => {
@@ -169,6 +176,135 @@ describe("createAgentSessionForInvocation", () => {
     expect(messages.length).toBe(2);
     expect(messages[0].role).toBe("user");
     expect(messages[1].role).toBe("assistant");
+  });
+
+  it("persists context messages as session entries so compaction can summarize them", async () => {
+    await createAgentSessionForInvocation({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "system",
+      tools: [],
+      authStorage: fakeAuthStore(),
+      modelAdapter: defaultModelAdapter,
+      contextMessages: [
+        { role: "user", content: "hello", timestamp: 0 },
+        { role: "user", content: "world", timestamp: 0 },
+      ],
+      sessionFile: "/tmp/does-not-matter.jsonl",
+    });
+
+    // Compaction rebuilds agent.state.messages from session entries; context
+    // messages that never became entries would be silently dropped.
+    expect(mockState.appendMessage).toHaveBeenCalledTimes(2);
+    expect((mockState.appendMessage.mock.calls[0][0] as any).content).toBe("hello");
+    expect((mockState.appendMessage.mock.calls[1][0] as any).content).toBe("world");
+  });
+
+  it("accumulates billed usage from turn events", async () => {
+    const ctx = await createAgentSessionForInvocation({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "system",
+      tools: [],
+      authStorage: fakeAuthStore(),
+      modelAdapter: defaultModelAdapter,
+      sessionLimits: { maxCostUsd: 10 },
+    });
+    const session = mockState.sessions[0];
+
+    const turnEnd = (input: number, cost: number) => session.emit({
+      type: "turn_end",
+      message: { role: "assistant", content: [], stopReason: "stop", usage: mockUsage(input, 0, 0, cost) },
+      toolResults: [],
+    });
+
+    turnEnd(1_000, 0.02);
+    turnEnd(4_000, 0.03);
+
+    const summary = ctx.getUsageSummary();
+    expect(summary.usage.cost.total).toBeCloseTo(0.05, 5);
+    expect(summary.usage.input).toBe(5_000);
+    expect(summary.peakTurnInput).toBe(4_000);
+  });
+
+  it("imposes no context ceiling by default — only cost limits the session", async () => {
+    const ctx = await createAgentSessionForInvocation({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "system",
+      tools: [],
+      authStorage: fakeAuthStore(),
+      modelAdapter: defaultModelAdapter,
+      sessionLimits: { maxCostUsd: 10 },
+    });
+
+    const session = mockState.sessions[0];
+    const transform = await getTransform(ctx);
+
+    // A turn far beyond any model context window must not trip the soft limit;
+    // pi's auto-compaction handles context pressure instead.
+    session.emit({
+      type: "turn_end",
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "t1", name: "web_search", arguments: {} }],
+        stopReason: "toolUse",
+        usage: mockUsage(5_000_000, 0, 0, 0.01),
+      },
+      toolResults: [],
+    });
+
+    expect(hasMetaInLast(await transform(toolUseContext()))).toBe(false);
+  });
+
+  it("counts invocation turns from the preloaded-context boundary, and survives compaction rewriting it", async () => {
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const ctx = await createAgentSessionForInvocation({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "system",
+      tools: [],
+      authStorage: fakeAuthStore(),
+      modelAdapter: defaultModelAdapter,
+      sessionLimits: { maxCostUsd: 10 },
+      thinkingLevel: "high",
+      // Only the high-reasoning first-turn special case can fire, so the nudge
+      // is a direct probe of the computed turn count.
+      progressThresholdSeconds: 100_000,
+      contextMessages: [
+        // A past bot reply: preloaded assistant turns must not be counted as
+        // turns of this invocation.
+        {
+          role: "assistant", content: [{ type: "text" as const, text: "earlier reply" }],
+          api: "", provider: "", model: "", stopReason: "stop" as const, timestamp: 0,
+          usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+        },
+        { role: "user", content: "latest channel line", timestamp: 0 },
+      ],
+      logger,
+    });
+
+    const session = mockState.sessions[0];
+    const transform = await getTransform(ctx);
+    const preloaded = (ctx.agent as any).state.messages as unknown[];
+
+    // One assistant turn since the boundary → the high-reasoning first-turn
+    // nudge fires. Counting the preloaded reply too would make it turn 2.
+    const out = await transform([...preloaded, assistantToolCall(), toolResult()]);
+    expect(hasMetaInLast(out)).toBe(true);
+    expect((out.at(-1) as any).content[0].text).toContain("<status>");
+
+    // Compaction rewrites the message list: the boundary message is gone, so
+    // everything that remains counts as invocation content (still turn 1 here).
+    session.emit({
+      type: "compaction_end",
+      reason: "threshold",
+      aborted: false,
+      willRetry: false,
+      result: { summary: "s", firstKeptEntryId: "e1", tokensBefore: 250_000, estimatedTokensAfter: 20_000 },
+    });
+    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining("Context compacted"));
+
+    const compacted = [userMsg("summary"), assistantToolCall(), toolResult()];
+    const outAfter = await transform(compacted);
+    expect(hasMetaInLast(outAfter)).toBe(true);
+    expect((outAfter.at(-1) as any).content[0].text).toContain("<status>");
   });
 
   it("validates provider key via ensureProviderKey", async () => {

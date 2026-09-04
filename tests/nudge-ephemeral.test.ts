@@ -118,6 +118,7 @@ describe("internal nudge ephemerality", () => {
       modelAdapter,
       sessionLimits: { maxContextLength: 500_000, maxCostUsd: 10 },
       metaReminder: META_REMINDER,
+      contextMessages: [{ role: "user", content: "earlier channel line", timestamp: 0 }],
     });
 
     try {
@@ -162,5 +163,14 @@ describe("internal nudge ephemerality", () => {
       (m) => (m as any).role === "user" && getMessageText(m).includes("<meta>"),
     );
     expect(metaUserMessages).toHaveLength(0);
+
+    // ── Assert: preloaded context was persisted as a real session entry ──
+    // Auto-compaction rebuilds agent state from session entries, so context
+    // messages living only in agent.state.messages would vanish on compaction.
+    const branchTexts = session.sessionManager
+      .getBranch()
+      .filter((entry) => entry.type === "message")
+      .map((entry) => getMessageText((entry as { message: unknown }).message));
+    expect(branchTexts).toContain("earlier channel line");
   }, 15_000);
 });

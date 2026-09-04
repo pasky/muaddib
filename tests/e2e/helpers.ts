@@ -117,6 +117,7 @@ export function emptyUsage(): Usage {
 export function makeAssistantMessage(
   text: string,
   stopReason: "stop" | "toolUse" = "stop",
+  usage: Usage = emptyUsage(),
 ): AssistantMessage {
   return {
     role: "assistant",
@@ -124,17 +125,17 @@ export function makeAssistantMessage(
     api: "openai-completions",
     provider: "openai",
     model: "gpt-4o-mini",
-    usage: emptyUsage(),
+    usage,
     stopReason,
     timestamp: Date.now(),
   };
 }
 
 /** Build a factory that produces a scripted text-only AssistantMessageEventStream. */
-export function textStream(text: string): () => AssistantMessageEventStream {
+export function textStream(text: string, usage: Usage = emptyUsage()): () => AssistantMessageEventStream {
   return () => {
     const stream = createAssistantMessageEventStream();
-    const partial = makeAssistantMessage(text);
+    const partial = makeAssistantMessage(text, "stop", usage);
 
     queueMicrotask(() => {
       stream.push({ type: "start", partial });
@@ -151,6 +152,7 @@ export function textStream(text: string): () => AssistantMessageEventStream {
 /** Build a factory that produces a scripted tool-call AssistantMessageEventStream. */
 export function toolCallStream(
   toolCall: ToolCall,
+  usage: Usage = emptyUsage(),
 ): () => AssistantMessageEventStream {
   return () => {
     const stream = createAssistantMessageEventStream();
@@ -160,7 +162,7 @@ export function toolCallStream(
       api: "openai-completions",
       provider: "openai",
       model: "gpt-4o-mini",
-      usage: emptyUsage(),
+      usage,
       stopReason: "toolUse",
       timestamp: Date.now(),
     };

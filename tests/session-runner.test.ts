@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Usage } from "@earendil-works/pi-ai";
 import { AuthStore } from "../src/auth/auth-store.js";
+import { sumAssistantUsage } from "../src/cost/usage.js";
 
 import type { Mock } from "vitest";
 
@@ -77,6 +78,9 @@ function makeMockSession(opts: {
     ensureProviderKey,
     responseTimestamp: { lastResponseAt: 0 },
     getVisionFallbackActivated: () => opts.visionFallbackActivated ?? false,
+    // The real factory accumulates this from turn events; the mock derives it
+    // from the scripted messages, which carry the same per-turn usage.
+    getUsageSummary: () => sumAssistantUsage(session.messages),
   });
 
   return ctx;

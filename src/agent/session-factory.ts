@@ -1,5 +1,5 @@
 import { Agent, type AgentMessage, type AgentTool, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { Message, StopReason } from "@earendil-works/pi-ai";
+import type { Message, StopReason, Usage } from "@earendil-works/pi-ai";
 import {
   AgentSession,
   SessionManager,
@@ -14,8 +14,8 @@ import {
   SessionLimits,
   createInternalNudgeTransform,
   createNudgeDecider,
+  type InvocationStart,
   type ResponseTimestamp,
-  type TurnUsage,
 } from "./session-limits.js";
 import { PiAiModelAdapter, type ResolvedPiAiModel } from "../models/pi-ai-model-adapter.js";
 import { piAiModels } from "../models/pi-ai-models.js";
@@ -69,7 +69,12 @@ export function createSteeredPassiveAwareConvertToLlm(): typeof convertToLlm {
   };
 }
 
-const DEFAULT_MAX_CONTEXT_LENGTH = 100_000;
+/**
+ * No context ceiling unless one is configured: pi's auto-compaction summarizes
+ * the transcript when it approaches the model's real context window, so cost
+ * (and the safety vent) is what bounds a session.
+ */
+const DEFAULT_MAX_CONTEXT_LENGTH = Number.POSITIVE_INFINITY;
 const DEFAULT_MAX_COST_USD = 1.0;
 
 /** Custom session entry type used to stash the muaddib system prompt so
@@ -126,6 +131,10 @@ interface CreateAgentSessionResult {
   ensureProviderKey: (provider: string) => Promise<void>;
   getVisionFallbackActivated: () => boolean;
   bumpSessionLimits: (tokens: number, costUsd: number) => void;
+  /**
+   * Usage billed by this session so far (see `SessionLimits.usageSummary`).
+   */
+  getUsageSummary: () => { usage: Usage; peakTurnInput: number };
   dispose: () => void;
   /** Path to the persisted session JSONL file, or `null` when in-memory. */
   sessionFile: string | null;
@@ -195,7 +204,11 @@ export async function createAgentSessionForInvocation(
   );
   const sessionStartTime = Date.now();
   const responseTimestamp: ResponseTimestamp = { lastResponseAt: 0 };
-  const invocationStartMessageCount = input.contextMessages?.length ?? 0;
+  // Marks where preloaded content ends and this invocation's own turns begin.
+  // Held as message identity rather than an index because compaction rewrites
+  // the message list; filled in below, once the preload (explicit context or
+  // resumed session history) is in place.
+  const invocationStart: InvocationStart = { boundary: null };
 
   const getNudgeText = createNudgeDecider(
     limits,
@@ -206,7 +219,7 @@ export async function createAgentSessionForInvocation(
     input.progressThresholdSeconds,
   );
 
-  const transformContext = createInternalNudgeTransform(invocationStartMessageCount, limits, getNudgeText, logger);
+  const transformContext = createInternalNudgeTransform(invocationStart, limits, getNudgeText, logger);
 
   const agent = new Agent({
     initialState: {
@@ -229,7 +242,15 @@ export async function createAgentSessionForInvocation(
   });
 
   if (input.contextMessages) {
-    agent.state.messages = convertContextToAgentMessages(input.contextMessages, resolvedModel);
+    const contextMessages = withSequentialTimestamps(input.contextMessages);
+    agent.state.messages = contextMessages;
+
+    // Persist them as session entries too: auto-compaction rebuilds agent state
+    // from the session branch, so messages missing there would be lost (not even
+    // summarized) the moment the transcript is compacted.
+    for (const message of contextMessages) {
+      sessionManager.appendMessage(message);
+    }
   } else if (sessionFile) {
     // Resuming an existing session file — prime the agent with its history
     // so a follow-up prompt can re-use the provider's prompt cache.
@@ -238,6 +259,7 @@ export async function createAgentSessionForInvocation(
       agent.state.messages = resumed.messages;
     }
   }
+  invocationStart.boundary = agent.state.messages.at(-1) ?? null;
 
   const session = new AgentSession({
     agent,
@@ -260,7 +282,7 @@ export async function createAgentSessionForInvocation(
 
   const unsubscribe = session.subscribe((event) => {
     if (event.type === "turn_end") {
-      const msg = event.message as { usage?: TurnUsage; stopReason?: StopReason };
+      const msg = event.message as { usage?: Usage; stopReason?: StopReason };
       // Session-limit nudges are injected ephemerally via transformContext
       // (see createInternalNudgeTransform in session-limits.ts).  They appear
       // in LLM context but are never queued as steering messages, so they
@@ -271,6 +293,29 @@ export async function createAgentSessionForInvocation(
         void session.abort();
       }
 
+      return;
+    }
+
+    if (event.type === "compaction_start") {
+      logger.info(`Context compaction started reason=${event.reason}`);
+      return;
+    }
+
+    if (event.type === "compaction_end") {
+      if (event.aborted || !event.result) {
+        logger.warn(
+          `Context compaction did not complete reason=${event.reason}${event.errorMessage ? ` error=${event.errorMessage}` : ""}`,
+        );
+        return;
+      }
+      // The summarization call is billed like any other turn, and it is not
+      // represented in session.messages at all. (A failed or aborted compaction
+      // reports no usage — pi does not expose it, so those attempts are
+      // unavoidably invisible; the warn above is the only trace.)
+      limits.recordTurn(event.result.usage, undefined);
+      logger.info(
+        `Context compacted reason=${event.reason} tokens=${event.result.tokensBefore}→${event.result.estimatedTokensAfter ?? "?"}`,
+      );
       return;
     }
 
@@ -299,6 +344,7 @@ export async function createAgentSessionForInvocation(
       }
     },
     getVisionFallbackActivated: () => visionState.activated,
+    getUsageSummary: () => limits.usageSummary(),
     bumpSessionLimits: (tokens: number, costUsd: number) => limits.bump(tokens, costUsd),
     dispose: () => {
       unsubscribe();
@@ -317,16 +363,10 @@ function applySystemPromptOverrideToSession(session: AgentSession, override: str
   state._rebuildSystemPrompt = () => override;
 }
 
-function convertContextToAgentMessages(
-  contextMessages: Message[],
-  _resolvedModel: ResolvedPiAiModel,
-): AgentMessage[] {
+/** Ensure sequential timestamps for ordering within the agent session. */
+function withSequentialTimestamps(contextMessages: Message[]): Message[] {
   const now = Date.now();
-
-  return contextMessages.map((message, index): AgentMessage => {
-    // Ensure sequential timestamps for ordering within the agent session.
-    return { ...message, timestamp: now + index } as AgentMessage;
-  });
+  return contextMessages.map((message, index) => ({ ...message, timestamp: now + index }));
 }
 
 function createTracingStreamFn(

@@ -146,7 +146,11 @@ export interface ToolsConfig {
  * Lives under `agent` in config.json.
  */
 export interface SessionLimitsConfig {
-  /** Max context length in tokens (input + cacheRead + cacheWrite) for any single turn. Default: 100000. */
+  /**
+   * Max context length in tokens (input + cacheRead + cacheWrite) for any single
+   * turn. Unset means no ceiling: auto-compaction handles context pressure and
+   * `maxCostUsd` bounds the session.
+   */
   maxContextLength?: number;
   /** Max cumulative cost in USD across all turns. Default: 1.0. */
   maxCostUsd?: number;

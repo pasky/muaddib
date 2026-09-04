@@ -5,7 +5,6 @@
     "_comment": "Set refusalFallbackModel to \"\" to disable refusal fallback.",
     "refusalFallbackModel": "deepseek:deepseek-v4-pro",
     "sessionLimits": {
-      "maxContextLength": 100000,
       "maxCostUsd": 2.0,
       "warnCostUsd": 1.0
     },

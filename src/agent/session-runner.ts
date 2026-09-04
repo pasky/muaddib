@@ -14,7 +14,6 @@ import {
   type RunnerLogger,
 } from "./session-factory.js";
 import { compactJson, safeJson, truncateForDebug } from "./debug-utils.js";
-import { sumAssistantUsage } from "../cost/usage.js";
 import type { ToolSet } from "./tools/types.js";
 import type { SessionLimitsConfig } from "../config/muaddib-config.js";
 import { currentCostSpan, recordUsage } from "../cost/cost-span.js";
@@ -405,7 +404,7 @@ export class SessionRunner {
         throw pendingResponseError;
       }
 
-      const usageSummary = sumAssistantUsage(session.messages);
+      const usageSummary = sessionCtx.getUsageSummary();
       const callType = resolveCurrentLlmCallType();
       recordUsage(callType, this.model, usageSummary.usage);
       usageRecorded = true;
@@ -435,10 +434,9 @@ export class SessionRunner {
       };
     } finally {
       // Only account usage when the preflight passed — a failed key check made
-      // no LLM calls, and session.messages may contain preloaded context or
-      // resumed history whose usage must not be double-counted.
+      // no LLM calls.
       if (!usageRecorded && promptAttempted) {
-        const usageSummary = sumAssistantUsage(session.messages);
+        const usageSummary = sessionCtx.getUsageSummary();
         if (usageSummary.usage.totalTokens > 0 || usageSummary.usage.cost.total > 0) {
           recordUsage(resolveCurrentLlmCallType(), this.model, usageSummary.usage);
         }

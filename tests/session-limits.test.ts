@@ -1,13 +1,36 @@
 import { describe, expect, it } from "vitest";
 
+import type { Usage } from "@earendil-works/pi-ai";
+
 import { SessionLimits, createNudgeDecider } from "../src/agent/session-limits.js";
 
 describe("SessionLimits", () => {
-  const usage = (input: number, costTotal: number) => ({
+  const usage = (input: number, costTotal: number): Usage => ({
     input,
+    output: 10,
     cacheRead: 0,
     cacheWrite: 0,
-    cost: { total: costTotal },
+    totalTokens: input + 10,
+    cost: { input: costTotal, output: 0, cacheRead: 0, cacheWrite: 0, total: costTotal },
+  });
+
+  it("accumulates billed usage across turns and hands out snapshots", () => {
+    const limits = new SessionLimits(100_000, 1.0);
+    limits.recordTurn(usage(1_000, 0.02), "toolUse");
+    const afterFirst = limits.usageSummary();
+    expect(afterFirst.usage.cost.total).toBeCloseTo(0.02, 5);
+    expect(afterFirst.usage.totalTokens).toBe(1_010);
+    expect(afterFirst.peakTurnInput).toBe(1_000);
+
+    // Compaction summarizations carry no stop reason but are billed all the same.
+    limits.recordTurn(usage(4_000, 0.03), undefined);
+    // A snapshot already handed out must not change under the caller.
+    expect(afterFirst.usage.cost.total).toBeCloseTo(0.02, 5);
+
+    const afterSecond = limits.usageSummary();
+    expect(afterSecond.usage.cost.total).toBeCloseTo(0.05, 5);
+    expect(afterSecond.usage.input).toBe(5_000);
+    expect(afterSecond.peakTurnInput).toBe(4_000);
   });
 
   it("tracks peak (not cumulative) context and cumulative cost", () => {
