@@ -413,6 +413,32 @@ describe("oracle executor with invocation context", () => {
     });
   });
 
+  it("passes configured session limits to the subagent session verbatim", async () => {
+    oracleMock.promptFn.mockResolvedValue({ text: "answer", stopReason: "stop", usage: {} });
+    const invocation = {
+      conversationContext: [],
+      getToolSet: () => ({ tools: [], dispose: undefined }),
+    };
+
+    await createDefaultOracleExecutor(
+      {
+        toolsConfig: {
+          oracle: { model: "openai:gpt-4o-mini", sessionLimits: { maxContextLength: 200_000, maxCostUsd: 3 } },
+        },
+        logger: { info: vi.fn() },
+      },
+      invocation,
+    )({ query: "q" });
+    expect(oracleMock.capturedOptions.sessionLimits).toEqual({ maxContextLength: 200_000, maxCostUsd: 3 });
+
+    // Unconfigured stays unconfigured — no hidden ceiling injected here.
+    await createDefaultOracleExecutor(
+      { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }, logger: { info: vi.fn() } },
+      invocation,
+    )({ query: "q" });
+    expect(oracleMock.capturedOptions.sessionLimits).toBeUndefined();
+  });
+
   it("fails fast on invalid configured thinkingLevel", async () => {
     const executor = createDefaultOracleExecutor(
       { toolsConfig: { oracle: { model: "openai:gpt-4o-mini", thinkingLevel: "turbo" as any } }, logger: { info: vi.fn() } },

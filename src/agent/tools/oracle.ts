@@ -5,7 +5,6 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 
-import { iterationsToSessionLimits } from "../../config/muaddib-config.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { stringifyError, toConfiguredString } from "../../utils/index.js";
 import { withCostSpan } from "../../cost/cost-span.js";
@@ -152,7 +151,7 @@ export function createDefaultOracleExecutor(
       toolSet: oracleToolSet,
       modelAdapter,
       authStorage: options.authStorage,
-      sessionLimits: iterationsToSessionLimits(options.toolsConfig?.oracle?.maxIterations),
+      sessionLimits: options.toolsConfig?.oracle?.sessionLimits,
       logger,
       sessionFile: oracleToolSet.sessionHostDir && oracleRecordFile
         ? join(oracleToolSet.sessionHostDir, oracleRecordFile)

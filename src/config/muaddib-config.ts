@@ -17,13 +17,13 @@ export interface OracleConfig {
   model?: string;
   prompt?: string;
   thinkingLevel?: ThinkingLevel;
-  maxIterations?: number;
+  sessionLimits?: SessionLimitsConfig;
 }
 
 export interface DeepResearchConfig {
   model?: string;
   prompt?: string;
-  maxIterations?: number;
+  sessionLimits?: SessionLimitsConfig;
 }
 
 export interface ImageGenConfig {
@@ -152,18 +152,6 @@ export interface SessionLimitsConfig {
   maxCostUsd?: number;
   /** Cost threshold in USD above which a per-session cost warning is emitted. Default: 0.2. */
   warnCostUsd?: number;
-}
-
-/**
- * Convert a legacy maxIterations count to session limits.
- * Heuristic: ~10k context length and ~$0.04 cost per iteration.
- */
-export function iterationsToSessionLimits(maxIterations?: number): SessionLimitsConfig | undefined {
-  if (maxIterations == null) return undefined;
-  return {
-    maxContextLength: maxIterations * 10_000,
-    maxCostUsd: maxIterations * 0.04,
-  };
 }
 
 export interface AgentConfig {

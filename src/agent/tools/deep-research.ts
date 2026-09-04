@@ -8,7 +8,6 @@ import type { RunnerLogger } from "../session-factory.js";
 import { stringifyError, toConfiguredString } from "../../utils/index.js";
 import { withCostSpan } from "../../cost/cost-span.js";
 import { LLM_CALL_TYPE } from "../../cost/llm-call-type.js";
-import { iterationsToSessionLimits } from "../../config/muaddib-config.js";
 import {
   createDefaultWebSearchExecutor,
   createDefaultVisitWebpageExecutor,
@@ -117,7 +116,7 @@ export function createDefaultDeepResearchExecutor(
       toolSet: webTools,
       modelAdapter,
       authStorage: options.authStorage,
-      sessionLimits: iterationsToSessionLimits(options.toolsConfig?.deepResearch?.maxIterations),
+      sessionLimits: options.toolsConfig?.deepResearch?.sessionLimits,
       logger,
     });
 
