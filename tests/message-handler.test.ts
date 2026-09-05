@@ -279,29 +279,22 @@ function makeRunnerWithBlockedBackgroundWork(options: {
             content: [{ type: "text", text: "https://example.com/result" }],
           },
         ],
-        prompt: vi.fn(async () => {
-          backgroundPromptCount += 1;
-          if (backgroundPromptCount === 1) {
-            backgroundStarted.resolve();
-            await releaseBackground.promise;
-            recordCurrentSpanUsage(0.02, 5, 2);
-            session.messages.push({
-              role: "assistant",
-              content: [{ type: "text", text: "Memory updated." }],
-            });
-            return;
-          }
-
-          session.messages.push({
-            role: "assistant",
-            content: [{ type: "text", text: options.summaryText ?? "Summarized tool results." }],
-            usage: makeUsageRecord(7, 4, 0.03),
-          });
-        }),
         dispose: vi.fn(async () => {
           backgroundFinished.resolve();
         }),
       };
+      // The real followUp records its own usage under the caller's cost span.
+      const followUp = vi.fn(async () => {
+        backgroundPromptCount += 1;
+        if (backgroundPromptCount === 1) {
+          backgroundStarted.resolve();
+          await releaseBackground.promise;
+          recordCurrentSpanUsage(0.02, 5, 2);
+          return "Memory updated.";
+        }
+        recordCurrentSpanUsage(0.03, 7, 4);
+        return options.summaryText ?? "Summarized tool results.";
+      });
 
       const result = makeRunnerResult(options.text ?? "primary response", {
         inputTokens: 20,
@@ -313,8 +306,7 @@ function makeRunnerWithBlockedBackgroundWork(options: {
       return {
         ...result,
         session,
-        bumpSessionLimits: vi.fn(),
-        muteResponses: vi.fn(),
+        followUp,
       };
     },
   });
@@ -1897,11 +1889,9 @@ describe("RoomMessageHandler", () => {
           ...result,
           session: {
             messages: [],
-            prompt: async (p: string) => { sessionPrompts.push(p); },
             dispose: vi.fn(),
           } as any,
-          muteResponses: vi.fn(),
-          bumpSessionLimits: vi.fn(),
+          followUp: async (p: string) => { sessionPrompts.push(p); return null; },
         };
       },
     });

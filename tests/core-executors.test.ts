@@ -13,7 +13,7 @@ import {
   isUrlTrustedInArc,
   recordNetworkTrustEvent,
 } from "../src/agent/network-boundary.js";
-import { withCostSpan } from "../src/cost/cost-span.js";
+import { recordUsage, withCostSpan } from "../src/cost/cost-span.js";
 import { LLM_CALL_TYPE } from "../src/cost/llm-call-type.js";
 import { PiAiModelAdapter } from "../src/models/pi-ai-model-adapter.js";
 import { resetWebRateLimiters, jinaRetryConfig } from "../src/agent/tools/web.js";
@@ -316,7 +316,7 @@ describe("oracle executor with invocation context", () => {
     // oracle and deep_research are excluded to prevent recursion
   });
 
-  it("appends nested tool summary and records its usage", async () => {
+  it("appends nested tool summary generated under a TOOL_SUMMARY cost span", async () => {
     const sessionMessages: any[] = [
       {
         role: "toolResult",
@@ -326,19 +326,17 @@ describe("oracle executor with invocation context", () => {
         content: [{ type: "text", text: "Search results" }],
       },
     ];
-    const summaryPrompt = vi.fn(async () => {
-      sessionMessages.push({
-        role: "assistant",
-        content: [{ type: "text", text: "Used web_search for current references." }],
-        usage: {
-          input: 3,
-          output: 2,
-          cacheRead: 0,
-          cacheWrite: 0,
-          totalTokens: 5,
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.01 },
-        },
+    // The runner's followUp records its usage under the current cost span.
+    const followUp = vi.fn(async () => {
+      recordUsage(LLM_CALL_TYPE.TOOL_SUMMARY, "openai:gpt-4o-mini", {
+        input: 3,
+        output: 2,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 5,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.01 },
       });
+      return "Used web_search for current references.";
     });
 
     oracleMock.promptFn.mockResolvedValue({
@@ -352,10 +350,9 @@ describe("oracle executor with invocation context", () => {
         totalTokens: 15,
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.1 },
       },
-      bumpSessionLimits: vi.fn(),
+      followUp,
       session: {
         messages: sessionMessages,
-        prompt: summaryPrompt,
         dispose: vi.fn(),
       },
     });
@@ -378,6 +375,7 @@ describe("oracle executor with invocation context", () => {
       expect(span.allEntries()).toMatchObject([
         {
           callType: LLM_CALL_TYPE.TOOL_SUMMARY,
+          spanName: LLM_CALL_TYPE.TOOL_SUMMARY,
           model: "openai:gpt-4o-mini",
           usage: { input: 3, output: 2, cost: { total: 0.01 } },
         },
@@ -385,8 +383,8 @@ describe("oracle executor with invocation context", () => {
     });
 
     expect(output).toBe("oracle answer\n\nUsed web_search for current references.");
-    expect(summaryPrompt).toHaveBeenCalledWith(expect.stringContaining("web_search"));
-    expect(summaryPrompt).toHaveBeenCalledWith(expect.stringContaining("Use session_query id `session-parent/oracle-"));
+    expect(followUp).toHaveBeenCalledWith(expect.stringContaining("web_search"));
+    expect(followUp).toHaveBeenCalledWith(expect.stringContaining("Use session_query id `session-parent/oracle-"));
   });
 
   it("passes conversation context and configured thinkingLevel to SessionRunner.prompt", async () => {

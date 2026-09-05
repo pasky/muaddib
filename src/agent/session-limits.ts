@@ -3,7 +3,7 @@ import type { StopReason, Usage } from "@earendil-works/pi-ai";
 
 import { isAssistantMessage } from "./message.js";
 import type { Logger } from "../app/logging.js";
-import { accumulateUsage, cloneUsage, emptyUsage } from "../cost/usage.js";
+import { accumulateUsage, emptyUsage } from "../cost/usage.js";
 
 /** Mutable timestamp holder — bumped externally when a response is delivered. */
 export interface ResponseTimestamp {
@@ -34,16 +34,21 @@ export interface InvocationStart {
  *
  * This is also the source of truth for what the session cost: compaction
  * truncates `session.messages` and its summarization call is never represented
- * there, so summing usage over surviving messages undercounts.
+ * there, so summing usage over surviving messages undercounts. Billing reads
+ * it through `takeUsage()`, which hands over everything recorded since the
+ * previous take — so the main run and each follow-up prompt on the same session
+ * get exactly their own share.
  */
 export class SessionLimits {
   private readonly initialMaxContextLength: number;
   private readonly initialMaxCostUsd: number;
   private maxContextLength: number;
   private maxCostUsd: number;
-  private readonly usage = emptyUsage();
   private peakContextLength = 0;
+  private cumulativeCost = 0;
   private turnsSinceSoftLimit = 0;
+  private untakenUsage = emptyUsage();
+  private untakenPeakTurnInput = 0;
 
   constructor(maxContextLength: number, maxCostUsd: number) {
     this.initialMaxContextLength = maxContextLength;
@@ -54,24 +59,26 @@ export class SessionLimits {
 
   /** Either budget ceiling has been hit. */
   get reached(): boolean {
-    return this.peakContextLength >= this.maxContextLength || this.usage.cost.total >= this.maxCostUsd;
+    return this.peakContextLength >= this.maxContextLength || this.cumulativeCost >= this.maxCostUsd;
   }
 
   /** Within 80% of either ceiling — used to suppress progress nudges. */
   get nearLimit(): boolean {
     return (
       this.peakContextLength >= this.maxContextLength * 0.8 ||
-      this.usage.cost.total >= this.maxCostUsd * 0.8
+      this.cumulativeCost >= this.maxCostUsd * 0.8
     );
   }
 
   /**
-   * Snapshot of everything billed so far. A copy, not the live accumulator:
-   * follow-up prompts on the same session (memory update, tool summary) keep
-   * billing after a caller has taken its total.
+   * Hand over everything billed since the previous take (or since the start)
+   * and start a fresh tally. The limit ceilings are unaffected.
    */
-  usageSummary(): { usage: Usage; peakTurnInput: number } {
-    return { usage: cloneUsage(this.usage), peakTurnInput: this.peakContextLength };
+  takeUsage(): { usage: Usage; peakTurnInput: number } {
+    const taken = { usage: this.untakenUsage, peakTurnInput: this.untakenPeakTurnInput };
+    this.untakenUsage = emptyUsage();
+    this.untakenPeakTurnInput = 0;
+    return taken;
   }
 
   /**
@@ -82,8 +89,11 @@ export class SessionLimits {
    */
   recordTurn(usage: Usage | undefined, stopReason: StopReason | undefined): boolean {
     if (usage) {
-      accumulateUsage(this.usage, usage);
-      this.peakContextLength = Math.max(this.peakContextLength, usage.input + usage.cacheRead + usage.cacheWrite);
+      const turnContext = usage.input + usage.cacheRead + usage.cacheWrite;
+      this.peakContextLength = Math.max(this.peakContextLength, turnContext);
+      this.cumulativeCost += usage.cost.total;
+      accumulateUsage(this.untakenUsage, usage);
+      this.untakenPeakTurnInput = Math.max(this.untakenPeakTurnInput, turnContext);
     }
     if (this.reached && stopReason === "toolUse") {
       this.turnsSinceSoftLimit += 1;

@@ -14,23 +14,35 @@ describe("SessionLimits", () => {
     cost: { input: costTotal, output: 0, cacheRead: 0, cacheWrite: 0, total: costTotal },
   });
 
-  it("accumulates billed usage across turns and hands out snapshots", () => {
+  it("hands over billed usage since the previous take, without touching the ceilings", () => {
     const limits = new SessionLimits(100_000, 1.0);
     limits.recordTurn(usage(1_000, 0.02), "toolUse");
-    const afterFirst = limits.usageSummary();
-    expect(afterFirst.usage.cost.total).toBeCloseTo(0.02, 5);
-    expect(afterFirst.usage.totalTokens).toBe(1_010);
-    expect(afterFirst.peakTurnInput).toBe(1_000);
-
     // Compaction summarizations carry no stop reason but are billed all the same.
     limits.recordTurn(usage(4_000, 0.03), undefined);
-    // A snapshot already handed out must not change under the caller.
-    expect(afterFirst.usage.cost.total).toBeCloseTo(0.02, 5);
 
-    const afterSecond = limits.usageSummary();
-    expect(afterSecond.usage.cost.total).toBeCloseTo(0.05, 5);
-    expect(afterSecond.usage.input).toBe(5_000);
-    expect(afterSecond.peakTurnInput).toBe(4_000);
+    const mainRun = limits.takeUsage();
+    expect(mainRun.usage.cost.total).toBeCloseTo(0.05, 5);
+    expect(mainRun.usage.input).toBe(5_000);
+    expect(mainRun.usage.totalTokens).toBe(5_020);
+    expect(mainRun.peakTurnInput).toBe(4_000);
+
+    // A follow-up prompt on the same session gets exactly its own share ...
+    limits.recordTurn(usage(2_000, 0.5), "stop");
+    const followUp = limits.takeUsage();
+    expect(followUp.usage.cost.total).toBeCloseTo(0.5, 5);
+    expect(followUp.usage.input).toBe(2_000);
+    expect(followUp.peakTurnInput).toBe(2_000);
+    // ... while the take already handed out is untouched.
+    expect(mainRun.usage.cost.total).toBeCloseTo(0.05, 5);
+
+    // Nothing new since the last take.
+    expect(limits.takeUsage().usage.cost.total).toBe(0);
+
+    // The ceilings still see the cumulative picture: $0.55 of $1 is near the limit.
+    expect(limits.nearLimit).toBe(false);
+    limits.recordTurn(usage(1_000, 0.3), "stop");
+    expect(limits.nearLimit).toBe(true);
+    expect(limits.reached).toBe(false);
   });
 
   it("tracks peak (not cumulative) context and cumulative cost", () => {

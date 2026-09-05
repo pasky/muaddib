@@ -219,7 +219,7 @@ describe("createAgentSessionForInvocation", () => {
     turnEnd(1_000, 0.02);
     turnEnd(4_000, 0.03);
 
-    const summary = ctx.getUsageSummary();
+    const summary = ctx.takeUsage();
     expect(summary.usage.cost.total).toBeCloseTo(0.05, 5);
     expect(summary.usage.input).toBe(5_000);
     expect(summary.peakTurnInput).toBe(4_000);

@@ -2,10 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   buildToolSummaryFollowUpPrompt,
-  extractAssistantText,
   generateToolSummaryFromSession,
 } from "../src/agent/tool-summary.js";
-import { withCostSpan } from "../src/cost/cost-span.js";
+import { currentCostSpan, withCostSpan } from "../src/cost/cost-span.js";
 import { LLM_CALL_TYPE } from "../src/cost/llm-call-type.js";
 
 function makeLogger() {
@@ -14,17 +13,6 @@ function makeLogger() {
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
-  };
-}
-
-function makeUsage(input = 10, output = 5, cost = 0.01) {
-  return {
-    input,
-    output,
-    cacheRead: 0,
-    cacheWrite: 0,
-    totalTokens: input + output,
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: cost },
   };
 }
 
@@ -40,7 +28,6 @@ describe("generateToolSummaryFromSession", () => {
       } as any,
       tools: [{ name: "web_search", persistType: "summary" }] as any,
       logger,
-      model: "openai:gpt-4o-mini",
     });
 
     expect(summary).toBeNull();
@@ -48,15 +35,15 @@ describe("generateToolSummaryFromSession", () => {
 
   it("returns null when no summary tool results were produced", async () => {
     const logger = makeLogger();
-    const promptSpy = vi.fn();
+    const followUp = vi.fn();
 
     const summary = await generateToolSummaryFromSession({
       result: {
         text: "ok",
         stopReason: "stop",
         usage: {} as any,
+        followUp,
         session: {
-          prompt: promptSpy,
           messages: [
             {
               role: "assistant",
@@ -75,11 +62,10 @@ describe("generateToolSummaryFromSession", () => {
       } as any,
       tools: [{ name: "read", persistType: "none" }] as any,
       logger,
-      model: "openai:gpt-4o-mini",
     });
 
     expect(summary).toBeNull();
-    expect(promptSpy).not.toHaveBeenCalled();
+    expect(followUp).not.toHaveBeenCalled();
   });
 
   it("generates an in-session follow-up summary", async () => {
@@ -99,59 +85,36 @@ describe("generateToolSummaryFromSession", () => {
       },
     ];
 
-    const promptSpy = vi.fn(async () => {
-      sessionMessages.push({
-        role: "assistant",
-        content: [{ type: "text", text: "ran tool and produced artifact" }],
-        usage: makeUsage(11, 7, 0.02),
-      });
+    // The runner's followUp records its usage under whatever cost span is
+    // current, so the summary must run inside a TOOL_SUMMARY span.
+    let followUpSpanName: string | undefined;
+    const followUp = vi.fn(async () => {
+      followUpSpanName = currentCostSpan()?.name;
+      return "ran tool and produced artifact";
     });
 
-    const bumpSessionLimits = vi.fn();
-
-    let summary: string | null = null;
-    await withCostSpan("execute", { arc: "test-arc" }, async (span) => {
-      summary = await generateToolSummaryFromSession({
+    const summary = await withCostSpan("execute", { arc: "test-arc" }, async () =>
+      await generateToolSummaryFromSession({
         result: {
           text: "ok",
           stopReason: "stop",
-          usage: {
-            input: 120,
-            output: 20,
-            cacheRead: 30,
-            cacheWrite: 10,
-            totalTokens: 180,
-            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.5 },
-          },
-          bumpSessionLimits,
-          session: {
-            prompt: promptSpy,
-            messages: sessionMessages,
-          },
+          usage: {} as any,
+          followUp,
+          session: { messages: sessionMessages },
         } as any,
         tools: [
           { name: "web_search", persistType: "summary" },
           { name: "read", persistType: "none" },
         ] as any,
         logger,
-        model: "openai:gpt-4o-mini",
-      });
-
-      expect(span.allEntries()).toMatchObject([
-        {
-          callType: LLM_CALL_TYPE.TOOL_SUMMARY,
-          model: "openai:gpt-4o-mini",
-          usage: { input: 11, output: 7, cost: { total: 0.02 } },
-        },
-      ]);
-    });
+      }));
 
     expect(summary).toBe("ran tool and produced artifact");
-    expect(promptSpy).toHaveBeenCalledOnce();
-    expect(promptSpy).toHaveBeenCalledWith(
+    expect(followUp).toHaveBeenCalledOnce();
+    expect(followUp).toHaveBeenCalledWith(
       buildToolSummaryFollowUpPrompt(["web_search"]),
     );
-    expect(bumpSessionLimits).toHaveBeenCalledWith(16, 0.05);
+    expect(followUpSpanName).toBe(LLM_CALL_TYPE.TOOL_SUMMARY);
     expect(logger.error).not.toHaveBeenCalled();
   });
 
@@ -163,10 +126,10 @@ describe("generateToolSummaryFromSession", () => {
         text: "ok",
         stopReason: "stop",
         usage: {} as any,
+        followUp: vi.fn(async () => {
+          throw new Error("boom");
+        }),
         session: {
-          prompt: vi.fn(async () => {
-            throw new Error("boom");
-          }),
           messages: [
             {
               role: "assistant",
@@ -185,7 +148,6 @@ describe("generateToolSummaryFromSession", () => {
       } as any,
       tools: [{ name: "bash", persistType: "summary" }] as any,
       logger,
-      model: "openai:gpt-4o-mini",
     });
 
     expect(summary).toBeNull();
@@ -209,31 +171,5 @@ describe("buildToolSummaryFollowUpPrompt", () => {
     expect(prompt).toContain("/workspace/.sessions/session-<slug>/ working directory paths");
     expect(prompt).toContain("Use session_query id `session-abc12345/oracle-deadbeef`");
     expect(prompt).toContain("working directory belongs to a parent command session");
-  });
-});
-
-describe("extractAssistantText", () => {
-  it("extracts text blocks from assistant messages", () => {
-    const messages = [
-      { role: "user", content: "hello" },
-      {
-        role: "assistant",
-        content: [
-          { type: "text", text: "I will update memory." },
-          { type: "toolCall", id: "c1", name: "write", arguments: {} },
-        ],
-      },
-      { role: "toolResult", toolCallId: "c1", toolName: "write" },
-      {
-        role: "assistant",
-        content: [{ type: "text", text: "Done updating." }],
-      },
-    ] as any[];
-    expect(extractAssistantText(messages)).toBe("I will update memory.\nDone updating.");
-  });
-
-  it("returns undefined for empty or non-assistant messages", () => {
-    expect(extractAssistantText([])).toBeUndefined();
-    expect(extractAssistantText([{ role: "user", content: "hello" }] as any[])).toBeUndefined();
   });
 });

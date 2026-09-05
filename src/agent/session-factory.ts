@@ -131,10 +131,8 @@ interface CreateAgentSessionResult {
   ensureProviderKey: (provider: string) => Promise<void>;
   getVisionFallbackActivated: () => boolean;
   bumpSessionLimits: (tokens: number, costUsd: number) => void;
-  /**
-   * Usage billed by this session so far (see `SessionLimits.usageSummary`).
-   */
-  getUsageSummary: () => { usage: Usage; peakTurnInput: number };
+  /** Usage billed since the previous take (see `SessionLimits.takeUsage`). */
+  takeUsage: () => { usage: Usage; peakTurnInput: number };
   dispose: () => void;
   /** Path to the persisted session JSONL file, or `null` when in-memory. */
   sessionFile: string | null;
@@ -344,7 +342,7 @@ export async function createAgentSessionForInvocation(
       }
     },
     getVisionFallbackActivated: () => visionState.activated,
-    getUsageSummary: () => limits.usageSummary(),
+    takeUsage: () => limits.takeUsage(),
     bumpSessionLimits: (tokens: number, costUsd: number) => limits.bump(tokens, costUsd),
     dispose: () => {
       unsubscribe();

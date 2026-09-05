@@ -1,19 +1,16 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
-import { isAssistantMessage, responseText } from "./message.js";
 import type { MuaddibTool } from "./tools/baseline-tools.js";
 import type { PromptResult } from "./session-runner.js";
 import type { Logger } from "../app/logging.js";
-import { recordUsage, withCostSpan } from "../cost/cost-span.js";
+import { withCostSpan } from "../cost/cost-span.js";
 import { LLM_CALL_TYPE } from "../cost/llm-call-type.js";
-import { sumAssistantUsage } from "../cost/usage.js";
 import { truncateForDebug } from "./debug-utils.js";
 
 interface GenerateToolSummaryInput {
   result: PromptResult;
   tools: MuaddibTool[];
   logger: Logger;
-  model: string;
   sessionQueryId?: string;
   arc?: string;
 }
@@ -23,13 +20,12 @@ export async function generateToolSummaryFromSession(input: GenerateToolSummaryI
     result,
     tools,
     logger,
-    model,
     sessionQueryId,
     arc,
   } = input;
 
   const session = result.session;
-  if (!session) {
+  if (!session || !result.followUp) {
     return null;
   }
 
@@ -62,38 +58,25 @@ export async function generateToolSummaryFromSession(input: GenerateToolSummaryI
   return await withCostSpan(
     LLM_CALL_TYPE.TOOL_SUMMARY,
     arc ? { arc } : {},
-    async () => await generateInSessionToolSummary(result, summaryToolNames, logger, model, sessionQueryId, arc),
+    async () => await generateInSessionToolSummary(result.followUp!, summaryToolNames, logger, sessionQueryId, arc),
   );
 }
 
 /** In-session follow-up — reuses cached conversation context (cheap cache reads). */
 async function generateInSessionToolSummary(
-  result: PromptResult,
+  followUp: NonNullable<PromptResult["followUp"]>,
   summaryToolNames: string[],
   logger: Logger,
-  model: string,
   sessionQueryId?: string,
   arc?: string,
 ): Promise<string | null> {
-  const session = result.session!;
-  const preSummaryMsgCount = session.messages.length;
-
+  let summaryText: string | null;
   try {
-    result.bumpSessionLimits?.(
-      Math.ceil((result.usage?.input ?? 0) * 0.1 + (result.usage?.cacheRead ?? 0) * 0.1 + (result.usage?.cacheWrite ?? 0) * 0.1),
-      (result.usage?.cost.total ?? 0) * 0.1,
-    );
-    await session.prompt(buildToolSummaryFollowUpPrompt(summaryToolNames, { sessionQueryId }));
+    summaryText = await followUp(buildToolSummaryFollowUpPrompt(summaryToolNames, { sessionQueryId }));
   } catch (error) {
     logger.error("In-session tool summary failed", error);
     return null;
-  } finally {
-    recordToolSummaryUsage(session.messages.slice(preSummaryMsgCount), model);
   }
-
-  const summaryText = extractAssistantText(
-    session.messages.slice(preSummaryMsgCount),
-  );
 
   if (summaryText) {
     logger.debug(
@@ -104,12 +87,7 @@ async function generateInSessionToolSummary(
     );
   }
 
-  return summaryText ?? null;
-}
-
-function recordToolSummaryUsage(messages: AgentMessage[], model: string): void {
-  const { usage } = sumAssistantUsage(messages);
-  recordUsage(LLM_CALL_TYPE.TOOL_SUMMARY, model, usage);
+  return summaryText;
 }
 
 /**
@@ -135,18 +113,4 @@ export function buildToolSummaryFollowUpPrompt(
 
 export function formatToolSummaryLogPreview(text: string, maxChars = 180): string {
   return truncateForDebug(text.replace(/\s+/gu, " ").trim(), maxChars);
-}
-
-/** Extract concatenated text blocks from assistant messages in a message slice. */
-export function extractAssistantText(messages: AgentMessage[]): string | undefined {
-  const parts: string[] = [];
-  for (const msg of messages) {
-    if (!isAssistantMessage(msg)) continue;
-    const text = responseText(msg);
-    if (text) {
-      parts.push(text);
-    }
-  }
-  const joined = parts.join("\n").trim();
-  return joined || undefined;
 }

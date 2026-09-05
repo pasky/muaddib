@@ -978,30 +978,20 @@ export class CommandExecutor {
     }
 
     try {
-      // Stop delivering text to the channel — anything produced from here on
-      // (memory update, tool summary) is internal background work.
-      agentResult.muteResponses?.();
-
-      if (opts.memoryUpdate !== false && agentResult.session) {
+      if (opts.memoryUpdate !== false && agentResult.followUp) {
         try {
-          agentResult.bumpSessionLimits?.(
-            Math.ceil((agentResult.usage?.input ?? 0) * 0.1 + (agentResult.usage?.cacheRead ?? 0) * 0.1 + (agentResult.usage?.cacheWrite ?? 0) * 0.1),
-            (agentResult.usage?.cost.total ?? 0) * 0.1,
-          );
           const memoryPrompt = buildMemoryUpdatePrompt(message.arc, this.agentConfig.tools?.memory, {
             toolCallsCount: agentResult.toolCallsCount ?? 0,
             skillsConfig: this.agentConfig.tools?.skills,
           }, message.nick);
-          await withCostSpan(LLM_CALL_TYPE.MEMORY_UPDATE, {}, async () => {
-            await agentResult.session!.prompt(memoryPrompt);
-          });
+          await withCostSpan(LLM_CALL_TYPE.MEMORY_UPDATE, {}, () => agentResult.followUp!(memoryPrompt));
         } catch (err) {
           this.logger.warn("Memory update failed", String(err));
         }
       }
 
       if (opts.toolSummary !== false) {
-        await this.persistGeneratedToolSummary(message, agentResult, tools, opts.modelSpec ?? "unknown", triggerTs);
+        await this.persistGeneratedToolSummary(message, agentResult, tools, triggerTs);
       }
 
       agentResult.session?.dispose();
@@ -1258,14 +1248,12 @@ export class CommandExecutor {
     message: RoomMessage,
     result: PromptResult,
     tools: MuaddibTool[],
-    model: string,
     triggerTs?: string,
   ): Promise<void> {
     const summaryText = await generateToolSummaryFromSession({
       result,
       tools,
       logger: this.logger,
-      model,
       arc: message.arc,
     });
 

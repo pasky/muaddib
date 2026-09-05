@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Usage } from "@earendil-works/pi-ai";
 import { AuthStore } from "../src/auth/auth-store.js";
+import { withCostSpan } from "../src/cost/cost-span.js";
+import { LLM_CALL_TYPE } from "../src/cost/llm-call-type.js";
 import { sumAssistantUsage } from "../src/cost/usage.js";
 
 import type { Mock } from "vitest";
@@ -37,6 +39,7 @@ function makeUsage(multiplier = 1): Usage {
 
 interface MockSessionCtx {
   session: any;
+  bumpSessionLimits: Mock;
   callbacks: Array<(event: any) => void>;
   agent: {
     state: { model: any };
@@ -66,21 +69,28 @@ function makeMockSession(opts: {
     continue: vi.fn(async () => {}),
   };
   const ensureProviderKey = vi.fn(async () => {});
-  const ctx: MockSessionCtx = { session, callbacks, agent, ensureProviderKey };
+  const ctx: MockSessionCtx = { session, callbacks, agent, ensureProviderKey, bumpSessionLimits: vi.fn() };
 
   if (opts.promptImpl) {
     session.prompt.mockImplementation(() => opts.promptImpl!(ctx));
   }
 
+  let takenMessageCount = 0;
   mockCreateAgentSessionForInvocation.mockReturnValue({
     session,
     agent,
     ensureProviderKey,
     responseTimestamp: { lastResponseAt: 0 },
     getVisionFallbackActivated: () => opts.visionFallbackActivated ?? false,
+    bumpSessionLimits: ctx.bumpSessionLimits,
     // The real factory accumulates this from turn events; the mock derives it
-    // from the scripted messages, which carry the same per-turn usage.
-    getUsageSummary: () => sumAssistantUsage(session.messages),
+    // from the scripted messages appended since the previous take, which carry
+    // the same per-turn usage.
+    takeUsage: () => {
+      const taken = sumAssistantUsage(session.messages.slice(takenMessageCount));
+      takenMessageCount = session.messages.length;
+      return taken;
+    },
   });
 
   return ctx;
@@ -745,16 +755,43 @@ describe("SessionRunner", () => {
     const result = await runner.prompt("hello");
 
     expect(deliveredTexts).toEqual(["Main response."]);
-    expect(result.muteResponses).toBeTypeOf("function");
-    result.muteResponses!();
+    expect(result.usage.cost.total).toBeCloseTo(makeUsage(1).cost.total, 6);
 
-    // Simulate memory update: reuse the returned session for a follow-up prompt
-    ctx.session.prompt.mockImplementation(async () => { emitAssistantResponse(ctx, "Memory updated."); });
-    await result.session!.prompt("update memory");
+    // Simulate memory update: reuse the returned session for a follow-up prompt.
+    ctx.session.prompt.mockImplementation(async () => { emitAssistantResponse(ctx, "Memory updated.", { usageMultiplier: 3 }); });
+    const { reply, span } = await withCostSpan(LLM_CALL_TYPE.MEMORY_UPDATE, {}, async (span) => ({
+      reply: await result.followUp!("update memory"),
+      span,
+    }));
 
+    expect(reply).toBe("Memory updated.");
+    expect(ctx.session.prompt).toHaveBeenLastCalledWith("update memory");
     expect(deliveredTexts).toEqual(["Main response."]);
     const infoArgs = logger.info.mock.calls.map((c: any[]) => c[0]);
     expect(infoArgs).toContain("Suppressing post-response text");
+
+    // The follow-up gets 10% headroom on the main run's budget, and only its
+    // own usage is billed under the caller's cost span.
+    const main = makeUsage(1);
+    expect(ctx.bumpSessionLimits).toHaveBeenCalledWith(
+      Math.ceil((main.input + main.cacheRead + main.cacheWrite) * 0.1),
+      main.cost.total * 0.1,
+    );
+    const entries = span.allEntries();
+    expect(entries).toHaveLength(1);
+    expect(entries[0].callType).toBe(LLM_CALL_TYPE.MEMORY_UPDATE);
+    expect(entries[0].usage.cost.total).toBeCloseTo(makeUsage(3).cost.total, 6);
+  });
+
+  it("followUp reports no reply when the follow-up prompt produced no new assistant message", async () => {
+    const ctx = makeMockSession({
+      promptImpl: async (c) => { emitAssistantResponse(c, "Main response."); },
+    });
+    const runner = makeRunner({});
+    const result = await runner.prompt("hello");
+
+    ctx.session.prompt.mockImplementation(async () => {});
+    expect(await result.followUp!("update memory")).toBeNull();
   });
 
   it("appends refusal fallback suffix to messages after fallback activates", async () => {

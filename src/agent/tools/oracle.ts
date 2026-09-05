@@ -171,7 +171,6 @@ export function createDefaultOracleExecutor(
         result,
         tools: oracleToolSet.tools,
         logger,
-        model: configuredModel,
         sessionQueryId: oracleSessionQueryId,
         arc: options.arc,
       });

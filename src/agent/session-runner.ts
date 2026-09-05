@@ -90,10 +90,15 @@ export interface PromptResult {
   sessionFile?: string | null;
   /** Short session identifier (from the session header). */
   sessionId?: string;
-  /** Increase the session's token/cost limits (e.g. before a follow-up prompt). */
-  bumpSessionLimits?: (tokens: number, costUsd: number) => void;
-  /** Stop firing onResponse for subsequent session.prompt() calls (e.g. memory update). */
-  muteResponses?: () => void;
+  /**
+   * Run an internal follow-up prompt (memory update, tool summary) on the
+   * finished session. Nothing it produces is delivered via onResponse; its
+   * usage is recorded under the current cost span (so wrap the call in
+   * `withCostSpan(LLM_CALL_TYPE.X)`), and the budget is extended by 10% of the
+   * main run so the follow-up is not starved by an exhausted session limit.
+   * Resolves to the follow-up's reply text, or null if it produced none.
+   */
+  followUp?: (prompt: string) => Promise<string | null>;
 }
 
 export class SessionRunner {
@@ -404,7 +409,7 @@ export class SessionRunner {
         throw pendingResponseError;
       }
 
-      const usageSummary = sessionCtx.getUsageSummary();
+      const usageSummary = sessionCtx.takeUsage();
       const callType = resolveCurrentLlmCallType();
       recordUsage(callType, this.model, usageSummary.usage);
       usageRecorded = true;
@@ -427,19 +432,31 @@ export class SessionRunner {
         session,
         sessionFile: sessionCtx.sessionFile,
         sessionId: sessionCtx.sessionId,
-        bumpSessionLimits: sessionCtx.bumpSessionLimits,
-        muteResponses: () => {
+        followUp: async (followUpPrompt: string) => {
           responseMuted = true;
+          const mainUsage = usageSummary.usage;
+          sessionCtx.bumpSessionLimits(
+            Math.ceil((mainUsage.input + mainUsage.cacheRead + mainUsage.cacheWrite) * 0.1),
+            mainUsage.cost.total * 0.1,
+          );
+          // Identify the reply by message identity, not by list offset: pi may
+          // auto-compact at the start of this prompt (a long main run is exactly
+          // what pushes context past the threshold), rewriting session.messages.
+          const before = findLastAssistantMessage(session.messages);
+          try {
+            await session.prompt(followUpPrompt);
+          } finally {
+            recordUsage(resolveCurrentLlmCallType(), this.model, sessionCtx.takeUsage().usage);
+          }
+          const reply = findLastAssistantMessage(session.messages);
+          return reply && reply !== before ? responseText(reply).trim() || null : null;
         },
       };
     } finally {
       // Only account usage when the preflight passed — a failed key check made
       // no LLM calls.
       if (!usageRecorded && promptAttempted) {
-        const usageSummary = sessionCtx.getUsageSummary();
-        if (usageSummary.usage.totalTokens > 0 || usageSummary.usage.cost.total > 0) {
-          recordUsage(resolveCurrentLlmCallType(), this.model, usageSummary.usage);
-        }
+        recordUsage(resolveCurrentLlmCallType(), this.model, sessionCtx.takeUsage().usage);
       }
       // Error-path safety: if the session is never returned (exception before
       // return), run the full wrapped dispose (unsubscribe + toolSet.dispose +

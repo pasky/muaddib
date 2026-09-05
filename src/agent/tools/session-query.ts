@@ -20,7 +20,7 @@ import {
 import { Type } from "typebox";
 
 import { getMuaddibHome } from "../../config/paths.js";
-import { withCostSpan } from "../../cost/cost-span.js";
+import { recordUsage, withCostSpan } from "../../cost/cost-span.js";
 import { LLM_CALL_TYPE } from "../../cost/llm-call-type.js";
 import { responseText } from "../message.js";
 import {
@@ -271,16 +271,19 @@ export function createSessionQueryTool(options: ToolContext): MuaddibTool<typeof
           });
 
           const { session } = ctx;
-          const preCount = session.messages.length;
+          // Identify the answer by message identity, not by list offset: pi may
+          // auto-compact the resumed transcript at the start of this prompt,
+          // rewriting session.messages.
+          const lastResumed = [...session.messages].reverse().find(isAssistantMessage);
           try {
             await ctx.ensureProviderKey((await modelAdapter.resolve(modelSpec)).spec.provider);
             await session.prompt(QUESTION_ENVELOPE(question));
 
-            const newMessages = session.messages.slice(preCount);
-            const lastAssistant = [...newMessages].reverse().find(isAssistantMessage);
-            const answer = lastAssistant ? responseText(lastAssistant).trim() : "";
+            const lastAssistant = [...session.messages].reverse().find(isAssistantMessage);
+            const answer = lastAssistant && lastAssistant !== lastResumed ? responseText(lastAssistant).trim() : "";
             return { answer };
           } finally {
+            recordUsage(LLM_CALL_TYPE.SESSION_QUERY, modelSpec, ctx.takeUsage().usage);
             await session.dispose();
           }
         });
