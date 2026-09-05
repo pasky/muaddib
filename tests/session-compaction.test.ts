@@ -17,6 +17,9 @@
  *   3. Follow-up prompts on the finished session (memory update, tool summary)
  *      still find their reply and bill exactly their own usage when compaction
  *      lands inside them — which is the likely place for it after a long run.
+ *   4. A summarization pi rejects (e.g. cut off by stopReason=length) is still
+ *      paid for, and pi retries it before every subsequent turn — so it must
+ *      count against the budget even though pi reports no usage for it.
  *
  * Only `streamSimple` is mocked; SessionRunner, Agent, AgentSession,
  * SessionManager and the whole compaction machinery are real.
@@ -70,6 +73,7 @@ const llmCalls: Array<{ kind: "agent" | "summarization"; context: { messages: un
 let agentCallCount = 0;
 let followUpCallCount = 0;
 let phase: "main" | "followUp" = "main";
+let summarizationStopReason: "stop" | "length" = "stop";
 
 function routeStreamSimple(...args: unknown[]): AssistantMessageEventStream {
   const context = args[1] as { messages: unknown[]; systemPrompt?: string };
@@ -77,7 +81,7 @@ function routeStreamSimple(...args: unknown[]): AssistantMessageEventStream {
   llmCalls.push({ kind: isSummarization ? "summarization" : "agent", context });
 
   if (isSummarization) {
-    return textStream(SUMMARY_TEXT, usageOf(50_000, SUMMARIZATION_COST))();
+    return textStream(SUMMARY_TEXT, usageOf(50_000, SUMMARIZATION_COST), summarizationStopReason)();
   }
 
   if (phase === "followUp") {
@@ -131,44 +135,52 @@ function summarizationCalls(): number {
   return llmCalls.filter((c) => c.kind === "summarization").length;
 }
 
+function makeLogger() {
+  return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+}
+
+function makeRunner(logger: ReturnType<typeof makeLogger>, delivered: string[]): SessionRunner {
+  // Roughly one raw web page per tool call (~40k chars ≈ 10k tokens), the
+  // shape that actually fills muaddib's context in the field.
+  const BULK = "x".repeat(40_000);
+
+  const dumpTool = {
+    name: "dump",
+    persistType: "none" as const,
+    label: "Dump",
+    description: "Returns a large payload.",
+    parameters: Type.Object({}),
+    execute: async () => ({
+      content: [{ type: "text" as const, text: BULK }],
+      details: {},
+    }),
+  };
+
+  return new SessionRunner({
+    model: "openai:gpt-4o-mini",
+    systemPrompt: "You are a bot.",
+    toolSet: { tools: [dumpTool] },
+    authStorage: AuthStore.inMemory({ openai: { type: "api_key", key: "sk-fake" } }),
+    modelAdapter: new PiAiModelAdapter(),
+    sessionLimits: { maxCostUsd: 100 },
+    onResponse: (text) => { delivered.push(text); },
+    logger,
+  });
+}
+
 describe("auto-compaction", () => {
   beforeEach(() => {
     llmCalls.length = 0;
     agentCallCount = 0;
     followUpCallCount = 0;
     phase = "main";
+    summarizationStopReason = "stop";
   });
 
   it("fires, summarizes the preloaded context, keeps usage accounting intact, and survives follow-ups", async () => {
-    // Roughly one raw web page per tool call (~40k chars ≈ 10k tokens), the
-    // shape that actually fills muaddib's context in the field.
-    const BULK = "x".repeat(40_000);
-
-    const dumpTool = {
-      name: "dump",
-      persistType: "none" as const,
-      label: "Dump",
-      description: "Returns a large payload.",
-      parameters: Type.Object({}),
-      execute: async () => ({
-        content: [{ type: "text" as const, text: BULK }],
-        details: {},
-      }),
-    };
-
-    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const logger = makeLogger();
     const delivered: string[] = [];
-
-    const runner = new SessionRunner({
-      model: "openai:gpt-4o-mini",
-      systemPrompt: "You are a bot.",
-      toolSet: { tools: [dumpTool] },
-      authStorage: AuthStore.inMemory({ openai: { type: "api_key", key: "sk-fake" } }),
-      modelAdapter: new PiAiModelAdapter(),
-      sessionLimits: { maxCostUsd: 100 },
-      onResponse: (text) => { delivered.push(text); },
-      logger,
-    });
+    const runner = makeRunner(logger, delivered);
 
     const { result, mainSpan } = await withCostSpan(LLM_CALL_TYPE.AGENT_RUN, {}, async (span) => ({
       result: await runner.prompt("what happened?", {
@@ -238,6 +250,31 @@ describe("auto-compaction", () => {
       ]);
     } finally {
       await session.dispose();
+    }
+  }, 30_000);
+
+  it("bills summarizations that pi rejects, so failed compaction cannot escape the budget", async () => {
+    summarizationStopReason = "length";
+    const logger = makeLogger();
+    const runner = makeRunner(logger, []);
+
+    const result = await runner.prompt("what happened?", {
+      contextMessages: [{ role: "user", content: CHANNEL_LINE, timestamp: 0 }],
+    });
+    try {
+      // Every attempt failed (and pi keeps retrying before each turn) ...
+      const attempts = summarizationCalls();
+      expect(attempts).toBeGreaterThan(1);
+      expect(logger.info).not.toHaveBeenCalledWith(expect.stringContaining("Context compacted"));
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("Context compaction did not complete"));
+      expect(result.text).toBe("final answer");
+
+      // ... and every attempt was paid for. pi's compaction_end reports no
+      // usage for a rejected summary; only the stream function sees it.
+      const expectedCost = TOOL_TURN_COST * TOOL_TURNS + SUMMARIZATION_COST * attempts + FINAL_ANSWER_COST;
+      expect(result.usage.cost.total).toBeCloseTo(expectedCost, 5);
+    } finally {
+      await result.session!.dispose();
     }
   }, 30_000);
 });

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mockState = vi.hoisted(() => ({
   streamSimpleMock: vi.fn((_model, _context, options) => {
     options?.onPayload?.({ hello: "world" });
-    return { stream: true };
+    return { stream: true, result: () => new Promise(() => {}) };
   }),
   sessions: [] as any[],
   appendMessage: vi.fn(),
@@ -122,7 +122,19 @@ function hasMetaInLast(msgs: unknown[]): boolean {
   return (last.content ?? []).some((c) => c.type === "text" && (c.text ?? "").includes("<meta>"));
 }
 
-/** Build a mock usage object for turn_end events. */
+/**
+ * Play one assistant turn the way the real session does: the LLM call's final
+ * message flows through the factory's streamFn (where usage is accounted),
+ * then the session emits turn_end.
+ */
+async function emitTurn(session: any, event: { type: "turn_end"; message: any; toolResults: unknown[] }): Promise<void> {
+  mockState.streamSimpleMock.mockReturnValueOnce({ stream: true, result: () => Promise.resolve(event.message) });
+  session.agent.config.streamFn(session.agent.state.model, { messages: [] }, {});
+  await Promise.resolve();
+  session.emit(event);
+}
+
+/** Build a mock usage object for assistant messages. */
 function mockUsage(input = 1000, cacheRead = 0, cacheWrite = 0, costTotal = 0.01) {
   return {
     input,
@@ -210,19 +222,37 @@ describe("createAgentSessionForInvocation", () => {
     });
     const session = mockState.sessions[0];
 
-    const turnEnd = (input: number, cost: number) => session.emit({
+    const turnEnd = (input: number, cost: number) => emitTurn(session, {
       type: "turn_end",
       message: { role: "assistant", content: [], stopReason: "stop", usage: mockUsage(input, 0, 0, cost) },
       toolResults: [],
     });
 
-    turnEnd(1_000, 0.02);
-    turnEnd(4_000, 0.03);
+    await turnEnd(1_000, 0.02);
+    await turnEnd(4_000, 0.03);
 
     const summary = ctx.takeUsage();
     expect(summary.usage.cost.total).toBeCloseTo(0.05, 5);
     expect(summary.usage.input).toBe(5_000);
     expect(summary.peakTurnInput).toBe(4_000);
+  });
+
+  it("rejects malformed session limits instead of silently defaulting them", async () => {
+    const create = (sessionLimits: unknown) => createAgentSessionForInvocation({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "system",
+      tools: [],
+      authStorage: fakeAuthStore(),
+      modelAdapter: defaultModelAdapter,
+      sessionLimits: sessionLimits as any,
+    });
+
+    // null is a present-but-wrong value from JSON, not an absent one; a NaN
+    // ceiling would compare false forever and leave the session unbounded.
+    await expect(create({ maxCostUsd: null })).rejects.toThrow("sessionLimits.maxCostUsd must be a finite number > 0, got null.");
+    await expect(create({ maxCostUsd: "2" })).rejects.toThrow('sessionLimits.maxCostUsd must be a finite number > 0, got "2".');
+    await expect(create({ maxContextLength: 0 })).rejects.toThrow("sessionLimits.maxContextLength must be a finite number > 0, got 0.");
+    await expect(create({ maxCostUsd: 2 })).resolves.toBeDefined();
   });
 
   it("imposes no context ceiling by default — only cost limits the session", async () => {
@@ -240,7 +270,7 @@ describe("createAgentSessionForInvocation", () => {
 
     // A turn far beyond any model context window must not trip the soft limit;
     // pi's auto-compaction handles context pressure instead.
-    session.emit({
+    await emitTurn(session, {
       type: "turn_end",
       message: {
         role: "assistant",
@@ -382,7 +412,7 @@ describe("createAgentSessionForInvocation", () => {
     expect(mockState.streamSimpleMock.mock.calls[0][0]).toBe(visionModel);
 
     // Turn 1 (toolUse, 3000 context tokens): peak=3000 < maxContextLength=5000 → no limit
-    session.emit({
+    await emitTurn(session, {
       type: "turn_end",
       message: {
         role: "assistant",
@@ -396,7 +426,7 @@ describe("createAgentSessionForInvocation", () => {
 
     // Turn 2 (toolUse, 6000 context tokens): peak=6000 >= maxContextLength=5000 → limit reached
     // Session-limit nudge is now injected via transformContext, not agent.steer()
-    session.emit({
+    await emitTurn(session, {
       type: "turn_end",
       message: {
         role: "assistant",
@@ -412,7 +442,7 @@ describe("createAgentSessionForInvocation", () => {
 
     // Turns 3–10 (toolUse): all over limit → turnsSinceSoftLimit increments, no abort yet
     for (let turn = 3; turn <= 10; turn++) {
-      session.emit({
+      await emitTurn(session, {
         type: "turn_end",
         message: {
           role: "assistant",
@@ -427,7 +457,7 @@ describe("createAgentSessionForInvocation", () => {
     }
 
     // Turn 11 (toolUse): turnsSinceSoftLimit=10 → abort
-    session.emit({
+    await emitTurn(session, {
       type: "turn_end",
       message: {
         role: "assistant",
@@ -442,7 +472,7 @@ describe("createAgentSessionForInvocation", () => {
     expect(logger.warn).toHaveBeenCalledWith("Exceeding session limits, aborting session prompt loop.");
 
     // Turn 12 (stop): agent finally stops
-    session.emit({
+    await emitTurn(session, {
       type: "turn_end",
       message: {
         role: "assistant",
@@ -472,7 +502,7 @@ describe("createAgentSessionForInvocation", () => {
     const transform = await getTransform(ctx);
 
     // Turn 1: $0.03 → no limit yet
-    session.emit({
+    await emitTurn(session, {
       type: "turn_end",
       message: {
         role: "assistant",
@@ -489,7 +519,7 @@ describe("createAgentSessionForInvocation", () => {
     expect(hasMetaInLast(out1)).toBe(false);
 
     // Turn 2: $0.03 more → cumulative $0.06 >= $0.05 → limit reached
-    session.emit({
+    await emitTurn(session, {
       type: "turn_end",
       message: {
         role: "assistant",
@@ -594,7 +624,7 @@ describe("createAgentSessionForInvocation", () => {
     const transform = await getTransform(ctx);
 
     // Simulate peak context exceeding the limit
-    session.emit({
+    await emitTurn(session, {
       type: "turn_end",
       message: {
         role: "assistant",
@@ -699,7 +729,7 @@ describe("createAgentSessionForInvocation", () => {
     const session = mockState.sessions[0];
     const agent = (session as any).agent;
 
-    session.emit({
+    await emitTurn(session, {
       type: "turn_end",
       message: {
         role: "assistant",
@@ -755,7 +785,7 @@ describe("createAgentSessionForInvocation", () => {
     const session = mockState.sessions[0];
 
     // Emit a turn_end with 8500 context tokens → 85% of 10k limit → near limit
-    session.emit({
+    await emitTurn(session, {
       type: "turn_end",
       message: {
         role: "assistant",
@@ -825,7 +855,7 @@ describe("createAgentSessionForInvocation", () => {
     const session = mockState.sessions[0];
     const agent = (session as any).agent;
 
-    session.emit({
+    await emitTurn(session, {
       type: "turn_end",
       message: {
         role: "assistant",
@@ -853,7 +883,7 @@ describe("createAgentSessionForInvocation", () => {
     const transform = await getTransform(ctx);
 
     // Emit usage that exceeds initial context limit (peak=6000 >= maxContextLength=5000)
-    session.emit({
+    await emitTurn(session, {
       type: "turn_end",
       message: {
         role: "assistant",
@@ -891,7 +921,7 @@ describe("createAgentSessionForInvocation", () => {
     const transform = await getTransform(ctx);
 
     // Peak context = 95k — just under the limit
-    session.emit({
+    await emitTurn(session, {
       type: "turn_end",
       message: {
         role: "assistant",
@@ -907,7 +937,7 @@ describe("createAgentSessionForInvocation", () => {
     expect(hasMetaInLast(outBefore)).toBe(false);
 
     // Now push peak to 105k → exceeds 100k limit
-    session.emit({
+    await emitTurn(session, {
       type: "turn_end",
       message: {
         role: "assistant",

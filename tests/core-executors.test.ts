@@ -353,6 +353,7 @@ describe("oracle executor with invocation context", () => {
       followUp,
       session: {
         messages: sessionMessages,
+        sessionManager: { getBranch: () => sessionMessages.map((message) => ({ type: "message", message })) },
         dispose: vi.fn(),
       },
     });

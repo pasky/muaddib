@@ -1,5 +1,3 @@
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
-
 import type { MuaddibTool } from "./tools/baseline-tools.js";
 import type { PromptResult } from "./session-runner.js";
 import type { Logger } from "../app/logging.js";
@@ -37,18 +35,15 @@ export async function generateToolSummaryFromSession(input: GenerateToolSummaryI
     return null;
   }
 
+  // Look at the session branch, not session.messages: compaction truncates the
+  // latter, and a long run is exactly the one whose tool results got summarized
+  // away — still worth a wrap-up (the model has the compaction summary).
   const summaryToolNameSet = new Set(summaryToolNames);
-  const hasSummaryToolResults = session.messages.some((message) => {
-    if (message.role !== "toolResult") {
+  const hasSummaryToolResults = session.sessionManager.getBranch().some((entry) => {
+    if (entry.type !== "message" || entry.message.role !== "toolResult") {
       return false;
     }
-
-    const toolResult = message as AgentMessage & {
-      toolName: string;
-      isError?: boolean;
-    };
-
-    return !toolResult.isError && summaryToolNameSet.has(toolResult.toolName);
+    return !entry.message.isError && summaryToolNameSet.has(entry.message.toolName);
   });
 
   if (!hasSummaryToolResults) {

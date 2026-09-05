@@ -270,15 +270,17 @@ function makeRunnerWithBlockedBackgroundWork(options: {
 
   const runnerFactory: import("../src/rooms/command/message-handler.js").CommandRunnerFactory = (input) => ({
     prompt: async () => {
+      const messages = [
+        {
+          role: "toolResult",
+          toolName: "web_search",
+          isError: false,
+          content: [{ type: "text", text: "https://example.com/result" }],
+        },
+      ];
       const session: any = {
-        messages: [
-          {
-            role: "toolResult",
-            toolName: "web_search",
-            isError: false,
-            content: [{ type: "text", text: "https://example.com/result" }],
-          },
-        ],
+        messages,
+        sessionManager: { getBranch: () => messages.map((message) => ({ type: "message", message })) },
         dispose: vi.fn(async () => {
           backgroundFinished.resolve();
         }),
@@ -1889,6 +1891,7 @@ describe("RoomMessageHandler", () => {
           ...result,
           session: {
             messages: [],
+            sessionManager: { getBranch: () => [] },
             dispose: vi.fn(),
           } as any,
           followUp: async (p: string) => { sessionPrompts.push(p); return null; },

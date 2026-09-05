@@ -7,6 +7,17 @@ import {
 import { currentCostSpan, withCostSpan } from "../src/cost/cost-span.js";
 import { LLM_CALL_TYPE } from "../src/cost/llm-call-type.js";
 
+/**
+ * A session whose append-only branch holds the given messages. `live` is what
+ * session.messages currently shows; compaction may have truncated it.
+ */
+function sessionWith(branch: unknown[], live: unknown[] = branch) {
+  return {
+    messages: live,
+    sessionManager: { getBranch: () => branch.map((message) => ({ type: "message", message })) },
+  };
+}
+
 function makeLogger() {
   return {
     debug: vi.fn(),
@@ -43,22 +54,20 @@ describe("generateToolSummaryFromSession", () => {
         stopReason: "stop",
         usage: {} as any,
         followUp,
-        session: {
-          messages: [
-            {
-              role: "assistant",
-              content: [
-                { type: "toolCall", id: "call_1", name: "read", arguments: { path: "/tmp/test" } },
-              ],
-            },
-            {
-              role: "toolResult",
-              toolCallId: "call_1",
-              toolName: "read",
-              details: {},
-            },
-          ],
-        },
+        session: sessionWith([
+          {
+            role: "assistant",
+            content: [
+              { type: "toolCall", id: "call_1", name: "read", arguments: { path: "/tmp/test" } },
+            ],
+          },
+          {
+            role: "toolResult",
+            toolCallId: "call_1",
+            toolName: "read",
+            details: {},
+          },
+        ]),
       } as any,
       tools: [{ name: "read", persistType: "none" }] as any,
       logger,
@@ -100,7 +109,9 @@ describe("generateToolSummaryFromSession", () => {
           stopReason: "stop",
           usage: {} as any,
           followUp,
-          session: { messages: sessionMessages },
+          // Compaction has truncated the live message list; the tool results
+          // only survive in the session branch, and that must be enough.
+          session: sessionWith(sessionMessages, []),
         } as any,
         tools: [
           { name: "web_search", persistType: "summary" },
@@ -129,22 +140,20 @@ describe("generateToolSummaryFromSession", () => {
         followUp: vi.fn(async () => {
           throw new Error("boom");
         }),
-        session: {
-          messages: [
-            {
-              role: "assistant",
-              content: [
-                { type: "toolCall", id: "call_1", name: "bash", arguments: { command: "ls" } },
-              ],
-            },
-            {
-              role: "toolResult",
-              toolCallId: "call_1",
-              toolName: "bash",
-              details: {},
-            },
-          ],
-        },
+        session: sessionWith([
+          {
+            role: "assistant",
+            content: [
+              { type: "toolCall", id: "call_1", name: "bash", arguments: { command: "ls" } },
+            ],
+          },
+          {
+            role: "toolResult",
+            toolCallId: "call_1",
+            toolName: "bash",
+            details: {},
+          },
+        ]),
       } as any,
       tools: [{ name: "bash", persistType: "summary" }] as any,
       logger,

@@ -23,14 +23,16 @@ export interface InvocationStart {
 
 /**
  * Session budget tracking: billed usage accumulated from every LLM call of the
- * session (agent turns and compaction summarizations alike), with peak context
- * length (input + cacheRead + cacheWrite of any single call) and cumulative
- * cost checked against configurable ceilings.
+ * session (agent turns, auto-retries, and compaction summarizations — whether
+ * or not pi accepted their result), with peak context length (input +
+ * cacheRead + cacheWrite of any single call) and cumulative cost checked
+ * against configurable ceilings.
  *
- * Owned by the session factory; consulted by the nudge policy below. When the
- * budget is exhausted the agent is first nudged (ephemerally) to wrap up, and
- * `recordTurn` arms a safety vent that requests a hard abort if the agent
- * keeps calling tools for 10 more turns past the limit.
+ * Owned by the session factory, which feeds `recordUsage` from the stream
+ * function every LLM call passes through; consulted by the nudge policy below.
+ * When the budget is exhausted the agent is first nudged (ephemerally) to wrap
+ * up, and `recordTurnEnd` arms a safety vent that requests a hard abort if the
+ * agent keeps calling tools for 10 more turns past the limit.
  *
  * This is also the source of truth for what the session cost: compaction
  * truncates `session.messages` and its summarization call is never represented
@@ -81,20 +83,20 @@ export class SessionLimits {
     return taken;
   }
 
+  /** Record one LLM call's billed usage. */
+  recordUsage(usage: Usage): void {
+    const turnContext = usage.input + usage.cacheRead + usage.cacheWrite;
+    this.peakContextLength = Math.max(this.peakContextLength, turnContext);
+    this.cumulativeCost += usage.cost.total;
+    accumulateUsage(this.untakenUsage, usage);
+    this.untakenPeakTurnInput = Math.max(this.untakenPeakTurnInput, turnContext);
+  }
+
   /**
-   * Record an LLM call's usage. Pass the stop reason for assistant turns (it
-   * drives the safety vent); leave it undefined for compaction summarizations.
-   * Returns true when the safety vent has tripped and the caller should abort
-   * the prompt loop.
+   * Record the end of an assistant turn. Returns true when the safety vent has
+   * tripped and the caller should abort the prompt loop.
    */
-  recordTurn(usage: Usage | undefined, stopReason: StopReason | undefined): boolean {
-    if (usage) {
-      const turnContext = usage.input + usage.cacheRead + usage.cacheWrite;
-      this.peakContextLength = Math.max(this.peakContextLength, turnContext);
-      this.cumulativeCost += usage.cost.total;
-      accumulateUsage(this.untakenUsage, usage);
-      this.untakenPeakTurnInput = Math.max(this.untakenPeakTurnInput, turnContext);
-    }
+  recordTurnEnd(stopReason: StopReason | undefined): boolean {
     if (this.reached && stopReason === "toolUse") {
       this.turnsSinceSoftLimit += 1;
     }

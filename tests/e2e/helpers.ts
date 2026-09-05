@@ -116,7 +116,7 @@ export function emptyUsage(): Usage {
 
 export function makeAssistantMessage(
   text: string,
-  stopReason: "stop" | "toolUse" = "stop",
+  stopReason: "stop" | "toolUse" | "length" = "stop",
   usage: Usage = emptyUsage(),
 ): AssistantMessage {
   return {
@@ -132,17 +132,21 @@ export function makeAssistantMessage(
 }
 
 /** Build a factory that produces a scripted text-only AssistantMessageEventStream. */
-export function textStream(text: string, usage: Usage = emptyUsage()): () => AssistantMessageEventStream {
+export function textStream(
+  text: string,
+  usage: Usage = emptyUsage(),
+  stopReason: "stop" | "length" = "stop",
+): () => AssistantMessageEventStream {
   return () => {
     const stream = createAssistantMessageEventStream();
-    const partial = makeAssistantMessage(text, "stop", usage);
+    const partial = makeAssistantMessage(text, stopReason, usage);
 
     queueMicrotask(() => {
       stream.push({ type: "start", partial });
       stream.push({ type: "text_start", contentIndex: 0, partial });
       stream.push({ type: "text_delta", contentIndex: 0, delta: text, partial });
       stream.push({ type: "text_end", contentIndex: 0, content: text, partial });
-      stream.push({ type: "done", reason: "stop", message: partial });
+      stream.push({ type: "done", reason: stopReason, message: partial });
     });
 
     return stream;

@@ -1,5 +1,5 @@
 import { Agent, type AgentMessage, type AgentTool, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { Message, StopReason, Usage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Message, StopReason, Usage } from "@earendil-works/pi-ai";
 import {
   AgentSession,
   SessionManager,
@@ -192,14 +192,21 @@ export async function createAgentSessionForInvocation(
   // resolves that provider's API key. The streamFn override remains a safety net
   // against any stale model parameter captured before the config update.
   const visionState = { activated: false, model: null as ResolvedPiAiModel["model"] | null };
-  const streamFn = createTracingStreamFn(logger, llmDebugMaxChars, visionState);
 
   // Compute session limits, session start, and nudge state before Agent construction
   // so they can be captured in the transformContext closure.
   const limits = new SessionLimits(
-    input.sessionLimits?.maxContextLength ?? DEFAULT_MAX_CONTEXT_LENGTH,
-    input.sessionLimits?.maxCostUsd ?? DEFAULT_MAX_COST_USD,
+    resolveSessionLimit("maxContextLength", input.sessionLimits?.maxContextLength, DEFAULT_MAX_CONTEXT_LENGTH),
+    resolveSessionLimit("maxCostUsd", input.sessionLimits?.maxCostUsd, DEFAULT_MAX_COST_USD),
   );
+  // Every LLM call of the session passes through the stream function: agent
+  // turns, auto-retries, and compaction summarizations (pi calls
+  // agent.streamFunction for those, and reports no usage for the ones it then
+  // rejects, e.g. a summary cut off by stopReason=length). Accounting here is
+  // the only way nothing billed escapes the budget.
+  const streamFn = createTracingStreamFn(logger, llmDebugMaxChars, visionState, (message) => {
+    limits.recordUsage(message.usage);
+  });
   const sessionStartTime = Date.now();
   const responseTimestamp: ResponseTimestamp = { lastResponseAt: 0 };
   // Marks where preloaded content ends and this invocation's own turns begin.
@@ -280,13 +287,13 @@ export async function createAgentSessionForInvocation(
 
   const unsubscribe = session.subscribe((event) => {
     if (event.type === "turn_end") {
-      const msg = event.message as { usage?: Usage; stopReason?: StopReason };
+      const msg = event.message as { stopReason?: StopReason };
       // Session-limit nudges are injected ephemerally via transformContext
       // (see createInternalNudgeTransform in session-limits.ts).  They appear
       // in LLM context but are never queued as steering messages, so they
-      // cannot trigger extra turns or cause off-topic replies.  recordTurn
+      // cannot trigger extra turns or cause off-topic replies.  recordTurnEnd
       // returns true only when the post-limit safety vent trips.
-      if (limits.recordTurn(msg.usage, msg.stopReason)) {
+      if (limits.recordTurnEnd(msg.stopReason)) {
         logger.warn("Exceeding session limits, aborting session prompt loop.");
         void session.abort();
       }
@@ -306,11 +313,6 @@ export async function createAgentSessionForInvocation(
         );
         return;
       }
-      // The summarization call is billed like any other turn, and it is not
-      // represented in session.messages at all. (A failed or aborted compaction
-      // reports no usage — pi does not expose it, so those attempts are
-      // unavoidably invisible; the warn above is the only trace.)
-      limits.recordTurn(event.result.usage, undefined);
       logger.info(
         `Context compacted reason=${event.reason} tokens=${event.result.tokensBefore}→${event.result.estimatedTokensAfter ?? "?"}`,
       );
@@ -351,6 +353,21 @@ export async function createAgentSessionForInvocation(
   };
 }
 
+/**
+ * A limit is optional, but if present it must be a positive number: with no
+ * context ceiling by default, a malformed maxCostUsd would otherwise leave the
+ * session unbounded (comparisons against NaN are all false).
+ */
+function resolveSessionLimit(name: keyof SessionLimitsConfig, value: unknown, fallback: number): number {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw new Error(`sessionLimits.${name} must be a finite number > 0, got ${JSON.stringify(value)}.`);
+  }
+  return value;
+}
+
 function applySystemPromptOverrideToSession(session: AgentSession, override: string): void {
   session.agent.state.systemPrompt = override;
   const state = session as unknown as {
@@ -371,15 +388,21 @@ function createTracingStreamFn(
   logger: Logger,
   maxChars: number,
   visionState: { activated: boolean; model: ResolvedPiAiModel["model"] | null },
+  onResult: (message: AssistantMessage) => void,
 ): StreamFn {
   return (model, context, options) => {
     const effectiveModel = (visionState.activated && visionState.model) ? visionState.model : model;
-    return piAiModels.streamSimple(effectiveModel, context, {
+    const stream = piAiModels.streamSimple(effectiveModel, context, {
       ...options,
       onPayload: (payload: unknown) => {
         logger.debug("llm_io payload agent_stream", safeJson(payload, maxChars));
       },
     });
+    // result() only ever resolves (pi-ai reports failures as a final message
+    // with stopReason=error); a stream ended without a result leaves this
+    // listener dangling, which is harmless.
+    void stream.result().then(onResult);
+    return stream;
   };
 }
 
