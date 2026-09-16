@@ -356,7 +356,8 @@ export class SessionRunner {
       // Treat "[internal monologue]" as empty — these are suppressed by
       // cleanResponseText in command-executor.ts, so the user would see nothing.
       let text = stripUndeliverableResponse(extractLastAssistantText(session.messages));
-      for (let i = 0; i < EMPTY_RETRY_DELAYS_MS.length && !text; i += 1) {
+      // Iterates one past the delays so the terminal response is classified too.
+      for (let i = 0; i <= EMPTY_RETRY_DELAYS_MS.length && !text; i += 1) {
         const emptyMsg = findLastAssistantMessage(session.messages);
         const reason = emptyMsg?.stopReason ?? "unknown";
         const errorDetail = emptyMsg?.errorMessage ? `: ${emptyMsg.errorMessage}` : "";
@@ -368,6 +369,9 @@ export class SessionRunner {
             `${emptyMsg.model} is currently out of credits, consider switching mode (send me !h for more info about modes)`,
           );
         }
+        if (i === EMPTY_RETRY_DELAYS_MS.length) {
+          throw new Error(`Agent produced empty completion after ${EMPTY_RETRY_DELAYS_MS.length} retries.`);
+        }
         const delaySec = EMPTY_RETRY_DELAYS_MS[i] / 1_000;
         const retryMsg = `Error: empty assistant text (stopReason=${reason}${errorDetail}), retrying in ${delaySec}s (${i + 1}/${EMPTY_RETRY_DELAYS_MS.length})`;
         this.logger.error(retryMsg);
@@ -376,10 +380,6 @@ export class SessionRunner {
         await session.prompt(this.emptyCompletionRetryPrompt);
         this.logLlmIo(`after_empty_retry_${i + 1}`, session.messages);
         text = stripUndeliverableResponse(extractLastAssistantText(session.messages));
-      }
-
-      if (!text) {
-        throw new Error(`Agent produced empty completion after ${EMPTY_RETRY_DELAYS_MS.length} retries.`);
       }
 
       // The message_end hook queues this when it suppresses a response that

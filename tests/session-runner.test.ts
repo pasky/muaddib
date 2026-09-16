@@ -857,6 +857,11 @@ describe("SessionRunner", () => {
     ['429 {"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota","code":"insufficient_quota"}}'],
     // DeepSeek (HTTP 402)
     ['402 {"error":{"message":"Insufficient Balance","type":"unknown_error"}}'],
+    // Message-only variants (no leading status) for each new signature.
+    ["Insufficient Balance"],
+    ["insufficient_quota"],
+    ["You exceeded your current quota"],
+    ["Your credit balance is too low"],
   ])("throws an actionable out-of-credits error without retrying (%s)", async (errorMessage) => {
     const ctx = makeMockSession({
       messages: [{
@@ -871,6 +876,58 @@ describe("SessionRunner", () => {
     );
     // No empty-completion retry prompt was issued.
     expect(ctx.session.prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["429 Too Many Requests"],
+    ['{"error":{"message":"Rate limit exceeded","type":"rate_limit_error"}}'],
+    ["500 Internal Server Error (request 40201)"],
+  ])("still retries transient errors that are not billing failures (%s)", async (errorMessage) => {
+    vi.useFakeTimers();
+    try {
+      const ctx = makeMockSession({
+        messages: [{
+          role: "assistant", content: [], usage: makeUsage(), stopReason: "error", errorMessage,
+        }],
+      });
+
+      const runner = makeRunner();
+      const promise = runner.prompt("hello");
+      const assertion = expect(promise).rejects.toThrow("Agent produced empty completion after 3 retries.");
+      await vi.runAllTimersAsync();
+      await assertion;
+      expect(ctx.session.prompt).toHaveBeenCalledTimes(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("throws the out-of-credits error when the billing failure first appears on the final retry", async () => {
+    vi.useFakeTimers();
+    try {
+      let promptCount = 0;
+      const ctx = makeMockSession({
+        messages: [{ role: "assistant", content: [], usage: makeUsage(), stopReason: "error", errorMessage: "503 overloaded" }],
+        promptImpl: async (c) => {
+          promptCount += 1;
+          if (promptCount === 4) {
+            c.session.messages.push({
+              role: "assistant", content: [], usage: makeUsage(), stopReason: "error",
+              errorMessage: "402 Insufficient credits", model: "gpt-5",
+            });
+          }
+        },
+      });
+
+      const runner = makeRunner();
+      const promise = runner.prompt("hello");
+      const assertion = expect(promise).rejects.toThrow("gpt-5 is currently out of credits");
+      await vi.runAllTimersAsync();
+      await assertion;
+      expect(ctx.session.prompt).toHaveBeenCalledTimes(4);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("retries when share_artifact URL is missing from response", async () => {
