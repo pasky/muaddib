@@ -101,6 +101,17 @@ export interface PromptResult {
   followUp?: (prompt: string) => Promise<string | null>;
 }
 
+/**
+ * Provider billing-failure signatures. HTTP status is only matched at the
+ * start to avoid false positives on numbers in message bodies.
+ * - OpenRouter: 402 "requires more credits" / "Insufficient credits"
+ * - DeepSeek: 402 "Insufficient Balance"
+ * - Anthropic: 400 "Your credit balance is too low"
+ * - OpenAI: 429 "insufficient_quota" / "exceeded your current quota"
+ */
+const OUT_OF_CREDITS_RE =
+  /^\s*(?:error\s*:?\s*)?402\b|requires more credits|insufficient credits|insufficient balance|insufficient_quota|exceeded your current quota|credit balance is too low|payment required/iu;
+
 export class SessionRunner {
   private readonly model: string;
   private readonly tools: AgentTool<any>[];
@@ -349,12 +360,13 @@ export class SessionRunner {
         const emptyMsg = findLastAssistantMessage(session.messages);
         const reason = emptyMsg?.stopReason ?? "unknown";
         const errorDetail = emptyMsg?.errorMessage ? `: ${emptyMsg.errorMessage}` : "";
-        // Hard billing failures (HTTP 402, e.g. OpenRouter "requires more
-        // credits") won't resolve on retry — fail fast instead of burning
-        // through the delays. Status is only matched at the start to avoid
-        // false positives on numbers in message bodies.
-        if (emptyMsg?.errorMessage && /^\s*(?:error\s*:?\s*)?402\b|requires more credits|insufficient credits|payment required/iu.test(emptyMsg.errorMessage)) {
-          throw new Error(`Agent completion failed with non-retriable error: stopReason=${reason}${errorDetail}`);
+        // Hard billing failures won't resolve on retry — fail fast with an
+        // actionable message instead of burning through the delays.
+        if (emptyMsg?.errorMessage && OUT_OF_CREDITS_RE.test(emptyMsg.errorMessage)) {
+          this.logger.error(`Out of credits for ${emptyMsg.model}: stopReason=${reason}${errorDetail}`);
+          throw new Error(
+            `${emptyMsg.model} is currently out of credits, consider switching mode (send me !h for more info about modes)`,
+          );
         }
         const delaySec = EMPTY_RETRY_DELAYS_MS[i] / 1_000;
         const retryMsg = `Error: empty assistant text (stopReason=${reason}${errorDetail}), retrying in ${delaySec}s (${i + 1}/${EMPTY_RETRY_DELAYS_MS.length})`;

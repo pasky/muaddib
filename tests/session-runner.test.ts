@@ -851,15 +851,24 @@ describe("SessionRunner", () => {
     ['402: {"message":"This request requires more credits, or fewer max_tokens. You requested up to 65536 tokens, but can only afford 966."}'],
     ["402 Payment Required"],
     ["Account has insufficient credits"],
-  ])("throws immediately without retrying on non-retriable billing errors (%s)", async (errorMessage) => {
+    // Anthropic (HTTP 400)
+    ['400 {"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."},"request_id":"req_011"}'],
+    // OpenAI (HTTP 429 insufficient_quota)
+    ['429 {"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota","code":"insufficient_quota"}}'],
+    // DeepSeek (HTTP 402)
+    ['402 {"error":{"message":"Insufficient Balance","type":"unknown_error"}}'],
+  ])("throws an actionable out-of-credits error without retrying (%s)", async (errorMessage) => {
     const ctx = makeMockSession({
       messages: [{
         role: "assistant", content: [], usage: makeUsage(), stopReason: "error", errorMessage,
+        model: "claude-opus-4",
       }],
     });
 
     const runner = makeRunner();
-    await expect(runner.prompt("hello")).rejects.toThrow(/non-retriable error/);
+    await expect(runner.prompt("hello")).rejects.toThrow(
+      "claude-opus-4 is currently out of credits, consider switching mode (send me !h for more info about modes)",
+    );
     // No empty-completion retry prompt was issued.
     expect(ctx.session.prompt).toHaveBeenCalledTimes(1);
   });
