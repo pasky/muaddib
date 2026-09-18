@@ -5,7 +5,7 @@ import type { AuthStore } from "../auth/auth-store.js";
 import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai";
 
 import { extractStatus, extractThinking, isAssistantMessage, isTextContent, isToolCall, responseText } from "./message.js";
-import { detectRefusalErrorSignal, detectRefusalSignal } from "./refusal-detection.js";
+import { REFUSAL_ERROR_PREFIX, detectRefusalErrorSignal, detectRefusalSignal } from "./refusal-detection.js";
 import { stringifyError } from "../utils/index.js";
 import { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
 import { parseModelSpec } from "../models/model-spec.js";
@@ -368,6 +368,16 @@ export class SessionRunner {
           throw new Error(
             `${emptyMsg.model} is currently out of credits, consider switching mode (send me !h for more info about modes)`,
           );
+        }
+        // Content refusals are deterministic — retrying the same prompt only
+        // burns delays and hides the reason.  Surface it to the caller instead
+        // (the fallback model, when configured, already had its turn above).
+        const refusalSignal = emptyMsg?.stopReason === "error" && emptyMsg.errorMessage
+          ? detectRefusalErrorSignal(emptyMsg.errorMessage)
+          : null;
+        if (refusalSignal && emptyMsg?.errorMessage) {
+          this.logger.error(`Model refused (${refusalSignal}): ${emptyMsg.errorMessage}`);
+          throw new Error(`${REFUSAL_ERROR_PREFIX}${emptyMsg.errorMessage}`);
         }
         if (i === EMPTY_RETRY_DELAYS_MS.length) {
           throw new Error(`Agent produced empty completion after ${EMPTY_RETRY_DELAYS_MS.length} retries.`);

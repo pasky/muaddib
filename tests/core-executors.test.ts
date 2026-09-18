@@ -509,6 +509,30 @@ describe("oracle executor with invocation context", () => {
     );
   });
 
+  it("returns the refusal text to the caller instead of throwing, without refusal fallback", async () => {
+    oracleMock.promptFn.mockRejectedValue(
+      new Error("Model refused the request: This content was flagged for possible cybersecurity risk."),
+    );
+
+    const infoLog = vi.fn();
+    const logger = { info: infoLog, debug: vi.fn(), warn: vi.fn(), error: vi.fn() };
+
+    const executor = createDefaultOracleExecutor(
+      { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }, logger },
+      { conversationContext: [], getToolSet: () => ({ tools: [], dispose: undefined }) },
+    );
+
+    const result = await executor({ query: "security question" });
+
+    expect(result).toBe(
+      "Oracle refused the request: This content was flagged for possible cybersecurity risk.",
+    );
+    expect(infoLog).toHaveBeenCalledWith(expect.stringContaining("Oracle refused:"));
+    // The oracle never falls back to another model on refusal.
+    expect(oracleMock.promptFn).toHaveBeenCalledTimes(1);
+    expect(oracleMock.promptFn.mock.calls[0][1]).not.toHaveProperty("refusalFallbackModel");
+  });
+
   it("works without invocation context (zero tools, no conversation context)", async () => {
     oracleMock.promptFn.mockResolvedValue({ text: "bare answer", stopReason: "stop", usage: {} });
 

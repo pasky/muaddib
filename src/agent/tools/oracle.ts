@@ -6,6 +6,7 @@ import type { Message } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
+import { extractRefusalReason } from "../refusal-detection.js";
 import { stringifyError, toConfiguredString } from "../../utils/index.js";
 import { withCostSpan } from "../../cost/cost-span.js";
 import { LLM_CALL_TYPE } from "../../cost/llm-call-type.js";
@@ -177,6 +178,14 @@ export function createDefaultOracleExecutor(
       return toolSummary ? `${result.text}\n\n${toolSummary}` : result.text;
     } catch (error) {
       const message = stringifyError(error);
+      const refusalReason = extractRefusalReason(message);
+      if (refusalReason) {
+        // Refusals are a legitimate oracle verdict, not an infrastructure
+        // failure: hand the reason to the calling agent verbatim so it can
+        // rephrase or answer by itself.  No fallback model is ever used here.
+        logger.info(`${ORACLE_LOG_SEPARATOR} Oracle refused: ${refusalReason}`);
+        return `Oracle refused the request: ${refusalReason}`;
+      }
       if (message.includes("iteration") || message.includes("max")) {
         logger.info(`${ORACLE_LOG_SEPARATOR} Oracle exhausted: ${message}...`);
         return `Oracle exhausted iterations: ${message}`;

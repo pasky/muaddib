@@ -21,7 +21,9 @@ const REFUSAL_SIGNAL_PATTERNS: ReadonlyArray<RefusalPattern> = [
   },
   {
     label: "openai_invalid_prompt_safety",
-    pattern: /invalid_prompt[\s\S]{0,160}safety reasons/iu,
+    // Matches both the JSON error code (invalid_prompt) and the human-readable
+    // "Invalid prompt: ... for safety reasons." message, in either field order.
+    pattern: /invalid[_ ]prompt[\s\S]{0,160}safety reasons/iu,
   },
   {
     label: "content_safety_refusal",
@@ -37,6 +39,11 @@ const ERROR_REFUSAL_SIGNAL_PATTERNS: ReadonlyArray<RefusalPattern> = [
     // Anthropic stop_reason "refusal" → stopReason "error" + this errorMessage.
     label: "anthropic_refusal",
     pattern: /reduce refusals for your users|refusals-and-fallback|the model refused to complete the request/iu,
+  },
+  {
+    // OpenAI content filter: stopReason "error" + this errorMessage.
+    label: "openai_cybersecurity_flag",
+    pattern: /flagged for possible cybersecurity risk/iu,
   },
 ];
 
@@ -68,4 +75,16 @@ export function detectRefusalSignal(text: string): string | null {
  */
 export function detectRefusalErrorSignal(text: string): string | null {
   return matchFirst(text, ERROR_REFUSAL_SIGNAL_PATTERNS);
+}
+
+/** Prefix SessionRunner uses when it turns a detected refusal into an error. */
+export const REFUSAL_ERROR_PREFIX = "Model refused the request: ";
+
+/**
+ * Extract the provider's refusal reason from an error thrown by SessionRunner,
+ * or null if the error is not a refusal.
+ */
+export function extractRefusalReason(errorText: string): string | null {
+  const index = errorText.indexOf(REFUSAL_ERROR_PREFIX);
+  return index === -1 ? null : errorText.slice(index + REFUSAL_ERROR_PREFIX.length);
 }

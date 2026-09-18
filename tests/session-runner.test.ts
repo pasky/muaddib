@@ -879,6 +879,23 @@ describe("SessionRunner", () => {
   });
 
   it.each([
+    ["This content was flagged for possible cybersecurity risk. If this seems wrong, try rephrasing your request."],
+    ["The model refused to complete the request."],
+    ['400 {"error":{"message":"Invalid prompt: we\'ve limited access to this content for safety reasons.","type":"invalid_prompt"}}'],
+  ])("throws a refusal error without retrying when no fallback model is configured (%s)", async (errorMessage) => {
+    const ctx = makeMockSession({
+      messages: [{
+        role: "assistant", content: [], usage: makeUsage(), stopReason: "error", errorMessage,
+      }],
+    });
+
+    const runner = makeRunner();
+    await expect(runner.prompt("hello")).rejects.toThrow(`Model refused the request: ${errorMessage}`);
+    // No empty-completion retry prompt was issued.
+    expect(ctx.session.prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
     ["429 Too Many Requests"],
     ['{"error":{"message":"Rate limit exceeded","type":"rate_limit_error"}}'],
     ["500 Internal Server Error (request 40201)"],
