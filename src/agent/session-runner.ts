@@ -370,8 +370,10 @@ export class SessionRunner {
           );
         }
         // Content refusals are deterministic — retrying the same prompt only
-        // burns delays and hides the reason.  Surface it to the caller instead
-        // (the fallback model, when configured, already had its turn above).
+        // burns delays and hides the reason.  Surface it to the caller instead.
+        // A fallback model, when configured, already had its turn on the first
+        // prompt; a refusal that only surfaces on a later empty-completion
+        // retry deliberately does not start a second fallback round.
         const refusalSignal = emptyMsg?.stopReason === "error" && emptyMsg.errorMessage
           ? detectRefusalErrorSignal(emptyMsg.errorMessage)
           : null;
@@ -527,8 +529,16 @@ export class SessionRunner {
         return false;
       }
     } catch (error) {
-      if (!refusalFallbackModel || !detectRefusalErrorSignal(stringifyError(error))) {
+      const message = stringifyError(error);
+      if (!detectRefusalErrorSignal(message)) {
         throw error;
+      }
+      if (!refusalFallbackModel) {
+        // Same classification as the empty-completion path, so callers (e.g.
+        // the oracle tool) see one refusal representation regardless of
+        // whether the provider reported it as an error or an empty message.
+        this.logger.error(`Model refused: ${message}`);
+        throw new Error(`${REFUSAL_ERROR_PREFIX}${message}`, { cause: error });
       }
     }
 

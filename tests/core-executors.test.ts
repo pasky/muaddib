@@ -533,6 +533,24 @@ describe("oracle executor with invocation context", () => {
     expect(oracleMock.promptFn.mock.calls[0][1]).not.toHaveProperty("refusalFallbackModel");
   });
 
+  it("reports a refusal even when the response merely quotes safety wording", async () => {
+    oracleMock.promptFn.mockResolvedValue({
+      text: "Your prompt was flagged for possible cybersecurity risk by OpenAI; here is why...",
+      stopReason: "stop",
+      usage: {},
+    });
+
+    const executor = createDefaultOracleExecutor(
+      { toolsConfig: { oracle: { model: "openai:gpt-4o-mini" } }, logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() } },
+      { conversationContext: [], getToolSet: () => ({ tools: [], dispose: undefined }) },
+    );
+
+    // A successful answer that talks about refusals is returned verbatim.
+    expect(await executor({ query: "explain the filter" })).toBe(
+      "Your prompt was flagged for possible cybersecurity risk by OpenAI; here is why...",
+    );
+  });
+
   it("works without invocation context (zero tools, no conversation context)", async () => {
     oracleMock.promptFn.mockResolvedValue({ text: "bare answer", stopReason: "stop", usage: {} });
 

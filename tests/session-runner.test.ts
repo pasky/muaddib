@@ -816,6 +816,84 @@ describe("SessionRunner", () => {
     expect(result.refusalFallbackActivated).toBe(true);
   });
 
+  it("does not mistake an answer discussing provider safety errors for a refusal", async () => {
+    const ctx = makeMockSession({
+      promptImpl: async (c) => {
+        emitAssistantResponse(
+          c,
+          "The API error Invalid prompt: access limited for safety reasons means your request was filtered.",
+        );
+      },
+    });
+
+    const runner = makeRunner();
+    const result = await runner.prompt("hello", { refusalFallbackModel: "anthropic:claude-sonnet-4" });
+
+    expect(result.refusalFallbackActivated).toBe(false);
+    expect(ctx.session.prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it("normalizes a thrown provider refusal into a refusal error when no fallback is configured", async () => {
+    const ctx = makeMockSession({
+      promptImpl: async () => {
+        throw new Error("400 This content was flagged for possible cybersecurity risk.");
+      },
+    });
+
+    const runner = makeRunner();
+    await expect(runner.prompt("hello")).rejects.toThrow(
+      "Model refused the request: 400 This content was flagged for possible cybersecurity risk.",
+    );
+    expect(ctx.session.prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails with the refusal reason when the fallback model refuses too", async () => {
+    const ctx = makeMockSession({
+      messages: [{
+        role: "assistant", content: [], usage: makeUsage(), stopReason: "error",
+        errorMessage: "The model refused to complete the request.",
+      }],
+    });
+
+    const runner = makeRunner();
+    await expect(
+      runner.prompt("hello", { refusalFallbackModel: "anthropic:claude-sonnet-4" }),
+    ).rejects.toThrow("Model refused the request: The model refused to complete the request.");
+    // Original prompt + one fallback-model attempt, then no empty-completion retries.
+    expect(ctx.session.prompt).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops retrying as soon as an empty-completion retry turns into a refusal", async () => {
+    vi.useFakeTimers();
+    try {
+      let promptCount = 0;
+      const ctx = makeMockSession({
+        messages: [{
+          role: "assistant", content: [], usage: makeUsage(), stopReason: "error",
+          errorMessage: "503 overloaded",
+        }],
+      });
+      ctx.session.prompt.mockImplementation(async () => {
+        promptCount += 1;
+        if (promptCount >= 2) {
+          ctx.session.messages[0].errorMessage = "This content was flagged for possible cybersecurity risk.";
+        }
+      });
+
+      const runner = makeRunner();
+      const promise = runner.prompt("hello");
+      const assertion = expect(promise).rejects.toThrow(
+        "Model refused the request: This content was flagged for possible cybersecurity risk.",
+      );
+      await vi.runAllTimersAsync();
+      await assertion;
+      // First prompt + one retry that surfaced the refusal; remaining retries skipped.
+      expect(ctx.session.prompt).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("recovers text from earlier message when last assistant message is aborted/empty", async () => {
     makeMockSession({
       messages: [

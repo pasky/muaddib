@@ -21,9 +21,7 @@ const REFUSAL_SIGNAL_PATTERNS: ReadonlyArray<RefusalPattern> = [
   },
   {
     label: "openai_invalid_prompt_safety",
-    // Matches both the JSON error code (invalid_prompt) and the human-readable
-    // "Invalid prompt: ... for safety reasons." message, in either field order.
-    pattern: /invalid[_ ]prompt[\s\S]{0,160}safety reasons/iu,
+    pattern: /invalid_prompt[\s\S]{0,160}safety reasons/iu,
   },
   {
     label: "content_safety_refusal",
@@ -44,6 +42,12 @@ const ERROR_REFUSAL_SIGNAL_PATTERNS: ReadonlyArray<RefusalPattern> = [
     // OpenAI content filter: stopReason "error" + this errorMessage.
     label: "openai_cybersecurity_flag",
     pattern: /flagged for possible cybersecurity risk/iu,
+  },
+  {
+    // Human-readable form of openai_invalid_prompt_safety. Error-only: an
+    // answer *explaining* this error would otherwise be taken for a refusal.
+    label: "openai_invalid_prompt_safety_message",
+    pattern: /invalid prompt[\s\S]{0,160}safety reasons/iu,
   },
 ];
 
@@ -85,6 +89,7 @@ export const REFUSAL_ERROR_PREFIX = "Model refused the request: ";
  * or null if the error is not a refusal.
  */
 export function extractRefusalReason(errorText: string): string | null {
-  const index = errorText.indexOf(REFUSAL_ERROR_PREFIX);
-  return index === -1 ? null : errorText.slice(index + REFUSAL_ERROR_PREFIX.length);
+  return errorText.startsWith(REFUSAL_ERROR_PREFIX)
+    ? errorText.slice(REFUSAL_ERROR_PREFIX.length)
+    : null;
 }
