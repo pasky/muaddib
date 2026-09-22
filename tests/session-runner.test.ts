@@ -305,7 +305,7 @@ describe("SessionRunner", () => {
     });
 
     const runner = makeRunner();
-    const result = await runner.prompt("hello", { refusalFallbackModel: "anthropic:claude-sonnet-4" });
+    const result = await runner.prompt("hello", { refusalFallbackModels: ["anthropic:claude-sonnet-4"] });
 
     expect(result.refusalFallbackActivated).toBe(true);
     expect(result.refusalFallbackModel).toBe("anthropic:claude-sonnet-4");
@@ -334,7 +334,7 @@ describe("SessionRunner", () => {
     });
 
     const runner = makeRunner();
-    const result = await runner.prompt("hello", { refusalFallbackModel: "anthropic:claude-sonnet-4" });
+    const result = await runner.prompt("hello", { refusalFallbackModels: ["anthropic:claude-sonnet-4"] });
 
     expect(result.refusalFallbackActivated).toBe(true);
     expect(result.refusalFallbackModel).toBe("anthropic:claude-sonnet-4");
@@ -354,7 +354,7 @@ describe("SessionRunner", () => {
     });
 
     const runner = makeRunner();
-    const result = await runner.prompt("hello", { refusalFallbackModel: "anthropic:claude-sonnet-4" });
+    const result = await runner.prompt("hello", { refusalFallbackModels: ["anthropic:claude-sonnet-4"] });
 
     expect(result.refusalFallbackActivated).toBe(false);
     expect(ctx.session.prompt).toHaveBeenCalledTimes(1);
@@ -808,7 +808,7 @@ describe("SessionRunner", () => {
     });
 
     const runner = makeRunner({ onResponse: (text: string) => { deliveredTexts.push(text); } });
-    const result = await runner.prompt("hello", { refusalFallbackModel: "anthropic:claude-sonnet-4" });
+    const result = await runner.prompt("hello", { refusalFallbackModels: ["anthropic:claude-sonnet-4"] });
 
     expect(deliveredTexts[0]).not.toContain("[refusal fallback");
     expect(deliveredTexts[1]).toContain("[refusal fallback to claude-sonnet-4]");
@@ -827,7 +827,7 @@ describe("SessionRunner", () => {
     });
 
     const runner = makeRunner();
-    const result = await runner.prompt("hello", { refusalFallbackModel: "anthropic:claude-sonnet-4" });
+    const result = await runner.prompt("hello", { refusalFallbackModels: ["anthropic:claude-sonnet-4"] });
 
     expect(result.refusalFallbackActivated).toBe(false);
     expect(ctx.session.prompt).toHaveBeenCalledTimes(1);
@@ -857,10 +857,58 @@ describe("SessionRunner", () => {
 
     const runner = makeRunner();
     await expect(
-      runner.prompt("hello", { refusalFallbackModel: "anthropic:claude-sonnet-4" }),
+      runner.prompt("hello", { refusalFallbackModels: ["anthropic:claude-sonnet-4"] }),
     ).rejects.toThrow("Model refused the request: The model refused to complete the request.");
     // Original prompt + one fallback-model attempt, then no empty-completion retries.
     expect(ctx.session.prompt).toHaveBeenCalledTimes(2);
+  });
+
+  it("walks the refusal fallback chain until a model answers", async () => {
+    const deliveredTexts: string[] = [];
+    const REFUSAL = "The model refused to complete the request.";
+    const ctx = makeMockSession({
+      promptImpl: async (c) => {
+        // Primary (null model) and first fallback refuse; second fallback answers.
+        if (c.agent.state.model?.id === "kimi-k3") {
+          emitAssistantResponse(c, "the real answer");
+          return;
+        }
+        c.session.messages.push({
+          role: "assistant", content: [], usage: makeUsage(), stopReason: "error", errorMessage: REFUSAL,
+        });
+      },
+    });
+
+    const runner = makeRunner({ onResponse: (text: string) => { deliveredTexts.push(text); } });
+    const result = await runner.prompt("hello", {
+      refusalFallbackModels: ["anthropic:claude-opus-5", "openrouter:kimi-k3"],
+    });
+
+    expect(result.text).toBe("the real answer");
+    expect(result.refusalFallbackActivated).toBe(true);
+    expect(result.refusalFallbackModel).toBe("openrouter:kimi-k3");
+    expect(ctx.session.prompt).toHaveBeenCalledTimes(3);
+    expect(ctx.ensureProviderKey.mock.calls.map((c) => c[0])).toEqual(["openai", "anthropic", "openrouter"]);
+    expect(ctx.agent.state.model).toEqual({ provider: "openrouter", id: "kimi-k3" });
+    expect(deliveredTexts).toHaveLength(1);
+    expect(deliveredTexts[0]).toContain("[refusal fallback to claude-opus-5]");
+    expect(deliveredTexts[0]).toContain("[refusal fallback to kimi-k3]");
+  });
+
+  it("fails with the refusal reason when every model in the fallback chain refuses", async () => {
+    const ctx = makeMockSession({
+      messages: [{
+        role: "assistant", content: [], usage: makeUsage(), stopReason: "error",
+        errorMessage: "The model refused to complete the request.",
+      }],
+    });
+
+    const runner = makeRunner();
+    await expect(
+      runner.prompt("hello", { refusalFallbackModels: ["anthropic:claude-opus-5", "openrouter:kimi-k3"] }),
+    ).rejects.toThrow("Model refused the request: The model refused to complete the request.");
+    expect(ctx.session.prompt).toHaveBeenCalledTimes(3);
+    expect(ctx.agent.state.model).toEqual({ provider: "openrouter", id: "kimi-k3" });
   });
 
   it("stops retrying as soon as an empty-completion retry turns into a refusal", async () => {

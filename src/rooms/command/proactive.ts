@@ -350,7 +350,7 @@ export class ProactiveRunner {
         historySize: this.config.historySize,
         reasoningEffort: classifiedRuntime.reasoningEffort,
         allowedTools: classifiedRuntime.allowedTools,
-        refusalFallbackModel: classifiedRuntime.refusalFallbackModel,
+        refusalFallbackModels: classifiedRuntime.refusalFallbackModels,
       },
       (agent) => { this.activeAgents.set(sessionKey, agent); },
     );

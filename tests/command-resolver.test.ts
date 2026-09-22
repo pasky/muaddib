@@ -401,7 +401,7 @@ describe("CommandResolver runtimeForTrigger toolsOverrides", () => {
   });
 });
 
-describe("CommandResolver runtimeForTrigger refusalFallbackModel", () => {
+describe("CommandResolver runtimeForTrigger refusalFallbackModels", () => {
   it("returns null when no refusal fallback is configured", () => {
     const resolver = new CommandResolver(
       commandConfig as any,
@@ -412,20 +412,20 @@ describe("CommandResolver runtimeForTrigger refusalFallbackModel", () => {
     );
 
     const { runtime } = resolver.runtimeForTrigger("!s");
-    expect(runtime.refusalFallbackModel).toBeNull();
+    expect(runtime.refusalFallbackModels).toBeNull();
   });
 
-  it("resolves per-mode refusalFallbackModel with trigger override taking precedence", () => {
+  it("resolves per-mode refusalFallbackModels with trigger override taking precedence", () => {
     const config = {
       ...commandConfig,
       modes: {
         ...commandConfig.modes,
         serious: {
           ...commandConfig.modes.serious,
-          refusalFallbackModel: "anthropic:claude-sonnet-4",
+          refusalFallbackModels: ["anthropic:claude-sonnet-4"],
           triggers: {
             "!s": {},
-            "!a": { refusalFallbackModel: "anthropic:claude-opus-4-8" },
+            "!a": { refusalFallbackModels: ["anthropic:claude-opus-4-8"] },
           },
         },
       },
@@ -441,11 +441,45 @@ describe("CommandResolver runtimeForTrigger refusalFallbackModel", () => {
 
     // !s inherits the mode-level fallback
     const { runtime: sRuntime } = resolver.runtimeForTrigger("!s");
-    expect(sRuntime.refusalFallbackModel).toBe("anthropic:claude-sonnet-4");
+    expect(sRuntime.refusalFallbackModels).toEqual(["anthropic:claude-sonnet-4"]);
 
     // !a overrides it
     const { runtime: aRuntime } = resolver.runtimeForTrigger("!a");
-    expect(aRuntime.refusalFallbackModel).toBe("anthropic:claude-opus-4-8");
+    expect(aRuntime.refusalFallbackModels).toEqual(["anthropic:claude-opus-4-8"]);
+  });
+
+  it("lets a trigger disable an inherited chain with [] and rejects malformed overrides", () => {
+    const config = {
+      ...commandConfig,
+      modes: {
+        ...commandConfig.modes,
+        serious: {
+          ...commandConfig.modes.serious,
+          refusalFallbackModels: ["anthropic:claude-sonnet-4"],
+          triggers: {
+            "!s": { refusalFallbackModels: [] },
+            "!a": { refusalFallbackModels: "anthropic:claude-opus-4-8" },
+            "!b": { refusalFallbackModels: ["claude-opus-4-8"] },
+          },
+        },
+      },
+    };
+
+    const resolver = new CommandResolver(
+      config as any,
+      async () => "EASY_SERIOUS",
+      "!h",
+      new Set(["!c"]),
+      (model) => String(model),
+    );
+
+    expect(resolver.runtimeForTrigger("!s").runtime.refusalFallbackModels).toEqual([]);
+    expect(() => resolver.runtimeForTrigger("!a")).toThrow(
+      "refusalFallbackModels must be an array of provider:model strings",
+    );
+    expect(() => resolver.runtimeForTrigger("!b")).toThrow(
+      "Model 'claude-opus-4-8' must be fully qualified as provider:model.",
+    );
   });
 });
 

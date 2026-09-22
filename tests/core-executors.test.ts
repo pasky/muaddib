@@ -530,7 +530,7 @@ describe("oracle executor with invocation context", () => {
     expect(infoLog).toHaveBeenCalledWith(expect.stringContaining("Oracle refused:"));
     // The oracle never falls back to another model on refusal.
     expect(oracleMock.promptFn).toHaveBeenCalledTimes(1);
-    expect(oracleMock.promptFn.mock.calls[0][1]).not.toHaveProperty("refusalFallbackModel");
+    expect(oracleMock.promptFn.mock.calls[0][1]).not.toHaveProperty("refusalFallbackModels");
   });
 
   it("reports a refusal even when the response merely quotes safety wording", async () => {

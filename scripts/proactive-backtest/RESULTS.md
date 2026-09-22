@@ -20,7 +20,7 @@ in false negatives (going silent where opus-4-5 would speak).
   disagreement rates under harness shift**, not true production FP/FN rates.
 - FP% = P(interject | silver NULL); FN% = P(NULL | silver interject).
   Refusals count as NULL but are tracked separately (note: production
-  currently retries refusals via `refusalFallbackModel`, which could itself
+  currently retries refusals via `refusalFallbackModels`, which could itself
   interject — deploying a refusal-prone model would need that suppressed for
   proactive runs).
 - **Replay baseline**: opus-4-5 replayed through the harness against its own

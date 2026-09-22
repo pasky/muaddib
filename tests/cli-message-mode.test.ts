@@ -590,14 +590,18 @@ describe("runCliMessageMode", () => {
     ).rejects.toThrow("command.responseMaxBytes must be a positive integer.");
   });
 
-  it("fails fast when agent.refusalFallbackModel is malformed", async () => {
+  it.each([
+    { value: ["gpt-4o-mini"], error: "Model 'gpt-4o-mini' must be fully qualified as provider:model." },
+    { value: "deepseek:deepseek-v4-pro", error: "agent.refusalFallbackModels must be an array of provider:model strings" },
+    { value: null, error: "agent.refusalFallbackModels must be an array of provider:model strings" },
+  ])("fails fast when agent.refusalFallbackModels is malformed ($value)", async ({ value, error }) => {
     const dir = await mkdtemp(join(tmpdir(), "muaddib-cli-"));
     tempDirs.push(dir);
 
     const configPath = join(dir, "config.json");
     const config = {
       agent: {
-        refusalFallbackModel: "gpt-4o-mini",
+        refusalFallbackModels: value,
       },
       rooms: {
         common: {
@@ -632,19 +636,17 @@ describe("runCliMessageMode", () => {
         configPath,
         message: "!s hi",
       }),
-    ).rejects.toThrow(
-      "Model 'gpt-4o-mini' must be fully qualified as provider:model.",
-    );
+    ).rejects.toThrow(error);
   });
 
-  it("accepts empty agent.refusalFallbackModel to disable refusal fallback", async () => {
+  it("accepts empty agent.refusalFallbackModels to disable refusal fallback", async () => {
     const dir = await mkdtemp(join(tmpdir(), "muaddib-cli-"));
     tempDirs.push(dir);
 
     const configPath = join(dir, "config.json");
     const config = {
       agent: {
-        refusalFallbackModel: "",
+        refusalFallbackModels: [],
       },
       rooms: {
         common: {
@@ -679,7 +681,7 @@ describe("runCliMessageMode", () => {
       message: "!s hi",
       runnerFactory: (input) => ({
         prompt: async (_prompt, options) => {
-          expect(options?.refusalFallbackModel).toBeUndefined();
+          expect(options?.refusalFallbackModels).toEqual([]);
           await input.onResponse("cli ok", { interim: false });
           return {
             assistantMessage: {
@@ -718,7 +720,7 @@ describe("runCliMessageMode", () => {
     expect(result.response).toBe("cli ok");
   });
 
-  it("accepts agent.refusalFallbackModel with DeepSeek V4 Pro", async () => {
+  it("accepts agent.refusalFallbackModels with DeepSeek V4 Pro", async () => {
     const dir = await mkdtemp(join(tmpdir(), "muaddib-cli-"));
     tempDirs.push(dir);
 
@@ -731,7 +733,7 @@ describe("runCliMessageMode", () => {
         },
       },
       agent: {
-        refusalFallbackModel: "deepseek:deepseek-v4-pro",
+        refusalFallbackModels: ["deepseek:deepseek-v4-pro"],
       },
       rooms: {
         common: {

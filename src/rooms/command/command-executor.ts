@@ -32,7 +32,7 @@ import { extractThinking } from "../../agent/message.js";
 import type { Message } from "@earendil-works/pi-ai";
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
-import { parseModelSpec } from "../../models/model-spec.js";
+import { parseModelSpecList } from "../../models/model-spec.js";
 import {
   checkUserBudget,
   resolveCostPolicyConfig,
@@ -118,8 +118,8 @@ export interface QuietExecuteParams {
   historySize: number;
   reasoningEffort: string;
   allowedTools: string[] | null;
-  /** `null` = inherit global, `""` = disabled, else `provider:model`. */
-  refusalFallbackModel: string | null;
+  /** `null` = inherit global, `[]` = disabled, else ordered `provider:model` chain. */
+  refusalFallbackModels: string[] | null;
   promptReminder?: string;
 }
 
@@ -166,7 +166,7 @@ export class CommandExecutor {
   private readonly runnerFactory: CommandRunnerFactory;
   private readonly rateLimiter: CommandRateLimiter;
   private readonly contextReducer: ContextReducer;
-  private readonly refusalFallbackModel: string | null;
+  private readonly refusalFallbackModels: string[];
   private readonly responseMaxBytes: number;
   private readonly eventsWatcher?: ArcEventsWatcher;
 
@@ -248,16 +248,9 @@ export class CommandExecutor {
       new RateLimiter(rateLimit, ratePeriod);
 
     // Global default; per-mode overrides are resolved lazily like visionModel.
-    const globalRefusalFallback = agentConfig.refusalFallbackModel;
-    if (globalRefusalFallback != null && typeof globalRefusalFallback !== "string") {
-      throw new Error(
-        "agent.refusalFallbackModel must be a string fully qualified as provider:model (or \"\" to disable).",
-      );
-    }
-    this.refusalFallbackModel = globalRefusalFallback?.trim() || null;
-    if (this.refusalFallbackModel) {
-      parseModelSpec(this.refusalFallbackModel);
-    }
+    this.refusalFallbackModels = agentConfig.refusalFallbackModels === undefined
+      ? []
+      : parseModelSpecList(agentConfig.refusalFallbackModels, "agent.refusalFallbackModels");
 
     const configuredResponseMaxBytes = this.commandConfig.responseMaxBytes;
     if (configuredResponseMaxBytes === undefined || configuredResponseMaxBytes === null) {
@@ -703,7 +696,7 @@ export class CommandExecutor {
           runner, message, queryLine, runnerContext, toolSet.tools, {
             reasoningEffort: resolvedRuntime.reasoningEffort,
             visionModel: resolvedRuntime.visionModel ?? undefined,
-            refusalFallbackModel: resolvedRuntime.refusalFallbackModel ?? this.refusalFallbackModel ?? undefined,
+            refusalFallbackModels: resolvedRuntime.refusalFallbackModels ?? this.refusalFallbackModels,
             // @model override means unknown model quality — skip automatic
             // memory/skill maintenance (the memory prompt covers both).
             memoryUpdate: resolved.modelOverride ? false : resolvedRuntime.memoryUpdate,
@@ -767,7 +760,7 @@ export class CommandExecutor {
     onAgentCreated?: (agent: Agent) => void,
   ): Promise<boolean> {
     const { logger } = this;
-    const { modelSpec, trigger, source, systemPrompt, historySize, reasoningEffort, allowedTools, refusalFallbackModel, promptReminder } = params;
+    const { modelSpec, trigger, source, systemPrompt, historySize, reasoningEffort, allowedTools, refusalFallbackModels, promptReminder } = params;
 
     const context = await this.history.getContextForMessage(message, historySize);
 
@@ -844,7 +837,7 @@ export class CommandExecutor {
             toolSet.tools,
             {
               reasoningEffort,
-              refusalFallbackModel: refusalFallbackModel ?? this.refusalFallbackModel ?? undefined,
+              refusalFallbackModels: refusalFallbackModels ?? this.refusalFallbackModels,
               modelSpec,
             },
             async () => {
@@ -918,7 +911,7 @@ export class CommandExecutor {
       historySize: resolvedRuntime.historySize,
       reasoningEffort: resolvedRuntime.reasoningEffort,
       allowedTools: resolvedRuntime.allowedTools,
-      refusalFallbackModel: resolvedRuntime.refusalFallbackModel,
+      refusalFallbackModels: resolvedRuntime.refusalFallbackModels,
       promptReminder: modeConfig.promptReminder,
     });
   }
@@ -936,7 +929,7 @@ export class CommandExecutor {
     queryText: string,
     contextMessages: Message[],
     tools: MuaddibTool[],
-    opts: { reasoningEffort: string; visionModel?: string; refusalFallbackModel?: string; memoryUpdate?: boolean; toolSummary?: boolean; modelSpec?: string },
+    opts: { reasoningEffort: string; visionModel?: string; refusalFallbackModels: string[]; memoryUpdate?: boolean; toolSummary?: boolean; modelSpec?: string },
     afterResponse: (result: PromptRunResult) => Promise<void>,
     triggerTs?: string,
   ): Promise<PromptRunResult> {
@@ -951,7 +944,7 @@ export class CommandExecutor {
       contextMessages,
       thinkingLevel: opts.reasoningEffort as ThinkingLevel,
       visionFallbackModel: opts.visionModel,
-      refusalFallbackModel: opts.refusalFallbackModel,
+      refusalFallbackModels: opts.refusalFallbackModels,
     });
 
     // Record top-level usage into the active cost span.  The session runner

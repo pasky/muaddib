@@ -24,6 +24,18 @@ export class ModelSpecError extends Error {
 
 const MODEL_SPEC_EXAMPLE = "provider:model";
 
+/**
+ * Validate a configured model list (e.g. refusalFallbackModels): must be an
+ * array of fully-qualified specs.  `label` names the config key in errors.
+ */
+export function parseModelSpecList(value: unknown, label: string): string[] {
+  if (!Array.isArray(value) || value.some((m) => typeof m !== "string")) {
+    throw new Error(`${label} must be an array of ${MODEL_SPEC_EXAMPLE} strings (or [] to disable).`);
+  }
+  value.forEach(parseModelSpec);
+  return value;
+}
+
 export function parseModelSpec(input: string): ModelSpec {
   const raw = (input ?? "").trim();
   if (!raw) {

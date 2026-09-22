@@ -70,7 +70,8 @@ export interface PromptOptions {
   contextMessages?: Message[];
   thinkingLevel?: ThinkingLevel;
   visionFallbackModel?: string;
-  refusalFallbackModel?: string;
+  /** Models to retry with, in order, when the current model issues a content refusal. */
+  refusalFallbackModels?: string[];
 }
 
 export interface PromptResult {
@@ -84,6 +85,7 @@ export interface PromptResult {
   visionFallbackActivated?: boolean;
   visionFallbackModel?: string;
   refusalFallbackActivated?: boolean;
+  /** The fallback model that ultimately answered, when the chain was activated. */
   refusalFallbackModel?: string;
   session?: AgentSession;
   /** Path to the persisted session JSONL file, or `null` when in-memory. */
@@ -338,11 +340,11 @@ export class SessionRunner {
       await sessionCtx.ensureProviderKey(primaryProvider);
       promptAttempted = true;
 
-      const refusalFallbackActivated = await this.promptWithRefusalFallback(
+      const refusalFallbackModel = await this.promptWithRefusalFallback(
         session,
         agent,
         prompt,
-        options.refusalFallbackModel,
+        options.refusalFallbackModels ?? [],
         sessionCtx.ensureProviderKey,
         (suffix) => { responseSuffix = `${responseSuffix} ${suffix}`.trim(); },
       );
@@ -449,10 +451,8 @@ export class SessionRunner {
         visionFallbackModel: sessionCtx.getVisionFallbackActivated()
           ? options.visionFallbackModel
           : undefined,
-        refusalFallbackActivated,
-        refusalFallbackModel: refusalFallbackActivated
-          ? options.refusalFallbackModel
-          : undefined,
+        refusalFallbackActivated: refusalFallbackModel !== null,
+        refusalFallbackModel: refusalFallbackModel ?? undefined,
         session,
         sessionFile: sessionCtx.sessionFile,
         sessionId: sessionCtx.sessionId,
@@ -503,51 +503,58 @@ export class SessionRunner {
   }
 
   /**
-   * Prompt the session, retrying with a fallback model if a refusal is detected.
-   * Returns true if the fallback model was activated.
+   * Prompt the session, walking the fallback chain while refusals are detected.
+   * Returns the last activated fallback model spec, or null if only the primary
+   * model was prompted.  When the last model in the chain refuses too, an
+   * error-shaped refusal is left in the session for the empty-completion path
+   * to surface, a thrown provider refusal is rethrown with REFUSAL_ERROR_PREFIX,
+   * and a body-text refusal is returned as ordinary text.
    */
   private async promptWithRefusalFallback(
     session: AgentSession,
     agent: Agent,
     prompt: string,
-    refusalFallbackModel: string | undefined,
+    refusalFallbackModels: readonly string[],
     ensureProviderKey: (provider: string) => Promise<void>,
     addSuffix: (suffix: string) => void,
-  ): Promise<boolean> {
-    try {
-      await session.prompt(prompt);
+  ): Promise<string | null> {
+    let activeFallback: string | null = null;
+    for (let i = 0; ; i += 1) {
+      const nextFallback = refusalFallbackModels[i] ?? null;
+      try {
+        await session.prompt(prompt);
 
-      // Anthropic refusals arrive as an empty message with stopReason "error"
-      // and the refusal in errorMessage, not the body — probe both.
-      const lastMessage = findLastAssistantMessage(session.messages);
-      const bodyRefusal = detectRefusalSignal(extractLastAssistantText(session.messages));
-      const errorRefusal =
-        lastMessage?.stopReason === "error"
-          ? detectRefusalErrorSignal(lastMessage.errorMessage ?? "")
-          : null;
-      if (!refusalFallbackModel || !(bodyRefusal ?? errorRefusal)) {
-        return false;
+        // Anthropic refusals arrive as an empty message with stopReason "error"
+        // and the refusal in errorMessage, not the body — probe both.
+        const lastMessage = findLastAssistantMessage(session.messages);
+        const bodyRefusal = detectRefusalSignal(extractLastAssistantText(session.messages));
+        const errorRefusal =
+          lastMessage?.stopReason === "error"
+            ? detectRefusalErrorSignal(lastMessage.errorMessage ?? "")
+            : null;
+        if (nextFallback === null || !(bodyRefusal ?? errorRefusal)) {
+          return activeFallback;
+        }
+      } catch (error) {
+        const message = stringifyError(error);
+        if (!detectRefusalErrorSignal(message)) {
+          throw error;
+        }
+        if (nextFallback === null) {
+          // Same classification as the empty-completion path, so callers (e.g.
+          // the oracle tool) see one refusal representation regardless of
+          // whether the provider reported it as an error or an empty message.
+          this.logger.error(`Model refused: ${message}`);
+          throw new Error(`${REFUSAL_ERROR_PREFIX}${message}`, { cause: error });
+        }
       }
-    } catch (error) {
-      const message = stringifyError(error);
-      if (!detectRefusalErrorSignal(message)) {
-        throw error;
-      }
-      if (!refusalFallbackModel) {
-        // Same classification as the empty-completion path, so callers (e.g.
-        // the oracle tool) see one refusal representation regardless of
-        // whether the provider reported it as an error or an empty message.
-        this.logger.error(`Model refused: ${message}`);
-        throw new Error(`${REFUSAL_ERROR_PREFIX}${message}`, { cause: error });
-      }
+
+      const fallbackModel = await this.modelAdapter.resolve(nextFallback);
+      await ensureProviderKey(fallbackModel.spec.provider);
+      agent.state.model = fallbackModel.model;
+      addSuffix(`[refusal fallback to ${fallbackModel.spec.modelId}]`);
+      activeFallback = nextFallback;
     }
-
-    const fallbackModel = await this.modelAdapter.resolve(refusalFallbackModel);
-    await ensureProviderKey(fallbackModel.spec.provider);
-    agent.state.model = fallbackModel.model;
-    addSuffix(`[refusal fallback to ${fallbackModel.spec.modelId}]`);
-    await session.prompt(prompt);
-    return true;
   }
 }
 

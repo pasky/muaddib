@@ -2,8 +2,8 @@
   "_comment": "Configuration (no secrets). API keys go in auth.json — see auth.json.example.",
 
   "agent": {
-    "_comment": "Set refusalFallbackModel to \"\" to disable refusal fallback.",
-    "refusalFallbackModel": "deepseek:deepseek-v4-pro",
+    "_comment": "Ordered chain of models to retry with on content refusal; set refusalFallbackModels to [] to disable.",
+    "refusalFallbackModels": ["deepseek:deepseek-v4-pro"],
     "sessionLimits": {
       "maxCostUsd": 2.0,
       "warnCostUsd": 1.0
@@ -174,8 +174,8 @@
               "!a": {
                 "autoReduceContext": true,
                 "reasoningEffort": "high",
-                "model": "anthropic:claude-opus-5",
-                "refusalFallbackModel": "openrouter:moonshotai/kimi-k3"
+                "model": "anthropic:claude-opus-5-5",
+                "refusalFallbackModels": ["anthropic:claude-opus-5", "openrouter:moonshotai/kimi-k3"]
               }
             }
           },

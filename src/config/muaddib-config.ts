@@ -164,8 +164,8 @@ export interface AgentConfig {
   progress?: {
     thresholdSeconds?: number;
   };
-  /** Model to retry with when the primary model issues a content refusal. Empty string disables refusal fallback. */
-  refusalFallbackModel?: string;
+  /** Models to retry with, in order, when the current model issues a content refusal. Empty array disables refusal fallback. */
+  refusalFallbackModels?: string[];
   /** Configuration for the agent's built-in tools. */
   tools?: ToolsConfig;
 }
@@ -199,8 +199,8 @@ export interface ModeConfig {
   autoReduceContext?: boolean;
   includeChapterSummary?: boolean;
   visionModel?: string;
-  /** Per-mode override for agent.refusalFallbackModel. Empty string disables refusal fallback for this mode. */
-  refusalFallbackModel?: string;
+  /** Per-mode override for agent.refusalFallbackModels. Empty array disables refusal fallback for this mode. */
+  refusalFallbackModels?: string[];
   prompt?: string;
   promptReminder?: string;
   memoryUpdate?: boolean;

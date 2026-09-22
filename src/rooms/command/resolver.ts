@@ -1,5 +1,6 @@
 import type { Message } from "@earendil-works/pi-ai";
 import type { CommandConfig, ModeConfig } from "../../config/muaddib-config.js";
+import { parseModelSpecList } from "../../models/model-spec.js";
 import { buildArc, type RoomMessage } from "../message.js";
 
 export type { CommandConfig, ModeConfig };
@@ -38,8 +39,8 @@ export interface RuntimeSettings {
   toolSummary: boolean;
   model: string | null;
   visionModel: string | null;
-  /** `null` = inherit global agent.refusalFallbackModel; `""` = disabled. */
-  refusalFallbackModel: string | null;
+  /** `null` = inherit global agent.refusalFallbackModels; `[]` = disabled. */
+  refusalFallbackModels: string[] | null;
   historySize: number;
   /** Partial tool config overrides, deep-merged over the global agent.tools config. */
   toolsOverrides: Record<string, unknown> | null;
@@ -173,6 +174,7 @@ export class CommandResolver {
 
     const modeConfig = this.commandConfig.modes[modeKey];
     const overrides = this.triggerOverrides[trigger] ?? {};
+    const refusalFallbackModels = overrides.refusalFallbackModels ?? modeConfig.refusalFallbackModels;
 
     return {
       modeKey,
@@ -201,10 +203,9 @@ export class CommandResolver {
         model: (overrides.model as string | undefined) ?? null,
         visionModel:
           (overrides.visionModel as string | undefined) ?? modeConfig.visionModel ?? null,
-        refusalFallbackModel:
-          (overrides.refusalFallbackModel as string | undefined) ??
-          modeConfig.refusalFallbackModel ??
-          null,
+        refusalFallbackModels: refusalFallbackModels === undefined
+          ? null
+          : parseModelSpecList(refusalFallbackModels, `${modeKey}/${trigger} refusalFallbackModels`),
         historySize: Number(modeConfig.historySize ?? this.commandConfig.historySize),
         toolsOverrides:
           (overrides.tools as Record<string, unknown> | undefined) ?? null,

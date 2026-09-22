@@ -610,7 +610,7 @@ describe("RoomMessageHandler", () => {
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      configData: { agent: { refusalFallbackModel: "anthropic:claude-3-5-haiku" } },
+      configData: { agent: { refusalFallbackModels: ["anthropic:claude-3-5-haiku"] } },
       logger,
       runnerFactory: makeRunner("The AI refused to respond to this request", {
         refusalFallbackActivated: true,
@@ -2625,7 +2625,7 @@ describe("RoomMessageHandler", () => {
       } as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      configData: { agent: { refusalFallbackModel: "anthropic:claude-3-5-haiku" } },
+      configData: { agent: { refusalFallbackModels: ["anthropic:claude-3-5-haiku"] } },
       runnerFactory: makeRunner("The AI refused to respond to this request", {
         refusalFallbackActivated: true,
         refusalFallbackModel: "anthropic:claude-3-5-haiku",
@@ -2667,21 +2667,21 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
-  it("treats empty agent.refusalFallbackModel as disabled", async () => {
+  it("treats empty agent.refusalFallbackModels as disabled", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();
 
     const incoming = makeMessage("!s no refusal fallback");
-    let promptRefusalFallbackModel: string | undefined;
+    let promptRefusalFallbackModel: string[] | undefined;
 
     const handler = createHandler({
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      configData: { agent: { refusalFallbackModel: "" } },
+      configData: { agent: { refusalFallbackModels: [] } },
       runnerFactory: (input) => ({
         prompt: async (_prompt, options) => {
-          promptRefusalFallbackModel = options?.refusalFallbackModel;
+          promptRefusalFallbackModel = options?.refusalFallbackModels;
           const result = makeRunnerResult("done");
           await input.onResponse(result.text, { interim: false });
           return result;
@@ -2694,12 +2694,12 @@ describe("RoomMessageHandler", () => {
     await handler.handleIncomingMessage(incoming, { sendResponse: async (text) => { sent.push(text); } });
 
     expect(sent[0]).toBe("done");
-    expect(promptRefusalFallbackModel).toBeUndefined();
+    expect(promptRefusalFallbackModel).toEqual([]);
 
     await history.close();
   });
 
-  it("retries on explicit refusal text with agent.refusalFallbackModel and persists fallback model usage", async () => {
+  it("retries on explicit refusal text with agent.refusalFallbackModels and persists fallback model usage", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();
 
@@ -2710,7 +2710,7 @@ describe("RoomMessageHandler", () => {
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      configData: { agent: { refusalFallbackModel: "anthropic:claude-3-5-haiku" } },
+      configData: { agent: { refusalFallbackModels: ["anthropic:claude-3-5-haiku"] } },
       runnerFactory: (input) => {
         runnerModels.push(input.model);
         return makeRunner("The AI refused to respond to this request", {
@@ -2742,7 +2742,7 @@ describe("RoomMessageHandler", () => {
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      configData: { agent: { refusalFallbackModel: "anthropic:claude-3-5-haiku" } },
+      configData: { agent: { refusalFallbackModels: ["anthropic:claude-3-5-haiku"] } },
       runnerFactory: () => ({
         prompt: async () => {
           throw new Error("Agent run failed: invalid_prompt blocked for safety reasons.");
@@ -2771,7 +2771,7 @@ describe("RoomMessageHandler", () => {
       roomConfig: roomConfig as any,
       history,
       classifyMode: async () => "EASY_SERIOUS",
-      configData: { agent: { refusalFallbackModel: "anthropic:claude-3-5-haiku" } },
+      configData: { agent: { refusalFallbackModels: ["anthropic:claude-3-5-haiku"] } },
       runnerFactory: (input) => {
         runnerModels.push(input.model);
         return makeRunner("normal answer")(input);

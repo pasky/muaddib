@@ -24,7 +24,7 @@ False negatives (going silent where opus-4-5 spoke) are the secondary metric.
 - Refusals (relevant for e.g. claude-fable-5) are detected via
   `src/agent/refusal-detection.ts` and scored as NULL decisions, but reported
   separately. NOTE: production does NOT currently do this — it retries
-  refusals via `refusalFallbackModel`, which could itself interject. Deploying
+  refusals via `refusalFallbackModels`, which could itself interject. Deploying
   a refusal-prone model proactively would require suppressing that fallback
   for proactive runs; also a high refusal rate is bad by itself (latency,
   cost).

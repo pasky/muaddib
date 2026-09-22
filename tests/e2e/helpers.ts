@@ -278,7 +278,7 @@ export function e2eConfig(): Record<string, unknown> {
     },
     agent: {
       // Pin refusal fallback model to value asserted in refusal-fallback.e2e.test.ts
-      refusalFallbackModel: "anthropic:claude-sonnet-5",
+      refusalFallbackModels: ["anthropic:claude-sonnet-5"],
       tools: {
         // oracle must use anthropic so oracle-web-search test can assert modelProvider(1)==="anthropic"
         oracle: {
