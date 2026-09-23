@@ -164,7 +164,12 @@ export interface AgentConfig {
   progress?: {
     thresholdSeconds?: number;
   };
-  /** Models to retry with, in order, when the current model issues a content refusal. Empty array disables refusal fallback. */
+  /**
+   * Models to retry with, in order, when the current model issues a content
+   * refusal. Always the final stage of the chain: a mode/trigger list is tried
+   * first, then this one. Empty array = no global stage; refusal fallback is
+   * off only where no mode/trigger stage is configured either.
+   */
   refusalFallbackModels?: string[];
   /** Configuration for the agent's built-in tools. */
   tools?: ToolsConfig;
@@ -199,7 +204,7 @@ export interface ModeConfig {
   autoReduceContext?: boolean;
   includeChapterSummary?: boolean;
   visionModel?: string;
-  /** Per-mode override for agent.refusalFallbackModels. Empty array disables refusal fallback for this mode. */
+  /** Mode-specific stage tried before agent.refusalFallbackModels. Empty array = no mode stage, straight to the global chain. */
   refusalFallbackModels?: string[];
   prompt?: string;
   promptReminder?: string;

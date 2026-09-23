@@ -448,7 +448,7 @@ describe("CommandResolver runtimeForTrigger refusalFallbackModels", () => {
     expect(aRuntime.refusalFallbackModels).toEqual(["anthropic:claude-opus-4-8"]);
   });
 
-  it("lets a trigger disable an inherited chain with [] and rejects malformed overrides", () => {
+  it("lets a trigger drop the mode stage with [] and rejects malformed overrides", () => {
     const config = {
       ...commandConfig,
       modes: {

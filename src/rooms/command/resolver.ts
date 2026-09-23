@@ -39,7 +39,7 @@ export interface RuntimeSettings {
   toolSummary: boolean;
   model: string | null;
   visionModel: string | null;
-  /** `null` = inherit global agent.refusalFallbackModels; `[]` = disabled. */
+  /** Mode/trigger stage of the refusal chain; `null` = none. The global agent.refusalFallbackModels always follows. */
   refusalFallbackModels: string[] | null;
   historySize: number;
   /** Partial tool config overrides, deep-merged over the global agent.tools config. */

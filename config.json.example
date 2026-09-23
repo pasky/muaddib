@@ -2,7 +2,7 @@
   "_comment": "Configuration (no secrets). API keys go in auth.json — see auth.json.example.",
 
   "agent": {
-    "_comment": "Ordered chain of models to retry with on content refusal; set refusalFallbackModels to [] to disable.",
+    "_comment": "Ordered chain of models to retry with on content refusal. Always the final stage: a mode/trigger refusalFallbackModels list is tried first, then this one. [] = no global stage (fallback off unless a mode/trigger configures its own).",
     "refusalFallbackModels": ["deepseek:deepseek-v4-pro"],
     "sessionLimits": {
       "maxCostUsd": 2.0,

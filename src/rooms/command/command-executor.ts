@@ -118,7 +118,7 @@ export interface QuietExecuteParams {
   historySize: number;
   reasoningEffort: string;
   allowedTools: string[] | null;
-  /** `null` = inherit global, `[]` = disabled, else ordered `provider:model` chain. */
+  /** Mode/trigger stage of the refusal chain (`null` = none); the global chain always follows. */
   refusalFallbackModels: string[] | null;
   promptReminder?: string;
 }
@@ -247,7 +247,7 @@ export class CommandExecutor {
       overrides?.rateLimiter ??
       new RateLimiter(rateLimit, ratePeriod);
 
-    // Global default; per-mode overrides are resolved lazily like visionModel.
+    // Final stage of every refusal chain; mode/trigger stages are resolved lazily like visionModel.
     this.refusalFallbackModels = agentConfig.refusalFallbackModels === undefined
       ? []
       : parseModelSpecList(agentConfig.refusalFallbackModels, "agent.refusalFallbackModels");
@@ -696,7 +696,7 @@ export class CommandExecutor {
           runner, message, queryLine, runnerContext, toolSet.tools, {
             reasoningEffort: resolvedRuntime.reasoningEffort,
             visionModel: resolvedRuntime.visionModel ?? undefined,
-            refusalFallbackModels: resolvedRuntime.refusalFallbackModels ?? this.refusalFallbackModels,
+            refusalFallbackModels: this.refusalFallbackChain(effectiveModelSpec, resolvedRuntime.refusalFallbackModels),
             // @model override means unknown model quality — skip automatic
             // memory/skill maintenance (the memory prompt covers both).
             memoryUpdate: resolved.modelOverride ? false : resolvedRuntime.memoryUpdate,
@@ -837,7 +837,7 @@ export class CommandExecutor {
             toolSet.tools,
             {
               reasoningEffort,
-              refusalFallbackModels: refusalFallbackModels ?? this.refusalFallbackModels,
+              refusalFallbackModels: this.refusalFallbackChain(modelSpec, refusalFallbackModels),
               modelSpec,
             },
             async () => {
@@ -917,6 +917,22 @@ export class CommandExecutor {
   }
 
   // ── Shared: prompt invocation + post-processing ──
+
+  /**
+   * Effective refusal chain for a prompt: the mode/trigger stage first, then
+   * the global `agent.refusalFallbackModels` as the always-present final stage.
+   * Deduped in order, and the primary model is dropped — re-asking the model
+   * that just refused is pointless.
+   */
+  private refusalFallbackChain(primaryModelSpec: string, modeStage: string[] | null): string[] {
+    const chain: string[] = [];
+    for (const spec of [...(modeStage ?? []), ...this.refusalFallbackModels]) {
+      if (spec !== primaryModelSpec && !chain.includes(spec)) {
+        chain.push(spec);
+      }
+    }
+    return chain;
+  }
 
   /**
    * Invoke the agent runner, run caller-specific post-response work, then

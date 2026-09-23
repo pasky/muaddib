@@ -895,6 +895,30 @@ describe("SessionRunner", () => {
     expect(deliveredTexts[0]).toContain("[refusal fallback to kimi-k3]");
   });
 
+  it("treats an OpenRouter-wrapped xAI permission-denied error as a refusal, not an empty completion", async () => {
+    const XAI_REFUSAL =
+      '403: {"message":"Provider returned error","code":403,"metadata":{"raw":"{\\"code\\":\\"permission-denied\\",\\"error\\":\\"I can\'t help with that request.\\"}","provider_name":"xAI","is_byok":false}} ; {"code":"permission-denied","error":"I can\'t help with that request."}';
+    const ctx = makeMockSession({
+      promptImpl: async (c) => {
+        if (c.agent.state.model?.id === "kimi-k3") {
+          emitAssistantResponse(c, "the real answer");
+          return;
+        }
+        c.session.messages.push({
+          role: "assistant", content: [], usage: makeUsage(), stopReason: "error", errorMessage: XAI_REFUSAL,
+        });
+      },
+    });
+
+    const runner = makeRunner();
+    const result = await runner.prompt("hello", { refusalFallbackModels: ["openrouter:kimi-k3"] });
+
+    expect(result.text).toBe("the real answer");
+    expect(result.refusalFallbackModel).toBe("openrouter:kimi-k3");
+    // Primary + fallback only — no empty-completion retry of the refusing model.
+    expect(ctx.session.prompt).toHaveBeenCalledTimes(2);
+  });
+
   it("fails with the refusal reason when every model in the fallback chain refuses", async () => {
     const ctx = makeMockSession({
       messages: [{

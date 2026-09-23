@@ -639,7 +639,7 @@ describe("runCliMessageMode", () => {
     ).rejects.toThrow(error);
   });
 
-  it("accepts empty agent.refusalFallbackModels to disable refusal fallback", async () => {
+  it("accepts empty agent.refusalFallbackModels (no global fallback stage)", async () => {
     const dir = await mkdtemp(join(tmpdir(), "muaddib-cli-"));
     tempDirs.push(dir);
 

@@ -49,6 +49,14 @@ const ERROR_REFUSAL_SIGNAL_PATTERNS: ReadonlyArray<RefusalPattern> = [
     label: "openai_invalid_prompt_safety_message",
     pattern: /invalid prompt[\s\S]{0,160}safety reasons/iu,
   },
+  {
+    // xAI content refusal (also as surfaced through OpenRouter's 403 wrapper):
+    // {"code":"permission-denied","error":"I can't help with that request."}.
+    // Both halves are required so a genuine permission-denied auth error
+    // doesn't get mistaken for a refusal.
+    label: "xai_permission_denied",
+    pattern: /permission-denied[\s\S]{0,160}can['’]t help with that request/iu,
+  },
 ];
 
 function matchFirst(text: string, patterns: ReadonlyArray<RefusalPattern>): string | null {

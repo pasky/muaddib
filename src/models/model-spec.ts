@@ -30,7 +30,7 @@ const MODEL_SPEC_EXAMPLE = "provider:model";
  */
 export function parseModelSpecList(value: unknown, label: string): string[] {
   if (!Array.isArray(value) || value.some((m) => typeof m !== "string")) {
-    throw new Error(`${label} must be an array of ${MODEL_SPEC_EXAMPLE} strings (or [] to disable).`);
+    throw new Error(`${label} must be an array of ${MODEL_SPEC_EXAMPLE} strings (or []).`);
   }
   value.forEach(parseModelSpec);
   return value;

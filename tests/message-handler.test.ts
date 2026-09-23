@@ -2667,7 +2667,7 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
-  it("treats empty agent.refusalFallbackModels as disabled", async () => {
+  it("passes an empty chain when agent.refusalFallbackModels is [] and no mode stage is set", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();
 
@@ -2695,6 +2695,91 @@ describe("RoomMessageHandler", () => {
 
     expect(sent[0]).toBe("done");
     expect(promptRefusalFallbackModel).toEqual([]);
+
+    await history.close();
+  });
+
+  it("appends the global chain after the mode chain, deduped, with the primary model dropped", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const captured: Array<string[] | undefined> = [];
+    const handler = createHandler({
+      roomConfig: {
+        ...roomConfig,
+        command: {
+          ...roomConfig.command,
+          modes: {
+            ...roomConfig.command.modes,
+            serious: {
+              ...roomConfig.command.modes.serious,
+              refusalFallbackModels: ["anthropic:claude-opus-4-8", "deepseek:deepseek-v4-pro"],
+              triggers: {
+                "!s": {},
+                // Trigger-level [] means "no mode-specific stage", straight to global.
+                "!a": { refusalFallbackModels: [] },
+              },
+            },
+          },
+        },
+      } as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      configData: { agent: { refusalFallbackModels: ["openai:gpt-4o-mini", "deepseek:deepseek-v4-pro", "anthropic:claude-3-5-haiku"] } },
+      runnerFactory: (input) => ({
+        prompt: async (_prompt, options) => {
+          captured.push(options?.refusalFallbackModels);
+          const result = makeRunnerResult("done");
+          await input.onResponse(result.text, { interim: false });
+          return result;
+        },
+      }),
+    });
+
+    const sendResponse = async () => {};
+    await handler.handleIncomingMessage(makeMessage("!s chain", { isDirect: true }), { sendResponse });
+    await handler.handleIncomingMessage(makeMessage("!a chain", { isDirect: true }), { sendResponse });
+
+    expect(captured).toEqual([
+      // Mode stage first, then global; primary (openai:gpt-4o-mini) and duplicate deepseek dropped.
+      ["anthropic:claude-opus-4-8", "deepseek:deepseek-v4-pro", "anthropic:claude-3-5-haiku"],
+      ["deepseek:deepseek-v4-pro", "anthropic:claude-3-5-haiku"],
+    ]);
+
+    await history.close();
+  });
+
+  it("keeps the mode stage when the global chain is [] (global [] only drops the global stage)", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    let captured: string[] | undefined;
+    const handler = createHandler({
+      roomConfig: {
+        ...roomConfig,
+        command: {
+          ...roomConfig.command,
+          modes: {
+            ...roomConfig.command.modes,
+            serious: { ...roomConfig.command.modes.serious, refusalFallbackModels: ["anthropic:claude-opus-4-8"] },
+          },
+        },
+      } as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      configData: { agent: { refusalFallbackModels: [] } },
+      runnerFactory: (input) => ({
+        prompt: async (_prompt, options) => {
+          captured = options?.refusalFallbackModels;
+          const result = makeRunnerResult("done");
+          await input.onResponse(result.text, { interim: false });
+          return result;
+        },
+      }),
+    });
+
+    await handler.handleIncomingMessage(makeMessage("!s chain", { isDirect: true }), { sendResponse: async () => {} });
+    expect(captured).toEqual(["anthropic:claude-opus-4-8"]);
 
     await history.close();
   });
@@ -3694,16 +3779,28 @@ describe("RoomMessageHandler", () => {
 
     const sent: string[] = [];
     const proactivePromptReached = createDeferred<void>();
+    let capturedChain: string[] | undefined;
 
     // Exact shape of the ##chemistry leak: inline <thinking> block followed
     // by the real reply on the same line.
     const leakedPayload = "<thinking>Directly invited by name, open technical question. Resonance in VB theory literally is a superposition.</thinking>eren, mefistofeles: actually resonance is literal superposition - the math holds.";
 
     const handler = createHandler({
-      roomConfig: proactiveRoomConfig as any,
+      roomConfig: {
+        ...proactiveRoomConfig,
+        command: {
+          ...proactiveRoomConfig.command,
+          modes: {
+            ...proactiveRoomConfig.command.modes,
+            serious: { ...proactiveRoomConfig.command.modes.serious, refusalFallbackModels: ["anthropic:claude-opus-4-8"] },
+          },
+        },
+      } as any,
       history,
+      configData: { agent: { refusalFallbackModels: ["anthropic:claude-3-5-haiku"] } },
       runnerFactory: (input) => ({
-        prompt: async () => {
+        prompt: async (_prompt, options) => {
+          capturedChain = options?.refusalFallbackModels;
           proactivePromptReached.resolve();
           const result = makeRunnerResult(leakedPayload);
           await input.onResponse(result.text, { interim: false });
@@ -3733,6 +3830,8 @@ describe("RoomMessageHandler", () => {
     expect(sent[0]).toContain("eren, mefistofeles: actually resonance is literal superposition");
     expect(sent[0]).not.toContain("thinking");
     expect(sent[0]).not.toContain("Directly invited by name");
+    // The quiet (proactive/event) path merges the refusal chain the same way as commands.
+    expect(capturedChain).toEqual(["anthropic:claude-opus-4-8", "anthropic:claude-3-5-haiku"]);
 
     const rows = await history.getFullHistory("libera##test");
     const monologue = rows.find((r: any) => r.message.includes("[internal monologue]"));
