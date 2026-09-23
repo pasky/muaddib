@@ -371,11 +371,9 @@ export class SessionRunner {
             `${emptyMsg.model} is currently out of credits, consider switching mode (send me !h for more info about modes)`,
           );
         }
-        // Content refusals are deterministic — retrying the same prompt only
-        // burns delays and hides the reason.  Surface it to the caller instead.
-        // A fallback model, when configured, already had its turn on the first
-        // prompt; a refusal that only surfaces on a later empty-completion
-        // retry deliberately does not start a second fallback round.
+        // A first-attempt refusal was already handled by promptWithRefusalFallback;
+        // this catches a refusal that only appears on an empty-completion retry.
+        // Refusals are deterministic — surface it instead of burning the delays.
         const refusalSignal = emptyMsg?.stopReason === "error" && emptyMsg.errorMessage
           ? detectRefusalErrorSignal(emptyMsg.errorMessage)
           : null;
@@ -505,10 +503,9 @@ export class SessionRunner {
   /**
    * Prompt the session, walking the fallback chain while refusals are detected.
    * Returns the last activated fallback model spec, or null if only the primary
-   * model was prompted.  When the last model in the chain refuses too, an
-   * error-shaped refusal is left in the session for the empty-completion path
-   * to surface, a thrown provider refusal is rethrown with REFUSAL_ERROR_PREFIX,
-   * and a body-text refusal is returned as ordinary text.
+   * model was prompted.  When the last model in the chain refuses too, a
+   * body-text refusal is returned as ordinary text; an error-shaped or thrown
+   * provider refusal is raised as a REFUSAL_ERROR_PREFIX error.
    */
   private async promptWithRefusalFallback(
     session: AgentSession,
@@ -521,6 +518,10 @@ export class SessionRunner {
     let activeFallback: string | null = null;
     for (let i = 0; ; i += 1) {
       const nextFallback = refusalFallbackModels[i] ?? null;
+      // Provider refusal text when the model refused via an error (thrown or
+      // stopReason "error"); null when it answered or refused in body text.
+      let errorRefusalMessage: string | null = null;
+      let errorRefusalCause: unknown;
       try {
         await session.prompt(prompt);
 
@@ -532,21 +533,23 @@ export class SessionRunner {
           lastMessage?.stopReason === "error"
             ? detectRefusalErrorSignal(lastMessage.errorMessage ?? "")
             : null;
-        if (nextFallback === null || !(bodyRefusal ?? errorRefusal)) {
+        if (errorRefusal) {
+          errorRefusalMessage = lastMessage?.errorMessage ?? "";
+        } else if (!bodyRefusal || nextFallback === null) {
+          // Answered, or a body-text refusal with nobody left to ask: deliver as-is.
           return activeFallback;
         }
       } catch (error) {
-        const message = stringifyError(error);
-        if (!detectRefusalErrorSignal(message)) {
+        errorRefusalMessage = stringifyError(error);
+        if (!detectRefusalErrorSignal(errorRefusalMessage)) {
           throw error;
         }
-        if (nextFallback === null) {
-          // Same classification as the empty-completion path, so callers (e.g.
-          // the oracle tool) see one refusal representation regardless of
-          // whether the provider reported it as an error or an empty message.
-          this.logger.error(`Model refused: ${message}`);
-          throw new Error(`${REFUSAL_ERROR_PREFIX}${message}`, { cause: error });
-        }
+        errorRefusalCause = error;
+      }
+      if (nextFallback === null) {
+        // Deterministic — the empty-completion retry loop must not re-prompt.
+        this.logger.error(`Model refused: ${errorRefusalMessage}`);
+        throw new Error(`${REFUSAL_ERROR_PREFIX}${errorRefusalMessage}`, { cause: errorRefusalCause });
       }
 
       const fallbackModel = await this.modelAdapter.resolve(nextFallback);
