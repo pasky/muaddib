@@ -483,6 +483,41 @@ describe("CommandResolver runtimeForTrigger refusalFallbackModels", () => {
   });
 });
 
+describe("CommandResolver runtimeForTrigger overloadFallbackModels", () => {
+  it("defaults to [], inherits the mode list, lets a trigger override it, and rejects malformed lists", () => {
+    const config = {
+      ...commandConfig,
+      modes: {
+        ...commandConfig.modes,
+        serious: {
+          ...commandConfig.modes.serious,
+          overloadFallbackModels: ["openrouter:x-ai/grok-4.7"],
+          triggers: {
+            "!s": {},
+            "!a": { overloadFallbackModels: [] },
+            "!b": { overloadFallbackModels: "openrouter:x-ai/grok-4.7" },
+          },
+        },
+      },
+    };
+
+    const resolver = new CommandResolver(
+      config as any,
+      async () => "EASY_SERIOUS",
+      "!h",
+      new Set(["!c"]),
+      (model) => String(model),
+    );
+
+    expect(resolver.runtimeForTrigger("!s").runtime.overloadFallbackModels).toEqual(["openrouter:x-ai/grok-4.7"]);
+    expect(resolver.runtimeForTrigger("!a").runtime.overloadFallbackModels).toEqual([]);
+    expect(() => resolver.runtimeForTrigger("!b")).toThrow(
+      "overloadFallbackModels must be an array of provider:model strings",
+    );
+    expect(resolver.runtimeForTrigger("!d").runtime.overloadFallbackModels).toEqual([]);
+  });
+});
+
 describe("modelStrCore", () => {
   it("strips provider prefix", () => {
     expect(modelStrCore("anthropic:claude-opus-4-6")).toBe("claude-opus-4-6");

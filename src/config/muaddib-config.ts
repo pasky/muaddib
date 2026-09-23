@@ -206,6 +206,13 @@ export interface ModeConfig {
   visionModel?: string;
   /** Mode-specific stage tried before agent.refusalFallbackModels. Empty array = no mode stage, straight to the global chain. */
   refusalFallbackModels?: string[];
+  /**
+   * Models to switch to, in order, when this mode's model hits a transient
+   * provider error (overloaded, rate-limited, 5xx) — instead of retrying it
+   * with backoff. Only applies while the mode/trigger's own configured model
+   * runs (not @model overrides). No global counterpart. Also a trigger key.
+   */
+  overloadFallbackModels?: string[];
   prompt?: string;
   promptReminder?: string;
   memoryUpdate?: boolean;

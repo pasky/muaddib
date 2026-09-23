@@ -169,7 +169,8 @@
             "steering": true,
             "triggers": {
               "!s": {
-                "tools": { "visitWebpage": { "model": "" } }
+                "tools": { "visitWebpage": { "model": "" } },
+                "overloadFallbackModels": ["openrouter:x-ai/grok-4.7#xai/zdr"]
               },
               "!a": {
                 "autoReduceContext": true,

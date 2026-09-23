@@ -697,6 +697,8 @@ export class CommandExecutor {
             reasoningEffort: resolvedRuntime.reasoningEffort,
             visionModel: resolvedRuntime.visionModel ?? undefined,
             refusalFallbackModels: this.refusalFallbackChain(effectiveModelSpec, resolvedRuntime.refusalFallbackModels),
+            overloadFallbackModels: this.overloadFallbackChain(remappedModelSpec, trigger)
+              .map((spec) => budgetStatus.state === "byok" ? remapToOpenRouter(spec) : spec),
             // @model override means unknown model quality — skip automatic
             // memory/skill maintenance (the memory prompt covers both).
             memoryUpdate: resolved.modelOverride ? false : resolvedRuntime.memoryUpdate,
@@ -838,6 +840,7 @@ export class CommandExecutor {
             {
               reasoningEffort,
               refusalFallbackModels: this.refusalFallbackChain(modelSpec, refusalFallbackModels),
+              overloadFallbackModels: this.overloadFallbackChain(modelSpec, trigger),
               modelSpec,
             },
             async () => {
@@ -919,6 +922,19 @@ export class CommandExecutor {
   // ── Shared: prompt invocation + post-processing ──
 
   /**
+   * Overload chain for a prompt. It belongs to the mode/trigger's configured
+   * model (a fragile model gets a sturdier stand-in), so it is empty whenever a
+   * different model runs: @model override, BYOK remap, proactive's own model.
+   */
+  private overloadFallbackChain(runModelSpec: string, trigger: string): string[] {
+    const { modeKey, runtime } = this.resolver.runtimeForTrigger(trigger);
+    const configuredModelSpec = runtime.model ?? this.commandConfig.modes[modeKey].model;
+    return runModelSpec === configuredModelSpec
+      ? runtime.overloadFallbackModels.filter((spec) => spec !== runModelSpec)
+      : [];
+  }
+
+  /**
    * Effective refusal chain for a prompt: the mode/trigger stage first, then
    * the global `agent.refusalFallbackModels` as the always-present final stage.
    * Deduped in order, and the primary model is dropped — re-asking the model
@@ -945,7 +961,7 @@ export class CommandExecutor {
     queryText: string,
     contextMessages: Message[],
     tools: MuaddibTool[],
-    opts: { reasoningEffort: string; visionModel?: string; refusalFallbackModels: string[]; memoryUpdate?: boolean; toolSummary?: boolean; modelSpec?: string },
+    opts: { reasoningEffort: string; visionModel?: string; refusalFallbackModels: string[]; overloadFallbackModels: string[]; memoryUpdate?: boolean; toolSummary?: boolean; modelSpec?: string },
     afterResponse: (result: PromptRunResult) => Promise<void>,
     triggerTs?: string,
   ): Promise<PromptRunResult> {
@@ -961,6 +977,7 @@ export class CommandExecutor {
       thinkingLevel: opts.reasoningEffort as ThinkingLevel,
       visionFallbackModel: opts.visionModel,
       refusalFallbackModels: opts.refusalFallbackModels,
+      overloadFallbackModels: opts.overloadFallbackModels,
     });
 
     // Record top-level usage into the active cost span.  The session runner

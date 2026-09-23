@@ -153,6 +153,23 @@ export function textStream(
   };
 }
 
+/** Build a factory that produces a scripted provider failure (stopReason=error), as pi-ai reports it. */
+export function errorStream(errorMessage: string): () => AssistantMessageEventStream {
+  return () => {
+    const stream = createAssistantMessageEventStream();
+    const error: AssistantMessage = {
+      ...makeAssistantMessage("", "stop"),
+      content: [],
+      stopReason: "error",
+      errorMessage,
+    };
+    queueMicrotask(() => {
+      stream.push({ type: "error", reason: "error", error });
+    });
+    return stream;
+  };
+}
+
 /** Build a factory that produces a scripted tool-call AssistantMessageEventStream. */
 export function toolCallStream(
   toolCall: ToolCall,
@@ -228,7 +245,9 @@ export function baseCommandConfig() {
         prompt: "You are {mynick}.",
         memoryUpdate: false,
         triggers: {
-          "!s": {},
+          // deepMerge keeps config.json.example's !s overload chain otherwise;
+          // resolving its OpenRouter model would add an unscripted fetch.
+          "!s": { overloadFallbackModels: [] },
         },
       },
     },

@@ -47,6 +47,8 @@ interface MockSessionCtx {
     continue: ReturnType<typeof vi.fn>;
   };
   ensureProviderKey: ReturnType<typeof vi.fn>;
+  /** What the factory's getOverloadFallbackModel() reports. */
+  overloadFallbackModel: string | null;
 }
 
 /** Create a mock session wired to mockCreateAgentSessionForInvocation. */
@@ -69,7 +71,9 @@ function makeMockSession(opts: {
     continue: vi.fn(async () => {}),
   };
   const ensureProviderKey = vi.fn(async () => {});
-  const ctx: MockSessionCtx = { session, callbacks, agent, ensureProviderKey, bumpSessionLimits: vi.fn() };
+  const ctx: MockSessionCtx = {
+    session, callbacks, agent, ensureProviderKey, bumpSessionLimits: vi.fn(), overloadFallbackModel: null,
+  };
 
   if (opts.promptImpl) {
     session.prompt.mockImplementation(() => opts.promptImpl!(ctx));
@@ -81,7 +85,9 @@ function makeMockSession(opts: {
     agent,
     ensureProviderKey,
     responseTimestamp: { lastResponseAt: 0 },
+    switchModel: (resolved: any) => { agent.state.model = resolved.model; },
     getVisionFallbackActivated: () => opts.visionFallbackActivated ?? false,
+    getOverloadFallbackModel: () => ctx.overloadFallbackModel,
     bumpSessionLimits: ctx.bumpSessionLimits,
     // The real factory accumulates this from turn events; the mock derives it
     // from the scripted messages appended since the previous take, which carry
@@ -814,6 +820,29 @@ describe("SessionRunner", () => {
     expect(deliveredTexts[1]).toContain("[refusal fallback to claude-sonnet-4]");
     expect(result.text).toBe("The real answer.");
     expect(result.refusalFallbackActivated).toBe(true);
+  });
+
+  it("passes overloadFallbackModels to the factory and annotates responses once the fallback kicks in", async () => {
+    const deliveredTexts: string[] = [];
+    makeMockSession({
+      promptImpl: async (c) => {
+        emitAssistantResponse(c, "Checking.", { withToolCall: { name: "web_search" } });
+        // pi auto-retry of a 429: the factory switched to the fallback first.
+        c.overloadFallbackModel = "openrouter:x-ai/grok-4.7#xai/zdr";
+        c.callbacks.forEach((cb) => cb({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 2000, errorMessage: "429" }));
+        c.callbacks.forEach((cb) => cb({ type: "auto_retry_start", attempt: 2, maxAttempts: 3, delayMs: 4000, errorMessage: "429" }));
+        emitAssistantResponse(c, "The real answer.");
+      },
+    });
+
+    const runner = makeRunner({ onResponse: (text: string) => { deliveredTexts.push(text); } });
+    const result = await runner.prompt("hello", { overloadFallbackModels: ["openrouter:x-ai/grok-4.7#xai/zdr"] });
+
+    expect(mockCreateAgentSessionForInvocation.mock.calls[0][0]).toMatchObject({
+      overloadFallbackModels: ["openrouter:x-ai/grok-4.7#xai/zdr"],
+    });
+    expect(deliveredTexts).toEqual(["Checking.", "The real answer. [overload fallback to x-ai/grok-4.7]"]);
+    expect(result.text).toBe("The real answer.");
   });
 
   it("does not mistake an answer discussing provider safety errors for a refusal", async () => {

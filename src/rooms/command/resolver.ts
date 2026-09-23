@@ -41,6 +41,8 @@ export interface RuntimeSettings {
   visionModel: string | null;
   /** Mode/trigger stage of the refusal chain; `null` = none. The global agent.refusalFallbackModels always follows. */
   refusalFallbackModels: string[] | null;
+  /** Models to switch to, in order, on transient provider errors (overload, rate limit); [] = none. */
+  overloadFallbackModels: string[];
   historySize: number;
   /** Partial tool config overrides, deep-merged over the global agent.tools config. */
   toolsOverrides: Record<string, unknown> | null;
@@ -175,6 +177,7 @@ export class CommandResolver {
     const modeConfig = this.commandConfig.modes[modeKey];
     const overrides = this.triggerOverrides[trigger] ?? {};
     const refusalFallbackModels = overrides.refusalFallbackModels ?? modeConfig.refusalFallbackModels;
+    const overloadFallbackModels = overrides.overloadFallbackModels ?? modeConfig.overloadFallbackModels;
 
     return {
       modeKey,
@@ -206,6 +209,9 @@ export class CommandResolver {
         refusalFallbackModels: refusalFallbackModels === undefined
           ? null
           : parseModelSpecList(refusalFallbackModels, `${modeKey}/${trigger} refusalFallbackModels`),
+        overloadFallbackModels: overloadFallbackModels === undefined
+          ? []
+          : parseModelSpecList(overloadFallbackModels, `${modeKey}/${trigger} overloadFallbackModels`),
         historySize: Number(modeConfig.historySize ?? this.commandConfig.historySize),
         toolsOverrides:
           (overrides.tools as Record<string, unknown> | undefined) ?? null,

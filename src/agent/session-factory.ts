@@ -111,6 +111,12 @@ interface CreateAgentSessionInput {
   thinkingLevel?: ThinkingLevel;
   sessionLimits?: SessionLimitsConfig;
   visionFallbackModel?: string;
+  /**
+   * Models to switch to, in order, when pi is about to auto-retry a transient
+   * provider error (overloaded, rate-limited, 5xx): the retry then goes to the
+   * next fallback instead of hammering the same model.
+   */
+  overloadFallbackModels?: string[];
   llmDebugMaxChars?: number;
   metaReminder?: string;
   progressThresholdSeconds?: number;
@@ -129,7 +135,15 @@ interface CreateAgentSessionResult {
   agent: Agent;
   responseTimestamp: ResponseTimestamp;
   ensureProviderKey: (provider: string) => Promise<void>;
+  /**
+   * Switch the agent to another model (a fallback) and record it as a
+   * `model_change` in a persisted session, so session_query resumes with the
+   * model that actually finished the work.
+   */
+  switchModel: (resolved: ResolvedPiAiModel) => void;
   getVisionFallbackActivated: () => boolean;
+  /** Spec of the overload fallback currently in use, or null while on the primary model. */
+  getOverloadFallbackModel: () => string | null;
   bumpSessionLimits: (tokens: number, costUsd: number) => void;
   /** Usage billed since the previous take (see `SessionLimits.takeUsage`). */
   takeUsage: () => { usage: Usage; peakTurnInput: number };
@@ -285,7 +299,42 @@ export async function createAgentSessionForInvocation(
     resolvedModel.spec.modelId,
   );
 
+  const switchModel = (resolved: ResolvedPiAiModel): void => {
+    agent.state.model = resolved.model;
+    if (sessionFile) {
+      sessionManager.appendModelChange(resolved.spec.provider, resolved.spec.modelId);
+    }
+  };
+
+  // Resolved upfront: the auto_retry_start listener must switch synchronously,
+  // before pi removes the failed message and schedules agent.continue().
+  const overloadFallbacks: Array<{ spec: string; resolved: ResolvedPiAiModel }> = [];
+  for (const spec of input.overloadFallbackModels ?? []) {
+    overloadFallbacks.push({ spec, resolved: await input.modelAdapter.resolve(spec) });
+  }
+  let overloadFallbackIndex = -1;
+  // The chain belongs to the primary model and then to each fallback it
+  // installs. Once something else took the model over (refusal or vision
+  // fallback), a transient error is that model's problem: leave it to pi's
+  // plain backoff retry. (Vision also forces its model in streamFn, so
+  // switching here would pair the vision request with another provider's key.)
+  let overloadChainModel: ResolvedPiAiModel["model"] = resolvedModel.model;
+
   const unsubscribe = session.subscribe((event) => {
+    if (event.type === "auto_retry_start") {
+      // Only fires for errors pi classifies as transient. Switching
+      // agent.state.model here makes the retry's continue() build its loop
+      // config (model + provider API key) from the fallback.
+      const next = overloadFallbacks[overloadFallbackIndex + 1];
+      if (next && agent.state.model === overloadChainModel) {
+        overloadFallbackIndex += 1;
+        logger.warn(`Overload fallback to ${next.spec} after: ${event.errorMessage}`);
+        switchModel(next.resolved);
+        overloadChainModel = next.resolved.model;
+      }
+      return;
+    }
+
     if (event.type === "turn_end") {
       const msg = event.message as { stopReason?: StopReason };
       // Session-limit nudges are injected ephemerally via transformContext
@@ -323,10 +372,10 @@ export async function createAgentSessionForInvocation(
       if (!visionState.activated && visionFallbackModel && hasImageToolOutput(event.result)) {
         visionState.activated = true;
         visionState.model = visionFallbackModel.model;
-        // setModel ensures correctness for subsequent session.prompt() calls
-        // (e.g. empty-completion retry), but won't help the current loop
+        // Ensures correctness for subsequent session.prompt() calls (e.g.
+        // empty-completion retry), but won't help the current loop
         // iteration — the streamFn override handles that.
-        agent.state.model = visionFallbackModel.model;
+        switchModel(visionFallbackModel);
       }
     }
   });
@@ -343,7 +392,9 @@ export async function createAgentSessionForInvocation(
         throw new Error(`No API key configured for provider '${provider}'. Add it to auth.json.`);
       }
     },
+    switchModel,
     getVisionFallbackActivated: () => visionState.activated,
+    getOverloadFallbackModel: () => overloadFallbacks[overloadFallbackIndex]?.spec ?? null,
     takeUsage: () => limits.takeUsage(),
     bumpSessionLimits: (tokens: number, costUsd: number) => limits.bump(tokens, costUsd),
     dispose: () => {

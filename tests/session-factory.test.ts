@@ -7,6 +7,7 @@ const mockState = vi.hoisted(() => ({
   }),
   sessions: [] as any[],
   appendMessage: vi.fn(),
+  appendModelChange: vi.fn(),
 }));
 
 vi.mock("@earendil-works/pi-agent-core", () => ({
@@ -15,7 +16,9 @@ vi.mock("@earendil-works/pi-agent-core", () => ({
     public steer = vi.fn();
     public hasQueuedMessages = vi.fn(() => false);
 
-    constructor(public readonly config: any) {}
+    constructor(public readonly config: any) {
+      this.state.model = config.initialState?.model ?? null;
+    }
   },
 }));
 
@@ -60,7 +63,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
       getSessionId: () => "mock-session-id",
       appendMessage: mockState.appendMessage,
       appendCustomEntry: vi.fn(),
-      appendModelChange: vi.fn(),
+      appendModelChange: mockState.appendModelChange,
       getBranch: () => [],
     })),
   },
@@ -163,6 +166,7 @@ describe("createAgentSessionForInvocation", () => {
     mockState.sessions.length = 0;
     mockState.streamSimpleMock.mockClear();
     mockState.appendMessage.mockClear();
+    mockState.appendModelChange.mockClear();
   });
 
   it("converts context messages and preserves provider/model metadata", async () => {
@@ -483,6 +487,75 @@ describe("createAgentSessionForInvocation", () => {
       toolResults: [],
     });
     expect(agent.steer).not.toHaveBeenCalled();
+  });
+
+  describe("overloadFallbackModels", () => {
+    const modelFor = (spec: string) => {
+      const [provider, modelId] = spec.split(":");
+      return { spec: { provider, modelId }, model: { provider, id: modelId, api: "responses" } };
+    };
+    const retry = { type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 2000, errorMessage: "429: rate-limited upstream" };
+    const logger = () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() });
+    // Resolved models are cached so identity holds across resolve() calls, like the real adapter's catalog.
+    const makeAdapter = () => {
+      const cache = new Map<string, ReturnType<typeof modelFor>>();
+      return { resolve: vi.fn((spec: string) => cache.get(spec) ?? cache.set(spec, modelFor(spec)).get(spec)!) } as any;
+    };
+    const create = (extra: Record<string, unknown> = {}) => createAgentSessionForInvocation({
+      model: "openrouter:xiaomi/mimo",
+      systemPrompt: "system",
+      tools: [],
+      authStorage: fakeAuthStore(),
+      modelAdapter: makeAdapter(),
+      overloadFallbackModels: ["openrouter:x-ai/grok", "anthropic:claude-sonnet-4"],
+      logger: logger(),
+      ...extra,
+    });
+
+    it("walks the chain on pi auto-retries, one model per retry, persisting each switch", async () => {
+      const log = logger();
+      const ctx = await create({ sessionFile: "/tmp/does-not-matter.jsonl", contextMessages: [], logger: log });
+      const session = mockState.sessions[0];
+      const agent = ctx.agent as any;
+      expect(ctx.getOverloadFallbackModel()).toBeNull();
+
+      session.emit(retry);
+      expect(agent.state.model).toEqual(modelFor("openrouter:x-ai/grok").model);
+      expect(ctx.getOverloadFallbackModel()).toBe("openrouter:x-ai/grok");
+      expect(log.warn).toHaveBeenCalledWith("Overload fallback to openrouter:x-ai/grok after: 429: rate-limited upstream");
+      // session_query resumes with the last model_change.
+      expect(mockState.appendModelChange).toHaveBeenLastCalledWith("openrouter", "x-ai/grok");
+
+      session.emit({ ...retry, attempt: 2 });
+      expect(agent.state.model).toEqual(modelFor("anthropic:claude-sonnet-4").model);
+      expect(mockState.appendModelChange).toHaveBeenLastCalledWith("anthropic", "claude-sonnet-4");
+
+      // Chain exhausted: pi's ordinary backoff retry continues on the last fallback.
+      session.emit({ ...retry, attempt: 3 });
+      expect(agent.state.model).toEqual(modelFor("anthropic:claude-sonnet-4").model);
+      expect(ctx.getOverloadFallbackModel()).toBe("anthropic:claude-sonnet-4");
+    });
+
+    it("leaves a refusal fallback's transient errors to pi's plain retry", async () => {
+      const ctx = await create();
+      const refusalModel = modelFor("deepseek:deepseek-v4-pro");
+      ctx.switchModel(refusalModel as any);
+
+      mockState.sessions[0].emit(retry);
+      expect((ctx.agent as any).state.model).toBe(refusalModel.model);
+      expect(ctx.getOverloadFallbackModel()).toBeNull();
+    });
+
+    it("never switches away from an activated vision fallback", async () => {
+      const ctx = await create({ visionFallbackModel: "anthropic:claude-opus-5" });
+      const session = mockState.sessions[0];
+      session.emit({ type: "tool_execution_end", isError: false, result: { nested: [{ kind: "image" }] } });
+      expect(ctx.getVisionFallbackActivated()).toBe(true);
+
+      session.emit(retry);
+      expect((ctx.agent as any).state.model).toEqual(modelFor("anthropic:claude-opus-5").model);
+      expect(ctx.getOverloadFallbackModel()).toBeNull();
+    });
   });
 
   it("triggers soft limit on cost threshold via transformContext", async () => {

@@ -25,7 +25,9 @@ import {
   buildRuntime,
   createE2EContext,
   createStreamMockState,
+  deepMerge,
   e2eConfig,
+  errorStream,
   handleStreamSimpleCall,
   resetStreamMock,
   textStream,
@@ -110,6 +112,40 @@ describe("E2E: Refusal → fallback → annotated response", () => {
     const fallbackMessage = botMessages.find((row) => row.message.includes("The answer to your question is 42."));
     expect(fallbackMessage).toBeDefined();
     expect(fallbackMessage!.message).toContain("[refusal fallback to");
+  }, 30_000);
+
+  it("retries a rate-limited model on its overload fallback instead of the same model", async () => {
+    mockState.responses = [
+      errorStream('429: {"message":"Provider returned error","code":429,"metadata":{"raw":"xiaomi/mimo is temporarily rate-limited upstream."}}'),
+      textStream("Grok says hi."),
+    ];
+
+    const runtime = buildRuntime(ctx, deepMerge(e2eConfig(), {
+      rooms: {
+        common: {
+          command: {
+            modes: { serious: { triggers: { "!s": { overloadFallbackModels: ["anthropic:claude-sonnet-5"] } } } },
+          },
+        },
+      },
+    }));
+    const monitor = buildIrcMonitor(runtime, ctx.sender);
+
+    await monitor.processMessageEvent({
+      type: "message",
+      subtype: "public",
+      server: "libera",
+      target: "#test",
+      nick: "alice",
+      message: "muaddib: !s hello",
+    });
+
+    // pi's auto-retry went straight to the fallback model.
+    expect(mockState.calls.map((call) => (call.model as { provider: string; id: string }).provider))
+      .toEqual(["openai", "anthropic"]);
+    expect(ctx.sender.sent.map((sent) => sent.message)).toEqual([
+      expect.stringMatching(/Grok says hi\. \[overload fallback to claude-sonnet-5\]/),
+    ]);
   }, 30_000);
 
   // [internal monologue] retry behaviour is covered by the unit-level

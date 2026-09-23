@@ -2749,6 +2749,56 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("passes the overload chain only while the mode's own configured model runs", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const captured: Array<[string, string[] | undefined]> = [];
+    const handler = createHandler({
+      roomConfig: {
+        ...roomConfig,
+        command: {
+          ...roomConfig.command,
+          modes: {
+            ...roomConfig.command.modes,
+            serious: {
+              ...roomConfig.command.modes.serious,
+              triggers: {
+                "!s": { overloadFallbackModels: ["openrouter:x-ai/grok-4.7", "openai:gpt-4o-mini"] },
+                "!a": { reasoningEffort: "medium" },
+              },
+            },
+          },
+        },
+      } as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: (input) => ({
+        prompt: async (_prompt, options) => {
+          captured.push([input.model, options?.overloadFallbackModels]);
+          const result = makeRunnerResult("done");
+          await input.onResponse(result.text, { interim: false });
+          return result;
+        },
+      }),
+    });
+
+    const sendResponse = async () => {};
+    await handler.handleIncomingMessage(makeMessage("!s chain", { isDirect: true }), { sendResponse });
+    await handler.handleIncomingMessage(makeMessage("!a chain", { isDirect: true }), { sendResponse });
+    await handler.handleIncomingMessage(makeMessage("!s @anthropic:claude-sonnet-4 chain", { isDirect: true }), { sendResponse });
+
+    expect(captured).toEqual([
+      // The primary model itself is dropped from its own chain.
+      ["openai:gpt-4o-mini", ["openrouter:x-ai/grok-4.7"]],
+      ["openai:gpt-4o-mini", []],
+      // An @model override is not the fragile model the chain was configured for.
+      ["anthropic:claude-sonnet-4", []],
+    ]);
+
+    await history.close();
+  });
+
   it("keeps the mode stage when the global chain is [] (global [] only drops the global stage)", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();

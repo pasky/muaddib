@@ -7,7 +7,7 @@ import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai";
 import { extractStatus, extractThinking, isAssistantMessage, isTextContent, isToolCall, responseText } from "./message.js";
 import { REFUSAL_ERROR_PREFIX, detectRefusalErrorSignal, detectRefusalSignal } from "./refusal-detection.js";
 import { stringifyError } from "../utils/index.js";
-import { PiAiModelAdapter } from "../models/pi-ai-model-adapter.js";
+import { PiAiModelAdapter, type ResolvedPiAiModel } from "../models/pi-ai-model-adapter.js";
 import { parseModelSpec } from "../models/model-spec.js";
 import {
   createAgentSessionForInvocation,
@@ -72,6 +72,8 @@ export interface PromptOptions {
   visionFallbackModel?: string;
   /** Models to retry with, in order, when the current model issues a content refusal. */
   refusalFallbackModels?: string[];
+  /** Models to switch to, in order, on transient provider errors (overload, rate limit). */
+  overloadFallbackModels?: string[];
 }
 
 export interface PromptResult {
@@ -154,6 +156,7 @@ export class SessionRunner {
         thinkingLevel: options.thinkingLevel,
         sessionLimits: this.options.sessionLimits,
         visionFallbackModel: options.visionFallbackModel,
+        overloadFallbackModels: options.overloadFallbackModels,
         llmDebugMaxChars: this.llmDebugMaxChars,
         metaReminder: this.options.metaReminder,
         progressThresholdSeconds: this.options.progressThresholdSeconds,
@@ -252,9 +255,22 @@ export class SessionRunner {
         return true;
       };
 
+      let annotatedOverloadFallback: string | null = null;
       unsubscribe = session.subscribe((event) => {
         if (event.type === "turn_end") {
           iterations += 1;
+          return;
+        }
+
+        // The factory's own listener (registered first) has already switched
+        // the model by the time this one runs.
+        if (event.type === "auto_retry_start") {
+          const overloadFallback = sessionCtx.getOverloadFallbackModel();
+          if (overloadFallback && overloadFallback !== annotatedOverloadFallback) {
+            annotatedOverloadFallback = overloadFallback;
+            const spec = parseModelSpec(overloadFallback);
+            responseSuffix = `${responseSuffix} [overload fallback to ${spec.modelId}]`.trim();
+          }
           return;
         }
 
@@ -342,10 +358,10 @@ export class SessionRunner {
 
       const refusalFallbackModel = await this.promptWithRefusalFallback(
         session,
-        agent,
         prompt,
         options.refusalFallbackModels ?? [],
         sessionCtx.ensureProviderKey,
+        sessionCtx.switchModel,
         (suffix) => { responseSuffix = `${responseSuffix} ${suffix}`.trim(); },
       );
 
@@ -509,10 +525,10 @@ export class SessionRunner {
    */
   private async promptWithRefusalFallback(
     session: AgentSession,
-    agent: Agent,
     prompt: string,
     refusalFallbackModels: readonly string[],
     ensureProviderKey: (provider: string) => Promise<void>,
+    switchModel: (resolved: ResolvedPiAiModel) => void,
     addSuffix: (suffix: string) => void,
   ): Promise<string | null> {
     let activeFallback: string | null = null;
@@ -554,7 +570,7 @@ export class SessionRunner {
 
       const fallbackModel = await this.modelAdapter.resolve(nextFallback);
       await ensureProviderKey(fallbackModel.spec.provider);
-      agent.state.model = fallbackModel.model;
+      switchModel(fallbackModel);
       addSuffix(`[refusal fallback to ${fallbackModel.spec.modelId}]`);
       activeFallback = nextFallback;
     }
