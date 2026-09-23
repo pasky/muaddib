@@ -20,7 +20,7 @@
         "url": "https://example.com/artifacts"
       },
       "imageGen": {
-        "model": "openrouter:openai/gpt-5.4-image-2",
+        "model": "openrouter:openai/gpt-image-2.5-sunburst",
         "timeoutMs": 900000
       },
       "_comment_subagent_limits": "oracle/deepResearch take their own sessionLimits (same fields as agent.sessionLimits). Unset behaves like the top-level session: no context ceiling, $1 cost cap.",

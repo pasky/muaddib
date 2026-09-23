@@ -1300,24 +1300,14 @@ describe("core tool executors generate_image support", () => {
         });
       }
 
-      if (url === "https://openrouter.ai/api/v1/chat/completions") {
+      if (url === "https://openrouter.ai/api/v1/images") {
         openRouterRequestBody = JSON.parse(String(init?.body ?? "{}"));
 
         return new Response(
           JSON.stringify({
-            choices: [
-              {
-                message: {
-                  images: [
-                    {
-                      image_url: {
-                        url: "data:image/png;base64,QUJD",
-                      },
-                    },
-                  ],
-                },
-              },
-            ],
+            data: [{ b64_json: "QUJD", media_type: "image/png" }],
+            // usage.cost takes precedence over the legacy native_tokens_cost.
+            usage: { prompt_tokens: 0, completion_tokens: 10, total_tokens: 10, cost: 0.04, native_tokens_cost: 0.5 },
           }),
           {
             status: 200,
@@ -1335,9 +1325,19 @@ describe("core tool executors generate_image support", () => {
       authStorage: AuthStore.inMemory({ openrouter: { type: "api_key", key: "or-key" } }),
     });
 
-    const result = await executors.generateImage({
-      prompt: "Draw a tiny cat",
-      image_urls: ["https://assets.example/ref.png"],
+    const result = await withCostSpan("execute", { arc: TEST_ARC }, async (span) => {
+      const output = await executors.generateImage({
+        prompt: "Draw a tiny cat",
+        image_urls: ["https://assets.example/ref.png"],
+      });
+      expect(span.allEntries()).toMatchObject([
+        {
+          callType: LLM_CALL_TYPE.GENERATE_IMAGE,
+          model: "openrouter:google/gemini-3-pro-image-preview",
+          usage: { output: 10, totalTokens: 10, cost: { total: 0.04 } },
+        },
+      ]);
+      return output;
     });
 
     expect(result.summaryText).toContain("Generated image: https://example.com/artifacts/?");
@@ -1352,10 +1352,12 @@ describe("core tool executors generate_image support", () => {
     expect(savedImage.equals(Buffer.from("ABC"))).toBe(true);
 
     expect(openRouterRequestBody.model).toBe("google/gemini-3-pro-image-preview");
-    expect(openRouterRequestBody.modalities).toEqual(["image", "text"]);
-    expect(openRouterRequestBody.messages[0].content[0]).toEqual({ type: "text", text: "Draw a tiny cat" });
-    expect(openRouterRequestBody.messages[0].content[1].type).toBe("image_url");
-    expect(openRouterRequestBody.messages[0].content[1].image_url.url).toMatch(/^data:image\/png;base64,/);
+    expect(openRouterRequestBody.prompt).toBe("Draw a tiny cat");
+    expect(openRouterRequestBody.n).toBe(1);
+    expect(openRouterRequestBody.messages).toBeUndefined();
+    expect(openRouterRequestBody.input_references).toHaveLength(1);
+    expect(openRouterRequestBody.input_references[0].type).toBe("image_url");
+    expect(openRouterRequestBody.input_references[0].image_url.url).toMatch(/^data:image\/png;base64,/);
   });
 
   it("generate_image fetches configured artifact viewer reference URLs as raw image URLs", async () => {
@@ -1386,24 +1388,13 @@ describe("core tool executors generate_image support", () => {
         });
       }
 
-      if (url === "https://openrouter.ai/api/v1/chat/completions") {
+      if (url === "https://openrouter.ai/api/v1/images") {
         openRouterRequestBody = JSON.parse(String(init?.body ?? "{}"));
 
         return new Response(
           JSON.stringify({
-            choices: [
-              {
-                message: {
-                  images: [
-                    {
-                      image_url: {
-                        url: "data:image/png;base64,QUJD",
-                      },
-                    },
-                  ],
-                },
-              },
-            ],
+            data: [{ b64_json: "QUJD", media_type: "image/png" }],
+            usage: { prompt_tokens: 0, completion_tokens: 10, total_tokens: 10, cost: 0.04 },
           }),
           {
             status: 200,
@@ -1428,7 +1419,7 @@ describe("core tool executors generate_image support", () => {
 
     expect(fetchedUrls).toContain("https://example.com/artifacts/ref.png");
     expect(fetchedUrls).not.toContain("https://example.com/artifacts/?ref.png");
-    expect(openRouterRequestBody.messages[0].content[1].image_url.url).toBe("data:image/png;base64,CQ==");
+    expect(openRouterRequestBody.input_references[0].image_url.url).toBe("data:image/png;base64,CQ==");
   });
 
   it("generate_image adds the slop watermark to the local artifact file", async () => {
@@ -1452,22 +1443,11 @@ fs.appendFileSync(args[args.length - 1], "\\nWATERMARKED");
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
 
-      if (url === "https://openrouter.ai/api/v1/chat/completions") {
+      if (url === "https://openrouter.ai/api/v1/images") {
         return new Response(
           JSON.stringify({
-            choices: [
-              {
-                message: {
-                  images: [
-                    {
-                      image_url: {
-                        url: "data:image/png;base64,QUJD",
-                      },
-                    },
-                  ],
-                },
-              },
-            ],
+            data: [{ b64_json: "QUJD", media_type: "image/png" }],
+            usage: { prompt_tokens: 0, completion_tokens: 10, total_tokens: 10, cost: 0.04 },
           }),
           {
             status: 200,
@@ -1506,6 +1486,43 @@ fs.appendFileSync(args[args.length - 1], "\\nWATERMARKED");
     }
   });
 
+  it("generate_image normalizes media_type and sniffs the format when it is absent", async () => {
+    const { artifactsPath } = await makeArtifactsDir();
+    const jpegB64 = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2]).toString("base64");
+    const pngB64 = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]).toString("base64");
+    let responseData: unknown[] = [];
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "https://openrouter.ai/api/v1/images") {
+        return new Response(JSON.stringify({ data: responseData }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      throw new Error(`Unexpected fetch URL in test: ${url}`);
+    });
+
+    const executors = createDefaultToolExecutors({ toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" }, imageGen: { model: "openrouter:openai/gpt-image-2.5-sunburst" } },
+      authStorage: AuthStore.inMemory({ openrouter: { type: "api_key", key: "or-key" } }),
+    });
+
+    responseData = [
+      { b64_json: jpegB64, media_type: "image/JPG" },
+      { b64_json: jpegB64 },
+      { b64_json: pngB64 },
+    ];
+    const result = await executors.generateImage({ prompt: "Draw a cat" });
+    expect(result.images.map((image) => image.mimeType)).toEqual(["image/jpeg", "image/jpeg", "image/png"]);
+    expect(result.images.map((image) => extractFilenameFromViewerUrl(image.artifactUrl).split(".").pop()))
+      .toEqual(["jpg", "jpg", "png"]);
+
+    responseData = [{ b64_json: Buffer.from("not an image").toString("base64") }];
+    await expect(executors.generateImage({ prompt: "Draw a cat" })).rejects.toThrow(
+      "Image generation returned an image of undeterminable format",
+    );
+  });
+
   it("generate_image fails fast when tools.image_gen.model is missing", async () => {
     const executors = createDefaultToolExecutors();
 
@@ -1535,16 +1552,10 @@ fs.appendFileSync(args[args.length - 1], "\\nWATERMARKED");
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
 
-      if (url === "https://openrouter.ai/api/v1/chat/completions") {
+      if (url === "https://openrouter.ai/api/v1/images") {
         return new Response(
           JSON.stringify({
-            choices: [
-              {
-                message: {
-                  images: [],
-                },
-              },
-            ],
+            data: [],
           }),
           {
             status: 200,

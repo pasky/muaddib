@@ -55,20 +55,9 @@ const TINY_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
 
 const FAKE_OPENROUTER_RESPONSE = {
-  choices: [
-    {
-      message: {
-        content: [
-          {
-            type: "image_url",
-            image_url: {
-              url: `data:image/png;base64,${TINY_PNG_BASE64}`,
-            },
-          },
-        ],
-      },
-    },
-  ],
+  created: 1748372400,
+  data: [{ b64_json: TINY_PNG_BASE64, media_type: "image/png" }],
+  usage: { prompt_tokens: 0, completion_tokens: 100, total_tokens: 100, cost: 0.04 },
 };
 
 // ── Test suite ──
@@ -161,7 +150,7 @@ describe("E2E: Image generation pipeline", () => {
     // ── Verify fetch was called correctly ──
     expect(fetchCalls).toHaveLength(1);
     const call = fetchCalls[0];
-    expect(call.url).toBe("https://openrouter.ai/api/v1/chat/completions");
+    expect(call.url).toBe("https://openrouter.ai/api/v1/images");
     expect(call.init.method).toBe("POST");
     expect(call.init.headers).toMatchObject({
       Authorization: "Bearer sk-fake-openrouter-key",
@@ -169,8 +158,8 @@ describe("E2E: Image generation pipeline", () => {
     });
     const body = JSON.parse(call.init.body as string);
     expect(body.model).toBe("some-image-model");
-    expect(body.messages[0].content[0]).toEqual({ type: "text", text: "a red pixel" });
-    expect(body.modalities).toEqual(["image", "text"]);
+    expect(body.prompt).toBe("a red pixel");
+    expect(body.input_references).toBeUndefined();
 
     // ── Verify artifact file was written to disk ──
     const files = await readdir(artifactsPath);
