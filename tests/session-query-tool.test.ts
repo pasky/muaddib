@@ -304,7 +304,7 @@ describe("session_query prompt-cache prefix guarantee", () => {
     };
     const usage = { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
     const legacyMessages = [
-      { role: "user", content: "what is the spice?", timestamp: 1 },
+      { role: "user", content: [{ type: "text", text: "what is the spice?" }], timestamp: 1 },
       { role: "assistant", content: [{ type: "text", text: "It must flow." }], api: "anthropic-messages", provider: "anthropic", model: "claude-sonnet-4-5", usage, stopReason: "stop", timestamp: 2 },
     ];
     const entries: Record<string, unknown>[] = [

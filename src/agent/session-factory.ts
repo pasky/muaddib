@@ -290,7 +290,7 @@ export async function createAgentSessionForInvocation(
   // Mirror the session branch (preloaded context, or a resumed session file's
   // history) into agent state. Requests project plain message entries as the
   // same objects, so transformContext finds the boundary below by identity
-  // (custom/summary/context-edited entries are rebuilt per projection; if the
+  // (custom_message/summary/context-edited entries are rebuilt per projection; if the
   // boundary is one of those, or compaction drops it, turn counting falls back
   // to the whole context).
   session.refreshContext();
