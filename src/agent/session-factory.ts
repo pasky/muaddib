@@ -288,8 +288,11 @@ export async function createAgentSessionForInvocation(
   });
 
   // Mirror the session branch (preloaded context, or a resumed session file's
-  // history) into agent state. Requests project the same message objects, so
-  // the boundary below is found by identity in transformContext.
+  // history) into agent state. Requests project plain message entries as the
+  // same objects, so transformContext finds the boundary below by identity
+  // (custom/summary/context-edited entries are rebuilt per projection; if the
+  // boundary is one of those, or compaction drops it, turn counting falls back
+  // to the whole context).
   session.refreshContext();
   invocationStart.boundary = session.messages.at(-1) ?? null;
 
@@ -429,9 +432,11 @@ function resolveSessionLimit(name: keyof SessionLimitsConfig, value: unknown, fa
  * `<cwd>` of the host process), which would leak into our prompt and differ
  * across deployments. pi's own override (`before_agent_start` returning
  * `systemPrompt`) only lasts for a single `session.prompt()` run, not for a
- * direct `agent.continue()`. Pinning in transformContext covers every request
- * — turns, retries, steering drains — and keeps the prefix byte-stable for
+ * direct `agent.continue()`. Pinning in transformContext covers every agent
+ * request — turns, retries, steering drains — and keeps the prefix byte-stable for
  * prompt caching. The current tool loadout is replayed from the transcript.
+ * (Compaction summarization calls the stream function directly with its own
+ * prompt and is deliberately not affected.)
  */
 function pinSystemPrompt(
   systemPrompt: string,

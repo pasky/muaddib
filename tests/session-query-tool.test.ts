@@ -288,4 +288,55 @@ describe("session_query prompt-cache prefix guarantee", () => {
     );
     expect(followUpStart).toBe(originalEnd);
   });
+  it("resumes a pre-0.86 session record (no system message entries) with the stored prompt and tools", async () => {
+    // Session records written before pi 0.86 carry the prompt and tools only
+    // in muaddib's custom entries; the transcript has no system messages.
+    const arc = "testsrv##chan";
+    const slug = "01d5e551";
+    const dir = join(muaddibHome, "arcs", arc, "workspace", ".sessions", `session-${slug}`);
+    await mkdir(dir, { recursive: true });
+    const sessionFile = join(dir, ".session-record.jsonl");
+    const storedPrompt = "You are Muaddib (legacy session).";
+    const toolSchema = {
+      name: "web_search",
+      description: "Search the web.",
+      parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+    };
+    const usage = { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
+    const legacyMessages = [
+      { role: "user", content: "what is the spice?", timestamp: 1 },
+      { role: "assistant", content: [{ type: "text", text: "It must flow." }], api: "anthropic-messages", provider: "anthropic", model: "claude-sonnet-4-5", usage, stopReason: "stop", timestamp: 2 },
+    ];
+    const entries: Record<string, unknown>[] = [
+      { type: "session", version: 3, id: "legacy-session", timestamp: new Date(0).toISOString(), cwd: "/srv" },
+      { type: "custom", customType: MUADDIB_SYSTEM_PROMPT_CUSTOM_TYPE, data: { text: storedPrompt } },
+      { type: "custom", customType: MUADDIB_TOOL_SCHEMAS_CUSTOM_TYPE, data: { schemas: [toolSchema] } },
+      { type: "model_change", provider: "anthropic", modelId: "claude-sonnet-4-5" },
+      ...legacyMessages.map((message) => ({ type: "message", message })),
+    ];
+    let parentId: string | null = null;
+    const lines = entries.map((entry, i) => {
+      if (i === 0) return JSON.stringify(entry);
+      const id = `e${i}`;
+      const line = JSON.stringify({ ...entry, id, parentId, timestamp: new Date(i).toISOString() });
+      parentId = id;
+      return line;
+    });
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(sessionFile, lines.join("\n") + "\n");
+
+    const authStorage = AuthStore.inMemory({ anthropic: { type: "api_key", key: "unit-test" } });
+    const tool = createSessionQueryTool({ authStorage, modelAdapter: new PiAiModelAdapter({ authStorage }), arc });
+    const result = await tool.execute!("tc-legacy", { sessionId: slug, question: "recap please" });
+    expect((result.content[0] as { text: string }).text).toContain("canned faux reply");
+
+    expect(captured).toHaveLength(1);
+    const req = captured[0]!;
+    expect(req.roles[0]).toBe("system");
+    expect(req.roles.filter((role) => role === "system")).toHaveLength(1);
+    expect(req.systemPrompt).toBe(storedPrompt);
+    expect(req.tools).toEqual([toolSchema]);
+    expect(JSON.stringify(req.messages.slice(0, 2))).toBe(JSON.stringify(legacyMessages));
+    expect(req.messages).toHaveLength(3);
+  });
 });
