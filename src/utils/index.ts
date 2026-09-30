@@ -221,5 +221,6 @@ export function messageText(msg: import("@earendil-works/pi-ai").Message): strin
   if (typeof msg.content === "string") {
     return msg.content;
   }
-  return msg.content.filter(isTextContent).map((b) => b.text).join(" ");
+  const blocks: ReadonlyArray<{ type: string }> = msg.content;
+  return blocks.filter(isTextContent).map((b) => b.text).join(" ");
 }

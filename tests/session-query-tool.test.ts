@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 interface CapturedContext {
   systemPrompt?: string;
+  roles: string[];
   messages: unknown[];
   tools: unknown[];
 }
@@ -31,21 +32,24 @@ const captured: CapturedContext[] = globalAny.__sessionQueryCaptured;
 vi.mock("../src/models/pi-ai-models.js", async () => {
   const actual = await vi.importActual<typeof import("@earendil-works/pi-ai")>("@earendil-works/pi-ai");
   const { buildPiAiModelsMock } = await import("./pi-ai-models-mock.js");
-  const streamSimple = (_model: unknown, context: { systemPrompt?: string; messages: unknown[]; tools?: unknown[] }, _options?: unknown) => {
-    const g = globalThis as unknown as { __sessionQueryCaptured?: { systemPrompt?: string; messages: unknown[]; tools: unknown[] }[] };
+  const streamSimple = (_model: unknown, context: { messages: Array<{ role: string }> }, _options?: unknown) => {
+    const g = globalThis as unknown as { __sessionQueryCaptured?: CapturedContext[] };
     if (!g.__sessionQueryCaptured) {
       g.__sessionQueryCaptured = [];
     }
     // Tools carry non-cloneable `execute` functions.  Snapshot only the
     // serialized shape — which is what the provider actually receives.
-    const snapshotTools = (context.tools ?? []).map((t: any) => ({
+    // The provider receives a normalized transcript: the prompt and tools are
+    // replayed from its system messages.
+    const snapshotTools = actual.getCurrentTools(context.messages as any).map((t: any) => ({
       name: t.name,
       description: t.description,
       parameters: t.parameters,
     }));
     g.__sessionQueryCaptured.push({
-      systemPrompt: context.systemPrompt,
-      messages: JSON.parse(JSON.stringify(context.messages)),
+      systemPrompt: actual.getCurrentSystemPrompt(context.messages as any),
+      roles: context.messages.map((m) => m.role),
+      messages: JSON.parse(JSON.stringify(context.messages.filter((m) => m.role !== "system"))),
       tools: JSON.parse(JSON.stringify(snapshotTools)),
     });
     const stream = actual.createAssistantMessageEventStream();
@@ -224,7 +228,7 @@ describe("session_query prompt-cache prefix guarantee", () => {
     // own user+assistant entries.)
     const persistedAtEndOfPhase1 = SessionManager.open(sessionFile)
       .getBranch()
-      .filter((entry) => entry.type === "message")
+      .filter((entry) => entry.type === "message" && entry.message.role !== "system")
       .map((entry: any) => entry.message);
     expect(persistedAtEndOfPhase1).toHaveLength(2);
 
@@ -247,6 +251,12 @@ describe("session_query prompt-cache prefix guarantee", () => {
       tools.map((t: any) => ({ name: t.name, description: t.description, parameters: t.parameters }));
 
     expect(followUpReq.systemPrompt).toBe(originalReq.systemPrompt);
+    // A single leading system message: no mid-conversation prompt patches
+    // that would diverge from the original request's prefix.
+    for (const req of [originalReq, followUpReq]) {
+      expect(req.roles[0]).toBe("system");
+      expect(req.roles.filter((role) => role === "system")).toHaveLength(1);
+    }
     expect(normalizeTools(followUpReq.tools)).toEqual(normalizeTools(originalReq.tools));
 
     // The follow-up's messages are exactly the session's end-of-phase-1 state

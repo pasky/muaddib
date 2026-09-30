@@ -1,5 +1,12 @@
 import { Agent, type AgentMessage, type AgentTool, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, Message, StopReason, Usage } from "@earendil-works/pi-ai";
+import {
+  getCurrentSystemMessage,
+  type AssistantMessage,
+  type Message,
+  type StopReason,
+  type SystemMessage,
+  type Usage,
+} from "@earendil-works/pi-ai";
 import {
   AgentSession,
   SessionManager,
@@ -238,11 +245,13 @@ export async function createAgentSessionForInvocation(
     input.progressThresholdSeconds,
   );
 
-  const transformContext = createInternalNudgeTransform(invocationStart, limits, getNudgeText, logger);
+  const transformContext = pinSystemPrompt(
+    input.systemPrompt,
+    createInternalNudgeTransform(invocationStart, limits, getNudgeText, logger),
+  );
 
   const agent = new Agent({
     initialState: {
-      systemPrompt: input.systemPrompt,
       model: resolvedModel.model,
       thinkingLevel: input.thinkingLevel ?? "off",
       tools: input.tools,
@@ -261,24 +270,12 @@ export async function createAgentSessionForInvocation(
   });
 
   if (input.contextMessages) {
-    const contextMessages = withSequentialTimestamps(input.contextMessages);
-    agent.state.messages = contextMessages;
-
-    // Persist them as session entries too: auto-compaction rebuilds agent state
-    // from the session branch, so messages missing there would be lost (not even
-    // summarized) the moment the transcript is compacted.
-    for (const message of contextMessages) {
+    // The session manager is pi's canonical provider context: every request is
+    // projected from its branch, so preloaded context must live there.
+    for (const message of withSequentialTimestamps(input.contextMessages)) {
       sessionManager.appendMessage(message);
     }
-  } else if (sessionFile) {
-    // Resuming an existing session file — prime the agent with its history
-    // so a follow-up prompt can re-use the provider's prompt cache.
-    const resumed = sessionManager.buildSessionContext();
-    if (resumed.messages.length > 0) {
-      agent.state.messages = resumed.messages;
-    }
   }
-  invocationStart.boundary = agent.state.messages.at(-1) ?? null;
 
   const session = new AgentSession({
     agent,
@@ -290,7 +287,11 @@ export async function createAgentSessionForInvocation(
     baseToolsOverride: Object.fromEntries(input.tools.map((tool) => [tool.name, tool])),
   });
 
-  applySystemPromptOverrideToSession(session, input.systemPrompt);
+  // Mirror the session branch (preloaded context, or a resumed session file's
+  // history) into agent state. Requests project the same message objects, so
+  // the boundary below is found by identity in transformContext.
+  session.refreshContext();
+  invocationStart.boundary = session.messages.at(-1) ?? null;
 
   const visionFallbackModel = await resolveVisionFallbackModel(
     input.modelAdapter,
@@ -419,14 +420,34 @@ function resolveSessionLimit(name: keyof SessionLimitsConfig, value: unknown, fa
   return value;
 }
 
-function applySystemPromptOverrideToSession(session: AgentSession, override: string): void {
-  session.agent.state.systemPrompt = override;
-  const state = session as unknown as {
-    _baseSystemPrompt: string;
-    _rebuildSystemPrompt: () => string;
+/**
+ * Send `systemPrompt` verbatim as the sole, leading system message of every
+ * request.
+ *
+ * pi keeps the system prompt in the transcript as structured sections built
+ * from the resource loader, and always appends sections of its own (e.g.
+ * `<cwd>` of the host process), which would leak into our prompt and differ
+ * across deployments. pi's own override (`before_agent_start` returning
+ * `systemPrompt`) only lasts for a single `session.prompt()` run, not for a
+ * direct `agent.continue()`. Pinning in transformContext covers every request
+ * — turns, retries, steering drains — and keeps the prefix byte-stable for
+ * prompt caching. The current tool loadout is replayed from the transcript.
+ */
+function pinSystemPrompt(
+  systemPrompt: string,
+  inner: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>,
+): (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]> {
+  return async (messages, signal) => {
+    const transformed = await inner(messages, signal);
+    const current = getCurrentSystemMessage(transformed as Message[]);
+    const head: SystemMessage = {
+      role: "system",
+      content: systemPrompt,
+      ...(current?.toolsAdded ? { toolsAdded: current.toolsAdded } : {}),
+      timestamp: current?.timestamp ?? 0,
+    };
+    return [head, ...transformed.filter((message) => message.role !== "system")];
   };
-  state._baseSystemPrompt = override;
-  state._rebuildSystemPrompt = () => override;
 }
 
 /** Ensure sequential timestamps for ordering within the agent session. */

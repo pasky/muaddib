@@ -29,12 +29,12 @@ describe("PiAiModelAdapter", () => {
     expect(resolved.model.id).toBe("gpt-4o-mini");
   });
 
-  it("resolves DeepSeek V4 Flash via pi-ai registry", async () => {
-    const resolved = await adapter.resolve("deepseek:deepseek-v4-flash");
+  it("resolves DeepSeek V4.1 Flash via pi-ai registry", async () => {
+    const resolved = await adapter.resolve("deepseek:deepseek-flash");
     const compat = resolved.model.compat as { thinkingFormat?: string } | undefined;
 
     expect(resolved.spec.provider).toBe("deepseek");
-    expect(resolved.model.id).toBe("deepseek-v4-flash");
+    expect(resolved.model.id).toBe("deepseek-flash");
     expect(resolved.model.provider).toBe("deepseek");
     expect(resolved.model.api).toBe("openai-completions");
     expect(resolved.model.baseUrl).toBe("https://api.deepseek.com");
@@ -53,9 +53,9 @@ describe("PiAiModelAdapter", () => {
     expect(resolved.model.baseUrl).toBe("https://api.deepseek.com");
     expect(compat?.thinkingFormat).toBe("deepseek");
     expect(resolved.model.reasoning).toBe(true);
-    expect(resolved.model.cost.input).toBe(0.435);
-    expect(resolved.model.cost.output).toBe(0.87);
-    expect(resolved.model.cost.cacheRead).toBe(0.003625);
+    expect(resolved.model.cost.input).toBe(1.32);
+    expect(resolved.model.cost.output).toBe(3.96);
+    expect(resolved.model.cost.cacheRead).toBe(0.044);
     expect(resolved.model.contextWindow).toBe(1_000_000);
     expect(resolved.model.maxTokens).toBe(384_000);
   });

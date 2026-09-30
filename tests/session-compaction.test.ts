@@ -29,7 +29,7 @@ import { Type } from "typebox";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AssistantMessageEventStream, Usage } from "@earendil-works/pi-ai";
+import { getCurrentSystemPrompt, type AssistantMessageEventStream, type Message, type Usage } from "@earendil-works/pi-ai";
 
 import { AuthStore } from "../src/auth/auth-store.js";
 import { textStream, toolCallStream } from "./e2e/helpers.js";
@@ -76,8 +76,8 @@ let phase: "main" | "followUp" = "main";
 let summarizationStopReason: "stop" | "length" = "stop";
 
 function routeStreamSimple(...args: unknown[]): AssistantMessageEventStream {
-  const context = args[1] as { messages: unknown[]; systemPrompt?: string };
-  const isSummarization = (context.systemPrompt ?? "").includes("summarization assistant");
+  const context = args[1] as { messages: Message[] };
+  const isSummarization = getCurrentSystemPrompt(context.messages).includes("summarization assistant");
   llmCalls.push({ kind: isSummarization ? "summarization" : "agent", context });
 
   if (isSummarization) {

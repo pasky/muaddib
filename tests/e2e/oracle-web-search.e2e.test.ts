@@ -13,6 +13,7 @@
 import { rm } from "node:fs/promises";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getCurrentSystemPrompt } from "@earendil-works/pi-ai";
 
 import {
   type E2EContext,
@@ -162,7 +163,7 @@ describe("E2E: Oracle with nested web_search", () => {
     // Call 5: outer agent summary follow-up
     expect(modelProvider(5)).toBe("openai");
 
-    const systemPrompt = (i: number) => String((mockState.calls[i].context as any).systemPrompt ?? "");
+    const systemPrompt = (i: number) => getCurrentSystemPrompt((mockState.calls[i].context as any).messages);
     const outerWorkdir = systemPrompt(0).match(/\/workspace\/\.sessions\/session-[0-9a-f]{8}/u)?.[0];
     expect(outerWorkdir).toBeDefined();
     expect(systemPrompt(1)).toContain(outerWorkdir!);

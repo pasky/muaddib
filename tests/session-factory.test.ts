@@ -29,6 +29,20 @@ vi.mock("../src/models/pi-ai-models.js", () => ({
   },
 }));
 
+function mockSessionManager(overrides: Record<string, unknown>) {
+  const messages: unknown[] = [];
+  return {
+    type: "sessionManager",
+    messages,
+    getSessionId: () => "mock-session-id",
+    appendMessage: (message: unknown) => {
+      messages.push(message);
+      mockState.appendMessage(message);
+    },
+    ...overrides,
+  };
+}
+
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   AgentSession: class {
     public readonly callbacks: Array<(event: any) => void> = [];
@@ -36,9 +50,21 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
     public dispose = vi.fn();
     public agent: any;
 
+    public sessionManager: any;
+
     constructor(config: any) {
       this.agent = config.agent;
+      this.sessionManager = config.sessionManager;
       mockState.sessions.push(this);
+    }
+
+    // Like pi: agent state mirrors the session manager's branch.
+    refreshContext(): void {
+      this.agent.state.messages = [...this.sessionManager.messages];
+    }
+
+    get messages(): any[] {
+      return this.agent.state.messages;
     }
 
     subscribe(callback: (event: any) => void): () => void {
@@ -51,17 +77,11 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
     }
   },
   SessionManager: {
-    inMemory: vi.fn(() => ({
-      type: "sessionManager",
+    inMemory: vi.fn(() => mockSessionManager({
       getSessionFile: () => undefined,
-      getSessionId: () => "mock-session-id",
-      appendMessage: mockState.appendMessage,
     })),
-    open: vi.fn((path: string) => ({
-      type: "sessionManager",
+    open: vi.fn((path: string) => mockSessionManager({
       getSessionFile: () => path,
-      getSessionId: () => "mock-session-id",
-      appendMessage: mockState.appendMessage,
       appendCustomEntry: vi.fn(),
       appendModelChange: mockState.appendModelChange,
       getBranch: () => [],
@@ -113,10 +133,20 @@ function toolUseContext(extraAssistantTurns = 0): Record<string, unknown>[] {
   return msgs;
 }
 
-async function getTransform(ctx: Awaited<ReturnType<typeof createAgentSessionForInvocation>>) {
+function getRawTransform(ctx: Awaited<ReturnType<typeof createAgentSessionForInvocation>>) {
   // The mocked Agent stores constructor options at agent.config
   return (ctx.agent as any).config.transformContext as
     (messages: unknown[]) => Promise<unknown[]>;
+}
+
+/** transformContext minus the pinned system-prompt head (covered by its own test). */
+async function getTransform(ctx: Awaited<ReturnType<typeof createAgentSessionForInvocation>>) {
+  const transform = getRawTransform(ctx);
+  return async (messages: unknown[]): Promise<unknown[]> => {
+    const out = await transform(messages);
+    expect((out[0] as { role?: string }).role).toBe("system");
+    return out.slice(1);
+  };
 }
 
 function hasMetaInLast(msgs: unknown[]): boolean {
@@ -339,6 +369,30 @@ describe("createAgentSessionForInvocation", () => {
     const outAfter = await transform(compacted);
     expect(hasMetaInLast(outAfter)).toBe(true);
     expect((outAfter.at(-1) as any).content[0].text).toContain("<status>");
+  });
+
+  it("pins the verbatim system prompt as the sole leading system message of every request", async () => {
+    const ctx = await createAgentSessionForInvocation({
+      model: "openai:gpt-4o-mini",
+      systemPrompt: "You are muaddib.",
+      tools: [],
+      authStorage: fakeAuthStore(),
+      modelAdapter: defaultModelAdapter,
+    });
+    const transform = getRawTransform(ctx);
+    const tool = { name: "web_search", description: "Search.", parameters: { type: "object" } };
+
+    // pi's transcript carries its own structured prompt (with a <cwd> section)
+    // plus later patches; none of it may reach the provider.
+    const out = await transform([
+      { role: "system", content: "", sections: { preamble: "You are muaddib.", cwd: "<cwd>\n/srv\n</cwd>" }, toolsAdded: [tool], timestamp: 5 },
+      userMsg("hi"),
+      { role: "system", content: "", sections: { cwd: "<cwd>\n/elsewhere\n</cwd>" }, timestamp: 6 },
+      userMsg("again"),
+    ]);
+
+    expect(out.map((m: any) => m.role)).toEqual(["system", "user", "user"]);
+    expect(out[0]).toEqual({ role: "system", content: "You are muaddib.", toolsAdded: [tool], timestamp: 5 });
   });
 
   it("validates provider key via ensureProviderKey", async () => {
