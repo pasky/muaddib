@@ -99,6 +99,39 @@ describe("baseline agent tools", () => {
     ]);
   });
 
+  it("omits request_network_access when a '.*' urlAllowRegexes rule applies to the arc", () => {
+    const names = (toolsConfig: Record<string, unknown>) => createTools({
+      serverTag: "libera",
+      channelName: "#open",
+      toolsConfig,
+    }).map((tool) => tool.name);
+
+    expect(names({ gondolin: { arcs: { "*": { urlAllowRegexes: [".*"] } } } }))
+      .not.toContain("request_network_access");
+    expect(names({ gondolin: { arcs: { "libera##open": { urlAllowRegexes: [".*"] } } } }))
+      .not.toContain("request_network_access");
+    expect(names({
+      gondolin: {
+        profiles: { open: { urlAllowRegexes: [".*"] } },
+        arcs: { "libera##*": { use: ["open"] } },
+      },
+    })).not.toContain("request_network_access");
+    // Rules are additive: a narrower arc rule does not cancel a global ".*".
+    expect(names({
+      gondolin: {
+        arcs: {
+          "*": { urlAllowRegexes: [".*"] },
+          "libera##open": { urlAllowRegexes: ["^https://pypi\\.org/.*$"] },
+        },
+      },
+    })).not.toContain("request_network_access");
+    // Targeted rules or rules for other arcs keep the tool.
+    expect(names({ gondolin: { arcs: { "*": { urlAllowRegexes: ["^https://pypi\\.org/.*$"] } } } }))
+      .toContain("request_network_access");
+    expect(names({ gondolin: { arcs: { "libera##other": { urlAllowRegexes: [".*"] } } } }))
+      .toContain("request_network_access");
+  });
+
   it("every tool has a colocated persistType matching Python parity", () => {
     const tools = createTools({
       executors: {

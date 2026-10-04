@@ -1,5 +1,6 @@
 import { Type } from "typebox";
 
+import { resolveUrlAllowRegexes } from "../gondolin/env.js";
 import { NetworkBoundaryService } from "../network-boundary-service.js";
 import type { MuaddibTool, ToolContext } from "./types.js";
 
@@ -21,6 +22,21 @@ const REQUEST_NETWORK_ACCESS_PARAMETERS = Type.Object({
 });
 
 const networkBoundary = new NetworkBoundaryService();
+
+/**
+ * True when the arc's urlAllowRegexes include a literal ".*" rule, i.e. every
+ * URL is auto-approved and request_network_access would be dead weight.
+ */
+export function areAllUrlsAutoApproved(
+  options: Pick<ToolContext, "serverTag" | "channelName" | "toolsConfig">,
+): boolean {
+  const regexes = resolveUrlAllowRegexes({
+    config: options.toolsConfig?.gondolin ?? {},
+    serverTag: options.serverTag,
+    channelName: options.channelName,
+  });
+  return regexes.some((regex) => regex.source === ".*");
+}
 
 export function createRequestNetworkAccessTool(
   executors: { requestNetworkAccess: RequestNetworkAccessExecutor },

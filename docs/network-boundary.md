@@ -99,6 +99,9 @@ Reasoning:
 
 A shell/skill wrapper may be added later for convenience, but the tool is the source of truth.
 
+When the arc's resolved `urlAllowRegexes` include a literal `".*"` rule, every URL is auto-approved,
+so `request_network_access` is omitted from the tool set to save prompt tokens.
+
 Minimal shape:
 
 ```json

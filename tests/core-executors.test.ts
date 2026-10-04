@@ -612,6 +612,36 @@ describe("oracle executor with invocation context", () => {
   });
 });
 
+describe("deep research executor tool set", () => {
+  beforeEach(() => {
+    oracleMock.capturedOptions = undefined;
+    oracleMock.promptFn = vi.fn().mockResolvedValue({ text: "research answer", stopReason: "stop", usage: {} });
+  });
+
+  async function deepResearchToolNames(urlAllowRegexes: string[]): Promise<string[]> {
+    const executors = createDefaultToolExecutors({
+      serverTag: "libera",
+      channelName: "#open",
+      logger: { info: vi.fn() },
+      toolsConfig: {
+        deepResearch: { model: "openai:gpt-4o-mini" },
+        gondolin: { arcs: { "*": { urlAllowRegexes } } },
+      },
+    });
+    await expect(executors.deepResearch({ query: "topic" })).resolves.toBe("research answer");
+    return oracleMock.capturedOptions.toolSet.tools.map((tool: any) => tool.name);
+  }
+
+  it("omits request_network_access when all URLs are auto-approved", async () => {
+    expect(await deepResearchToolNames([".*"])).toEqual(["web_search", "visit_webpage"]);
+  });
+
+  it("keeps request_network_access under targeted allow rules", async () => {
+    expect(await deepResearchToolNames(["^https://pypi\\.org/.*$"]))
+      .toEqual(["web_search", "visit_webpage", "request_network_access"]);
+  });
+});
+
 describe("core tool executors web_search support", () => {
   it("web_search returns formatted search results and seeds trust for result URLs", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {

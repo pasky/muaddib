@@ -24,6 +24,7 @@ import {
 import {
   createDefaultRequestNetworkAccessExecutor,
   createRequestNetworkAccessTool,
+  areAllUrlsAutoApproved,
 } from "./request-network-access.js";
 import { createGondolinTools } from "./gondolin-tools.js";
 import { createSessionQueryTool } from "./session-query.js";
@@ -93,12 +94,12 @@ export interface BaselineToolOptions extends ToolContext {
   threadId?: string;
 }
 
-type ExecutorBackedToolFactory = (executors: BaselineToolExecutors, options: BaselineToolOptions) => MuaddibTool;
+type ExecutorBackedToolFactory = (executors: BaselineToolExecutors, options: BaselineToolOptions) => MuaddibTool | null;
 
 const BASELINE_TOOL_FACTORIES: ReadonlyArray<ExecutorBackedToolFactory> = [
   createWebSearchTool,
   createVisitWebpageTool,
-  createRequestNetworkAccessTool,
+  (executors, options) => areAllUrlsAutoApproved(options) ? null : createRequestNetworkAccessTool(executors),
   (executors, options) => createGenerateImageTool(executors, toConfiguredString(options.toolsConfig?.imageGen?.model)),
   (executors, options) => createOracleTool(executors, toConfiguredString(options.toolsConfig?.oracle?.model)),
   (executors, options) => createDeepResearchTool(executors, toConfiguredString(options.toolsConfig?.deepResearch?.model)),
@@ -135,9 +136,9 @@ export function createBaselineAgentTools(options: BaselineToolOptions): ToolSet 
     ...Object.fromEntries(Object.entries(overrides).filter(([, v]) => v !== undefined)),
   } as BaselineToolExecutors;
 
-  const executorBackedTools = BASELINE_TOOL_FACTORIES.map((factory) =>
-    factory(executors, options),
-  );
+  const executorBackedTools = BASELINE_TOOL_FACTORIES
+    .map((factory) => factory(executors, options))
+    .filter((tool): tool is MuaddibTool => tool !== null);
 
   const gondolinToolSet = createGondolinTools({
     arc: options.arc,
