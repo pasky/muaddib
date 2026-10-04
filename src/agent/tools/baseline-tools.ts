@@ -1,5 +1,4 @@
 import { toConfiguredString } from "../../utils/index.js";
-import { createMakePlanTool } from "./control.js";
 import {
   createDefaultGenerateImageExecutor,
   createGenerateImageTool,
@@ -55,7 +54,6 @@ export type { RequestNetworkAccessInput, RequestNetworkAccessExecutor } from "./
 
 export {
   createGenerateImageTool,
-  createMakePlanTool,
   createOracleTool,
   createDeepResearchTool,
   createRequestNetworkAccessTool,
@@ -157,7 +155,6 @@ export function createBaselineAgentTools(options: BaselineToolOptions): ToolSet 
   const tools = [
     ...executorBackedTools,
     ...gondolinToolSet.tools,
-    createMakePlanTool(),
     createSessionQueryTool(options),
   ];
 

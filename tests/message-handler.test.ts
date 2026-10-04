@@ -865,7 +865,8 @@ describe("RoomMessageHandler", () => {
             ...roomConfig.command.modes,
             serious: {
               ...roomConfig.command.modes.serious,
-              allowedTools: ["web_search", "make_plan"],
+              // make_plan no longer exists; stale allowlist entries are harmless.
+              allowedTools: ["web_search", "oracle", "make_plan"],
             },
           },
         },
@@ -881,7 +882,7 @@ describe("RoomMessageHandler", () => {
     incoming.isDirect = true;
     await handler.handleIncomingMessage(incoming, { sendResponse: async () => {} });
 
-    expect(seenToolNames).toEqual(["web_search", "make_plan"]);
+    expect(seenToolNames).toEqual(["web_search", "oracle"]);
 
     await history.close();
   });

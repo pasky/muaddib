@@ -12,7 +12,6 @@ import {
   createOracleTool,
   createDeepResearchTool,
   ORACLE_EXCLUDED_TOOLS,
-  createMakePlanTool,
   createRequestNetworkAccessTool,
   createVisitWebpageTool,
   createWebSearchTool,
@@ -94,7 +93,6 @@ describe("baseline agent tools", () => {
       "edit",
       "bash",
       "share_artifact",
-      "make_plan",
       "session_query",
     ]);
   });
@@ -147,15 +145,6 @@ describe("baseline agent tools", () => {
     for (const tool of tools) {
       expect((tool as any).persistType, `${tool.name} missing persistType`).toBeDefined();
     }
-  });
-
-  it("make_plan tool returns OK and stores plan details", async () => {
-    const tool = createMakePlanTool();
-
-    const result = await tool.execute("call-1", { plan: "Step 1: research. Step 2: execute." }, undefined, undefined);
-
-    expect(result.content[0]).toEqual({ type: "text", text: "OK, follow this plan" });
-    expect(result.details.plan).toBe("Step 1: research. Step 2: execute.");
   });
 
   it("web_search tool delegates to configured executor", async () => {
@@ -354,7 +343,6 @@ describe("baseline tools with Gondolin", () => {
     expect(names).toContain("request_network_access");
     expect(names).toContain("generate_image");
     expect(names).toContain("oracle");
-    expect(names).toContain("make_plan");
   });
 
   it("rejects deprecated dnsMode=trusted", () => {
