@@ -150,6 +150,15 @@ describe("resolveProviderOverrideModel uses per-endpoint pricing", () => {
             status: 0,
             pricing: { prompt: "0.000002", completion: "0.000008" },
           },
+          {
+            tag: "smaller-provider",
+            provider_name: "Smaller",
+            context_length: 64000,
+            max_completion_tokens: 2048,
+            supported_parameters: [],
+            status: 0,
+            pricing: { prompt: "0.000001", completion: "0.000004" },
+          },
         ],
       },
     };
@@ -164,6 +173,10 @@ describe("resolveProviderOverrideModel uses per-endpoint pricing", () => {
     // Should skip the status=-2 endpoint and pick the active one.
     expect(model!.cost.input).toBeCloseTo(2, 5);
     expect(model!.cost.output).toBeCloseTo(8, 5);
+    // Unpinned routing may land on any active endpoint, so limits must fit all of them
+    // (an oversized max_tokens makes OpenRouter skip or 400 on smaller endpoints).
+    expect(model!.maxTokens).toBe(2048);
+    expect(model!.contextWindow).toBe(64000);
     expect(model!.compat).toBeUndefined();
   });
 });

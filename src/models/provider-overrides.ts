@@ -100,11 +100,34 @@ function pickEndpoint(
   return payload.endpoints.find((e) => e.status >= 0) ?? payload.endpoints[0];
 }
 
+/**
+ * Context/output limits the request must fit. Pinned routing hits exactly one endpoint;
+ * unpinned routing may land on any active one, so take the minimum across them - otherwise
+ * e.g. DeepInfra's advertised 943718 max_completion_tokens makes OpenRouter skip or 400 on
+ * endpoints capped at 131072.
+ */
+function endpointLimits(
+  payload: OpenRouterEndpointsPayload,
+  endpoint: OpenRouterEndpoint,
+  pinned: boolean,
+): { contextWindow: number; maxTokens: number } {
+  const active = payload.endpoints.filter((e) => e.status >= 0);
+  const pool = pinned || active.length === 0 ? [endpoint] : active;
+  const completionCaps = pool
+    .map((e) => e.max_completion_tokens)
+    .filter((n): n is number => n !== null);
+  return {
+    contextWindow: Math.min(...pool.map((e) => e.context_length)),
+    maxTokens: completionCaps.length > 0 ? Math.min(...completionCaps) : 8_192,
+  };
+}
+
 function buildModelFromEndpoint(
   modelId: string,
   payload: OpenRouterEndpointsPayload,
   endpoint: OpenRouterEndpoint,
   compat: OpenAICompletionsCompat | undefined,
+  pinned: boolean,
 ): Model<Api> {
   return {
     id: modelId,
@@ -123,8 +146,7 @@ function buildModelFromEndpoint(
       cacheRead: parseFloat(endpoint.pricing.input_cache_read ?? "0") * 1_000_000,
       cacheWrite: parseFloat(endpoint.pricing.input_cache_write ?? "0") * 1_000_000,
     },
-    contextWindow: endpoint.context_length,
-    maxTokens: endpoint.max_completion_tokens ?? 8_192,
+    ...endpointLimits(payload, endpoint, pinned),
     compat,
   };
 }
@@ -146,7 +168,7 @@ function resolveOpenRouterModel(modelId: string, providerRouting?: string[]): Mo
     const cached = endpointsCache.get(candidate);
     if (cached) {
       const endpoint = pickEndpoint(cached, providerRouting);
-      if (endpoint) return buildModelFromEndpoint(candidate, cached, endpoint, compat);
+      if (endpoint) return buildModelFromEndpoint(candidate, cached, endpoint, compat, endpoint.tag === providerRouting?.[0]);
     }
   }
 
