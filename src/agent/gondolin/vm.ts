@@ -657,16 +657,41 @@ export async function closeAllVms(): Promise<void> {
   }
 }
 
-function installProcessCleanupHandlers() {
-  let cleanupDone = false;
+/** Upper bound on signal-triggered VM shutdown, so a stuck close can't block exit. */
+const SHUTDOWN_TIMEOUT_MS = 20_000;
 
-  const asyncCleanup = async (signal: string) => {
-    if (cleanupDone) return;
-    cleanupDone = true;
-    await closeAllVms();
-    process.removeListener("SIGTERM", sigtermHandler);
-    process.removeListener("SIGINT", sigintHandler);
-    process.kill(process.pid, signal as NodeJS.Signals);
+function installProcessCleanupHandlers() {
+  let cleanupStarted = false;
+
+  const asyncCleanup = async (signal: NodeJS.Signals) => {
+    if (cleanupStarted) {
+      // Second signal while shutting down: give up on cleanup and die now.
+      process.removeListener("SIGTERM", sigtermHandler);
+      process.removeListener("SIGINT", sigintHandler);
+      process.kill(process.pid, signal);
+      return;
+    }
+    cleanupStarted = true;
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      // Close cached VMs and let in-flight checkpoints (which own their VM's
+      // close) finish; gondolin only deletes the /tmp disk overlay once
+      // VM.close() completes.
+      await Promise.race([
+        Promise.allSettled([closeAllVms(), ...vmCheckpointInProgress.values()]),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(() => {
+            console.error(`Gondolin VM shutdown exceeded ${SHUTDOWN_TIMEOUT_MS}ms on ${signal}; exiting anyway`);
+            resolve();
+          }, SHUTDOWN_TIMEOUT_MS);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+      process.removeListener("SIGTERM", sigtermHandler);
+      process.removeListener("SIGINT", sigintHandler);
+      process.kill(process.pid, signal);
+    }
   };
 
   const sigintHandler = () => void asyncCleanup("SIGINT");
@@ -675,12 +700,19 @@ function installProcessCleanupHandlers() {
   process.on("SIGTERM", sigtermHandler);
   process.on("SIGINT", sigintHandler);
 
+  // 'exit' handlers must be synchronous, so VM.close() can't run here (e.g.
+  // after an uncaught exception).  Best effort: unlink the ephemeral root-disk
+  // overlays gondolin would have deleted on close.  `rootDisk` is a private
+  // gondolin field; if its shape changes this silently does nothing.
   process.on("exit", () => {
     for (const vm of vmCache.values()) {
-      try {
-        vm.close().catch(() => {});
-      } catch {
-        // ignore
+      const disk = (vm as unknown as { rootDisk?: { path?: unknown; deleteOnClose?: unknown } }).rootDisk;
+      if (disk?.deleteOnClose === true && typeof disk.path === "string") {
+        try {
+          rmSync(disk.path, { force: true });
+        } catch {
+          // ignore
+        }
       }
     }
     vmCache.clear();

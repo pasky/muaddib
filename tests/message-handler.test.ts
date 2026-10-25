@@ -1921,6 +1921,51 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("awaits session dispose (Gondolin VM checkpoint/close) before completing", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const disposeStarted = createDeferred<void>();
+    const releaseDispose = createDeferred<void>();
+    const runnerFactory: CommandRunnerFactory = (input) => ({
+      prompt: async () => {
+        const result = makeRunnerResult("done");
+        await input.onResponse(result.text, { interim: false });
+        return {
+          ...result,
+          session: {
+            messages: [],
+            sessionManager: { getBranch: () => [] },
+            dispose: async () => {
+              disposeStarted.resolve();
+              await releaseDispose.promise;
+            },
+          } as any,
+        };
+      },
+    });
+
+    let settled = false;
+    const execution = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory,
+    }).handleIncomingMessage(makeMessage("!s hello", { isDirect: true }), {
+      sendResponse: async () => {},
+    }).finally(() => { settled = true; });
+
+    await disposeStarted.promise;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(settled).toBe(false);
+
+    releaseDispose.resolve();
+    await execution;
+    expect(settled).toBe(true);
+
+    await history.close();
+  });
+
   it("refuses over-budget free users before runner creation", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();

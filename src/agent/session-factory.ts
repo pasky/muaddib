@@ -154,7 +154,7 @@ interface CreateAgentSessionResult {
   bumpSessionLimits: (tokens: number, costUsd: number) => void;
   /** Usage billed since the previous take (see `SessionLimits.takeUsage`). */
   takeUsage: () => { usage: Usage; peakTurnInput: number };
-  dispose: () => void;
+  dispose: () => Promise<void>;
   /** Path to the persisted session JSONL file, or `null` when in-memory. */
   sessionFile: string | null;
   /** Short session identifier (from the session header). */
@@ -401,9 +401,11 @@ export async function createAgentSessionForInvocation(
     getOverloadFallbackModel: () => overloadFallbacks[overloadFallbackIndex]?.spec ?? null,
     takeUsage: () => limits.takeUsage(),
     bumpSessionLimits: (tokens: number, costUsd: number) => limits.bump(tokens, costUsd),
-    dispose: () => {
+    dispose: async () => {
       unsubscribe();
-      session.dispose();
+      // session.dispose may have been replaced by an async wrapper (SessionRunner
+      // chains Gondolin VM checkpoint/close into it), so always await it.
+      await session.dispose();
     },
   };
 }

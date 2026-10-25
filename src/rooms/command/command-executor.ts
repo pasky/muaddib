@@ -1019,13 +1019,19 @@ export class CommandExecutor {
       if (opts.toolSummary !== false) {
         await this.persistGeneratedToolSummary(message, agentResult, tools, triggerTs);
       }
-
-      agentResult.session?.dispose();
     } catch (error) {
       if (thrown) {
         this.logger.error("Background work failed after post-response error", error);
       } else {
         thrown = error;
+      }
+    } finally {
+      // Awaited: the wrapped dispose checkpoints/closes the Gondolin VM, and
+      // only a completed VM.close() removes its /tmp disk overlay.
+      try {
+        await agentResult.session?.dispose();
+      } catch (error) {
+        this.logger.error("Session dispose failed", error);
       }
     }
 
