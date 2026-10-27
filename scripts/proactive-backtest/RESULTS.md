@@ -199,15 +199,72 @@ Atkinson-cycle corrections) — like July, many silver "FPs" look like good
 interjections. Unadjudicated: `annotate-opus55-v5.md` holds its 36 FP
 disagreements not covered by the July gold sheet.
 
-## Verdict
+## Initial verdict (superseded below)
 
-Do not switch yet. opus-5-5 is no better on FN, ~4-5pp worse on silver FP
-(not significant on the July data, clearly worse on fresh data), and adds a
-1.9-6.8% refusal rate that production routes to untested fallback models. Cost
-and latency are a wash. Revisit if pasky's annotation of
-`annotate-opus55-v5.md` shows most of its extra interjections are welcome
-(then the FP gap could vanish as with 4-8 in July) AND proactive refusals
-are suppressed (empty refusalFallbackModels for proactive) rather than
-falling back.
+Do not switch yet: no better on FN, ~4-5pp worse on silver FP, plus 1.9-6.8%
+refusals routed to untested fallback models. Revisit after annotation and
+with refusals handled. Spend: ~$32.
 
-Experiment spend: ~$32.
+## Round 2 (2026-10-27): annotation, strict-v6, refusal fallback
+
+**Annotation** of opus-5-5-v5's 36 not-yet-gold FP disagreements
+(`annotate-opus55-v5.md`): 18 interject / 16 either / **2 null** — like
+opus-4-8 in July, nearly all of its "extra" interjections were welcome.
+
+**Gold-null trend.** Across both sheets, 3 of the 5 gold-null cases are
+questions explicitly addressed to another person by nick, asking for *their*
+advice/knowledge ("fenn: for a 5090 what models do you advise", "L29Ah: why
+is metformin useful...", "eren: what is TheLounge?"). But a blanket rule
+would hurt: the addressed-to-other gold-interject cases are questions resting
+on a misconception the bot can correct. **strict-v6** = strict-v5 with check 2
+extended: a question addressed to a specific person by nick is theirs to
+answer -> NULL, unless it rests on a concrete factual error you can correct
+(example phrased generically, not from the annotated cases).
+
+Finals (226+300, silver; paired vs production opus-4-8+v5 via
+`report.ts --paired-baseline`, base-only/cand-only, exact McNemar):
+
+| run          | FP% silver    | FN% silver     | FP paired    | FN paired     |
+|--------------|---------------|----------------|--------------|---------------|
+| opus-4-8 v5  | 15.9 (36/226) | 43.0 (129/300) | —            | —             |
+| opus-4-8 v6  | 11.5 (26/226) | 50.3 (151/300) | 15/5 p=0.04  | 9/31 p=0.001  |
+| opus-5-5 v5  | 20.4 (46/226) | 44.3 (133/300) | 18/28 p=0.18 | 31/35 p=0.71  |
+| **opus-5-5 v6** | 16.8 (38/226) | 41.0 (123/300) | 22/24 p=0.88 | 37/31 p=0.55 |
+
+Held-out (406) tells the same story (5-5-v6 vs 4-8-v5: FP 16/18, FN 24/26).
+v6 improves opus-5-5 on both axes; on opus-4-8 it mostly just makes it
+quieter. On addressed-to-other cases v6 drives FP to 0/49 for both models.
+
+**Refusal handling**: new `proactive.refusalFallbackModels` (replaces the
+classified mode's stage; global chain still follows). With
+`["anthropic:claude-opus-4-8"]`, a refused turn is decided by the current
+production model; a fallback-made interjection carries the
+`[refusal fallback to claude-opus-4-8]` suffix, a NULL stays silent.
+Simulating this (refusal -> opus-4-8-v5 replay decision): July set FP 38/225,
+FN 118/300, paired vs 4-8-v5 FP 22/24 (p=0.88), FN 37/26 (p=0.21).
+
+**Fresh Aug-Oct cross-check** (silver = production opus-4-8 itself, so
+self-agreement favors the 4-8 replay): opus-5-5-v6 FP 18.7% (20/107) vs
+4-8 replay 9.3%; with refusal fallback simulated, paired FP 6/16 (p=0.05),
+FN 20/39 (p=0.02). Eyeballing the 16 5-5-only interjections: ~10 good
+(qualia, UMA history, where.exe, router reset, retinal-emergency warnings),
+~4-6 bad (pedantic "small snag", bot relaying itself to another nick, misread
+of a past anecdote as an emergency). Unadjudicated: `backtest-proactive-
+2026-10/annotate-fp.md` (26 FP disagreements of both runs, for fair gold).
+Pending fair-gold on the July set: `annotate-round3.md` (18 remaining
+unadjudicated FPs of 4-8-v5/v6 and 5-5-v6).
+
+## Recommendation (applied, canary)
+
+- `proactive.models.serious` -> `anthropic:claude-opus-5-5`
+- `proactive.prompts.seriousExtra` -> `prompts/strict-v6.txt`
+- `proactive.refusalFallbackModels` -> `["anthropic:claude-opus-4-8"]`
+
+On the neutral (opus-4-5-silver) July set this is indistinguishable from the
+current production setup; the fresh-data FP excess is the open risk — watch
+production and revert to opus-4-8 (v5 or v6) if it proves chattier.
+Applied to `config.json.example` and the live config (backup:
+`config.json.bak-opus55-proactive`; needs this build — older builds ignore
+`proactive.refusalFallbackModels`).
+
+Experiment spend total: ~$52.
