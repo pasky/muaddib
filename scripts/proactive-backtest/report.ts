@@ -20,7 +20,7 @@
  */
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { basename, dirname } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 
 import {
   mcnemarExactP,
@@ -29,13 +29,22 @@ import {
   type DatasetExample,
 } from "./lib.js";
 
-function argValue(flag: string): string | undefined {
-  const idx = process.argv.indexOf(flag);
-  return idx >= 0 ? process.argv[idx + 1] : undefined;
+/** All values of a (repeatable) flag; a flag without a value is an error, not a no-op. */
+function argValues(flag: string): string[] {
+  const values: string[] = [];
+  for (let i = 2; i < process.argv.length; i++) {
+    if (process.argv[i] !== flag) continue;
+    const value = process.argv[i + 1];
+    if (value === undefined || value.startsWith("--")) throw new Error(`${flag} requires a value`);
+    values.push(value);
+  }
+  return values;
 }
 
-function argValues(flag: string): string[] {
-  return process.argv.flatMap((a, i) => (a === flag && i + 1 < process.argv.length ? [process.argv[i + 1]] : []));
+function argValue(flag: string): string | undefined {
+  const values = argValues(flag);
+  if (values.length > 1) throw new Error(`${flag} given more than once`);
+  return values[0];
 }
 
 interface RunRecord {
@@ -83,7 +92,7 @@ let splitIds: Set<string> | null = null;
 if (split !== undefined) {
   if (split !== "dev" && split !== "heldout") throw new Error(`--split must be dev or heldout, got '${split}'`);
   const caps = { null: Number(argValue("--dev-max-null") ?? "60"), interject: Number(argValue("--dev-max-interject") ?? "60") };
-  if (!Number.isInteger(caps.null) || !Number.isInteger(caps.interject)) throw new Error("--dev-max-* must be integers");
+  if (![caps.null, caps.interject].every((c) => Number.isInteger(c) && c >= 0)) throw new Error("--dev-max-* must be nonnegative integers");
   const devIds = new Set(sampleDataset([...dataset.values()], caps, argValue("--seed") ?? "backtest-v1").map((ex) => ex.id));
   splitIds = split === "dev" ? devIds : new Set([...dataset.keys()].filter((id) => !devIds.has(id)));
   console.log(`Split ${split}: ${splitIds.size} dataset examples`);
@@ -171,7 +180,7 @@ if (pairedBaseline) {
   const pHeader = ["run", "pairs", "FP base/cand", "p(FP)", "FN base/cand", "p(FN)"];
   const pTable = [pHeader];
   for (const path of resultPaths) {
-    if (basename(path, ".jsonl") === baseName) continue;
+    if (resolve(path) === resolve(pairedBaseline)) continue;
     let pairs = 0, fpBase = 0, fpCand = 0, fnBase = 0, fnCand = 0;
     for (const r of loadRun(path)) {
       const b = base.get(r.id);

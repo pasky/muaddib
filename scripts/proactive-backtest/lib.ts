@@ -311,8 +311,9 @@ export type GoldLabel = "interject" | "null" | "either";
 export function parseGoldAnnotations(sheets: { path: string; text: string }[]): Map<string, GoldLabel> {
   const gold = new Map<string, { label: GoldLabel; path: string }>();
   for (const { path, text } of sheets) {
-    for (const m of text.matchAll(/^gold\[([^\]]+)\]:[ \t]*(\S*)[ \t]*$/gm)) {
-      const [, id, raw] = m;
+    for (const m of text.matchAll(/^gold\[([^\]]+)\]:(.*)$/gm)) {
+      const id = m[1];
+      const raw = m[2].trim();
       if (!raw) continue;
       if (raw !== "interject" && raw !== "null" && raw !== "either") {
         throw new Error(`Invalid gold label '${raw}' for ${id} in ${path}`);

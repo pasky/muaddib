@@ -231,22 +231,28 @@ Finals (226+300, silver; paired vs production opus-4-8+v5 via
 | opus-5-5 v5  | 20.4 (46/226) | 44.3 (133/300) | 18/28 p=0.18 | 31/35 p=0.71  |
 | **opus-5-5 v6** | 16.8 (38/226) | 41.0 (123/300) | 22/24 p=0.88 | 37/31 p=0.55 |
 
-Held-out (406) tells the same story (5-5-v6 vs 4-8-v5: FP 16/18, FN 24/26).
-v6 improves opus-5-5 on both axes; on opus-4-8 it mostly just makes it
-quieter. On addressed-to-other cases v6 drives FP to 0/49 for both models.
+Held-out (406) tells the same story (5-5-v6 vs 4-8-v5: FP 16/18, FN 24/26),
+but **the v6 numbers are in-sample**: v6 was written after reading the gold
+sheets, 42/56 of whose cases (incl. all 5 gold-null ones) lie outside dev.
+The "held-out" complement is no longer untouched for v6 \u2014 only fresh data
+confirms it. v6 improves opus-5-5 on both axes; on opus-4-8 it mostly just
+makes it quieter. On addressed-to-other cases v6 drives FP to 0/49 for both
+models (gold-adjusted, same in-sample caveat).
 
 **Refusal handling**: new `proactive.refusalFallbackModels` (replaces the
 classified mode's stage; global chain still follows). With
 `["anthropic:claude-opus-4-8"]`, a refused turn is decided by the current
 production model; a fallback-made interjection carries the
 `[refusal fallback to claude-opus-4-8]` suffix, a NULL stays silent.
-Simulating this (refusal -> opus-4-8-v5 replay decision): July set FP 38/225,
-FN 118/300, paired vs 4-8-v5 FP 22/24 (p=0.88), FN 37/26 (p=0.21).
+Simulating this (refusal -> the opus-4-8-v6 replay decision, i.e. the
+deployed prompt; ignores the rare further global-chain stage): July set FP
+38/226, FN 117/300, paired vs 4-8-v5 FP 22/24 (p=0.88), FN 38/26 (p=0.17).
 
 **Fresh Aug-Oct cross-check** (silver = production opus-4-8 itself, so
 self-agreement favors the 4-8 replay): opus-5-5-v6 FP 18.7% (20/107) vs
-4-8 replay 9.3%; with refusal fallback simulated, paired FP 6/16 (p=0.05),
-FN 20/39 (p=0.02). Eyeballing the 16 5-5-only interjections: ~10 good
+4-8 replay 9.3%; with refusal fallback approximated (no opus-4-8-v6 run on
+this set, so refusals take the 4-8-v5 replay decision), paired FP 6/16
+(p=0.05), FN 20/39 (p=0.02). This set is out-of-sample for v6. Eyeballing the 16 5-5-only interjections: ~10 good
 (qualia, UMA history, where.exe, router reset, retinal-emergency warnings),
 ~4-6 bad (pedantic "small snag", bot relaying itself to another nick, misread
 of a past anecdote as an emergency). Unadjudicated: `backtest-proactive-

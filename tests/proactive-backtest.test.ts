@@ -184,6 +184,7 @@ describe("parseGoldAnnotations", () => {
 
   it("throws on a filled but invalid label", () => {
     expect(() => parseGoldAnnotations([{ path: "a.md", text: "gold[x]: nul\n" }])).toThrow(/nul/);
+    expect(() => parseGoldAnnotations([{ path: "a.md", text: "gold[x]: null # unsure\n" }])).toThrow(/null # unsure/);
   });
 });
 
