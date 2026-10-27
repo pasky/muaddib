@@ -127,3 +127,87 @@ spoke, opus-4-5 stayed silent) formatted for annotation — fill the `gold[...]`
 lines and re-run report.ts with `--annotations` to score against human gold
 instead of silver. If a chunk of those FPs are annotated `interject`/`either`,
 the effective FP gap shrinks further.
+
+# 2026-10: claude-opus-5-5 (the `!a` model) as opus-4-8 replacement
+
+Same protocol as July: July dataset (opus-4-5 silver), seed `backtest-v1`,
+reasoning=low, tool-less replay, dev 60+60 prompt sweep → finals 226+300 →
+held-out complement + gold, refusals tracked separately (scored as NULL).
+Results under `$BACKTEST_DIR/results/anthropic_claude-opus-5-5-*`.
+
+## Dev subset (60+60), FP%/FN% (refusals in parens)
+
+| model    | logged         | strict-v1 | strict-v2 | strict-v3 | strict-v4  | strict-v5  |
+|----------|----------------|-----------|-----------|-----------|------------|------------|
+| opus-4-8 | 46.7 / 11.7    | 6.7 / 75.0| 18.3 / 38.3| 16.7 / 46.7| 16.7 / 43.3| 16.7 / 55.0|
+| opus-5-5 | 33.3 / 26.7 (10)| 1.7 / 78.3| 26.7 / 28.3 (1)| 23.3 / 40.0| 28.3 / 33.3 (2)| 20.0 / 45.0 (1)|
+
+opus-5-5 is less trigger-happy than 4-8 with the loose logged prompt but
+*less* steerable by the strict prompts: at every strict-v2..v5 level it sits
+~4-10pp FP above opus-4-8.
+
+## Finals (226 null + 300 interject)
+
+| run                | FP% silver    | FP% gold¹    | FN% silver     | refusals | p50 lat | cost/run |
+|--------------------|---------------|--------------|----------------|----------|---------|----------|
+| opus-4-8 v5 (prod) | 15.9 (36/226) | 12.0 (25/209)| 43.0 (129/300) | 0        | 4.1s    | $0.013   |
+| opus-4-8 v2        | 19.5 (44/226) | 12.9 (27/209)| 33.0 (99/300)  | 0        | 4.3s    | $0.013   |
+| opus-4-5 replay    | 17.7 (40/226) | 16.3 (34/209)| 19.0 (57/300)  | 0        | 12.3s   | $0.018   |
+| **opus-5-5 v5**    | 20.4 (46/226) | 17.6 (37/210)| 44.3 (133/300) | 10 (1.9%)| 4.4s    | $0.012   |
+| opus-5-5 v2        | 27.4 (62/226) | 23.8 (50/210)| 27.0 (81/300)  | 10 (1.9%)| 5.1s    | $0.012   |
+
+¹ Gold = July's 20 annotations, which only adjudicated opus-4-8-v2's own FP
+disagreements — structurally biased toward opus-4-8. Use silver for the
+head-to-head.
+
+Held-out (406 non-dev) silver FP: opus-5-5 v5 20.5% (34/166) vs opus-4-8 v5
+15.7% (26/166). Paired on silver-NULL cases: 5-5-v5-only interjections 28 vs
+4-8-v5-only 18 (McNemar p≈0.18, not significant); v2 vs v2 32 vs 13
+(p≈0.007, significant).
+
+## Fresh data cross-check (2026-07-18..10-27, silver = production opus-4-8+v5)
+
+484 cases (107 null / 377 interject), `backtest-proactive-2026-10/`. Silver
+is opus-4-8 itself, so its replay is self-agreement-advantaged; still:
+
+| run             | FP%           | FN%            | refusals    |
+|-----------------|---------------|----------------|-------------|
+| opus-4-8 v5     | 9.3 (10/107)  | 18.8 (71/377)  | 2           |
+| opus-5-5 v5     | 23.4 (25/107) | 27.9 (105/377) | 33 (6.8%)   |
+
+Paired silver-NULL: 5-5-only 21 vs 4-8-only 6.
+
+## Refusals
+
+opus-5-5 refusals are of two kinds: (a) Anthropic ToS "reverse engineering /
+duplicating model outputs" blocks on ordinary #llm discussion (agentic coding,
+SAEs, quantization, even "what is a certificate"), and (b) the bio/chem
+classifier on benign #hplusroadmap / ##biology / ##chemistry questions
+(ancient DNA, polygenic scores, OSKM, gerozymes). Rate is 1.9% on Apr-Jul
+data but 6.8% on Aug-Oct — rising with the #llm share. In production a
+refusal falls through the `!a` mode stage (opus-5, kimi-k3) and the global
+chain (deepseek-v4-pro), so those turns would be decided by un-backtested
+models, plus latency/cost of the double call.
+
+## Quality
+
+Eyeballing the 28 cases where opus-5-5 alone interjected (both opus-4-5 and
+opus-4-8 silent): mostly substantive, specific, plausible corrections/answers
+(PostgREST for nginx-postgres RPC, RLS-vs-function-grants caveat, Discord CDN
+signed-URL expiry causing zero-byte downloads, Ollama binding to 127.0.0.1,
+Atkinson-cycle corrections) — like July, many silver "FPs" look like good
+interjections. Unadjudicated: `annotate-opus55-v5.md` holds its 36 FP
+disagreements not covered by the July gold sheet.
+
+## Verdict
+
+Do not switch yet. opus-5-5 is no better on FN, ~4-5pp worse on silver FP
+(not significant on the July data, clearly worse on fresh data), and adds a
+1.9-6.8% refusal rate that production routes to untested fallback models. Cost
+and latency are a wash. Revisit if pasky's annotation of
+`annotate-opus55-v5.md` shows most of its extra interjections are welcome
+(then the FP gap could vanish as with 4-8 in July) AND proactive refusals
+are suppressed (empty refusalFallbackModels for proactive) rather than
+falling back.
+
+Experiment spend: ~$32.
