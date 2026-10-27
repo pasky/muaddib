@@ -210,6 +210,8 @@
         "rateLimit": 10,
         "ratePeriod": 60,
         "debounceSeconds": 15.0,
+        "_comment_refusalFallbackModels": "Optional refusal stage for interjection runs, replacing the classified mode's refusalFallbackModels (agent.refusalFallbackModels still follows). A fallback-made interjection is suffixed '[refusal fallback to <model>]'; NULL stays silent.",
+        "refusalFallbackModels": ["anthropic:claude-opus-4-8"],
         "models": {
           "serious": "anthropic:claude-opus-4-8",
           "validation": [

@@ -258,6 +258,8 @@ export interface ProactiveRoomConfig {
   rateLimit?: number;
   ratePeriod?: number;
   interjectThreshold?: number;
+  /** Refusal stage for interjection runs, replacing the classified mode's stage; the global agent.refusalFallbackModels still follows. */
+  refusalFallbackModels?: string[];
   models?: {
     validation?: string[];
     serious?: string;

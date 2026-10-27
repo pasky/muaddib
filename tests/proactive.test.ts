@@ -30,6 +30,7 @@ const baseConfig: ProactiveConfig = {
   rateLimit: 10,
   ratePeriod: 3600,
   interjectThreshold: 7,
+  refusalFallbackModels: null,
   models: {
     validation: ["openai:gpt-4o-mini"],
     serious: "openai:gpt-4o",

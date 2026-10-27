@@ -10,6 +10,7 @@
 import type { Agent } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
+import { parseModelSpecList } from "../../models/model-spec.js";
 import { formatUtcTime, messageText } from "../../utils/index.js";
 import { responseText } from "../../agent/message.js";
 import type { ProactiveRoomConfig } from "../../config/muaddib-config.js";
@@ -44,6 +45,12 @@ export interface ProactiveConfig {
   ratePeriod: number;
   /** Minimum score (out of 10) to trigger interjection. */
   interjectThreshold: number;
+  /**
+   * Refusal stage for the interjection run, replacing the classified mode's
+   * stage (the global agent.refusalFallbackModels still follows); `null` =
+   * use the classified mode's stage.
+   */
+  refusalFallbackModels: string[] | null;
   /** Model to use when interjecting (for "serious" mode). */
   models: {
     /** Validation models — scored in sequence, early-exit on low score. */
@@ -91,6 +98,9 @@ export function buildProactiveConfig(
     rateLimit: rawProactive.rateLimit ?? 10,
     ratePeriod: rawProactive.ratePeriod ?? 3600,
     interjectThreshold: rawProactive.interjectThreshold ?? 7,
+    refusalFallbackModels: rawProactive.refusalFallbackModels === undefined
+      ? null
+      : parseModelSpecList(rawProactive.refusalFallbackModels, "proactive.refusalFallbackModels"),
     models: {
       validation: rawProactive.models?.validation ?? [],
       serious: rawProactive.models?.serious ?? commandConfig.modes.serious?.model ?? "",
@@ -350,7 +360,7 @@ export class ProactiveRunner {
         historySize: this.config.historySize,
         reasoningEffort: classifiedRuntime.reasoningEffort,
         allowedTools: classifiedRuntime.allowedTools,
-        refusalFallbackModels: classifiedRuntime.refusalFallbackModels,
+        refusalFallbackModels: this.config.refusalFallbackModels ?? classifiedRuntime.refusalFallbackModels,
       },
       (agent) => { this.activeAgents.set(sessionKey, agent); },
     );

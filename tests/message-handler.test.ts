@@ -4002,6 +4002,74 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("proactive refusalFallbackModels replaces the classified mode's refusal stage (global chain still follows)", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+
+    const proactiveRoomConfig = {
+      ...roomConfig,
+      command: {
+        ...roomConfig.command,
+        modes: {
+          ...roomConfig.command.modes,
+          serious: { ...roomConfig.command.modes.serious, refusalFallbackModels: ["anthropic:claude-opus-5"] },
+        },
+      },
+      proactive: {
+        interjecting: ["libera##test"],
+        debounceSeconds: 0,
+        historySize: 10,
+        rateLimit: 10,
+        ratePeriod: 60,
+        interjectThreshold: 1,
+        refusalFallbackModels: ["anthropic:claude-opus-4-8"],
+        models: {
+          validation: ["openai:gpt-4o-mini"],
+          serious: "anthropic:claude-opus-5-5",
+        },
+        prompts: {
+          interject: "Score this: {message}",
+          seriousExtra: "Respond with NULL when abstaining.",
+        },
+      },
+    };
+
+    let captured: string[] | undefined;
+    const proactivePromptReached = createDeferred<void>();
+
+    const handler = createHandler({
+      roomConfig: proactiveRoomConfig as any,
+      history,
+      configData: { agent: { refusalFallbackModels: ["deepseek:deepseek-v4-pro"] } },
+      runnerFactory: (input) => ({
+        prompt: async (_prompt, options) => {
+          captured = options?.refusalFallbackModels;
+          proactivePromptReached.resolve();
+          const result = makeRunnerResult("NULL");
+          await input.onResponse(result.text, { interim: false });
+          return result;
+        },
+      }),
+      modelAdapter: {
+        completeSimple: async (_model: string, _payload: unknown, callOptions?: { callType?: string }) => {
+          if (callOptions?.callType === LLM_CALL_TYPE.MODE_CLASSIFIER) {
+            return { content: [{ type: "text", text: "EASY_SERIOUS" }] };
+          }
+          return { content: [{ type: "text", text: "Score: 9/10" }] };
+        },
+      },
+    });
+
+    await history.addMessage(makeMessage("seed message"));
+    await handler.handleIncomingMessage(makeMessage("should I jump in?"), { sendResponse: async () => {} });
+    await proactivePromptReached.promise;
+    await new Promise((r) => setImmediate(r));
+
+    expect(captured).toEqual(["anthropic:claude-opus-4-8", "deepseek:deepseek-v4-pro"]);
+
+    await history.close();
+  });
+
   it("skips proactive session for untrusted passive messages", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();
