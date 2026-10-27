@@ -65,13 +65,29 @@ npx tsx scripts/proactive-backtest/report.ts \
   --dataset $BACKTEST_DIR/dataset.jsonl \
   $BACKTEST_DIR/results/*.jsonl
 
+#    --split dev|heldout   restrict to the 60+60 dev subset (as sampled by
+#                          run.ts; override with --dev-max-null/-interject,
+#                          --seed) or its never-tuned-on complement
+#    --paired-baseline R   per-run discordance vs run R on the same cases
+#                          (FP/FN only-in-base vs only-in-candidate) with an
+#                          exact McNemar p — the right test for "is X worse
+#                          than Y", since both runs share the cases
+
 # 4. Optionally generate an annotation sheet for a run's disagreements,
 #    fill in the gold[...] lines, and feed back via --annotations
+#    (repeatable: all sheets merge into one gold set, conflicting labels are
+#    an error; ids already gold-labelled are left out of new sheets)
 npx tsx scripts/proactive-backtest/report.ts \
   --dataset $BACKTEST_DIR/dataset.jsonl \
-  --disagreements-for $BACKTEST_DIR/results/<run>.jsonl \
+  --annotations $BACKTEST_DIR/annotate-opus48-v2.md \
+  --annotations $BACKTEST_DIR/annotate-opus55-v5.md \
+  --disagreements-for $BACKTEST_DIR/results/<run>.jsonl --disagreements-type fp \
   $BACKTEST_DIR/results/<run>.jsonl
 ```
+
+Gold annotations only adjudicate the runs whose disagreements were sheeted:
+when comparing two candidates on gold, make sure *both* runs' FP
+disagreements are annotated, otherwise gold flatters whichever was sheeted.
 
 The dataset is reproducible from the profile logs via extract.ts.
 (`data/` and `results/` are additionally gitignored as a safety net in case

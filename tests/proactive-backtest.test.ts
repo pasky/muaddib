@@ -5,6 +5,8 @@ import {
   canonicalizeSystemPrompt,
   classifyDecision,
   extractExample,
+  mcnemarExactP,
+  parseGoldAnnotations,
   parseLlmIoBlocks,
   sampleDataset,
   type DatasetExample,
@@ -161,5 +163,36 @@ describe("sampleDataset", () => {
 
   it("takes everything when no cap is given", () => {
     expect(sampleDataset(examples, {})).toHaveLength(20);
+  });
+});
+
+describe("parseGoldAnnotations", () => {
+  it("merges filled gold lines across sheets, ignoring blanks and agreeing duplicates", () => {
+    const gold = parseGoldAnnotations([
+      { path: "a.md", text: "## 1. x\ngold[x]: null\n\ngold[y]: \ngold[z]: either\n" },
+      { path: "b.md", text: "gold[y]: interject\ngold[x]: null\n" },
+    ]);
+    expect([...gold.entries()].sort()).toEqual([["x", "null"], ["y", "interject"], ["z", "either"]]);
+  });
+
+  it("throws on conflicting labels for the same id", () => {
+    expect(() => parseGoldAnnotations([
+      { path: "a.md", text: "gold[x]: null\n" },
+      { path: "b.md", text: "gold[x]: interject\n" },
+    ])).toThrow(/x.*a\.md.*b\.md/);
+  });
+
+  it("throws on a filled but invalid label", () => {
+    expect(() => parseGoldAnnotations([{ path: "a.md", text: "gold[x]: nul\n" }])).toThrow(/nul/);
+  });
+});
+
+describe("mcnemarExactP", () => {
+  it("computes the two-sided exact binomial p-value on discordant pairs", () => {
+    expect(mcnemarExactP(0, 0)).toBe(1);
+    expect(mcnemarExactP(5, 5)).toBe(1);
+    expect(mcnemarExactP(0, 5)).toBeCloseTo(0.0625, 6);
+    expect(mcnemarExactP(28, 18)).toBeCloseTo(0.1840, 3);
+    expect(mcnemarExactP(13, 32)).toBeCloseTo(mcnemarExactP(32, 13), 12);
   });
 });

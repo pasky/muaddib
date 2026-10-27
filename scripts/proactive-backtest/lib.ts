@@ -298,3 +298,51 @@ export function sampleDataset(
   out.sort((a, b) => (a.id < b.id ? -1 : 1));
   return out;
 }
+
+// ── Gold annotations ──
+
+export type GoldLabel = "interject" | "null" | "either";
+
+/**
+ * Merge `gold[<id>]: interject|null|either` lines from one or more annotation
+ * sheets. Unfilled lines are ignored; an id labelled differently in two places
+ * is an error (the merged gold set must be unambiguous).
+ */
+export function parseGoldAnnotations(sheets: { path: string; text: string }[]): Map<string, GoldLabel> {
+  const gold = new Map<string, { label: GoldLabel; path: string }>();
+  for (const { path, text } of sheets) {
+    for (const m of text.matchAll(/^gold\[([^\]]+)\]:[ \t]*(\S*)[ \t]*$/gm)) {
+      const [, id, raw] = m;
+      if (!raw) continue;
+      if (raw !== "interject" && raw !== "null" && raw !== "either") {
+        throw new Error(`Invalid gold label '${raw}' for ${id} in ${path}`);
+      }
+      const prev = gold.get(id);
+      if (prev && prev.label !== raw) {
+        throw new Error(`Conflicting gold labels for ${id}: '${prev.label}' in ${prev.path} vs '${raw}' in ${path}`);
+      }
+      gold.set(id, { label: raw, path });
+    }
+  }
+  return new Map([...gold].map(([id, { label }]) => [id, label]));
+}
+
+// ── Paired comparison ──
+
+/**
+ * Two-sided exact McNemar test: binomial(b + c, 0.5) on the discordant pair
+ * counts b and c.
+ */
+export function mcnemarExactP(b: number, c: number): number {
+  const n = b + c;
+  if (n === 0) return 1;
+  const k = Math.min(b, c);
+  // P(X <= k) via log-space binomial pmf to stay stable for large n.
+  let logC = 0; // log C(n, 0)
+  let tail = 0;
+  for (let i = 0; i <= k; i++) {
+    if (i > 0) logC += Math.log(n - i + 1) - Math.log(i);
+    tail += Math.exp(logC - n * Math.LN2);
+  }
+  return Math.min(1, 2 * tail);
+}
