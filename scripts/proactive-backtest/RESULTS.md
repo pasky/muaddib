@@ -274,3 +274,40 @@ Applied to `config.json.example` and the live config (backup:
 `proactive.refusalFallbackModels`).
 
 Experiment spend total: ~$52.
+
+## Round 3 (2026-10-28): live "answered a question addressed to someone else"
+
+Incident (#linux-cs): `spaceangel: profor: a anatomicky ... co to teda je?` in
+banter; opus-5-5+v6 interjected, answering spaceangel in parallel to profor,
+who replied while the bot was thinking. Two causes:
+
+- **Race (fixed in code, ea14f68).** Proactive runs deliver only the final
+  turn; profor's reply was steered in with the generic "if you just finished
+  responding, say NULL unless a followup is needed" wording, the model said
+  NULL (= no followup) and the stale draft went out. Steers into proactive
+  runs now say the draft is unsent and to decide afresh (NULL withdraws it;
+  informal/imprecise human answers are fine, no nitpicking; if speaking,
+  address/reference whoever it builds on). Replaying the incident's second
+  turn: 12/12 NULL (v6 and v7 prompts), vs 6/6 nitpicking "profor: ..."
+  rewrites with a weaker "withdraw or revise" wording. Control: an unrelated
+  steer keeps a good draft (6/6), "nvm, figured it out" withdraws it (6/6).
+- **Decision.** Even without the race, v6 interjects on the first turn 6/6
+  (low and high reasoning): the model satisfies the v6 exception by finding
+  *any* correctable claim in the banter (profor's joking "to se neji").
+
+Prompt variants (finals, silver, vs opus-4-8-v5 replay; FP/FN counts):
+
+| prompt (opus-5-5) | July FP / FN | Aug-Oct FP / FN | incident turn 1 NULL |
+|-------------------|--------------|-----------------|----------------------|
+| v6 (live)         | 38 / 123     | 20 / 111        | 0/6                  |
+| v6b (v6 + "jokes aren't claims", narrowed exception, address-and-refer) | 34 / 135 | 22 / 126 | 3/6 |
+| v7 (addressed-question rule as own check, + v6b points) | 33 / 141 | 15 / 133 | 5/6 |
+| opus-4-8 v5 replay | 36 / 129    | 10 / 71         | —                    |
+
+v7 vs v6 paired (July): FP 10 v6-only / 5 v7-only (p=0.30), FN 6/24
+(p=0.001). Of v7's 24 lost interjections ~20 look like welcome answers to
+open questions ("anyone used an llm for 3d printing", "anyone knows if groq
+has a usage endpoint") — v7 makes the model quieter across the board, not
+only on addressed questions. v6b buys little on either axis. Choice between
+v6 (more helpful) and v7 (~5 fewer FPs per set for ~20 fewer good
+interjections) is a preference call; the race fix applies either way.
