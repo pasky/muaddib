@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import type { Message } from "@earendil-works/pi-ai";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 
 import {
   extractStatus,
@@ -284,8 +286,8 @@ describe("buildSteeredPassiveMessage", () => {
     expect(m.content).toBe("hello");
     expect(m.display).toBe(false);
     expect(typeof m.timestamp).toBe("number");
-    expect(m.draftUnsent).toBe(false);
-    expect(buildSteeredPassiveMessage("hello", { draftUnsent: true }).draftUnsent).toBe(true);
+    expect(m.details.draftUnsent).toBe(false);
+    expect(buildSteeredPassiveMessage("hello", { draftUnsent: true }).details.draftUnsent).toBe(true);
   });
 });
 
@@ -325,6 +327,16 @@ describe("createSteeredPassiveAwareConvertToLlm", () => {
 
     const quiet = await convert([...messages.slice(0, -1), buildSteeredPassiveMessage("[12:34] <alice> ping", { draftUnsent: true })]);
     expect((quiet.at(-1) as { content: Array<{ text: string }> }).content[0]?.text).toContain("NOT been sent");
+  });
+
+  it("keeps the unsent-draft variant across session persistence (retry/compaction rebuild messages from entries)", async () => {
+    const sm = SessionManager.inMemory();
+    sm.appendMessage({ role: "user", content: "do something", timestamp: 0 } as Message);
+    sm.appendMessage(assistantMsg("sure") as Message);
+    const steer = buildSteeredPassiveMessage("[12:34] <alice> ping", { draftUnsent: true });
+    sm.appendCustomMessageEntry(steer.customType, steer.content, steer.display, steer.details);
+    const out = await convert(sm.buildSessionContext().messages);
+    expect((out.at(-1) as { content: Array<{ text: string }> }).content[0]?.text).toContain("NOT been sent");
   });
 
   it("renders after-tool variant when predecessor is a toolResult", async () => {

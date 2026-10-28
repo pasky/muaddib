@@ -28,7 +28,7 @@ import {
   type ToolSet,
 } from "../../agent/tools/baseline-tools.js";
 import { writeArtifactText } from "../../agent/tools/artifact-storage.js";
-import { extractThinking } from "../../agent/message.js";
+import { extractThinking, isNullSentinel } from "../../agent/message.js";
 import type { Message } from "@earendil-works/pi-ai";
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
@@ -97,6 +97,8 @@ export interface CommandRunnerFactoryInput {
   onResponse: (text: string, meta: { interim: boolean }) => void | Promise<void>;
   logger?: Logger;
   onAgentCreated?: (agent: Agent) => void;
+  /** Quiet delivery: only the final turn's response is delivered (see SessionRunnerOptions). */
+  finalTurnOnly?: boolean;
 }
 
 export type CommandRunnerFactory = (input: CommandRunnerFactoryInput) => {
@@ -222,6 +224,7 @@ export class CommandExecutor {
           onResponse: input.onResponse,
           logger: input.logger,
           onAgentCreated: input.onAgentCreated,
+          finalTurnOnly: input.finalTurnOnly,
           sessionFile: input.toolSet.sessionHostDir
             ? join(input.toolSet.sessionHostDir, ".session-record.jsonl")
             : undefined,
@@ -821,6 +824,7 @@ export class CommandExecutor {
       onResponse,
       logger,
       onAgentCreated,
+      finalTurnOnly: true,
     });
 
     const lastMessage = context[context.length - 1];
@@ -1362,12 +1366,6 @@ export class CommandExecutor {
 
 export function modelStrCore(model: unknown): string {
   return String(model).replace(/(?:[-.\w]*:)?(?:[-.\w]*\/)?([-.\w]+)(?:#[-\w,/]*)?/, "$1");
-}
-
-export function isNullSentinel(text: string): boolean {
-  const trimmed = text.trim();
-  const unquoted = trimmed.replace(/^["'`]|["'`]$/g, "").trim();
-  return /^null$/iu.test(unquoted);
 }
 
 export function buildMemoryUpdatePrompt(

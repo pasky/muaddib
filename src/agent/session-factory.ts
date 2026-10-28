@@ -65,7 +65,9 @@ export function createSteeredPassiveAwareConvertToLlm(): typeof convertToLlm {
       while (j >= 0 && (messages[j].role === "user" || messages[j].role === "custom")) j--;
       const predecessor = j >= 0 ? messages[j] : undefined;
       const afterTool = predecessor?.role === "toolResult";
-      const { content: body, draftUnsent } = m as SteeredPassiveMessage;
+      const { content: body, details } = m as SteeredPassiveMessage;
+      // details may be absent on entries persisted before the field existed.
+      const draftUnsent = details?.draftUnsent ?? false;
       return {
         role: "user",
         content: [{ type: "text", text: renderSteeredPassive(body, { afterTool, draftUnsent }) }],

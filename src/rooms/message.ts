@@ -86,12 +86,15 @@ export interface SteeredPassiveMessage {
   /** Not displayed in any TUI — muaddib has no TUI for this. */
   display: false;
   timestamp: number;
-  /**
-   * The session buffers its reply until the run ends (quiet/proactive), so a
-   * reply drafted before this message is still unsent and can be withdrawn
-   * or revised.
-   */
-  draftUnsent: boolean;
+  /** In `details` because pi persists only customType/content/display/details. */
+  details: {
+    /**
+     * The session buffers its reply until the run ends (quiet/proactive), so
+     * a reply drafted before this message is still unsent and can be
+     * withdrawn or revised.
+     */
+    draftUnsent: boolean;
+  };
 }
 
 declare module "@earendil-works/pi-agent-core" {
@@ -108,7 +111,7 @@ export function buildSteeredPassiveMessage(body: string, opts: { draftUnsent?: b
     content: body,
     display: false,
     timestamp: Date.now(),
-    draftUnsent: opts.draftUnsent ?? false,
+    details: { draftUnsent: opts.draftUnsent ?? false },
   };
 }
 

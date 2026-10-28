@@ -105,3 +105,10 @@ function extractTagged(text: string, tag: string): { text: string; captured: str
     .trim();
   return { text: visible, captured: parts.join("\n") };
 }
+
+/** The "stay silent" sentinel: NULL, optionally quoted, any case. */
+export function isNullSentinel(text: string): boolean {
+  const trimmed = text.trim();
+  const unquoted = trimmed.replace(/^["'`]|["'`]$/g, "").trim();
+  return /^null$/iu.test(unquoted);
+}

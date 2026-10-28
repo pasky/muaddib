@@ -4,7 +4,7 @@ import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { AuthStore } from "../auth/auth-store.js";
 import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai";
 
-import { extractStatus, extractThinking, isAssistantMessage, isTextContent, isToolCall, responseText } from "./message.js";
+import { extractStatus, extractThinking, isAssistantMessage, isNullSentinel, isTextContent, isToolCall, responseText } from "./message.js";
 import { REFUSAL_ERROR_PREFIX, detectRefusalErrorSignal, detectRefusalSignal } from "./refusal-detection.js";
 import { stringifyError } from "../utils/index.js";
 import { PiAiModelAdapter, type ResolvedPiAiModel } from "../models/pi-ai-model-adapter.js";
@@ -64,6 +64,12 @@ export interface SessionRunnerOptions {
    * replayable workspace record, e.g. deepResearch).
    */
   sessionFile?: string;
+  /**
+   * Only the final turn's response is delivered (quiet/proactive runs), so a
+   * final NULL withdraws any earlier unsent draft and must not be overridden
+   * by artifact-URL enforcement.
+   */
+  finalTurnOnly?: boolean;
 }
 
 export interface PromptOptions {
@@ -247,6 +253,11 @@ export class SessionRunner {
       let pendingArtifactUrlRetry: string | undefined;
       let artifactUrlRetryAttempted = false;
       const queueArtifactUrlRetryIfNeeded = (assistantMessage: unknown, text: string): boolean => {
+        if (this.options.finalTurnOnly && isNullSentinel(text)) {
+          // Withdrawal: there is no message left to carry the URL.
+          pendingArtifactUrlRetry = undefined;
+          return false;
+        }
         if (!lastCreatedArtifactUrl || artifactUrlRetryAttempted || pendingArtifactUrlRetry ||
             !isPotentialFinalAssistantMessage(assistantMessage) || text.includes(lastCreatedArtifactUrl)) {
           return false;
@@ -304,7 +315,7 @@ export class SessionRunner {
                   }
                   // Don't decorate NULL sentinel responses with suffixes — they must
                   // pass through to onResponse unchanged so callers can suppress them.
-                  const decorated = responseSuffix && !/^["'`]?\s*null\s*["'`]?$/iu.test(text)
+                  const decorated = responseSuffix && !isNullSentinel(text)
                     ? `${text} ${responseSuffix}`
                     : text;
                   queueResponseDelivery(decorated, interim);

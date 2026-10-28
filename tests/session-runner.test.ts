@@ -1199,6 +1199,28 @@ describe("SessionRunner", () => {
     await result.session!.dispose();
   });
 
+  it("final-turn-only (quiet) runs: a NULL withdrawal cancels a pending artifact-URL retry", async () => {
+    let promptCount = 0;
+    const artifactUrl = "https://example.com/artifacts/?q1.png";
+    makeMockSession({
+      promptImpl: async (c) => {
+        promptCount += 1;
+        emitToolResult(c, "share_artifact", `Artifact shared: ${artifactUrl}`);
+        emitAssistantResponse(c, "Here is the image.");
+        // A steered message made the (unsent) draft redundant.
+        emitAssistantResponse(c, "NULL");
+      },
+    });
+
+    const deliveredTexts: string[] = [];
+    const runner = makeRunner({ finalTurnOnly: true, onResponse: (text: string) => { deliveredTexts.push(text); } });
+    const result = await runner.prompt("draw");
+
+    expect(promptCount).toBe(1);
+    expect(deliveredTexts).toEqual(["NULL"]);
+    await result.session!.dispose();
+  });
+
   it("does not retry when share_artifact URL is already in response", async () => {
     let promptCount = 0;
     const artifactUrl = "https://example.com/artifacts/?xyz789.txt";

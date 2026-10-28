@@ -3962,6 +3962,7 @@ describe("RoomMessageHandler", () => {
     };
 
     const sent: string[] = [];
+    let finalTurnOnly: boolean | undefined;
     const proactivePromptReached = createDeferred<void>();
 
     const handler = createHandler({
@@ -3969,6 +3970,7 @@ describe("RoomMessageHandler", () => {
       history,
       runnerFactory: (input) => ({
         prompt: async () => {
+          finalTurnOnly = input.finalTurnOnly;
           proactivePromptReached.resolve();
           // A draft answer, then (after a steered "someone already answered")
           // the final turn withdraws it with NULL.
@@ -3998,6 +4000,7 @@ describe("RoomMessageHandler", () => {
     // Yield to let the fire-and-forget proactive pipeline finish cleanup
     await new Promise((r) => setImmediate(r));
 
+    expect(finalTurnOnly).toBe(true);
     expect(sent).toEqual([]);
     const rows = await history.getFullHistory("libera##test");
     expect(rows.filter((row) => row.role === "assistant")).toHaveLength(0);
@@ -4301,13 +4304,13 @@ describe("RoomMessageHandler", () => {
     // Fake agent that records steered messages. Passive steers arrive as
     // muaddib.steered_passive custom messages (body in `content` as string).
     const fakeAgent = {
-      steer(msg: { role: string; customType?: string; content: unknown; draftUnsent?: boolean }) {
+      steer(msg: { role: string; customType?: string; content: unknown; details?: { draftUnsent?: boolean } }) {
         const text = typeof msg.content === "string"
           ? msg.content
           : Array.isArray(msg.content)
             ? (msg.content[0] as { text?: string } | undefined)?.text ?? ""
             : "";
-        steeredMessages.push({ role: msg.role, customType: msg.customType, text, draftUnsent: msg.draftUnsent });
+        steeredMessages.push({ role: msg.role, customType: msg.customType, text, draftUnsent: msg.details?.draftUnsent });
       },
     };
 

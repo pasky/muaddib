@@ -11,7 +11,7 @@
 
 import { createHash } from "node:crypto";
 
-import { isNullSentinel } from "../../src/rooms/command/command-executor.js";
+import { isNullSentinel } from "../../src/agent/message.js";
 import {
   detectRefusalErrorSignal,
   detectRefusalSignal,
