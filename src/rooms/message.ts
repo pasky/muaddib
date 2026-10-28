@@ -86,6 +86,12 @@ export interface SteeredPassiveMessage {
   /** Not displayed in any TUI — muaddib has no TUI for this. */
   display: false;
   timestamp: number;
+  /**
+   * The session buffers its reply until the run ends (quiet/proactive), so a
+   * reply drafted before this message is still unsent and can be withdrawn
+   * or revised.
+   */
+  draftUnsent: boolean;
 }
 
 declare module "@earendil-works/pi-agent-core" {
@@ -95,13 +101,14 @@ declare module "@earendil-works/pi-agent-core" {
 }
 
 /** Build a SteeredPassiveMessage suitable for `agent.steer(...)`. */
-export function buildSteeredPassiveMessage(body: string): SteeredPassiveMessage {
+export function buildSteeredPassiveMessage(body: string, opts: { draftUnsent?: boolean } = {}): SteeredPassiveMessage {
   return {
     role: "custom",
     customType: MUADDIB_STEERED_PASSIVE_CUSTOM_TYPE,
     content: body,
     display: false,
     timestamp: Date.now(),
+    draftUnsent: opts.draftUnsent ?? false,
   };
 }
 
@@ -115,11 +122,15 @@ export function buildSteeredPassiveMessage(body: string): SteeredPassiveMessage 
  *
  * `afterTool === false` is the post-assistant-text case (or no predecessor):
  * the agent has just finished responding, so the NULL-when-irrelevant hint
- * makes sense.
+ * makes sense. With `draftUnsent` (quiet/proactive runs, which deliver only
+ * the final turn), that reply was never sent: the final turn either withdraws
+ * it (NULL) or restates it revised for the new message.
  */
-export function renderSteeredPassive(body: string, opts: { afterTool: boolean }): string {
+export function renderSteeredPassive(body: string, opts: { afterTool: boolean; draftUnsent?: boolean }): string {
   const head = opts.afterTool
     ? "<meta>Background channel message — DO NOT derail from your in-progress task. Continue your current tool work; only adjust course if this message is directly relevant to what you are doing.</meta>"
-    : "<meta>Background channel message — DO NOT derail from your current task and continue work / responding. Acknowledge only if directly relevant. If you just finished responding, respond with only the single word NULL unless this message should provoke a direct followup.</meta>";
+    : opts.draftUnsent
+      ? "<meta>New channel message — any reply you drafted above has NOT been sent yet; only your final message will be. Discard your draft and decide afresh, as if you had written nothing: if someone has now answered adequately (informal or imprecise is fine - nitpicking a human's answer is unwelcome), or the conversation moved on, respond with only the single word NULL. Speak only if you would interject even now; then send your complete final message, and if it builds on or corrects what someone said, address them by nick and refer to it.</meta>"
+      : "<meta>Background channel message — DO NOT derail from your current task and continue work / responding. Acknowledge only if directly relevant. If you just finished responding, respond with only the single word NULL unless this message should provoke a direct followup.</meta>";
   return `${head}\n\n${body}\n\n<meta>Before reacting in any way, consider silently whether to adjust course in any way or continue in your current trajectory.</meta>`;
 }

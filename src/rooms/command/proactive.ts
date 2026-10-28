@@ -190,7 +190,8 @@ export class ProactiveRunner {
     const existing = this.activeAgents.get(sessionKey);
     if (existing) {
       const ts = formatUtcTime().slice(-5);
-      existing.steer(buildSteeredPassiveMessage(`[${ts}] <${message.nick}> ${message.content}`));
+      // executeQuiet delivers only the final turn, so the draft is still unsent.
+      existing.steer(buildSteeredPassiveMessage(`[${ts}] <${message.nick}> ${message.content}`, { draftUnsent: true }));
       this.logger.info(
         "Steered passive message into proactive session",
         `arc=${message.arc}`,

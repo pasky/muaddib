@@ -65,10 +65,10 @@ export function createSteeredPassiveAwareConvertToLlm(): typeof convertToLlm {
       while (j >= 0 && (messages[j].role === "user" || messages[j].role === "custom")) j--;
       const predecessor = j >= 0 ? messages[j] : undefined;
       const afterTool = predecessor?.role === "toolResult";
-      const body = (m as SteeredPassiveMessage).content;
+      const { content: body, draftUnsent } = m as SteeredPassiveMessage;
       return {
         role: "user",
-        content: [{ type: "text", text: renderSteeredPassive(body, { afterTool }) }],
+        content: [{ type: "text", text: renderSteeredPassive(body, { afterTool, draftUnsent }) }],
         timestamp: m.timestamp,
       } as AgentMessage;
     });

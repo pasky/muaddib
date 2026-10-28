@@ -798,7 +798,10 @@ export class CommandExecutor {
 
       let cleaned = this.cleanResponseText(raw, message.nick);
       cleaned = await this.applyResponseLengthPolicy(cleaned, message.arc);
-      if (!cleaned || isNullSentinel(cleaned) || cleaned.startsWith("Error: ")) return;
+      // A final-turn NULL withdraws any earlier unsent draft (e.g. a steered
+      // channel message showed someone already answered).
+      if (isNullSentinel(cleaned)) { lastValidResponse = null; return; }
+      if (!cleaned || cleaned.startsWith("Error: ")) return;
       // Strip trailing NULL sentinel from otherwise valid content (agent
       // sometimes appends "NULL" after real output in event responses).
       cleaned = cleaned.replace(/\n["'`]?\s*null\s*["'`]?\s*$/iu, "").trim();

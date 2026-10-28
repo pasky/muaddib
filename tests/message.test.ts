@@ -264,6 +264,16 @@ describe("renderSteeredPassive", () => {
     expect(text).toContain(body);
     expect(text).not.toContain("NULL");
   });
+
+  it("unsent-draft variant (quiet/proactive runs) asks to decide afresh: withdraw via NULL or send the final message", () => {
+    const text = renderSteeredPassive(body, { afterTool: false, draftUnsent: true });
+    expect(text).toContain("NOT been sent");
+    expect(text).toContain("NULL");
+    expect(text).toContain("decide afresh");
+    expect(text).toContain(body);
+    // Mid-tool-work steering keeps the continue-your-work wording either way.
+    expect(renderSteeredPassive(body, { afterTool: true, draftUnsent: true })).toContain("Continue your current tool work");
+  });
 });
 
 describe("buildSteeredPassiveMessage", () => {
@@ -274,6 +284,8 @@ describe("buildSteeredPassiveMessage", () => {
     expect(m.content).toBe("hello");
     expect(m.display).toBe(false);
     expect(typeof m.timestamp).toBe("number");
+    expect(m.draftUnsent).toBe(false);
+    expect(buildSteeredPassiveMessage("hello", { draftUnsent: true }).draftUnsent).toBe(true);
   });
 });
 
@@ -310,6 +322,9 @@ describe("createSteeredPassiveAwareConvertToLlm", () => {
     expect(last.role).toBe("user");
     expect(last.content[0]?.text).toContain("respond with only the single word NULL");
     expect(last.content[0]?.text).toContain("[12:34] <alice> ping");
+
+    const quiet = await convert([...messages.slice(0, -1), buildSteeredPassiveMessage("[12:34] <alice> ping", { draftUnsent: true })]);
+    expect((quiet.at(-1) as { content: Array<{ text: string }> }).content[0]?.text).toContain("NOT been sent");
   });
 
   it("renders after-tool variant when predecessor is a toolResult", async () => {

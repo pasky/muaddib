@@ -3937,7 +3937,7 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
-  it("drops proactive NULL sentinel responses instead of sending them", async () => {
+  it("drops proactive NULL sentinel responses instead of sending them, withdrawing an earlier unsent draft", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();
 
@@ -3970,6 +3970,9 @@ describe("RoomMessageHandler", () => {
       runnerFactory: (input) => ({
         prompt: async () => {
           proactivePromptReached.resolve();
+          // A draft answer, then (after a steered "someone already answered")
+          // the final turn withdraws it with NULL.
+          await input.onResponse("draft answer", { interim: false });
           const result = makeRunnerResult("NULL");
           await input.onResponse(result.text, { interim: false });
           return result;
@@ -4293,18 +4296,18 @@ describe("RoomMessageHandler", () => {
 
     const agentStarted = createDeferred<void>();
     const releaseAgent = createDeferred<void>();
-    const steeredMessages: Array<{ role: string; customType?: string; text: string }> = [];
+    const steeredMessages: Array<{ role: string; customType?: string; text: string; draftUnsent?: boolean }> = [];
 
     // Fake agent that records steered messages. Passive steers arrive as
     // muaddib.steered_passive custom messages (body in `content` as string).
     const fakeAgent = {
-      steer(msg: { role: string; customType?: string; content: unknown }) {
+      steer(msg: { role: string; customType?: string; content: unknown; draftUnsent?: boolean }) {
         const text = typeof msg.content === "string"
           ? msg.content
           : Array.isArray(msg.content)
             ? (msg.content[0] as { text?: string } | undefined)?.text ?? ""
             : "";
-        steeredMessages.push({ role: msg.role, customType: msg.customType, text });
+        steeredMessages.push({ role: msg.role, customType: msg.customType, text, draftUnsent: msg.draftUnsent });
       },
     };
 
@@ -4352,6 +4355,8 @@ describe("RoomMessageHandler", () => {
       // wrapping is applied at LLM-call time by convertToLlm.
       expect(msg.role).toBe("custom");
       expect(msg.customType).toBe("muaddib.steered_passive");
+      // Proactive replies are buffered until the run ends: steers must say so.
+      expect(msg.draftUnsent).toBe(true);
       // Steered messages must include a [HH:MM] UTC timestamp before the nick
       expect(msg.text).toMatch(/\[\d{2}:\d{2}\] </);
     }
