@@ -1374,7 +1374,7 @@ export function buildMemoryUpdatePrompt(
   options?: { toolCallsCount?: number; skillsConfig?: SkillsConfig },
   nick?: string,
 ): string {
-  const charLimit = memoryConfig?.charLimit ?? 2200;
+  const charLimit = memoryConfig?.charLimit ?? 6000;
   const content = loadArcMemoryFile(arc);
 
   const chars = content.length;

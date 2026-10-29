@@ -44,7 +44,7 @@
         "model": "openai:gpt-5.6-luna"
       },
       "memory": {
-        "charLimit": 2200
+        "charLimit": 6000
       },
       "skills": {
         "creationThreshold": 4

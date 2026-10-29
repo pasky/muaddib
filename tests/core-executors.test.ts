@@ -1659,7 +1659,7 @@ describe("buildMemoryUpdatePrompt", () => {
   it("returns prompt with empty-file marker when MEMORY.md does not exist", () => {
     const prompt = buildMemoryUpdatePrompt("nonexistent-memory-arc");
     expect(prompt).toContain("(empty - not yet created)");
-    expect(prompt).toContain("0/2200 chars");
+    expect(prompt).toContain("0/6000 chars");
     expect(prompt).toContain("<meta>");
     expect(prompt).toContain("</meta>");
   });
@@ -1672,7 +1672,7 @@ describe("buildMemoryUpdatePrompt", () => {
 
     const prompt = buildMemoryUpdatePrompt(arc);
     expect(prompt).toContain("Favorite color: blue");
-    expect(prompt).toContain("20/2200 chars");
+    expect(prompt).toContain("20/6000 chars");
     expect(prompt).not.toContain("consolidate");
   });
 
@@ -1680,11 +1680,11 @@ describe("buildMemoryUpdatePrompt", () => {
     const arc = "memory-capacity-arc";
     const workspacePath = getArcWorkspacePath(arc);
     mkdirSync(workspacePath, { recursive: true });
-    const content = "x".repeat(1800);
+    const content = "x".repeat(5000);
     writeFileSync(join(workspacePath, "MEMORY.md"), content);
 
     const prompt = buildMemoryUpdatePrompt(arc);
-    expect(prompt).toContain("1800/2200 chars");
+    expect(prompt).toContain("5000/6000 chars");
     expect(prompt).toContain("consolidate");
   });
 
