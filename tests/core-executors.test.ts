@@ -1673,7 +1673,7 @@ describe("buildMemoryUpdatePrompt", () => {
     const prompt = buildMemoryUpdatePrompt(arc);
     expect(prompt).toContain("Favorite color: blue");
     expect(prompt).toContain("20/6000 chars");
-    expect(prompt).not.toContain("consolidate");
+    expect(prompt).not.toContain("nearly full");
   });
 
   it("includes capacity warning when over 80% full", () => {
@@ -1685,7 +1685,7 @@ describe("buildMemoryUpdatePrompt", () => {
 
     const prompt = buildMemoryUpdatePrompt(arc);
     expect(prompt).toContain("5000/6000 chars");
-    expect(prompt).toContain("consolidate");
+    expect(prompt).toContain("nearly full");
   });
 
   it("respects custom charLimit from config", () => {
@@ -1696,7 +1696,7 @@ describe("buildMemoryUpdatePrompt", () => {
 
     const prompt = buildMemoryUpdatePrompt(arc, { charLimit: 600 });
     expect(prompt).toContain("500/600 chars");
-    expect(prompt).toContain("consolidate"); // 500/600 > 80%
+    expect(prompt).toContain("nearly full"); // 500/600 > 80%
   });
 
   it("includes skill creation section when toolCallsCount >= threshold", () => {
@@ -1763,7 +1763,7 @@ describe("buildMemoryUpdatePrompt", () => {
 
     const prompt = buildMemoryUpdatePrompt(arc, { charLimit: 400 }, undefined, "carol");
     expect(prompt).toContain("Per-user memory for carol (170/200 chars");
-    expect(prompt).toContain("you must consolidate existing entries if you add something");
+    expect(prompt).toContain("carol (170/200 chars - nearly full, make room before adding)");
   });
 
   it("omits per-user memory when nick is not provided", () => {

@@ -1379,7 +1379,7 @@ export function buildMemoryUpdatePrompt(
 
   const chars = content.length;
   const capacityWarning = chars >= charLimit * 0.8
-    ? " - you must consolidate existing entries if you add something"
+    ? " - nearly full, make room before adding"
     : "";
 
   const displayContent = content.trim() || "(empty - not yet created)";
@@ -1392,13 +1392,13 @@ export function buildMemoryUpdatePrompt(
     const userChars = userContent.length;
     const userCharLimit = Math.round(charLimit / 2);
     const userCapacityWarning = userChars >= userCharLimit * 0.8
-      ? " - you must consolidate existing entries if you add something"
+      ? " - nearly full, make room before adding"
       : "";
     const userDisplayContent = userContent.trim() || "(empty - not yet created)";
     prompt += `\n\nPer-user memory for ${nick} (${userChars}/${userCharLimit} chars${userCapacityWarning}):\n<user-memory nick="${nick}" file="/workspace/users/${nick}.md">\n${userDisplayContent}\n</user-memory>\nUse /workspace/users/${nick}.md for how to interact with this user (communication preferences, corrections they have made, interaction style, critical personal context to keep in mind for most interactions). Not for logging what was discussed — that is in chat history or chronicle.`;
   }
 
-  prompt += `\n\nIf this session revealed a behavioral correction or a factual error worth persisting, update the appropriate memory file using the edit or write tool. Keep entries concise and actionable. If nothing worth saving (almost always!), do nothing.`;
+  prompt += `\n\nIf this session revealed a behavioral correction or a factual error worth persisting, update the appropriate memory file using the edit or write tool. One rule per bullet. Terse is fine, but each bullet must read as a self-contained statement (what to do, when, and why if non-obvious) to a model that has never seen this session - no private shorthand. To make room, move the least valuable entries to /workspace/MEMORY_OVERFLOW.md (not injected, but greppable) or condense; when condensing, think hard and doublecheck that every rewritten entry still decodes unambiguously from a blank context. If nothing worth saving (almost always!), do nothing.`;
 
   // Skill creation section - appended when session was complex enough
   const toolCallsCount = options?.toolCallsCount ?? 0;
