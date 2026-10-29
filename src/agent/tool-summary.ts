@@ -1,6 +1,8 @@
 import type { MuaddibTool } from "./tools/baseline-tools.js";
 import type { PromptResult } from "./session-runner.js";
 import type { Logger } from "../app/logging.js";
+import type { MemoryConfig, SkillsConfig } from "../config/muaddib-config.js";
+import { loadArcMemoryFile, loadArcUserMemoryFile } from "./gondolin/index.js";
 import { withCostSpan } from "../cost/cost-span.js";
 import { LLM_CALL_TYPE } from "../cost/llm-call-type.js";
 import { truncateForDebug } from "./debug-utils.js";
@@ -108,4 +110,43 @@ export function buildToolSummaryFollowUpPrompt(
 
 export function formatToolSummaryLogPreview(text: string, maxChars = 180): string {
   return truncateForDebug(text.replace(/\s+/gu, " ").trim(), maxChars);
+}
+
+export function buildMemoryUpdatePrompt(
+  arc: string,
+  memoryConfig?: MemoryConfig,
+  options?: { toolCallsCount?: number; skillsConfig?: SkillsConfig },
+  nick?: string,
+): string {
+  const charLimit = memoryConfig?.charLimit ?? 6000;
+  const content = loadArcMemoryFile(arc);
+
+  const chars = content.length;
+  const capacityWarning = (used: number, limit: number) => used >= limit * 0.8 ? " - nearly full, make room before adding" : "";
+
+  const displayContent = content.trim() || "(empty - not yet created)";
+
+  let prompt = `<meta>Session complete. DO NOT RESPOND ANYMORE.\n\nWrap-up task: Here is your current shared memory (${chars}/${charLimit} chars${capacityWarning(chars, charLimit)}):\n<memory file="/workspace/MEMORY.md">\n${displayContent}\n</memory>\nMEMORY.md is for behavioral directives (how to act, what to verify, communication rules) and factual corrections (things your training data gets wrong). This memory gets injected into every single session - therefore, you do not need to re-record what you said or found out (already captured in /chat_history) or what happenned (already captured in /chronicle). Prefer positive actionable rules ("verify before quoting") over prohibitions ("never fabricate"). If the current memory block doesn't conform to these instructions, adjust/prune it as needed.`;
+
+  // Per-user memory section
+  if (nick) {
+    const userContent = loadArcUserMemoryFile(arc, nick);
+    const userChars = userContent.length;
+    const userCharLimit = Math.round(charLimit / 2);
+    const userDisplayContent = userContent.trim() || "(empty - not yet created)";
+    prompt += `\n\nPer-user memory for ${nick} (${userChars}/${userCharLimit} chars${capacityWarning(userChars, userCharLimit)}):\n<user-memory nick="${nick}" file="/workspace/users/${nick}.md">\n${userDisplayContent}\n</user-memory>\nUse /workspace/users/${nick}.md for how to interact with this user (communication preferences, corrections they have made, interaction style, critical personal context to keep in mind for most interactions). Not for logging what was discussed — that is in chat history or chronicle.`;
+  }
+
+  prompt += `\n\nIf this session revealed a behavioral correction or a factual error worth persisting, update the appropriate memory file using the edit or write tool. One rule per bullet. Terse is fine, but each bullet must read as a self-contained statement (what to do, when, and why if non-obvious) to a model that has never seen this session - no private shorthand. To make room, move the least valuable entries to /workspace/MEMORY_OVERFLOW.md (not injected, but greppable) or condense; when condensing, think hard and doublecheck that every rewritten entry still decodes unambiguously from a blank context. If nothing worth saving (almost always!), do nothing.`;
+
+  // Skill creation section - appended when session was complex enough
+  const toolCallsCount = options?.toolCallsCount ?? 0;
+  const threshold = options?.skillsConfig?.creationThreshold ?? 4;
+
+  if (toolCallsCount >= threshold) {
+    prompt += `\n\nSkill creation: this session used ${toolCallsCount} tool calls - was it tough? If you didn't follow an existing skill, consider saving a reusable skill using manage-skills. Skills allow you to continuously learn, but also carry a permanent token cost. So only if both:\n- The procedure was complex *and* hard to discover (required trial & error or user correction)\n- You could confirm this is a pattern you've encountered historically (grep history?) or are certain to need again\nIf it's not worth capturing, do nothing.`;
+  }
+
+  prompt += "</meta>";
+  return prompt;
 }
