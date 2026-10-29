@@ -54,7 +54,7 @@ import {
   CommandResolver,
   type CommandConfig,
 } from "./resolver.js";
-import { buildMemoryUpdatePrompt, generateToolSummaryFromSession } from "../../agent/tool-summary.js";
+import { buildMemoryUpdatePrompt, generateToolSummaryFromSession } from "../../agent/session-followups.js";
 import type { Logger } from "../../app/logging.js";
 import type { AgentConfig, ToolsConfig } from "../../config/muaddib-config.js";
 import type { ArcEventsWatcher } from "../../events/watcher.js";

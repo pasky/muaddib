@@ -12,7 +12,7 @@ import { withCostSpan } from "../../cost/cost-span.js";
 import { LLM_CALL_TYPE } from "../../cost/llm-call-type.js";
 import type { RunnerLogger } from "../session-factory.js";
 import { SessionRunner, type PromptResult } from "../session-runner.js";
-import { generateToolSummaryFromSession } from "../tool-summary.js";
+import { generateToolSummaryFromSession } from "../session-followups.js";
 import type { MuaddibTool, ToolContext, ToolSet } from "./types.js";
 
 export interface OracleInput {

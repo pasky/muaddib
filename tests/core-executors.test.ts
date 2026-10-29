@@ -1653,7 +1653,7 @@ describe("loadWorkspaceSkills", () => {
 
 // ── Memory update prompt ──────────────────────────────────────────────────
 
-import { buildMemoryUpdatePrompt } from "../src/agent/tool-summary.js";
+import { buildMemoryUpdatePrompt } from "../src/agent/session-followups.js";
 
 describe("buildMemoryUpdatePrompt", () => {
   it("returns prompt with empty-file marker when MEMORY.md does not exist", () => {

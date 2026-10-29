@@ -1584,6 +1584,19 @@ describe("gondolin — chat history in systemPromptSuffix", () => {
     });
     expect(systemPromptSuffix).toContain("/chat_history/");
     expect(systemPromptSuffix).toContain("YYYY-MM-DD.jsonl");
+    expect(systemPromptSuffix).toContain("/chat_history /chronicle`.");
+    expect(systemPromptSuffix).not.toContain("MEMORY_OVERFLOW.md");
+
+    const overflowPath = `${getArcWorkspacePath("history-arc")}/MEMORY_OVERFLOW.md`;
+    mkdirSync(getArcWorkspacePath("history-arc"), { recursive: true });
+    writeFileSync(overflowPath, "- archived rule");
+    try {
+      const withOverflow = createGondolinTools({ arc: "history-arc", config: gondolinConfig }).systemPromptSuffix;
+      expect(withOverflow).toContain("/chat_history /chronicle /workspace/MEMORY_OVERFLOW.md`");
+      expect(withOverflow).not.toContain("archived rule");
+    } finally {
+      rmSync(overflowPath);
+    }
   });
 
   it("omits chat_history hint when chat_history dir does not exist", () => {

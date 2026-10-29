@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   buildToolSummaryFollowUpPrompt,
   generateToolSummaryFromSession,
-} from "../src/agent/tool-summary.js";
+} from "../src/agent/session-followups.js";
 import { currentCostSpan, withCostSpan } from "../src/cost/cost-span.js";
 import { LLM_CALL_TYPE } from "../src/cost/llm-call-type.js";
 
