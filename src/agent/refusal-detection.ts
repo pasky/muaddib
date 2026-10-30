@@ -57,6 +57,13 @@ const ERROR_REFUSAL_SIGNAL_PATTERNS: ReadonlyArray<RefusalPattern> = [
     label: "xai_permission_denied",
     pattern: /permission-denied[\s\S]{0,160}can['’]t help with that request/iu,
   },
+  {
+    // OpenAI-completions finish_reason "content_filter" as mapped by pi-ai.
+    // The body may still carry provider boilerplate (e.g. mimo via OpenRouter:
+    // "The request was rejected because it was considered high risk").
+    label: "content_filter_finish_reason",
+    pattern: /finish_reason: content_filter/iu,
+  },
 ];
 
 function matchFirst(text: string, patterns: ReadonlyArray<RefusalPattern>): string | null {

@@ -17,6 +17,9 @@ describe("refusal detection", () => {
     ["xai_permission_denied", XAI_PERMISSION_DENIED_RAW],
     ["xai_permission_denied", XAI_PERMISSION_DENIED_WRAPPED],
     ["xai_permission_denied", XAI_PERMISSION_DENIED_LIVE],
+    // pi-ai openai-completions mapping of finish_reason "content_filter"
+    // (e.g. mimo via OpenRouter, with "...considered high risk" in the body).
+    ["content_filter_finish_reason", "Provider finish_reason: content_filter"],
   ])("classifies a %s errorMessage as a refusal", (label, errorMessage) => {
     expect(detectRefusalErrorSignal(errorMessage)).toBe(label);
   });
@@ -27,6 +30,7 @@ describe("refusal detection", () => {
     // Refusal wording alone (no permission-denied code) is too generic to act on.
     "500 upstream error: I can't help with that request.",
     "503 overloaded",
+    "Provider finish_reason: network_error",
   ])("does not classify a genuine auth/availability error as a refusal: %s", (errorMessage) => {
     expect(detectRefusalErrorSignal(errorMessage)).toBeNull();
   });

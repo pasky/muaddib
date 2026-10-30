@@ -302,10 +302,16 @@ export class SessionRunner {
             const assistantMessageObj = event.message && typeof event.message === "object"
               ? event.message as object
               : null;
-            const queuedArtifactRetry = text && !responseMuted
+            // A provider refusal may carry boilerplate body text (e.g. "The request
+            // was rejected because it was considered high risk"); never deliver it —
+            // promptWithRefusalFallback retries or surfaces it as a refusal error.
+            const refusal = errorRefusalSignal(event.message);
+            const queuedArtifactRetry = text && !responseMuted && !refusal
               ? queueArtifactUrlRetryIfNeeded(event.message, text)
               : false;
-            if (text && this.onResponse && !responseMuted) {
+            if (text && refusal) {
+              this.logger.warn(`Suppressing refused response (${refusal})`, truncateForDebug(text, 200));
+            } else if (text && this.onResponse && !responseMuted) {
               if (!assistantMessageObj || !deliveredAssistantMessages.has(assistantMessageObj)) {
                 if (queuedArtifactRetry) {
                   this.logger.debug("Deferring assistant response missing last artifact URL", `url=${pendingArtifactUrlRetry ?? "unknown"}`);
@@ -401,9 +407,7 @@ export class SessionRunner {
         // A first-attempt refusal was already handled by promptWithRefusalFallback;
         // this catches a refusal that only appears on an empty-completion retry.
         // Refusals are deterministic — surface it instead of burning the delays.
-        const refusalSignal = emptyMsg?.stopReason === "error" && emptyMsg.errorMessage
-          ? detectRefusalErrorSignal(emptyMsg.errorMessage)
-          : null;
+        const refusalSignal = errorRefusalSignal(emptyMsg);
         if (refusalSignal && emptyMsg?.errorMessage) {
           this.logger.error(`Model refused (${refusalSignal}): ${emptyMsg.errorMessage}`);
           throw new Error(`${REFUSAL_ERROR_PREFIX}${emptyMsg.errorMessage}`);
@@ -556,11 +560,7 @@ export class SessionRunner {
         // and the refusal in errorMessage, not the body — probe both.
         const lastMessage = findLastAssistantMessage(session.messages);
         const bodyRefusal = detectRefusalSignal(extractLastAssistantText(session.messages));
-        const errorRefusal =
-          lastMessage?.stopReason === "error"
-            ? detectRefusalErrorSignal(lastMessage.errorMessage ?? "")
-            : null;
-        if (errorRefusal) {
+        if (errorRefusalSignal(lastMessage)) {
           errorRefusalMessage = lastMessage?.errorMessage ?? "";
         } else if (!bodyRefusal || nextFallback === null) {
           // Answered, or a body-text refusal with nobody left to ask: deliver as-is.
@@ -610,6 +610,13 @@ function stripUndeliverableResponse(text: string): string {
   // before room delivery (command-executor's onResponse), so treat it as
   // empty here to trigger the retry loop instead of ending in silence.
   return extractThinking(text).text;
+}
+
+/** Refusal label when the message is a stopReason "error" provider refusal. */
+function errorRefusalSignal(message: AgentMessage | null): string | null {
+  return message && isAssistantMessage(message) && message.stopReason === "error" && message.errorMessage
+    ? detectRefusalErrorSignal(message.errorMessage)
+    : null;
 }
 
 function findLastAssistantMessage(messages: readonly AgentMessage[]): AssistantMessage | null {

@@ -185,7 +185,7 @@ export function extractExample(
   const systemPrompt = canonicalizeSystemPrompt(systemRaw);
 
   // ── Silver label: only from explicit evidence ──
-  const deliveredMatch = /Delivering response arc=\S+ response=(.*)/.exec(logText);
+  const deliveredMatch = /Delivering response arc=\S+(?: \w+=\S+)* response=(.*)/.exec(logText);
   if (deliveredMatch) {
     return {
       example: {

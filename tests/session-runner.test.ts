@@ -948,6 +948,33 @@ describe("SessionRunner", () => {
     expect(ctx.session.prompt).toHaveBeenCalledTimes(2);
   });
 
+  it("falls back on a content_filter refusal without delivering its body text", async () => {
+    const deliveredTexts: string[] = [];
+    makeMockSession({
+      promptImpl: async (c) => {
+        if (c.agent.state.model?.id === "kimi-k3") {
+          emitAssistantResponse(c, "the real answer");
+          return;
+        }
+        // Live shape: mimo via OpenRouter (Novita) streams boilerplate text, then
+        // finish_reason content_filter, which pi-ai maps to stopReason "error".
+        c.session.messages.push({
+          role: "assistant",
+          content: [{ type: "text", text: "The request was rejected because it was considered high risk" }],
+          usage: makeUsage(), stopReason: "error", errorMessage: "Provider finish_reason: content_filter",
+        });
+        c.callbacks.forEach((cb) => cb({ type: "message_end", message: c.session.messages.at(-1) }));
+      },
+    });
+
+    const runner = makeRunner({ onResponse: (text: string) => { deliveredTexts.push(text); } });
+    const result = await runner.prompt("hello", { refusalFallbackModels: ["openrouter:kimi-k3"] });
+
+    expect(result.text).toBe("the real answer");
+    expect(result.refusalFallbackModel).toBe("openrouter:kimi-k3");
+    expect(deliveredTexts).toEqual(["the real answer [refusal fallback to kimi-k3]"]);
+  });
+
   it("fails with the refusal reason when every model in the fallback chain refuses", async () => {
     const ctx = makeMockSession({
       messages: [{

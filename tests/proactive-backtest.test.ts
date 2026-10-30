@@ -37,7 +37,7 @@ function logFor(opts: { delivered?: string; responseText?: string; thinking?: st
     lines.push("2026-07-16 22:52:55,500 - muaddib.rooms.command.irc - DEBUG - llm_io payload agent_stream " + JSON.stringify({ ...payload, model: opts.extraModel }, null, 2));
   }
   if (opts.delivered) {
-    lines.push(`2026-07-16 22:52:56,000 - muaddib.rooms.command.irc - INFO - Delivering response arc=libera##retwin response=${opts.delivered}`);
+    lines.push(`2026-07-16 22:52:56,000 - muaddib.rooms.command.irc - INFO - Delivering response arc=libera##retwin trigger=!s model=openrouter:moonshotai/kimi-k3 response=${opts.delivered}`);
   }
   return lines.join("\n");
 }

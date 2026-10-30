@@ -504,11 +504,14 @@ export class CommandExecutor {
     const { logger } = this;
 
     // ── Unified delivery: send + persist (used for all responses) ──
+    // Mode/model are unknown until resolution; pre-resolution deliveries
+    // (help, resolution errors) log without them.
+    let runTags: string[] = [];
     const deliver = async (
       text: string,
       persistOptions?: { mode?: string },
     ): Promise<void> => {
-      logger.info("Delivering response", `arc=${message.arc}`, `response=${text}`);
+      logger.info("Delivering response", `arc=${message.arc}`, ...runTags, `response=${text}`);
       const sr = await sendResponse(text);
       await this.persistBotResponse(message.arc, message, text, sr ?? undefined, {
         run: triggerTs,
@@ -520,6 +523,7 @@ export class CommandExecutor {
     if (!result) return;
 
     const { modelSpec, modeKey, trigger, runtime: resolvedRuntime, modeConfig, resolved, context } = result;
+    runTags = [`mode=${modeKey}`, `trigger=${trigger}`, `model=${modelSpec}`];
     const userArc = buildUserArc(message.serverTag, message.nick);
     const budgetStatus = await checkUserBudget({
       costPolicy: this.runtime.config.getCostPolicyConfig(),
@@ -774,7 +778,7 @@ export class CommandExecutor {
 
     // Quiet delivery: prefix with model tag, send + persist.
     const deliver = async (text: string): Promise<void> => {
-      logger.info("Delivering response", `arc=${message.arc}`, `response=${text}`);
+      logger.info("Delivering response", `arc=${message.arc}`, `trigger=${trigger}`, `model=${modelSpec}`, `response=${text}`);
       const sr = await sendResponse(text);
       await this.persistBotResponse(message.arc, message, text, sr ?? undefined, {
         mode: trigger,
@@ -888,6 +892,7 @@ export class CommandExecutor {
       "Quiet response delivered",
       `arc=${message.arc}`,
       `trigger=${trigger}`,
+      `model=${modelSpec}`,
     );
     return true;
   }
