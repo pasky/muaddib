@@ -19,10 +19,7 @@ import { SlackSocketTransport } from "./transport.js";
 import type { ArcEventsWatcher } from "../../events/watcher.js";
 
 interface CommandLike {
-  handleIncomingMessage(
-    message: RoomMessage,
-    options?: { sendResponse?: (text: string, options?: { forceNewMessage?: boolean }) => Promise<{ platformId?: string } | void>; onSteered?: () => void },
-  ): Promise<void>;
+  handleIncomingMessage: RoomMessageHandler["handleIncomingMessage"];
   cancelProactive?(): void;
 }
 
@@ -427,9 +424,19 @@ export class SlackRoomMonitor {
       lastReplyAtSeconds = undefined;
     };
 
+    const stopTyping = async (): Promise<void> => {
+      const threadTs = typingIndicatorThreadTs;
+      // Disable refreshes before clearing, including those from late error replies.
+      typingIndicatorThreadTs = undefined;
+      if (threadTs) {
+        await sender?.clearTypingIndicator?.(event.channelId, threadTs);
+      }
+    };
+
     const handleIncoming = async (): Promise<void> => {
       await this.options.commandHandler.handleIncomingMessage(message, {
         onSteered: breakEditChain,
+        onResponseComplete: stopTyping,
         sendResponse: sender
           ? async (text, sendOptions) => {
               const formattedText = await postProcessOutgoingSlackMessage(text, event.channelId, responseThreadId, sender, artifactsConfig, this.logger);
@@ -499,11 +506,8 @@ export class SlackRoomMonitor {
 
     const arc = message.arc;
     const typingThreadTs = message.threadId ?? event.messageTs;
-    let typingIndicatorSet = false;
-
     if (sender?.setTypingIndicator && typingThreadTs) {
-      typingIndicatorSet = await sender.setTypingIndicator(event.channelId, typingThreadTs);
-      if (typingIndicatorSet) {
+      if (await sender.setTypingIndicator(event.channelId, typingThreadTs)) {
         typingIndicatorThreadTs = typingThreadTs;
       }
     }
@@ -513,9 +517,8 @@ export class SlackRoomMonitor {
       try {
         await handleIncoming();
       } finally {
-        if (typingIndicatorSet && typingThreadTs && sender?.clearTypingIndicator) {
-          await sender.clearTypingIndicator(event.channelId, typingThreadTs);
-        }
+        // Also covers builtins, early returns, and errors before generation completes.
+        await stopTyping();
       }
     };
 

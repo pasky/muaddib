@@ -991,7 +991,7 @@ describe("SlackRoomMonitor", () => {
     await history.close();
   });
 
-  it("manages Slack typing indicator lifecycle for direct messages", async () => {
+  it("clears Slack typing before housekeeping and does not restore it for late replies", async () => {
     const history = createTempHistoryStore(20);
 
     const typingSetCalls: Array<{ channelId: string; threadTs: string }> = [];
@@ -1009,10 +1009,20 @@ describe("SlackRoomMonitor", () => {
           typingClearCalls.push({ channelId, threadTs });
         },
         sendMessage: async () => ({ messageTs: "1700000000.3000" }),
+        updateMessage: async () => ({ messageTs: "1700000000.3000" }),
       },
       commandHandler: {
         handleIncomingMessage: async (_message, options) => {
           await options?.sendResponse?.("working");
+          expect(typingClearCalls).toEqual([]);
+          await options?.sendResponse?.("done");
+          expect(typingSetCalls).toHaveLength(3);
+          await options?.onResponseComplete?.();
+          // The handler is still running housekeeping, but the status is already cleared.
+          expect(typingClearCalls).toEqual([{ channelId: "C123", threadTs: "1700000000.2000" }]);
+          // A late error reply must not revive typing, on either the edit or new-message path.
+          await options?.sendResponse?.("housekeeping error");
+          await options?.sendResponse?.("another error", { forceNewMessage: true });
         },
       },
     });
@@ -1032,10 +1042,43 @@ describe("SlackRoomMonitor", () => {
     expect(typingSetCalls).toEqual([
       { channelId: "C123", threadTs: "1700000000.2000" },
       { channelId: "C123", threadTs: "1700000000.2000" },
+      { channelId: "C123", threadTs: "1700000000.2000" },
     ]);
     expect(typingClearCalls).toEqual([{ channelId: "C123", threadTs: "1700000000.2000" }]);
 
     await history.close();
+  });
+
+  it("clears Slack typing when command handling fails before response completion", async () => {
+    const history = createTempHistoryStore(20);
+    const clearTypingIndicator = vi.fn(async () => {});
+    const monitor = new SlackRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      sender: {
+        setTypingIndicator: async () => true,
+        clearTypingIndicator,
+        sendMessage: async () => {},
+      },
+      commandHandler: {
+        handleIncomingMessage: async () => { throw new Error("generation failed"); },
+      },
+    });
+
+    try {
+      await expect(monitor.processMessageEvent({
+        workspaceId: "T123",
+        channelId: "C123",
+        username: "alice",
+        text: "hello",
+        mynick: "muaddib",
+        messageTs: "1700000000.2000",
+        isDirectMessage: true,
+      })).rejects.toThrow("generation failed");
+      expect(clearTypingIndicator).toHaveBeenCalledExactlyOnceWith("C123", "1700000000.2000");
+    } finally {
+      await history.close();
+    }
   });
 
   it("updates edited messages by platform id with history parity", async () => {
