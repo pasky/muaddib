@@ -35,10 +35,7 @@ export interface IrcEventsClient {
 }
 
 interface CommandLike {
-  handleIncomingMessage(
-    message: RoomMessage,
-    options?: { sendResponse?: (text: string) => Promise<void> },
-  ): Promise<void>;
+  handleIncomingMessage: RoomMessageHandler["handleIncomingMessage"];
   cancelProactive?(): void;
 }
 

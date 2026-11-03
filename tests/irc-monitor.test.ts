@@ -2,7 +2,7 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 
 import { AuthStore } from "../src/auth/auth-store.js";
 import { RuntimeLogWriter } from "../src/app/logging.js";
@@ -185,6 +185,7 @@ describe("IrcRoomMonitor", () => {
       history,
       commandHandler: {
         handleIncomingMessage: async (message, options) => {
+          expectTypeOf(options).toEqualTypeOf<Parameters<RoomMessageHandler["handleIncomingMessage"]>[1]>();
           executeCalls.push(message.content);
           originalContentCalls.push(message.originalContent);
           if (message.isDirect && options?.sendResponse) {
