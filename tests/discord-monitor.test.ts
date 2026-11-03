@@ -176,7 +176,13 @@ describe("DiscordRoomMonitor", () => {
     await history.close();
   });
 
-  it("includes attachment metadata block in command content", async () => {
+  it.each([
+    { name: "channel mention", content: "muaddib: please inspect", isDirectMessage: false, mentionsBot: true, expectedIsDirect: true },
+    { name: "captionless DM", content: "", isDirectMessage: true, mentionsBot: false, expectedIsDirect: true },
+    { name: "captionless passive message", content: "", isDirectMessage: false, mentionsBot: false, expectedIsDirect: false },
+  ])("includes attachment metadata for $name", async ({ content, isDirectMessage, mentionsBot, expectedIsDirect }) => {
+    const filename = "report.txt";
+    const contentType = "text/plain";
     const history = createTempHistoryStore(20);
 
     let seenContent = "";
@@ -187,7 +193,7 @@ describe("DiscordRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async (message) => {
           seenContent = message.content;
-
+          expect(message.isDirect).toBe(expectedIsDirect);
         },
       },
     });
@@ -196,28 +202,59 @@ describe("DiscordRoomMonitor", () => {
       guildId: "guild-1",
       channelId: "chan-1",
       username: "alice",
-      content: "muaddib: please inspect",
+      content,
       mynick: "muaddib",
-      mentionsBot: true,
+      mentionsBot,
+      isDirectMessage,
       attachments: [
         {
-          url: "https://cdn.discordapp.com/attachments/123/report.txt",
-          contentType: "text/plain",
-          filename: "report.txt",
+          url: `https://cdn.discordapp.com/attachments/123/${filename}`,
+          contentType,
+          filename,
           size: 512,
         },
       ],
     });
 
-    expect(seenContent).toContain("please inspect");
-    expect(seenContent).toContain("[Attachments]");
-    expect(seenContent).toContain("1. text/plain (filename: report.txt) (size: 512): https://cdn.discordapp.com/attachments/123/report.txt");
-    expect(seenContent).toContain("[/Attachments]");
+    expect(seenContent).toBe([
+      ...(content ? ["please inspect", ""] : []),
+      "[Attachments]",
+      `1. ${contentType} (filename: ${filename}) (size: 512): https://cdn.discordapp.com/attachments/123/${filename}`,
+      "[/Attachments]",
+    ].join("\n"));
 
     await history.close();
   });
 
-  it("writes direct-message logs to Discord arc-sharded files", async () => {
+  it.each(["", "   "])("ignores messages with no text or attachments (%s)", async (content) => {
+    const history = createTempHistoryStore(20);
+    let handled = false;
+    const monitor = new DiscordRoomMonitor({
+      roomConfig: { enabled: true },
+      history,
+      commandHandler: {
+        handleIncomingMessage: async () => { handled = true; },
+      },
+    });
+
+    await monitor.processMessageEvent({
+      channelId: "chan-1",
+      username: "alice",
+      content,
+      mynick: "muaddib",
+      isDirectMessage: true,
+    });
+
+    expect(handled).toBe(false);
+    await history.close();
+  });
+
+  it.each([
+    { content: "muaddib: check / parity", preview: "check_parity", attachments: [] },
+    { content: "", preview: "attachments_1_text_plain_filename_report_txt", attachments: [
+      { url: "https://cdn.discordapp.com/attachments/123/report.txt", contentType: "text/plain", filename: "report.txt" },
+    ] },
+  ])("writes useful Discord logs for content $content", async ({ content, preview, attachments }) => {
     const history = createTempHistoryStore(20);
 
     const logsHome = await mkdtemp(join(tmpdir(), "muaddib-discord-message-logs-"));
@@ -249,7 +286,9 @@ describe("DiscordRoomMonitor", () => {
       channelId: "chan-1",
       channelName: "general",
       username: "alice",
-      content: "muaddib: check / parity",
+      content,
+      attachments,
+      messageId: "message-1",
       mynick: "muaddib",
       mentionsBot: true,
     });
@@ -259,7 +298,11 @@ describe("DiscordRoomMonitor", () => {
     const arcFiles = await readdir(arcDir);
 
     expect(arcFiles).toHaveLength(1);
-    expect(arcFiles[0]).toBe("14-15-16-alice-muaddib_check_parity.log");
+    expect(arcFiles[0]).toBe(`14-15-16-alice-${preview}.log`);
+
+    const systemLog = await readFile(join(logsHome, "logs", datePath, "system.log"), "utf-8");
+    expect(systemLog).toContain(`Received Discord message channelId=chan-1 messageId=message-1 textLength=${content.length} attachments=${attachments.length}`);
+    expect(systemLog).not.toContain("https://cdn.discordapp.com");
 
     const messageLog = await readFile(join(arcDir, arcFiles[0]), "utf-8");
     expect(messageLog).toContain("inside discord direct handler");

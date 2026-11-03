@@ -282,7 +282,15 @@ export class DiscordRoomMonitor {
   }
 
   async processMessageEvent(event: DiscordMessageEvent): Promise<void> {
-    if (!event.channelId || !event.username || !event.content || !event.mynick) {
+    this.logger.debug(
+      "Received Discord message",
+      `channelId=${event.channelId}`,
+      `messageId=${event.messageId ?? "<unknown>"}`,
+      `textLength=${event.content.length}`,
+      `attachments=${event.attachments?.length ?? 0}`,
+    );
+
+    if (!event.channelId || !event.username || !event.mynick) {
       return;
     }
 
@@ -436,7 +444,7 @@ export class DiscordRoomMonitor {
     };
 
     if (this.logWriter) {
-      await this.logWriter.withMessageContext({ arc, nick: message.nick, message: event.content }, runDirectMessage);
+      await this.logWriter.withMessageContext({ arc, nick: message.nick, message: message.content }, runDirectMessage);
     } else {
       await runDirectMessage();
     }
