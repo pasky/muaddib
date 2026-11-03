@@ -1921,12 +1921,13 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
-  it("awaits session dispose (Gondolin VM checkpoint/close) before completing", async () => {
+  it.each(["!s hello", "!c !s hello"])("signals response completion before maintenance but awaits session dispose (%s)", async (command) => {
     const history = createTempHistoryStore(40);
     await history.initialize();
 
     const disposeStarted = createDeferred<void>();
     const releaseDispose = createDeferred<void>();
+    const phases: string[] = [];
     const runnerFactory: CommandRunnerFactory = (input) => ({
       prompt: async () => {
         const result = makeRunnerResult("done");
@@ -1941,6 +1942,7 @@ describe("RoomMessageHandler", () => {
               await releaseDispose.promise;
             },
           } as any,
+          followUp: async () => { phases.push("maintenance"); return null; },
         };
       },
     });
@@ -1951,19 +1953,24 @@ describe("RoomMessageHandler", () => {
       history,
       classifyMode: async () => "EASY_SERIOUS",
       runnerFactory,
-    }).handleIncomingMessage(makeMessage("!s hello", { isDirect: true }), {
-      sendResponse: async () => {},
+    }).handleIncomingMessage(makeMessage(command, { isDirect: true }), {
+      sendResponse: async () => { phases.push("response"); },
+      onResponseComplete: async () => { phases.push("response complete"); },
     }).finally(() => { settled = true; });
 
-    await disposeStarted.promise;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(settled).toBe(false);
-
-    releaseDispose.resolve();
-    await execution;
+    try {
+      await disposeStarted.promise;
+      // Let a mistakenly unawaited dispose allow execution to settle before checking.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(settled).toBe(false);
+      expect(phases.slice(0, 3)).toEqual(["response", "response complete", "maintenance"]);
+      expect(phases.filter((phase) => phase === "response complete")).toHaveLength(1);
+    } finally {
+      releaseDispose.resolve();
+      await execution;
+      await history.close();
+    }
     expect(settled).toBe(true);
-
-    await history.close();
   });
 
   it("refuses over-budget free users before runner creation", async () => {
@@ -2425,6 +2432,7 @@ describe("RoomMessageHandler", () => {
       makeRunnerWithBlockedBackgroundWork();
 
     const followupAttempted = createDeferred<void>();
+    const onResponseComplete = vi.fn(async () => {});
     let sendCount = 0;
     const execution = createHandler({
       roomConfig: roomConfig as any,
@@ -2432,6 +2440,7 @@ describe("RoomMessageHandler", () => {
       classifyMode: async () => "EASY_SERIOUS",
       runnerFactory,
     }).handleIncomingMessage(makeMessage("!s fail after response", { isDirect: true }), {
+      onResponseComplete,
       sendResponse: async () => {
         sendCount += 1;
         if (sendCount === 2) {
@@ -2443,10 +2452,12 @@ describe("RoomMessageHandler", () => {
 
     await backgroundStarted.promise;
     await followupAttempted.promise;
+    const responseCompleteCalls = onResponseComplete.mock.calls.length;
     releaseBackground.resolve();
 
     await expect(execution).rejects.toThrow("cost followup delivery failed");
     await backgroundFinished.promise;
+    expect(responseCompleteCalls).toBe(1);
 
     const jsonlLines = await readRawJsonlLines(history);
     const costRows = jsonlLines.filter((row: any) => row.call);

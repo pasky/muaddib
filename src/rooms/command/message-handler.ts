@@ -148,7 +148,12 @@ export class RoomMessageHandler {
 
   async handleIncomingMessage(
     message: RoomMessage,
-    options?: { sendResponse?: SendResponse; onSteered?: () => void },
+    options?: {
+      sendResponse?: SendResponse;
+      onSteered?: () => void;
+      /** User-facing generation and delivery finished; housekeeping may still be running. */
+      onResponseComplete?: () => Promise<void>;
+    },
   ): Promise<void> {
     message = this.sanitizeSensitiveCommandMessage(message);
     const sendResponse: SendResponse = options?.sendResponse ?? (async () => {});
@@ -240,11 +245,12 @@ export class RoomMessageHandler {
       if (breakingActiveSession || this.resolver.shouldBypassSteering(message)) {
         await this.executor.execute(message, triggerTs, sendResponse, {
           networkAccessApprover,
+          onResponseComplete: options?.onResponseComplete,
         });
         return;
       }
 
-      await this.handleCommandMessage(message, triggerTs, sendResponse, networkAccessApprover, options?.onSteered);
+      await this.handleCommandMessage(message, triggerTs, sendResponse, networkAccessApprover, options?.onSteered, options?.onResponseComplete);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       this.logger.error("Agent execution failed", `nick=${message.nick}`, `error=${errorMsg}`);
@@ -263,6 +269,7 @@ export class RoomMessageHandler {
     sendResponse: SendResponse,
     networkAccessApprover: NetworkAccessApprover,
     onSteered?: () => void,
+    onResponseComplete?: () => Promise<void>,
   ): Promise<void> {
     const key = sessionKey(message);
 
@@ -285,6 +292,7 @@ export class RoomMessageHandler {
     try {
       await this.executor.execute(message, triggerTs, sendResponse, {
         networkAccessApprover,
+        onResponseComplete,
         onAgentCreated: (agent) => {
           // Flush buffered messages, then swap to direct steering.
           for (const buffered of pending) {

@@ -18,10 +18,7 @@ import type { ArcEventsWatcher } from "../../events/watcher.js";
 const DISCORD_MESSAGE_CONTENT_MAX_CHARS = 2_000;
 
 interface CommandLike {
-  handleIncomingMessage(
-    message: RoomMessage,
-    options?: { sendResponse?: (text: string, options?: { forceNewMessage?: boolean }) => Promise<{ platformId?: string } | void>; onSteered?: () => void },
-  ): Promise<void>;
+  handleIncomingMessage: RoomMessageHandler["handleIncomingMessage"];
   cancelProactive?(): void;
 }
 
@@ -365,9 +362,10 @@ export class DiscordRoomMonitor {
       lastReplyAtSeconds = undefined;
     };
 
-    const handleIncoming = async (): Promise<void> => {
+    const handleIncoming = async (onResponseComplete?: () => Promise<void>): Promise<void> => {
       await this.options.commandHandler.handleIncomingMessage(message, {
         onSteered: breakEditChain,
+        onResponseComplete,
         sendResponse: sender
           ? async (text, sendOptions) => {
               const nowSeconds = nowMonotonicSeconds();
@@ -438,9 +436,7 @@ export class DiscordRoomMonitor {
     const arc = message.arc;
     const runDirectMessage = async (): Promise<void> => {
       this.logger.debug("Processing direct Discord message", `arc=${arc}`, `nick=${message.nick}`);
-      await this.withTypingIndicator(event.channelId, async () => {
-        await handleIncoming();
-      });
+      await this.withTypingIndicator(event.channelId, handleIncoming);
     };
 
     if (this.logWriter) {
@@ -452,7 +448,7 @@ export class DiscordRoomMonitor {
 
   private async withTypingIndicator(
     channelId: string,
-    run: () => Promise<void>,
+    run: (stopTyping?: () => Promise<void>) => Promise<void>,
   ): Promise<void> {
     const sender = this.options.sender;
     if (!sender?.setTypingIndicator) {
@@ -467,13 +463,19 @@ export class DiscordRoomMonitor {
       });
     }, 7_000);
 
-    try {
-      await run();
-    } finally {
+    let stopped = false;
+    const stopTyping = async (): Promise<void> => {
+      if (stopped) return;
+      stopped = true;
       clearInterval(refreshTimer);
-      if (sender.clearTypingIndicator) {
-        await sender.clearTypingIndicator(channelId);
-      }
+      await sender.clearTypingIndicator?.(channelId);
+    };
+
+    try {
+      await run(stopTyping);
+    } finally {
+      // Also covers builtins, early returns, and errors before generation completes.
+      await stopTyping();
     }
   }
 

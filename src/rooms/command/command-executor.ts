@@ -497,6 +497,7 @@ export class CommandExecutor {
     options?: {
       onAgentCreated?: (agent: Agent) => void;
       networkAccessApprover?: NetworkAccessApprover;
+      onResponseComplete?: () => Promise<void>;
     },
   ): Promise<void> {
     const onAgentCreated = options?.onAgentCreated;
@@ -712,15 +713,19 @@ export class CommandExecutor {
             modelSpec: effectiveModelSpec,
           },
           async ({ usage, toolCallsCount }) => {
-            // Send optional human-readable followups for expensive runs/milestones.
+            try {
+              // Send optional human-readable followups for expensive runs/milestones.
+              if (usage && usage.cost.total > 0) {
+                await this.emitCostFollowups(message, usage, toolCallsCount, deliver);
+              }
 
-            if (usage && usage.cost.total > 0) {
-              await this.emitCostFollowups(message, usage, toolCallsCount, deliver);
-            }
-
-            // Notify BYOK user if operator default drifted since they set their remap.
-            if (driftWarning) {
-              await deliver(driftWarning);
+              // Notify BYOK user if operator default drifted since they set their remap.
+              if (driftWarning) {
+                await deliver(driftWarning);
+              }
+            } finally {
+              // Stop user-facing activity before memory updates, summaries, and disposal.
+              await options?.onResponseComplete?.();
             }
           },
           triggerTs,

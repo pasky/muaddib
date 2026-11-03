@@ -2,7 +2,7 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { AuthStore } from "../src/auth/auth-store.js";
 import { RuntimeLogWriter } from "../src/app/logging.js";
@@ -136,44 +136,57 @@ describe("DiscordRoomMonitor", () => {
     await history.close();
   });
 
-  it("sets and clears Discord typing indicator around direct command handling", async () => {
+  it.each([false, true])("stops refreshing typing before housekeeping or on failure (failure=%s)", async (fail) => {
     const history = createTempHistoryStore(20);
-
-    const typingSetCalls: string[] = [];
-    const typingClearCalls: string[] = [];
-
-    const monitor = new DiscordRoomMonitor({
-      roomConfig: { enabled: true },
-      history,
-      sender: {
-        setTypingIndicator: async (channelId) => {
-          typingSetCalls.push(channelId);
+    vi.useFakeTimers();
+    try {
+      const typingSetCalls: string[] = [];
+      const typingClearCalls: string[] = [];
+      const monitor = new DiscordRoomMonitor({
+        roomConfig: { enabled: true },
+        history,
+        sender: {
+          setTypingIndicator: async (channelId) => { typingSetCalls.push(channelId); },
+          clearTypingIndicator: async (channelId) => { typingClearCalls.push(channelId); },
+          sendMessage: async () => {},
         },
-        clearTypingIndicator: async (channelId) => {
-          typingClearCalls.push(channelId);
+        commandHandler: {
+          handleIncomingMessage: async (_message, options) => {
+            await options?.sendResponse?.("Still working");
+            await vi.advanceTimersByTimeAsync(7_000);
+            expect(typingSetCalls).toEqual(["chan-typing", "chan-typing"]);
+            if (fail) throw new Error("generation failed");
+
+            await options?.sendResponse?.("Done");
+            await options?.onResponseComplete?.();
+            expect(typingClearCalls).toEqual(["chan-typing"]);
+            // Housekeeping is still running, but must not refresh typing.
+            await vi.advanceTimersByTimeAsync(21_000);
+            expect(typingSetCalls).toHaveLength(2);
+          },
         },
-        sendMessage: async () => {},
-      },
-      commandHandler: {
-        handleIncomingMessage: async (_message, options) => {
-          await options?.sendResponse?.("ok");
-        },
-      },
-    });
+      });
 
-    await monitor.processMessageEvent({
-      guildId: "guild-1",
-      channelId: "chan-typing",
-      username: "alice",
-      content: "muaddib: hello",
-      mynick: "muaddib",
-      mentionsBot: true,
-    });
-
-    expect(typingSetCalls).toEqual(["chan-typing"]);
-    expect(typingClearCalls).toEqual(["chan-typing"]);
-
-    await history.close();
+      const execution = monitor.processMessageEvent({
+        guildId: "guild-1",
+        channelId: "chan-typing",
+        username: "alice",
+        content: "muaddib: hello",
+        mynick: "muaddib",
+        mentionsBot: true,
+      });
+      if (fail) {
+        await expect(execution).rejects.toThrow("generation failed");
+      } else {
+        await execution;
+      }
+      await vi.advanceTimersByTimeAsync(21_000);
+      expect(typingSetCalls).toHaveLength(2);
+      expect(typingClearCalls).toEqual(["chan-typing"]);
+    } finally {
+      vi.useRealTimers();
+      await history.close();
+    }
   });
 
   it.each([
