@@ -44,7 +44,7 @@ const roomConfig = {
     modes: {
       serious: {
         model: "openai:gpt-4o-mini",
-        prompt: "You are {mynick}. Time={current_time}.",
+        prompt: "You are {mynick}. Models: !s={!s_model}. Using {current_trigger}={current_model}. Time={current_time}.",
         reasoningEffort: "low",
         steering: true,
         triggers: {
@@ -1847,6 +1847,7 @@ describe("RoomMessageHandler", () => {
       });
 
       let runnerModel: string | null = null;
+      let runnerSystemPrompt = "";
       const sent: string[] = [];
 
       const handler = createHandler({
@@ -1860,6 +1861,7 @@ describe("RoomMessageHandler", () => {
         runnerFactory: (input) => ({
           prompt: async () => {
             runnerModel = input.model;
+            runnerSystemPrompt = input.systemPrompt;
             const result = makeRunnerResult("done");
             await input.onResponse(result.text, { interim: false });
             return result;
@@ -1873,6 +1875,8 @@ describe("RoomMessageHandler", () => {
       });
 
       expect(runnerModel).toBe("openrouter:google/gemini-flash");
+      // The model listing documents configured models; only the current-model marker follows the override.
+      expect(runnerSystemPrompt).toContain("Models: !s=gpt-4o-mini. Using !s=gemini-flash.");
     } finally {
       await rm(muaddibHome, { recursive: true, force: true });
       await history.close();
@@ -3875,7 +3879,7 @@ describe("RoomMessageHandler", () => {
         interjectThreshold: 1,
         models: {
           validation: ["openai:gpt-4o-mini"],
-          serious: "openai:gpt-4o-mini",
+          serious: "openai:gpt-4o-mini-proactive",
         },
         prompts: {
           interject: "Score this: {message}",
@@ -3887,6 +3891,7 @@ describe("RoomMessageHandler", () => {
     const sent: string[] = [];
     const proactivePromptReached = createDeferred<void>();
     let capturedChain: string[] | undefined;
+    let capturedSystemPrompt = "";
 
     // Exact shape of the ##chemistry leak: inline <thinking> block followed
     // by the real reply on the same line.
@@ -3908,6 +3913,7 @@ describe("RoomMessageHandler", () => {
       runnerFactory: (input) => ({
         prompt: async (_prompt, options) => {
           capturedChain = options?.refusalFallbackModels;
+          capturedSystemPrompt = input.systemPrompt;
           proactivePromptReached.resolve();
           const result = makeRunnerResult(leakedPayload);
           await input.onResponse(result.text, { interim: false });
@@ -3939,6 +3945,8 @@ describe("RoomMessageHandler", () => {
     expect(sent[0]).not.toContain("Directly invited by name");
     // The quiet (proactive/event) path merges the refusal chain the same way as commands.
     expect(capturedChain).toEqual(["anthropic:claude-opus-4-8", "anthropic:claude-3-5-haiku"]);
+    // Prompt placeholders name the classified trigger and the proactive model actually running.
+    expect(capturedSystemPrompt).toContain("Models: !s=gpt-4o-mini. Using !s=gpt-4o-mini-proactive.");
 
     const rows = await history.getFullHistory("libera##test");
     const monologue = rows.find((r: any) => r.message.includes("[internal monologue]"));

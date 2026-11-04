@@ -356,7 +356,9 @@ export class ProactiveRunner {
         modeKey: "serious",
         trigger: classifiedTrigger,
         source: COST_SOURCE.PROACTIVE,
-        systemPrompt: this.executor.buildSystemPrompt("serious", message.mynick)
+        systemPrompt: this.executor.buildSystemPrompt(
+          "serious", message.mynick, this.config.models.serious, classifiedTrigger,
+        )
           + " " + this.config.prompts.seriousExtra,
         historySize: this.config.historySize,
         reasoningEffort: classifiedRuntime.reasoningEffort,

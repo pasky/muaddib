@@ -1163,6 +1163,11 @@ export class CommandExecutor {
 
   // ── Helpers ──
 
+  /**
+   * `{!x_model}` placeholders list each trigger's configured model; `{current_trigger}`
+   * and `{current_model}` describe this run (`modelOverride` = the model actually used
+   * when it differs from the trigger's configured one, e.g. `@model` or proactive).
+   */
   buildSystemPrompt(mode: string, mynick: string, modelOverride?: string, selectedTrigger?: string): string {
     const modeConfig = this.commandConfig.modes[mode];
     if (!modeConfig) {
@@ -1174,10 +1179,8 @@ export class CommandExecutor {
     const triggerModelVars: Record<string, string> = {};
     for (const [trigger, modeKey] of Object.entries(this.resolver.triggerToMode)) {
       const triggerOverrideModel = this.resolver.triggerOverrides[trigger]?.model as string | undefined;
-      const effectiveModel =
-        triggerOverrideModel ??
-        (modeKey === mode && modelOverride ? modelOverride : this.commandConfig.modes[modeKey].model);
-      triggerModelVars[`${trigger}_model`] = modelStrCore(effectiveModel ?? "");
+      const configuredModel = triggerOverrideModel ?? this.commandConfig.modes[modeKey].model;
+      triggerModelVars[`${trigger}_model`] = modelStrCore(configuredModel ?? "");
     }
 
     promptTemplate = promptTemplate.replace(
@@ -1186,14 +1189,15 @@ export class CommandExecutor {
     );
 
     const promptVars = this.runtime.config.getRoomConfig(this.roomName).promptVars ?? {};
+    const currentModel = modelOverride
+      ? modelStrCore(modelOverride)
+      : selectedTrigger ? triggerModelVars[`${selectedTrigger}_model`] : undefined;
     const vars: Record<string, string> = {
       ...promptVars,
       mynick,
       current_time: formatUtcTime() + " UTC",
       ...(selectedTrigger ? { current_trigger: selectedTrigger } : {}),
-      ...(selectedTrigger && triggerModelVars[`${selectedTrigger}_model`]
-        ? { current_model: triggerModelVars[`${selectedTrigger}_model`] }
-        : {}),
+      ...(currentModel ? { current_model: currentModel } : {}),
     };
 
     return promptTemplate.replace(/\{([A-Za-z0-9_]+)\}/g, (full, key: string) => vars[key] ?? full);
