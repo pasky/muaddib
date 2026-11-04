@@ -1667,31 +1667,37 @@ describe("gondolin — MEMORY.md in systemPromptSuffix", () => {
     mkdirSync(`${workspacePath}/users`, { recursive: true });
     writeFileSync(`${workspacePath}/users/alice.md`, "Prefers concise answers.");
 
-    const { systemPromptSuffix } = createGondolinTools({
+    const { systemPromptSuffix, systemPromptRunContext } = createGondolinTools({
       arc,
       config: gondolinConfig,
       nick: "alice",
     });
-    expect(systemPromptSuffix).toContain('<user-memory nick="alice" file="/workspace/users/alice.md">');
-    expect(systemPromptSuffix).toContain("Prefers concise answers.");
-    expect(systemPromptSuffix).toContain("</user-memory>");
+    expect(systemPromptRunContext).toMatch(/^Your working directory in this session: \/workspace\/\.sessions\/session-\w+\n/);
+    expect(systemPromptRunContext).toContain('<user-memory nick="alice" file="/workspace/users/alice.md">');
+    expect(systemPromptRunContext).toContain("Prefers concise answers.");
+    expect(systemPromptRunContext).toContain("</user-memory>");
+
+    // The arc suffix is prompt-cached: another session by another user must reproduce it byte-for-byte.
+    const other = createGondolinTools({ arc, config: gondolinConfig, nick: "bob" });
+    expect(other.systemPromptSuffix).toBe(systemPromptSuffix);
+    expect(other.systemPromptRunContext).not.toBe(systemPromptRunContext);
   });
 
   it("omits <user-memory> tag when nick is not provided", () => {
-    const { systemPromptSuffix } = createGondolinTools({
+    const { systemPromptRunContext } = createGondolinTools({
       arc: "no-nick-arc",
       config: gondolinConfig,
     });
-    expect(systemPromptSuffix).not.toContain("<user-memory");
+    expect(systemPromptRunContext).not.toContain("<user-memory");
   });
 
   it("omits <user-memory> tag when per-user file does not exist", () => {
-    const { systemPromptSuffix } = createGondolinTools({
+    const { systemPromptRunContext } = createGondolinTools({
       arc: "no-user-file-arc",
       config: gondolinConfig,
       nick: "charlie",
     });
-    expect(systemPromptSuffix).not.toContain("<user-memory");
+    expect(systemPromptRunContext).not.toContain("<user-memory");
   });
 
   it("omits <user-memory> tag when skipMemory is true", () => {
@@ -1700,13 +1706,13 @@ describe("gondolin — MEMORY.md in systemPromptSuffix", () => {
     mkdirSync(`${workspacePath}/users`, { recursive: true });
     writeFileSync(`${workspacePath}/users/dave.md`, "User note.");
 
-    const { systemPromptSuffix } = createGondolinTools({
+    const { systemPromptRunContext } = createGondolinTools({
       arc,
       config: gondolinConfig,
       nick: "dave",
       skipMemory: true,
     });
-    expect(systemPromptSuffix).not.toContain("<user-memory");
+    expect(systemPromptRunContext).not.toContain("<user-memory");
   });
 });
 

@@ -30,6 +30,7 @@ import {
 } from "../session-factory.js";
 import { PiAiModelAdapter } from "../../models/pi-ai-model-adapter.js";
 import { isAssistantMessage } from "../message.js";
+import type { SystemPromptParts } from "../system-prompt.js";
 import type { MuaddibTool, ToolContext } from "./types.js";
 
 export interface SessionQueryInput {
@@ -129,14 +130,21 @@ function findSessionModelSpec(entries: SessionEntry[]): string | null {
   return null;
 }
 
-/** Pull the persisted muaddib system prompt out of a session's branch, if any. */
-function findSessionSystemPrompt(entries: SessionEntry[]): string | null {
+/**
+ * Pull the persisted muaddib system prompt out of a session's branch, if any.
+ * Replaying its cache-tier parts keeps the resumed prefix byte-identical to the
+ * original run's; records written before parts were stored carry only `text`.
+ */
+function findSessionSystemPrompt(entries: SessionEntry[]): SystemPromptParts | null {
   for (let i = entries.length - 1; i >= 0; i -= 1) {
     const entry = entries[i]!;
     if (entry.type === "custom" && entry.customType === MUADDIB_SYSTEM_PROMPT_CUSTOM_TYPE) {
-      const data = entry.data as { text?: string } | undefined;
+      const data = entry.data as { text?: string; parts?: SystemPromptParts } | undefined;
+      if (data?.parts && typeof data.parts.mode === "string") {
+        return data.parts;
+      }
       if (data && typeof data.text === "string" && data.text.length > 0) {
-        return data.text;
+        return { mode: data.text };
       }
     }
   }
@@ -258,7 +266,7 @@ export function createSessionQueryTool(options: ToolContext): MuaddibTool<typeof
 
       try {
         const result = await withCostSpan(LLM_CALL_TYPE.SESSION_QUERY, { arc: options.arc }, async () => {
-          const resumedSystemPrompt = findSessionSystemPrompt(branch) ?? FALLBACK_QUERY_SYSTEM_PROMPT;
+          const resumedSystemPrompt = findSessionSystemPrompt(branch) ?? { mode: FALLBACK_QUERY_SYSTEM_PROMPT };
           const replayedTools = findSessionToolSchemas(branch).map(replayStoredTool);
           const ctx = await createAgentSessionForInvocation({
             model: modelSpec,

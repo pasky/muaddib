@@ -14,6 +14,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 interface CapturedContext {
   systemPrompt?: string;
+  /** System blocks of the Anthropic request after muaddib's onPayload cache tiering. */
+  anthropicSystem: unknown;
   roles: string[];
   messages: unknown[];
   tools: unknown[];
@@ -32,7 +34,11 @@ const captured: CapturedContext[] = globalAny.__sessionQueryCaptured;
 vi.mock("../src/models/pi-ai-models.js", async () => {
   const actual = await vi.importActual<typeof import("@earendil-works/pi-ai")>("@earendil-works/pi-ai");
   const { buildPiAiModelsMock } = await import("./pi-ai-models-mock.js");
-  const streamSimple = (_model: unknown, context: { messages: Array<{ role: string }> }, _options?: unknown) => {
+  const streamSimple = (
+    _model: unknown,
+    context: { messages: Array<{ role: string }> },
+    options?: { onPayload?: (payload: unknown, model: unknown) => unknown },
+  ) => {
     const g = globalThis as unknown as { __sessionQueryCaptured?: CapturedContext[] };
     if (!g.__sessionQueryCaptured) {
       g.__sessionQueryCaptured = [];
@@ -46,8 +52,13 @@ vi.mock("../src/models/pi-ai-models.js", async () => {
       description: t.description,
       parameters: t.parameters,
     }));
+    const systemPrompt = actual.getCurrentSystemPrompt(context.messages as any);
+    // pi-ai's anthropic-messages request shape for the system prompt.
+    const payload = { system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }] };
+    options?.onPayload?.(payload, { api: "anthropic-messages" });
     g.__sessionQueryCaptured.push({
-      systemPrompt: actual.getCurrentSystemPrompt(context.messages as any),
+      systemPrompt,
+      anthropicSystem: JSON.parse(JSON.stringify(payload.system)),
       roles: context.messages.map((m) => m.role),
       messages: JSON.parse(JSON.stringify(context.messages.filter((m) => m.role !== "system"))),
       tools: JSON.parse(JSON.stringify(snapshotTools)),
@@ -192,8 +203,11 @@ describe("session_query prompt-cache prefix guarantee", () => {
       persistType: "none",
       execute: async () => ({ content: [{ type: "text", text: "n/a" }], details: {} }),
     };
-    const originalSystemPrompt =
-      "You are Muaddib, ruler of Arrakis. Current arc: testsrv##chan. Stay on mission.";
+    const originalSystemPrompt = {
+      mode: "You are Muaddib, ruler of Arrakis.",
+      arc: "Current arc: testsrv##chan.",
+      run: "Stay on mission. Current time: 2026-11-04 12:00 UTC.",
+    };
 
     // ── Phase 1: run the original session through a real createAgentSessionForInvocation ──
     const origCtx = await createAgentSessionForInvocation({
@@ -212,7 +226,10 @@ describe("session_query prompt-cache prefix guarantee", () => {
     const originalReq = captured[0]!;
 
     // Sanity: the mocked provider saw the real systemPrompt + tools + one user message.
-    expect(originalReq.systemPrompt).toBe(originalSystemPrompt);
+    expect(originalReq.systemPrompt).toBe(
+      "You are Muaddib, ruler of Arrakis.\n\nCurrent arc: testsrv##chan.\n\nStay on mission. Current time: 2026-11-04 12:00 UTC.",
+    );
+    expect(originalReq.anthropicSystem).toHaveLength(3);
     expect((originalReq.tools as any[]).map((t) => t.name)).toEqual(["web_search", "read"]);
     expect(originalReq.messages).toHaveLength(1);
     expect((originalReq.messages[0] as any).role).toBe("user");
@@ -251,6 +268,8 @@ describe("session_query prompt-cache prefix guarantee", () => {
       tools.map((t: any) => ({ name: t.name, description: t.description, parameters: t.parameters }));
 
     expect(followUpReq.systemPrompt).toBe(originalReq.systemPrompt);
+    // Including the cache-tier split of the system prompt.
+    expect(followUpReq.anthropicSystem).toEqual(originalReq.anthropicSystem);
     // A single leading system message: no mid-conversation prompt patches
     // that would diverge from the original request's prefix.
     for (const req of [originalReq, followUpReq]) {

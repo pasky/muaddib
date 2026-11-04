@@ -162,6 +162,7 @@ export function createBaselineAgentTools(options: BaselineToolOptions): ToolSet 
     tools,
     dispose: gondolinToolSet.dispose,
     systemPromptSuffix: gondolinToolSet.systemPromptSuffix,
+    systemPromptRunContext: gondolinToolSet.systemPromptRunContext,
     sessionHostDir: gondolinToolSet.sessionHostDir,
   };
 }

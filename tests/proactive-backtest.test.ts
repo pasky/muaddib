@@ -105,6 +105,15 @@ describe("canonicalizeSystemPrompt / applyPromptVariant", () => {
     expect(out).toBe("You are IRC user MuaddibLLM. Persona stuff here. Current time: 2026-07-01 23:18 UTC. NOTE: new proactive rules.");
   });
 
+  it("canonicalizes the cache-tiered layout (time + NOTE sent after the workspace section) the same way", () => {
+    const tiered = [
+      "You are IRC user MuaddibLLM. Persona stuff here.",
+      "Filesystem: $HOME=/workspace blah\n<memory>secret workspace noise</memory>",
+      "Your working directory in this session: /workspace/.sessions/session-1\n(per-user memories belong in /workspace/users/<nick>.md)\n\nCurrent time: 2026-07-01 23:18 UTC. NOTE: This is a proactive interjection. Respond NULL when unsure!",
+    ].join("\n");
+    expect(canonicalizeSystemPrompt(tiered)).toBe(canonicalizeSystemPrompt(SYSTEM));
+  });
+
   it("throws when the NOTE marker is missing", () => {
     expect(() => applyPromptVariant("no marker here", "x")).toThrow(/NOTE marker/);
   });

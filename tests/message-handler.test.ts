@@ -44,7 +44,7 @@ const roomConfig = {
     modes: {
       serious: {
         model: "openai:gpt-4o-mini",
-        prompt: "You are {mynick}. Models: !s={!s_model}. Using {current_trigger}={current_model}. Time={current_time}.",
+        prompt: "You are {mynick}. Models: !s={!s_model}. Using {current_trigger}={current_model}.",
         reasoningEffort: "low",
         steering: true,
         triggers: {
@@ -3892,6 +3892,7 @@ describe("RoomMessageHandler", () => {
     const proactivePromptReached = createDeferred<void>();
     let capturedChain: string[] | undefined;
     let capturedSystemPrompt = "";
+    let capturedRunContext = "";
 
     // Exact shape of the ##chemistry leak: inline <thinking> block followed
     // by the real reply on the same line.
@@ -3914,6 +3915,7 @@ describe("RoomMessageHandler", () => {
         prompt: async (_prompt, options) => {
           capturedChain = options?.refusalFallbackModels;
           capturedSystemPrompt = input.systemPrompt;
+          capturedRunContext = input.systemPromptRunContext;
           proactivePromptReached.resolve();
           const result = makeRunnerResult(leakedPayload);
           await input.onResponse(result.text, { interim: false });
@@ -3946,7 +3948,9 @@ describe("RoomMessageHandler", () => {
     // The quiet (proactive/event) path merges the refusal chain the same way as commands.
     expect(capturedChain).toEqual(["anthropic:claude-opus-4-8", "anthropic:claude-3-5-haiku"]);
     // Prompt placeholders name the classified trigger and the proactive model actually running.
-    expect(capturedSystemPrompt).toContain("Models: !s=gpt-4o-mini. Using !s=gpt-4o-mini-proactive.");
+    expect(capturedSystemPrompt).toBe("You are muaddib. Models: !s=gpt-4o-mini. Using !s=gpt-4o-mini-proactive.");
+    // Per-run text (time, proactive note) stays out of the prompt-cached mode prompt.
+    expect(capturedRunContext).toMatch(/^Current time: \d{4}-\d\d-\d\d \d\d:\d\d UTC\. In your <thinking>, check the interjection criteria\.$/);
 
     const rows = await history.getFullHistory("libera##test");
     const monologue = rows.find((r: any) => r.message.includes("[internal monologue]"));

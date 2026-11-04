@@ -139,23 +139,22 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
     shareArtifactTool,
   ];
 
-  const systemPromptSuffix = buildSystemPromptSuffix(arc, sessionDir, toolsConfig, serverTag, channelName, skipMemory, nick);
+  const systemPromptSuffix = buildSystemPromptSuffix(arc, serverTag, channelName, skipMemory);
+  const systemPromptRunContext = buildSystemPromptRunContext(arc, sessionDir, skipMemory, nick);
 
   const dispose = () => checkpointGondolinArc(arc, logger);
 
-  return { tools, dispose, systemPromptSuffix, sessionHostDir };
+  return { tools, dispose, systemPromptSuffix, systemPromptRunContext, sessionHostDir };
 }
 
 // ── System prompt construction ──────────────────────────────────────────────
 
+/** Arc workspace context — must stay byte-stable across sessions (prompt-cached). */
 function buildSystemPromptSuffix(
   arc: string,
-  sessionDir: string,
-  toolsConfig?: ToolsConfig,
   serverTag?: string,
   channelName?: string,
   skipMemory?: boolean,
-  nick?: string,
 ): string {
   const overflowGrep = existsSync(join(getArcWorkspacePath(arc), "MEMORY_OVERFLOW.md"))
     ? " /workspace/MEMORY_OVERFLOW.md` (the last one archives entries pruned from memory)"
@@ -174,23 +173,31 @@ function buildSystemPromptSuffix(
     ? `\n<memory file="/workspace/MEMORY.md">\n${memoryContent}\n</memory>`
     : "";
 
-  const userMemoryContent = (skipMemory || !nick) ? "" : loadArcUserMemoryFile(arc, nick);
-  const userMemorySuffix = userMemoryContent.trim()
-    ? `\n<user-memory nick="${nick}" file="/workspace/users/${nick}.md">\n${userMemoryContent}\n</user-memory>`
-    : "(per-user memories belong in /workspace/users/<nick>.md)";
-
   const arcSuffix =
     serverTag && channelName
       ? ` Arc: server="${serverTag}", channel="${channelName}".`
       : "";
 
   return (
-    `Filesystem: $HOME=/workspace persists across sessions; ${sessionDir} is your working directory (last 8 session dirs in /workspace/.sessions/ are kept).` +
+    "Filesystem: $HOME=/workspace persists across sessions; each session gets its own working directory (last 8 session dirs in /workspace/.sessions/ are kept)." +
     " Environment: Alpine Linux, /workspace/bin is first on $PATH, uv venv is active (always use `uv pip install` + `uv run` instead of raw `pip` etc.)." +
     arcSuffix +
     skillsSection +
     recallSuffix +
-    memorySuffix +
-    userMemorySuffix
+    memorySuffix
   );
+}
+
+/** Session-specific workspace context, sent after the cached prompt parts. */
+function buildSystemPromptRunContext(
+  arc: string,
+  sessionDir: string,
+  skipMemory?: boolean,
+  nick?: string,
+): string {
+  const userMemoryContent = (skipMemory || !nick) ? "" : loadArcUserMemoryFile(arc, nick);
+  const userMemory = userMemoryContent.trim()
+    ? `<user-memory nick="${nick}" file="/workspace/users/${nick}.md">\n${userMemoryContent}\n</user-memory>`
+    : "(per-user memories belong in /workspace/users/<nick>.md)";
+  return `Your working directory in this session: ${sessionDir}\n${userMemory}`;
 }

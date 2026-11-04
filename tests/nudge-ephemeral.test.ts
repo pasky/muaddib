@@ -112,7 +112,7 @@ describe("internal nudge ephemerality", () => {
 
     const { session, dispose } = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
-      systemPrompt: "You are a bot.",
+      systemPrompt: { mode: "You are a bot." },
       tools: [pingTool],
       authStorage,
       modelAdapter,

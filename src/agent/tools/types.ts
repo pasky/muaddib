@@ -17,11 +17,14 @@ export type ToolPersistType = "none" | "summary";
  *
  * `systemPromptSuffix` is appended to the system prompt by SessionRunner
  * when present — used to inject sandbox-specific context (e.g. directory layout).
+ * It must be stable across sessions of an arc (it is prompt-cached);
+ * session-specific context goes to `systemPromptRunContext`, sent last.
  */
 export interface ToolSet {
   tools: MuaddibTool[];
   dispose?: () => Promise<void>;
   systemPromptSuffix?: string;
+  systemPromptRunContext?: string;
   /**
    * Host-side directory colocated with the session's workspace files
    * (e.g. `$MUADDIB_HOME/arcs/<arc>/workspace/.sessions/session-<id>`).

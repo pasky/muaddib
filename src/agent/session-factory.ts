@@ -28,6 +28,12 @@ import { PiAiModelAdapter, type ResolvedPiAiModel } from "../models/pi-ai-model-
 import { piAiModels } from "../models/pi-ai-models.js";
 import type { Logger } from "../app/logging.js";
 import { safeJson } from "./debug-utils.js";
+import {
+  applyAnthropicSystemPromptCacheTiers,
+  joinSystemPrompt,
+  type AnthropicCachePayload,
+  type SystemPromptParts,
+} from "./system-prompt.js";
 import type { SessionLimitsConfig } from "../config/muaddib-config.js";
 import {
   MUADDIB_STEERED_PASSIVE_CUSTOM_TYPE,
@@ -112,7 +118,7 @@ export type RunnerLogger = Logger;
 
 interface CreateAgentSessionInput {
   model: string;
-  systemPrompt: string;
+  systemPrompt: SystemPromptParts;
   tools: AgentTool<any>[];
   authStorage: AuthStore;
   modelAdapter: PiAiModelAdapter;
@@ -173,6 +179,7 @@ export async function createAgentSessionForInvocation(
     : SessionManager.inMemory();
   const sessionFile = sessionManager.getSessionFile() ?? null;
   const sessionId = sessionManager.getSessionId();
+  const systemPromptText = joinSystemPrompt(input.systemPrompt);
   if (sessionFile) {
     logger.info(`session_file ${sessionId} ${sessionFile}`);
     // Persist the effective system prompt so session_query can replay it
@@ -182,7 +189,10 @@ export async function createAgentSessionForInvocation(
       .getBranch()
       .some((entry) => entry.type === "custom" && entry.customType === MUADDIB_SYSTEM_PROMPT_CUSTOM_TYPE);
     if (!alreadyPersisted) {
-      sessionManager.appendCustomEntry(MUADDIB_SYSTEM_PROMPT_CUSTOM_TYPE, { text: input.systemPrompt });
+      sessionManager.appendCustomEntry(MUADDIB_SYSTEM_PROMPT_CUSTOM_TYPE, {
+        text: systemPromptText,
+        parts: input.systemPrompt,
+      });
       const toolSchemas = input.tools.map((tool) => ({
         name: tool.name,
         description: tool.description,
@@ -204,7 +214,7 @@ export async function createAgentSessionForInvocation(
   const resourceLoader: ResourceLoader = {
     ...EMPTY_RESOURCE_LOADER_BASE,
     getExtensions: () => ({ extensions: [], errors: [], runtime: createExtensionRuntime() }),
-    getSystemPrompt: () => input.systemPrompt,
+    getSystemPrompt: () => systemPromptText,
   };
 
   const modelRuntime = await input.authStorage.getModelRuntime();
@@ -227,7 +237,7 @@ export async function createAgentSessionForInvocation(
   // agent.streamFunction for those, and reports no usage for the ones it then
   // rejects, e.g. a summary cut off by stopReason=length). Accounting here is
   // the only way nothing billed escapes the budget.
-  const streamFn = createTracingStreamFn(logger, llmDebugMaxChars, visionState, (message) => {
+  const streamFn = createTracingStreamFn(logger, llmDebugMaxChars, visionState, input.systemPrompt, (message) => {
     limits.recordUsage(message.usage);
   });
   const sessionStartTime = Date.now();
@@ -248,7 +258,7 @@ export async function createAgentSessionForInvocation(
   );
 
   const transformContext = pinSystemPrompt(
-    input.systemPrompt,
+    systemPromptText,
     createInternalNudgeTransform(invocationStart, limits, getNudgeText, logger),
   );
 
@@ -469,13 +479,21 @@ function createTracingStreamFn(
   logger: Logger,
   maxChars: number,
   visionState: { activated: boolean; model: ResolvedPiAiModel["model"] | null },
+  systemPrompt: SystemPromptParts,
   onResult: (message: AssistantMessage) => void,
 ): StreamFn {
   return (model, context, options) => {
     const effectiveModel = (visionState.activated && visionState.model) ? visionState.model : model;
     const stream = piAiModels.streamSimple(effectiveModel, context, {
       ...options,
-      onPayload: (payload: unknown) => {
+      onPayload: (payload: unknown, payloadModel) => {
+        // Mutates the payload in place (pi-ai sends the object it handed us).
+        if (payloadModel.api === "anthropic-messages") {
+          // Same default as pi-ai's own long-retention gate.
+          const supportsLongCache = (payloadModel.compat as { supportsLongCacheRetention?: boolean } | undefined)
+            ?.supportsLongCacheRetention !== false;
+          applyAnthropicSystemPromptCacheTiers(payload as AnthropicCachePayload, systemPrompt, supportsLongCache);
+        }
         logger.debug("llm_io payload agent_stream", safeJson(payload, maxChars));
       },
     });

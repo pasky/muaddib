@@ -14,6 +14,7 @@ import {
   type RunnerLogger,
 } from "./session-factory.js";
 import { compactJson, safeJson, truncateForDebug } from "./debug-utils.js";
+import type { SystemPromptParts } from "./system-prompt.js";
 import type { ToolSet } from "./tools/types.js";
 import type { SessionLimitsConfig } from "../config/muaddib-config.js";
 import { currentCostSpan, recordUsage } from "../cost/cost-span.js";
@@ -27,7 +28,10 @@ const ARTIFACT_URL_PATTERN = /(?:Artifact shared|Generated image):\s+(https?:\/\
 
 export interface SessionRunnerOptions {
   model: string;
+  /** Mode/persona instructions — must not contain per-run values (cached across sessions). */
   systemPrompt: string;
+  /** Per-run instructions (current time, security policy, proactive note, ...), sent last. */
+  systemPromptRunContext?: string;
   /**
    * Tools and their session-end cleanup.  SessionRunner extracts the tool list
    * for the agent and automatically calls toolSet.dispose() (if present) at the
@@ -145,11 +149,15 @@ export class SessionRunner {
   }
 
   async prompt(prompt: string, options: PromptOptions = {}): Promise<PromptResult> {
-    const suffix = this.options.toolSet?.systemPromptSuffix;
-    const systemPrompt = suffix
-      ? `${this.options.systemPrompt}\n\n${suffix}`
-      : this.options.systemPrompt;
     const toolSet = this.options.toolSet;
+    const run = [toolSet?.systemPromptRunContext, this.options.systemPromptRunContext]
+      .filter(Boolean)
+      .join("\n\n");
+    const systemPrompt: SystemPromptParts = {
+      mode: this.options.systemPrompt,
+      ...(toolSet?.systemPromptSuffix ? { arc: toolSet.systemPromptSuffix } : {}),
+      ...(run ? { run } : {}),
+    };
     let sessionCtx: Awaited<ReturnType<typeof createAgentSessionForInvocation>>;
     try {
       sessionCtx = await createAgentSessionForInvocation({

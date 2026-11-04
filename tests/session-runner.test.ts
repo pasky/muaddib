@@ -541,19 +541,28 @@ describe("SessionRunner", () => {
     expect(unsubscribe).not.toHaveBeenCalled();
   });
 
-  it("appends toolSet.systemPromptSuffix to system prompt passed to LLM", async () => {
+  it("passes the system prompt to the session as cache-tier parts", async () => {
     makeMockSession({
       messages: [{ role: "assistant", content: [{ type: "text", text: "ok" }], usage: makeUsage(), stopReason: "stop" }],
     });
 
     const runner = makeRunner({
       systemPrompt: "base prompt",
-      toolSet: { tools: [], systemPromptSuffix: "Filesystem: /workspace persists; /workspace/.sessions/session-abc is your working directory." },
+      systemPromptRunContext: "Current time: 2026-11-04 12:00 UTC.",
+      toolSet: {
+        tools: [],
+        systemPromptSuffix: "Filesystem: /workspace persists.",
+        systemPromptRunContext: "Your working directory in this session: /workspace/.sessions/session-abc",
+      },
     });
     await runner.prompt("hello");
 
-    const calledWith = mockCreateAgentSessionForInvocation.mock.calls[0]![0] as { systemPrompt: string };
-    expect(calledWith.systemPrompt).toBe("base prompt\n\nFilesystem: /workspace persists; /workspace/.sessions/session-abc is your working directory.");
+    const calledWith = mockCreateAgentSessionForInvocation.mock.calls[0]![0] as { systemPrompt: unknown };
+    expect(calledWith.systemPrompt).toEqual({
+      mode: "base prompt",
+      arc: "Filesystem: /workspace persists.",
+      run: "Your working directory in this session: /workspace/.sessions/session-abc\n\nCurrent time: 2026-11-04 12:00 UTC.",
+    });
   });
 
   it("passes system prompt unchanged when toolSet has no systemPromptSuffix", async () => {
@@ -564,8 +573,8 @@ describe("SessionRunner", () => {
     const runner = makeRunner({ systemPrompt: "base prompt", toolSet: { tools: [] } });
     await runner.prompt("hello");
 
-    const calledWith = mockCreateAgentSessionForInvocation.mock.calls[0]![0] as { systemPrompt: string };
-    expect(calledWith.systemPrompt).toBe("base prompt");
+    const calledWith = mockCreateAgentSessionForInvocation.mock.calls[0]![0] as { systemPrompt: unknown };
+    expect(calledWith.systemPrompt).toEqual({ mode: "base prompt" });
   });
 
   it("fires onResponse for every non-empty assistant text including the final one", async () => {

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockState = vi.hoisted(() => ({
   streamSimpleMock: vi.fn((_model, _context, options) => {
-    options?.onPayload?.({ hello: "world" });
+    options?.onPayload?.({ hello: "world" }, _model);
     return { stream: true, result: () => new Promise(() => {}) };
   }),
   sessions: [] as any[],
@@ -93,6 +93,7 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
 }));
 
 import { createAgentSessionForInvocation } from "../src/agent/session-factory.js";
+import { applyAnthropicSystemPromptCacheTiers } from "../src/agent/system-prompt.js";
 
 // ── helpers for transformContext unit tests ──
 
@@ -207,7 +208,7 @@ describe("createAgentSessionForInvocation", () => {
 
     const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
-      systemPrompt: "system",
+      systemPrompt: { mode: "system" },
       tools: [],
       authStorage: fakeAuthStore(),
       modelAdapter: { resolve: vi.fn(() => resolved) } as any,
@@ -227,7 +228,7 @@ describe("createAgentSessionForInvocation", () => {
   it("persists context messages as session entries so compaction can summarize them", async () => {
     await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
-      systemPrompt: "system",
+      systemPrompt: { mode: "system" },
       tools: [],
       authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
@@ -248,7 +249,7 @@ describe("createAgentSessionForInvocation", () => {
   it("accumulates billed usage from turn events", async () => {
     const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
-      systemPrompt: "system",
+      systemPrompt: { mode: "system" },
       tools: [],
       authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
@@ -274,7 +275,7 @@ describe("createAgentSessionForInvocation", () => {
   it("rejects malformed session limits instead of silently defaulting them", async () => {
     const create = (sessionLimits: unknown) => createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
-      systemPrompt: "system",
+      systemPrompt: { mode: "system" },
       tools: [],
       authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
@@ -292,7 +293,7 @@ describe("createAgentSessionForInvocation", () => {
   it("imposes no context ceiling by default — only cost limits the session", async () => {
     const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
-      systemPrompt: "system",
+      systemPrompt: { mode: "system" },
       tools: [],
       authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
@@ -322,7 +323,7 @@ describe("createAgentSessionForInvocation", () => {
     const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
-      systemPrompt: "system",
+      systemPrompt: { mode: "system" },
       tools: [],
       authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
@@ -374,7 +375,7 @@ describe("createAgentSessionForInvocation", () => {
   it("pins the verbatim system prompt as the sole leading system message of every request", async () => {
     const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
-      systemPrompt: "You are muaddib.",
+      systemPrompt: { mode: "You are muaddib." },
       tools: [],
       authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
@@ -402,7 +403,7 @@ describe("createAgentSessionForInvocation", () => {
     };
     const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
-      systemPrompt: "system",
+      systemPrompt: { mode: "system" },
       tools: [],
       authStorage: authStorage as any,
       modelAdapter: {
@@ -441,7 +442,7 @@ describe("createAgentSessionForInvocation", () => {
     // Set token limit low enough to trigger after first turn_end with usage
     const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
-      systemPrompt: "system",
+      systemPrompt: { mode: "system" },
       tools: [],
       authStorage: fakeAuthStore(),
       modelAdapter: { resolve } as any,
@@ -557,7 +558,7 @@ describe("createAgentSessionForInvocation", () => {
     };
     const create = (extra: Record<string, unknown> = {}) => createAgentSessionForInvocation({
       model: "openrouter:xiaomi/mimo",
-      systemPrompt: "system",
+      systemPrompt: { mode: "system" },
       tools: [],
       authStorage: fakeAuthStore(),
       modelAdapter: makeAdapter(),
@@ -616,7 +617,7 @@ describe("createAgentSessionForInvocation", () => {
     const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
     const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
-      systemPrompt: "system",
+      systemPrompt: { mode: "system" },
       tools: [],
       authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
@@ -673,7 +674,7 @@ describe("createAgentSessionForInvocation", () => {
 
     const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
-      systemPrompt: "system",
+      systemPrompt: { mode: "system" },
       tools: [],
       authStorage: fakeAuthStore(),
       modelAdapter: { resolve } as any,
@@ -693,7 +694,7 @@ describe("createAgentSessionForInvocation", () => {
     const REMINDER = "Stay focused on the quest.";
     const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
-      systemPrompt: "system",
+      systemPrompt: { mode: "system" },
       tools: [],
       authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
@@ -739,7 +740,7 @@ describe("createAgentSessionForInvocation", () => {
     const REMINDER = "Stay focused on the quest.";
     const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
-      systemPrompt: "system",
+      systemPrompt: { mode: "system" },
       tools: [],
       authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
@@ -774,7 +775,7 @@ describe("createAgentSessionForInvocation", () => {
   it("transformContext does NOT inject on first turn when no metaReminder is set", async () => {
     const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
-      systemPrompt: "system",
+      systemPrompt: { mode: "system" },
       tools: [],
       authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
@@ -792,7 +793,7 @@ describe("createAgentSessionForInvocation", () => {
   it("transformContext injects both reminder and progress nudge when threshold elapsed", async () => {
     const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
-      systemPrompt: "system",
+      systemPrompt: { mode: "system" },
       tools: [],
       authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
@@ -812,7 +813,7 @@ describe("createAgentSessionForInvocation", () => {
   it("transformContext nudges are ephemeral: each call is independent and does not accumulate", async () => {
     const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
-      systemPrompt: "system",
+      systemPrompt: { mode: "system" },
       tools: [],
       authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
@@ -845,7 +846,7 @@ describe("createAgentSessionForInvocation", () => {
   it("does not inject progress nudge after a non-tool assistant turn", async () => {
     await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
-      systemPrompt: "system",
+      systemPrompt: { mode: "system" },
       tools: [],
       authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
@@ -873,7 +874,7 @@ describe("createAgentSessionForInvocation", () => {
   it("transformContext injects progress nudge on first tool-using turn with high reasoning, not on second", async () => {
     const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
-      systemPrompt: "system",
+      systemPrompt: { mode: "system" },
       tools: [],
       authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
@@ -900,7 +901,7 @@ describe("createAgentSessionForInvocation", () => {
   it("suppresses progress nudge near session limit (80% of token budget)", async () => {
     const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
-      systemPrompt: "system",
+      systemPrompt: { mode: "system" },
       tools: [],
       authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
@@ -935,7 +936,7 @@ describe("createAgentSessionForInvocation", () => {
   it("transformContext injects progress nudge with text output instruction", async () => {
     const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
-      systemPrompt: "system",
+      systemPrompt: { mode: "system" },
       tools: [],
       authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
@@ -952,7 +953,7 @@ describe("createAgentSessionForInvocation", () => {
   it("resets progress nudge debounce when responseTimestamp is bumped", async () => {
     const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
-      systemPrompt: "system",
+      systemPrompt: { mode: "system" },
       tools: [],
       authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
@@ -973,7 +974,7 @@ describe("createAgentSessionForInvocation", () => {
   it("does not inject metaReminder when not configured", async () => {
     await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
-      systemPrompt: "system",
+      systemPrompt: { mode: "system" },
       tools: [],
       authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
@@ -998,7 +999,7 @@ describe("createAgentSessionForInvocation", () => {
   it("bumpSessionLimits increases both token and cost limits", async () => {
     const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
-      systemPrompt: "system",
+      systemPrompt: { mode: "system" },
       tools: [],
       authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
@@ -1037,7 +1038,7 @@ describe("createAgentSessionForInvocation", () => {
     // maxContextLength=100000, maxCostUsd=1.0 → floor is 10000 tokens, $0.10
     const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
-      systemPrompt: "system",
+      systemPrompt: { mode: "system" },
       tools: [],
       authStorage: fakeAuthStore(),
       modelAdapter: defaultModelAdapter,
@@ -1088,5 +1089,86 @@ describe("createAgentSessionForInvocation", () => {
     // Peak is still 105k < 110k → no limit nudge
     const outBumped = await transform(toolUseContext());
     expect(hasMetaInLast(outBumped)).toBe(false);
+  });
+});
+
+describe("Anthropic system prompt cache tiers", () => {
+  const parts = { mode: "You are muaddib.", arc: "Filesystem: ...\n<memory>m</memory>", run: "Current time: 2026-11-04 12:00 UTC." };
+  const joined = "You are muaddib.\n\nFilesystem: ...\n<memory>m</memory>\n\nCurrent time: 2026-11-04 12:00 UTC.";
+  // Shape of pi-ai's anthropic-messages request: one system block, breakpoints on the last tool and last user message.
+  const piAiPayload = (system: Array<{ type: string; text: string; cache_control?: { type: string } }>) => ({
+    system,
+    tools: [{ name: "bash" }, { name: "read", cache_control: { type: "ephemeral" } }],
+    messages: [{ role: "user", content: [{ type: "text", text: "hi", cache_control: { type: "ephemeral" } }] }],
+  });
+
+  it("splits the system block into 1h mode, 5m arc, uncached run parts on Anthropic requests", async () => {
+    const payload = piAiPayload([{ type: "text", text: joined, cache_control: { type: "ephemeral" } }]);
+    const otherPayload = piAiPayload([{ type: "text", text: joined, cache_control: { type: "ephemeral" } }]);
+    const streamWithPayload = (model: any, _context: unknown, options: any) => {
+      options?.onPayload?.(model.api === "anthropic-messages" ? payload : otherPayload, model);
+      return { stream: true, result: () => new Promise(() => {}) };
+    };
+    mockState.streamSimpleMock.mockImplementationOnce(streamWithPayload).mockImplementationOnce(streamWithPayload);
+    const resolved = {
+      spec: { provider: "anthropic", modelId: "claude-opus-5-5" },
+      model: { provider: "anthropic", id: "claude-opus-5-5", api: "anthropic-messages" },
+    };
+    const ctx = await createAgentSessionForInvocation({
+      model: "anthropic:claude-opus-5-5",
+      systemPrompt: parts,
+      tools: [],
+      authStorage: fakeAuthStore(),
+      modelAdapter: { resolve: vi.fn(() => resolved) } as any,
+    });
+    const streamFn = (ctx.agent as any).config.streamFn;
+    streamFn(resolved.model, { messages: [] }, {});
+    streamFn({ provider: "openai", id: "gpt-4o-mini", api: "openai-responses" }, { messages: [] }, {});
+
+    expect(payload.system).toEqual([
+      { type: "text", text: parts.mode, cache_control: { type: "ephemeral", ttl: "1h" } },
+      { type: "text", text: parts.arc, cache_control: { type: "ephemeral" } },
+      { type: "text", text: parts.run },
+    ]);
+    // Longer TTLs must precede shorter ones: the tools breakpoint is lifted to 1h too.
+    expect(payload.tools[1]).toEqual({ name: "read", cache_control: { type: "ephemeral", ttl: "1h" } });
+    expect(payload.messages[0]!.content[0]!.cache_control).toEqual({ type: "ephemeral" });
+    expect(otherPayload).toEqual(piAiPayload([{ type: "text", text: joined, cache_control: { type: "ephemeral" } }]));
+  });
+
+  it("drops the breakpoint on a preceding OAuth identity block to stay within four breakpoints", () => {
+    const identity = { type: "text", text: "You are Claude Code, Anthropic's official CLI for Claude.", cache_control: { type: "ephemeral" } };
+    const payload = piAiPayload([identity, { type: "text", text: joined, cache_control: { type: "ephemeral" } }]);
+
+    expect(applyAnthropicSystemPromptCacheTiers(payload, parts, true)).toBe(true);
+    expect(payload.system.map((block) => block.cache_control ?? null)).toEqual([
+      null,
+      { type: "ephemeral", ttl: "1h" },
+      { type: "ephemeral" },
+      null,
+    ]);
+  });
+
+  it("keeps pi-ai's TTL on models without 1h cache support and never caches an empty mode part", () => {
+    const payload = piAiPayload([{ type: "text", text: joined.replace("You are muaddib.\n\n", ""), cache_control: { type: "ephemeral" } }]);
+
+    expect(applyAnthropicSystemPromptCacheTiers(payload, { ...parts, mode: "" }, false)).toBe(true);
+    expect(payload.system).toEqual([
+      { type: "text", text: parts.arc, cache_control: { type: "ephemeral" } },
+      { type: "text", text: parts.run },
+    ]);
+    expect(payload.tools[1]).toEqual({ name: "read", cache_control: { type: "ephemeral" } });
+  });
+
+  it("leaves the payload untouched when the system text differs, caching is off, or there is nothing to tier", () => {
+    const sanitized = piAiPayload([{ type: "text", text: joined.replace("muaddib", "m"), cache_control: { type: "ephemeral" } }]);
+    const uncached = piAiPayload([{ type: "text", text: joined }]);
+    const modeOnly = piAiPayload([{ type: "text", text: parts.mode, cache_control: { type: "ephemeral" } }]);
+    const snapshots = [sanitized, uncached, modeOnly].map((p) => structuredClone(p));
+
+    expect(applyAnthropicSystemPromptCacheTiers(sanitized, parts, true)).toBe(false);
+    expect(applyAnthropicSystemPromptCacheTiers(uncached, parts, true)).toBe(false);
+    expect(applyAnthropicSystemPromptCacheTiers(modeOnly, { mode: parts.mode }, true)).toBe(false);
+    expect([sanitized, uncached, modeOnly]).toEqual(snapshots);
   });
 });

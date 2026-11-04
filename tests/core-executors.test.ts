@@ -285,7 +285,8 @@ describe("oracle executor with invocation context", () => {
         { name: "visit_webpage" },
       ] as any[],
       dispose: parentDispose,
-      systemPromptSuffix: "Filesystem: /workspace/.sessions/session-parent is your working directory.",
+      systemPromptSuffix: "Filesystem: $HOME=/workspace persists across sessions.",
+      systemPromptRunContext: "Your working directory in this session: /workspace/.sessions/session-parent",
       sessionHostDir: "/tmp/session-parent",
     }));
 
@@ -308,7 +309,8 @@ describe("oracle executor with invocation context", () => {
     expect(toolNames).toContain("bash");
     expect(toolNames).toContain("visit_webpage");
     expect(toolNames).not.toContain("oracle");
-    expect(oracleMock.capturedOptions.toolSet.systemPromptSuffix).toBe("Filesystem: /workspace/.sessions/session-parent is your working directory.");
+    expect(oracleMock.capturedOptions.toolSet.systemPromptSuffix).toBe("Filesystem: $HOME=/workspace persists across sessions.");
+    expect(oracleMock.capturedOptions.toolSet.systemPromptRunContext).toBe("Your working directory in this session: /workspace/.sessions/session-parent");
     expect(oracleMock.capturedOptions.toolSet.sessionHostDir).toBe("/tmp/session-parent");
     expect(oracleMock.capturedOptions.toolSet.dispose).toBeUndefined();
     expect(oracleMock.capturedOptions.sessionFile).toMatch(/^\/tmp\/session-parent\/oracle-[0-9a-f]{8}\.session-record\.jsonl$/u);
@@ -364,7 +366,7 @@ describe("oracle executor with invocation context", () => {
         conversationContext: [],
         getToolSet: () => ({
           tools: [{ name: "web_search", persistType: "summary" }] as any[],
-          systemPromptSuffix: "Filesystem: /workspace/.sessions/session-parent is your working directory.",
+          systemPromptSuffix: "Filesystem: $HOME=/workspace persists across sessions.",
           sessionHostDir: "/tmp/session-parent",
         }),
       },

@@ -128,13 +128,19 @@ function responseIsNull(json: Record<string, unknown>): boolean {
 }
 
 /**
- * Truncate the logged serious-stage system prompt at the runner-appended
- * workspace section. Keeps persona + proactive NOTE; drops session dirs,
- * skills, memory — per-session noise the backtest replay can't honour anyway.
+ * Reduce the logged serious-stage system prompt to persona + current time +
+ * proactive NOTE, dropping the runner-appended workspace section (session
+ * dirs, skills, memory) — per-session noise the backtest replay can't honour
+ * anyway. Older logs carry time + NOTE inside the persona text; cache-tiered
+ * ones send them last, after the workspace section.
  */
 export function canonicalizeSystemPrompt(system: string): string {
-  const cut = system.indexOf("\n\nFilesystem:");
-  return cut >= 0 ? system.slice(0, cut) : system;
+  const cut = system.indexOf("\nFilesystem:");
+  if (cut < 0) return system;
+  const persona = system.slice(0, cut).trimEnd();
+  // Cache-tiered layout: the executor's run line starts a line of its own.
+  const runTime = [...system.slice(cut).matchAll(/\nCurrent time: \d{4}-\d\d-\d\d \d\d:\d\d UTC\./g)].at(-1);
+  return runTime?.index === undefined ? persona : `${persona} ${system.slice(cut + runTime.index + 1)}`;
 }
 
 /**
