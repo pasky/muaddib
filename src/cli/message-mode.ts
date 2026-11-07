@@ -47,6 +47,7 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
     if (!roomName) {
       if (parsed.serverTag.startsWith("discord:")) roomName = "discord";
       else if (parsed.serverTag.startsWith("slack:")) roomName = "slack";
+      else if (parsed.serverTag.startsWith("ipc:")) roomName = "ipc";
       else roomName = "irc";
     }
   }

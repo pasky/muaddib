@@ -104,6 +104,13 @@ sudo apt install qemu-system qemu-utils lz4
 
 Then, combine one or more of the following:
 
+#### Embedded (IPC)
+
+A Node program can run muaddib as its child process and talk to it over the
+`child_process` IPC channel (`rooms.ipc` in the config) — this is how
+[pi-super](https://github.com/pasky/pi-super)'s voice-only simple mode uses it. See the
+`ipc` block in `config.json.example`.
+
 #### Discord
 
 1. Follow [Discord setup instructions](docs/discord.md) to create a bot account and obtain a token. Set it in `~/.muaddib/auth.json` as the `discord` key.

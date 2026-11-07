@@ -19,6 +19,7 @@ export * from "./rooms/discord/monitor.js";
 export * from "./rooms/discord/transport.js";
 export * from "./rooms/slack/monitor.js";
 export * from "./rooms/slack/transport.js";
+export * from "./rooms/ipc/monitor.js";
 export * from "./history/chat-history-store.js";
 export * from "./chronicle/chronicle-store.js";
 export * from "./chronicle/lifecycle.js";

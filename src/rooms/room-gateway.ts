@@ -39,6 +39,7 @@ export function parseArc(arc: string): { serverTag: string; channelName: string 
 function transportForServerTag(serverTag: string): string {
   if (serverTag.startsWith("discord:")) return "discord";
   if (serverTag.startsWith("slack:")) return "slack";
+  if (serverTag.startsWith("ipc:")) return "ipc";
   return "irc";
 }
 

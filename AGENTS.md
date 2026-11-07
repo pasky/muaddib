@@ -16,6 +16,7 @@
   - IRC: `src/rooms/irc/monitor.ts`, `src/rooms/irc/varlink.ts`
   - Discord: `src/rooms/discord/monitor.ts`, `src/rooms/discord/transport.ts`
   - Slack: `src/rooms/slack/monitor.ts`, `src/rooms/slack/transport.ts`
+  - IPC (muaddib as a child of a Node parent, e.g. pi-super's voice mode): `src/rooms/ipc/monitor.ts`
 - **Command Handling**: `src/rooms/command/*` (resolver, classifier, handler, rate limiter, context reduction)
 - **Agent Runtime**: `src/agent/session-runner.ts` + `src/agent/session-factory.ts` + `src/agent/tools/*`
 - **Gondolin Sandbox**: `src/agent/tools/gondolin-tools.ts` — agent read/write/edit/bash tools run inside per-arc QEMU micro-VMs, not on the host.

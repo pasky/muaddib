@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 
 import { RuntimeLogWriter } from "./logging.js";
 import { DiscordRoomMonitor } from "../rooms/discord/monitor.js";
+import { IpcRoomMonitor } from "../rooms/ipc/monitor.js";
 import { IrcRoomMonitor } from "../rooms/irc/monitor.js";
 import { SlackRoomMonitor } from "../rooms/slack/monitor.js";
 import { RoomGateway } from "../rooms/room-gateway.js";
@@ -80,6 +81,7 @@ async function createMonitors(
   monitors.push(...IrcRoomMonitor.fromRuntime(runtime, opts));
   monitors.push(...await DiscordRoomMonitor.fromRuntime(runtime, opts));
   monitors.push(...await SlackRoomMonitor.fromRuntime(runtime, opts));
+  monitors.push(...IpcRoomMonitor.fromRuntime(runtime, opts));
   return monitors;
 }
 

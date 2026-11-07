@@ -99,6 +99,18 @@ describe("RoomGateway", () => {
     expect(handler.inject).toHaveBeenCalledWith("slack:MyWorkspace", "random", "hello", undefined);
   });
 
+  it("routes IPC arcs to the ipc transport", async () => {
+    const { buildArc } = await import("../src/rooms/message.js");
+    const gateway = new RoomGateway();
+    const handler = createMockHandler();
+    gateway.register("ipc", handler);
+
+    const arc = buildArc("ipc:pi-super", "grandma");
+    await gateway.inject(arc, "remind her");
+
+    expect(handler.inject).toHaveBeenCalledWith("ipc:pi-super", "grandma", "remind her", undefined);
+  });
+
   it("passes threadId through inject options", async () => {
     const { buildArc } = await import("../src/rooms/message.js");
     const gateway = new RoomGateway();

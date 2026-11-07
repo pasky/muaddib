@@ -298,6 +298,18 @@
         "interjecting": ["AmazingB2BSaaS##general"],
         "interjectingTest": []
       }
+    },
+
+    "ipc": {
+      "enabled": false,
+      "_comment": "Muaddib as a child process of a Node parent (e.g. pi-super's voice-only simple mode), over the child_process IPC channel: the parent sends {type:'message', id, server, channel, nick, content}, gets {type:'response', ...} for every reply and {type:'done', id} when the request is finished. Arcs are 'ipc:<server>#<channel>'. Responses are delivered whole (no line splitting), so responseMaxBytes is the only length limit. The irc room defaults to enabled: disable it explicitly in an ipc-only setup.",
+      "botName": "super",
+      "promptVars": {
+        "output": " Your replies are read out loud by a voice: plain spoken sentences, no markdown, no URLs."
+      },
+      "command": {
+        "responseMaxBytes": 4000
+      }
     }
   }
 }
