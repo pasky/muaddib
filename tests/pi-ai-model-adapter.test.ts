@@ -10,6 +10,7 @@ import {
   PiAiModelResolutionError,
 } from "../src/models/pi-ai-model-adapter.js";
 import { RemoteModelCatalog } from "../src/models/remote-catalog.js";
+import { piAiModels } from "../src/models/pi-ai-models.js";
 
 describe("PiAiModelAdapter", () => {
   const adapter = new PiAiModelAdapter();
@@ -141,6 +142,51 @@ describe("PiAiModelAdapter", () => {
     expect(resolved.model.id).toBe("google/gemini-3.1-pro-preview");
     expect(resolved.model.api).toBe("openai-completions");
     expect(resolved.model.baseUrl).toBe("https://openrouter.ai/api/v1");
+  });
+});
+
+describe("pi-ai patch: OpenRouter finish-reason diagnostics", () => {
+  it.each([
+    ["error", "MALFORMED_FUNCTION_CALL", "error", "Provider finish_reason: error (native_finish_reason: MALFORMED_FUNCTION_CALL)"],
+    ["content_filter", "SAFETY", "content_filter", "Provider finish_reason: content_filter (native_finish_reason: SAFETY)"],
+    ["error", "MALFORMED_FUNCTION_CALL", "content_filter", "Provider finish_reason: content_filter"],
+    ["content_filter", "SAFETY", "error", "Provider finish_reason: error"],
+    ["error", undefined, "error", "Provider finish_reason: error"],
+    ["error", "error", "error", "Provider finish_reason: error"],
+    ["error", "", "error", "Provider finish_reason: error"],
+    ["stop", "STOP", "stop", undefined],
+  ])("preserves diagnostics for %s / %s → %s", async (finishReason, nativeReason, finalFinishReason, errorMessage) => {
+    const model = piAiModels.getModel("openrouter", "openrouter/auto")!;
+    const chunk = {
+      id: "gen-diagnostic-test",
+      choices: [{ index: 0, delta: {}, finish_reason: finishReason, native_finish_reason: nativeReason }],
+    };
+    // OpenRouter can repeat finish_reason on a trailing usage chunk without
+    // native_finish_reason. Preserve the detail only if the reason is unchanged.
+    const usageChunk = {
+      ...chunk,
+      choices: [{ index: 0, delta: {}, finish_reason: finalFinishReason }],
+      usage: { prompt_tokens: 10, completion_tokens: 0, total_tokens: 10 },
+    };
+    const stream = piAiModels.streamSimple(model, {
+      messages: [{ role: "user", content: "Draw a comic", timestamp: 0 }],
+    }, {
+      apiKey: "test-key",
+      fetch: async () => new Response(
+        `data: ${JSON.stringify(chunk)}\n\ndata: ${JSON.stringify(usageChunk)}\n\ndata: [DONE]\n\n`,
+        { headers: { "Content-Type": "text/event-stream" } },
+      ),
+    });
+    const result = await stream.result();
+    expect(result.stopReason).toBe(finalFinishReason === "stop" ? "stop" : "error");
+    expect(result.rawStopReason).toBe(finalFinishReason);
+    expect(result.errorMessage).toBe(errorMessage);
+    // The terminal event used by the agent carries the same diagnostic as result().
+    const events = [];
+    for await (const event of stream) events.push(event);
+    if (finalFinishReason !== "stop") {
+      expect(events.at(-1)).toMatchObject({ type: "error", error: { errorMessage } });
+    }
   });
 });
 

@@ -14,7 +14,7 @@ WORKDIR /app
 
 COPY package.json package-lock.json tsconfig.json tsconfig.build.json ./
 COPY src ./src
-COPY scripts/runtime-entrypoint.sh /app/scripts/runtime-entrypoint.sh
+COPY scripts/runtime-entrypoint.sh scripts/patch-pi-ai.mjs /app/scripts/
 
 RUN chmod +x /app/scripts/runtime-entrypoint.sh
 RUN npm ci

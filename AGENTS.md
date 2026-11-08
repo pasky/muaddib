@@ -10,6 +10,7 @@
 
 ## Architecture
 - **Built on**: [`pi-coding-agent`](https://github.com/earendil-works/pi) SDK (`@earendil-works/pi-agent-core` and `@earendil-works/pi-ai`). Muaddib uses the `Agent` class from pi-agent-core but overrides all built-in tools via `baseToolsOverride` — pi's default read/write/bash tools are **not** exposed to the agent. All tools (bash, read, write, edit, web_search, etc.) are muaddib's own, defined in `src/agent/tools/`.
+- **pi dependency upgrades**: `pi-ai` is pinned and patched by `scripts/patch-pi-ai.mjs` (`postinstall`) to preserve OpenRouter's `native_finish_reason`. Bump it together with the pi sibling packages and re-check the patch and its streaming regression tests; remove the patch once upstream preserves the diagnostic.
 - **Main Service**: `src/app/main.ts` - core service coordinator (config, history, rooms, chronicler lifecycle)
 - **CLI Message Mode**: `src/cli/main.ts` + `src/cli/message-mode.ts`
 - **Room Isolation**:

@@ -1114,6 +1114,7 @@ describe("SessionRunner", () => {
     ["429 Too Many Requests"],
     ['{"error":{"message":"Rate limit exceeded","type":"rate_limit_error"}}'],
     ["500 Internal Server Error (request 40201)"],
+    ["Provider finish_reason: error (native_finish_reason: MALFORMED_FUNCTION_CALL)"],
   ])("still retries transient errors that are not billing failures (%s)", async (errorMessage) => {
     vi.useFakeTimers();
     try {
@@ -1123,12 +1124,16 @@ describe("SessionRunner", () => {
         }],
       });
 
-      const runner = makeRunner();
+      const logger = defaultLogger();
+      const onResponse = vi.fn();
+      const runner = makeRunner({ logger, onResponse });
       const promise = runner.prompt("hello");
       const assertion = expect(promise).rejects.toThrow("Agent produced empty completion after 3 retries.");
       await vi.runAllTimersAsync();
       await assertion;
       expect(ctx.session.prompt).toHaveBeenCalledTimes(4);
+      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining(errorMessage));
+      expect(onResponse.mock.calls[0]?.[0]).toContain(errorMessage);
     } finally {
       vi.useRealTimers();
     }
