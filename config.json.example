@@ -151,7 +151,7 @@
             "steering": false,
             "memoryUpdate": false,
             "toolSummary": false,
-            "allowedTools": [],
+            "allowedTools": ["generate_image"],
             "triggers": {
               "!d": {},
               "!S": {},
