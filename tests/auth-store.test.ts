@@ -114,12 +114,12 @@ describe("AuthStore", () => {
   });
 });
 
-function bridgeModel(id: string) {
+function bridgeModel(id: string, provider = "anthropic") {
   return {
     id,
     name: id,
     api: "anthropic-messages",
-    provider: "anthropic",
+    provider,
     baseUrl: "https://api.anthropic.com",
     reasoning: true,
     input: ["text"],
@@ -135,8 +135,13 @@ describe("AuthStore model catalog bridge", () => {
     vi.unstubAllEnvs();
   });
 
-  it("exposes muaddib's pi.dev catalog to the per-session ModelRuntime", async () => {
-    const model = bridgeModel("claude-bridge-test-9");
+  // OpenRouter is special in pi: its stored catalog replaces the built-in
+  // list instead of overlaying it, so builtins must survive the bridge too.
+  it.each([
+    ["anthropic", "claude-opus-4-5"],
+    ["openrouter", "anthropic/claude-sonnet-4.5"],
+  ])("exposes muaddib's pi.dev catalog to the per-session ModelRuntime (%s)", async (provider, builtinId) => {
+    const model = bridgeModel(`bridge-test-9-${provider}`, provider);
     vi.stubGlobal(
       "fetch",
       vi.fn(
@@ -148,16 +153,16 @@ describe("AuthStore model catalog bridge", () => {
       ),
     );
     // Memory-only refresh (no cachePath): nothing is written to a muaddib home.
-    await modelCatalog.refresh(["anthropic"], { maxAgeMs: 0 });
+    await modelCatalog.refresh([provider], { maxAgeMs: 0 });
 
     // Per-session runtimes exist for credential isolation, but must agree with
     // the process-wide registry about which models exist. pi snapshots the
     // store when the runtime is built, hence refresh-then-create.
-    const store = AuthStore.inMemory({ anthropic: { type: "api_key", key: "sk-test" } });
+    const store = AuthStore.inMemory({ [provider]: { type: "api_key", key: "sk-test" } });
     const runtime = await store.getModelRuntime();
 
-    expect(runtime.getModel("anthropic", model.id)).toBeDefined();
-    expect(runtime.getModel("anthropic", "claude-opus-4-5")).toBeDefined();
+    expect(runtime.getModel(provider, model.id)).toBeDefined();
+    expect(runtime.getModel(provider, builtinId)).toBeDefined();
   });
 
   it("applies the overlay for providers with no credential", async () => {

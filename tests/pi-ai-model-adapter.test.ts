@@ -253,6 +253,8 @@ describe("RemoteModelCatalog", () => {
     const resolved = models.getModel("anthropic", NEW_MODEL.id);
     expect(resolved?.cost.input).toBe(5);
     expect(resolved?.contextWindow).toBe(1_000_000);
+    // Typed lookups go through getAllModels() and must agree.
+    expect(models.getModelOfType("chat", "anthropic", NEW_MODEL.id)).toBeDefined();
     // Static entries stay resolvable alongside the overlay.
     expect(models.getModel("anthropic", "claude-opus-4-5")).toBeDefined();
   });

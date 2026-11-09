@@ -11,7 +11,7 @@ import type {
 } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 
-import { modelCatalog } from "../models/pi-ai-models.js";
+import { modelCatalog, piAiModels } from "../models/pi-ai-models.js";
 
 export type CredentialData = Record<string, Credential>;
 
@@ -286,6 +286,11 @@ class OverrideCredentialStore implements CredentialStore {
  * straight from the shared in-memory catalog keeps one source of truth for
  * *which models exist* while leaving *whose key pays* per session.
  *
+ * Reads return the provider's *complete* merged catalog (pi-ai built-ins plus
+ * the overlay, every model type), not just the overlay: pi wraps most
+ * providers with an overlay, but OpenRouter with a personalized catalog whose
+ * stored list *replaces* the built-ins. A complete list is right for both.
+ *
  * `lastModified` is reported as "newest possible" because
  * `modelCatalog.getModels()` has already applied the staleness gate against
  * pi-ai's baked catalog; applying it twice would drop valid overlays.
@@ -304,8 +309,10 @@ class OverrideCredentialStore implements CredentialStore {
  */
 class SharedCatalogModelsStore implements ModelsStore {
   async read(providerId: string): Promise<ModelsStoreEntry | undefined> {
-    const models = modelCatalog.getModels(providerId);
-    return models.length > 0 ? { models, lastModified: Number.MAX_SAFE_INTEGER } : undefined;
+    if (modelCatalog.getModels(providerId).length === 0) {
+      return undefined;
+    }
+    return { models: piAiModels.getAllModels(providerId), lastModified: Number.MAX_SAFE_INTEGER };
   }
 
   async write(providerId: string): Promise<void> {

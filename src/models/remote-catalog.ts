@@ -21,7 +21,7 @@ import { randomBytes } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
-import type { Api, Model, MutableModels, Provider } from "@earendil-works/pi-ai";
+import { isModelType, type AnyModel, type Api, type Model, type MutableModels, type Provider } from "@earendil-works/pi-ai";
 import { getBuiltinModelDataGeneratedAt } from "@earendil-works/pi-ai/providers/all";
 
 export const PI_DEV_CATALOG_BASE_URL = "https://pi.dev";
@@ -333,17 +333,21 @@ export class RemoteModelCatalog {
     return {
       ...provider,
       getModels: () => mergeModels(provider.getModels(), this.getModels(provider.id)),
+      // Typed lookups (getModelOfType, getAllModels) read this one instead.
+      getAllModels: () =>
+        mergeModels(provider.getAllModels?.() ?? provider.getModels(), this.getModels(provider.id)),
     };
   }
 }
 
-function mergeModels(base: readonly Model<Api>[], overlay: readonly Model<Api>[]): readonly Model<Api>[] {
+/** Overlay entries are chat models; they replace only same-id chat entries. */
+function mergeModels<T extends AnyModel>(base: readonly T[], overlay: readonly Model<Api>[]): readonly (T | Model<Api>)[] {
   if (overlay.length === 0) {
     return base;
   }
-  const merged = [...base];
+  const merged: (T | Model<Api>)[] = [...base];
   for (const model of overlay) {
-    const index = merged.findIndex((entry) => entry.id === model.id);
+    const index = merged.findIndex((entry) => entry.id === model.id && isModelType(entry, "chat"));
     if (index >= 0) {
       merged[index] = model;
     } else {

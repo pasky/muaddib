@@ -101,6 +101,11 @@ describe("SizeLimitProvider", () => {
 
     stacked.chmodSync("/script.sh", 0o600);
     expect(statSync(join(dir, "script.sh")).mode & 0o777).toBe(0o600);
+
+    const noChmod = Object.assign(Object.create(new RealFSProvider(dir)), { chmod: undefined, chmodSync: undefined });
+    const unsupported = new SizeLimitProvider(new NotifyingProvider(noChmod, () => {}, () => {}), LIMIT, dir);
+    await expect(unsupported.chmod("/script.sh", 0o755)).rejects.toMatchObject({ code: "ENOSYS" });
+    expect(() => unsupported.chmodSync("/script.sh", 0o755)).toThrow(expect.objectContaining({ code: "ENOSYS" }));
   });
 
   it("writeFileSync throws ENOSPC", () => {

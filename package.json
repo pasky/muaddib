@@ -63,9 +63,9 @@
   },
   "dependencies": {
     "@earendil-works/gondolin": "0.14.0",
-    "@earendil-works/pi-agent-core": "^1.5.0",
+    "@earendil-works/pi-agent-core": "1.5.0",
     "@earendil-works/pi-ai": "1.5.0",
-    "@earendil-works/pi-coding-agent": "^1.5.0",
+    "@earendil-works/pi-coding-agent": "1.5.0",
     "@slack/bolt": "^5.1.0",
     "croner": "^11.0.0",
     "discord.js": "^14.28.1",

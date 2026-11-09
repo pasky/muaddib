@@ -67,7 +67,12 @@ paths=$(node -e '
     console.log(registry.findExecutable(name).executablePath("linux"));
   }
 ')
+[ -x /usr/bin/chromium-browser ] || { echo "error: /usr/bin/chromium-browser missing" >&2; exit 1; }
 for p in $paths; do
+  case "$p" in
+    /*) ;;
+    *) echo "error: unexpected Playwright executable path '$p'" >&2; exit 1 ;;
+  esac
   [ -e "$p" ] && continue
   mkdir -p "$(dirname "$p")"
   ln -sf /usr/bin/chromium-browser "$p"
