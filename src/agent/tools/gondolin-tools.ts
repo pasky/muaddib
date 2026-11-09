@@ -49,6 +49,7 @@ import {
   checkpointGondolinArc,
   createVmSession,
 } from "../gondolin/index.js";
+import { resolveSshTargets } from "../gondolin/env.js";
 
 // ── Public API ─────────────────────────────────────────────────────────────
 
@@ -139,7 +140,8 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
     shareArtifactTool,
   ];
 
-  const systemPromptSuffix = buildSystemPromptSuffix(arc, serverTag, channelName, skipMemory);
+  const sshTargets = resolveSshTargets({ config, serverTag, channelName });
+  const systemPromptSuffix = buildSystemPromptSuffix(arc, sshTargets, serverTag, channelName, skipMemory);
   const systemPromptRunContext = buildSystemPromptRunContext(arc, sessionDir, skipMemory, nick);
 
   const dispose = () => checkpointGondolinArc(arc, logger);
@@ -152,10 +154,16 @@ export function createGondolinTools(options: GondolinToolsOptions): ToolSet {
 /** Arc workspace context — must stay byte-stable across sessions (prompt-cached). */
 function buildSystemPromptSuffix(
   arc: string,
+  sshTargets: string[],
   serverTag?: string,
   channelName?: string,
   skipMemory?: boolean,
 ): string {
+  // Without this the agent has no way to tell that ssh works at all: unlike HTTP
+  // secrets there is no env var hinting at it, and it holds no key of its own.
+  const sshSuffix = sshTargets.length > 0
+    ? ` SSH: outbound ssh (incl. git over ssh) works only to ${sshTargets.join(", ")}; authentication is handled outside the sandbox (you hold no key or password, and the login user is fixed). Only \`ssh host command\` works, with stdin/stdout piped through (copy files with e.g. \`ssh host 'cat > file' < file\`); there is no interactive session and no sftp, so plain scp/sftp fail.`
+    : "";
   const overflowGrep = existsSync(join(getArcWorkspacePath(arc), "MEMORY_OVERFLOW.md"))
     ? " /workspace/MEMORY_OVERFLOW.md` (the last one archives entries pruned from memory)"
     : "`";
@@ -182,6 +190,7 @@ function buildSystemPromptSuffix(
     "Filesystem: $HOME=/workspace persists across sessions; each session gets its own working directory (last 8 session dirs in /workspace/.sessions/ are kept)." +
     " Environment: Alpine Linux, /workspace/bin is first on $PATH, uv venv is active (always use `uv pip install` + `uv run` instead of raw `pip` etc.)." +
     arcSuffix +
+    sshSuffix +
     skillsSection +
     recallSuffix +
     memorySuffix

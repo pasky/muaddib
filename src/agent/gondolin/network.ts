@@ -1,9 +1,13 @@
 /**
  * Network filtering helpers for Gondolin VMs.
  *
- * CIDR/IP math, internal-range blocking, and the factory for Gondolin's
- * httpHooks option that gates outbound HTTP from the sandbox.
+ * CIDR/IP math, internal-range blocking, the factory for Gondolin's
+ * httpHooks option that gates outbound HTTP from the sandbox, and the
+ * factory for its credential-injecting SSH egress proxy.
  */
+
+import { generateKeyPair } from "node:crypto";
+import { promisify } from "node:util";
 
 import type { VMOptions } from "@earendil-works/gondolin";
 
@@ -239,6 +243,126 @@ export async function createVmHttpHooks(opts: CreateVmHttpHooksOptions): Promise
   };
 
   return { httpHooks, env, fetch: trustAwareFetch };
+}
+
+// ── SSH egress factory ─────────────────────────────────────────────────────
+
+export interface VmSshHostDefinition {
+  username: string;
+  privateKey: string;
+  /** Pinned upstream host public keys (wire blobs). */
+  hostKeys: Buffer[];
+}
+
+export interface CreateVmSshEgressOptions {
+  arc: string;
+  /** Keyed by canonical SSH target: "host", or "host:port" for non-default ports. */
+  hosts: Record<string, VmSshHostDefinition>;
+  logger?: Logger;
+}
+
+export interface VmSshEgress {
+  ssh: NonNullable<VMOptions["ssh"]>;
+  /** Guest path → content of the OpenSSH client config the guest needs to talk to the proxy. */
+  guestFiles: Record<string, string>;
+}
+
+/**
+ * Build the `ssh` option for Gondolin's VM constructor, or undefined when the
+ * arc has no SSH hosts (leaving all SSH egress blocked).
+ *
+ * Gondolin terminates the guest's SSH connection on the host and re-issues each
+ * exec request upstream using the host-held private key, so the guest gets
+ * authenticated access without ever holding a credential it could leak.
+ */
+export async function createVmSshEgress(opts: CreateVmSshEgressOptions): Promise<VmSshEgress | undefined> {
+  const targets = Object.keys(opts.hosts);
+  if (targets.length === 0) return undefined;
+
+  const proxyHostKey = await getSshProxyHostKey();
+  const formatTarget = (hostname: string, port: number) => (port === 22 ? hostname : `${hostname}:${port}`);
+
+  return {
+    guestFiles: {
+      // Every SSH server the guest can reach is the proxy, so its key is trusted for all hosts.
+      "/etc/ssh/ssh_known_hosts": `* ${proxyHostKey.publicKey}\n`,
+      // OpenSSH 10+ warns on every connection that the key exchange is not post-quantum and
+      // that "the server may need to be upgraded". The server it is judging is the proxy, over
+      // a hop that never leaves this machine; left in, the agent relays it as a finding about
+      // the real upstream host.
+      "/etc/ssh/ssh_config.d/muaddib-ssh-proxy.conf": "IgnoreUnknown WarnWeakCrypto\nWarnWeakCrypto no\n",
+    },
+    ssh: {
+      allowedHosts: targets,
+      credentials: Object.fromEntries(
+        Object.entries(opts.hosts).map(([target, { username, privateKey }]) => [target, { username, privateKey }]),
+      ),
+      hostKey: proxyHostKey.privateKey,
+      hostVerifier: (hostname, key, port) => {
+        const pinned = opts.hosts[formatTarget(hostname.toLowerCase(), port)]?.hostKeys ?? [];
+        const trusted = pinned.some((hostKey) => hostKey.equals(key));
+        if (!trusted) {
+          opts.logger?.warn(
+            `Gondolin VM [${opts.arc}] ssh host key mismatch for ${hostname}:${port}: ` +
+              `server presented ${readSshKeyType(key)} ${key.toString("base64")}, which is not in the configured hostKeys`,
+          );
+        }
+        return trusted;
+      },
+      execPolicy: (request) => {
+        // Quoted: the command is sandbox-controlled and may carry newlines or terminal escapes.
+        opts.logger?.info(
+          `Gondolin VM [${opts.arc}] ssh exec ${request.hostname}:${request.port}: ${JSON.stringify(request.command)}`,
+        );
+        return { allow: true };
+      },
+    },
+  };
+}
+
+function encodeSshString(value: Buffer): Buffer {
+  const length = Buffer.alloc(4);
+  length.writeUInt32BE(value.length);
+  return Buffer.concat([length, value]);
+}
+
+/** Key type name leading an SSH public key wire blob (best effort, for diagnostics). */
+function readSshKeyType(blob: Buffer): string {
+  return blob.length >= 4 ? blob.subarray(4, 4 + blob.readUInt32BE(0)).toString("latin1") : "unknown";
+}
+
+interface SshProxyHostKey {
+  /** PKCS#1 PEM. */
+  privateKey: string;
+  /** OpenSSH "<type> <base64>" form. */
+  publicKey: string;
+}
+
+let sshProxyHostKey: Promise<SshProxyHostKey> | undefined;
+
+/**
+ * Guest-facing host key of the SSH proxy, generated once per process.
+ *
+ * Left to itself Gondolin mints a throwaway key per VM that the guest has no way
+ * to verify, so every `ssh` would fail strict host key checking. We supply the
+ * key ourselves so its public half can be installed in the guest's known_hosts.
+ * RSA in PKCS#1 PEM is the one format both node can export and ssh2 can load.
+ */
+function getSshProxyHostKey(): Promise<SshProxyHostKey> {
+  sshProxyHostKey ??= promisify(generateKeyPair)("rsa", { modulusLength: 3072 }).then(({ publicKey, privateKey }) => {
+    const { e, n } = publicKey.export({ format: "jwk" });
+    // SSH mpints are signed: prefix a zero byte when the top bit is set.
+    const mpint = (base64url: string) => {
+      const bytes = Buffer.from(base64url, "base64url");
+      return encodeSshString((bytes[0]! & 0x80) !== 0 ? Buffer.concat([Buffer.alloc(1), bytes]) : bytes);
+    };
+    const blob = Buffer.concat([encodeSshString(Buffer.from("ssh-rsa")), mpint(e!), mpint(n!)]);
+    return {
+      privateKey: privateKey.export({ format: "pem", type: "pkcs1" }) as string,
+      publicKey: `ssh-rsa ${blob.toString("base64")}`,
+    };
+  });
+  return sshProxyHostKey;
 }
 
 const MAX_BUFFERED_STREAMING_REQUEST_BODY_BYTES = 64 * 1024 * 1024;

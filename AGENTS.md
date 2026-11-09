@@ -11,6 +11,7 @@
 ## Architecture
 - **Built on**: [`pi-coding-agent`](https://github.com/earendil-works/pi) SDK (`@earendil-works/pi-agent-core` and `@earendil-works/pi-ai`). Muaddib uses the `Agent` class from pi-agent-core but overrides all built-in tools via `baseToolsOverride` — pi's default read/write/bash tools are **not** exposed to the agent. All tools (bash, read, write, edit, web_search, etc.) are muaddib's own, defined in `src/agent/tools/`.
 - **pi dependency upgrades**: `pi-ai` is pinned and patched by `scripts/patch-pi-ai.mjs` (`postinstall`) to preserve OpenRouter's `native_finish_reason`. Bump it together with the pi sibling packages and re-check the patch and its streaming regression tests; remove the patch once upstream preserves the diagnostic.
+- **gondolin dependency upgrades**: `gondolin` is pinned and patched by `scripts/patch-gondolin.mjs` (`postinstall`), which fixes its SSH egress exec bridge (truncated stdout, unbounded buffering, stdin EOF never forwarded; the script header has the details and one known ssh2 limitation it cannot fix). On a bump, re-check the patch against the "ssh exec bridge" tests in `tests/gondolin-checkpoint.test.ts`, which run the real bridge; remove the patch once upstream passes them unpatched.
 - **Main Service**: `src/app/main.ts` - core service coordinator (config, history, rooms, chronicler lifecycle)
 - **CLI Message Mode**: `src/cli/main.ts` + `src/cli/message-mode.ts`
 - **Room Isolation**:
@@ -20,7 +21,7 @@
   - IPC (muaddib as a child of a Node parent, e.g. pi-super's voice mode): `src/rooms/ipc/monitor.ts`
 - **Command Handling**: `src/rooms/command/*` (resolver, classifier, handler, rate limiter, context reduction)
 - **Agent Runtime**: `src/agent/session-runner.ts` + `src/agent/session-factory.ts` + `src/agent/tools/*`
-- **Gondolin Sandbox**: `src/agent/tools/gondolin-tools.ts` — agent read/write/edit/bash tools run inside per-arc QEMU micro-VMs, not on the host.
+- **Gondolin Sandbox**: `src/agent/tools/gondolin-tools.ts` — agent read/write/edit/bash tools run inside per-arc QEMU micro-VMs, not on the host. Credentials never enter the VM: HTTP secrets are substituted and SSH is re-authenticated host-side (`src/agent/gondolin/network.ts`, configured per arc/profile via `env` / `ssh`).
 - **Persistence**:
   - Chat history: `src/history/chat-history-store.ts`
   - Chronicle: `src/chronicle/*`

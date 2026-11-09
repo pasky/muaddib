@@ -25,7 +25,7 @@ import type { Logger } from "../../app/logging.js";
 import type { ArcEventsWatcher } from "../../events/watcher.js";
 import { loadBundledSkills } from "../skills/load-skills.js";
 import { getArcWorkspacePath, getArcCheckpointPath, createVmMounts } from "./fs.js";
-import { createVmHttpHooks } from "./network.js";
+import { createVmHttpHooks, createVmSshEgress } from "./network.js";
 import { resolveGondolinEnv } from "./env.js";
 import { getMuaddibHome } from "../../config/paths.js";
 import { resolveLocalArtifactFilePath } from "../tools/url-utils.js";
@@ -385,12 +385,22 @@ async function ensureVm(opts: VmSessionOptions): Promise<VM> {
 
       const workspacePath = getArcWorkspacePath(arc);
 
-      const { plainEnv, secretEnv, urlAllowRegexes } = await resolveGondolinEnv({
+      const { plainEnv, secretEnv, sshHosts, urlAllowRegexes } = await resolveGondolinEnv({
         config,
         serverTag,
         channelName,
         authStorage,
       });
+
+      const sshEgress = await createVmSshEgress({ arc, hosts: sshHosts, logger });
+      // Checked here rather than left to Gondolin: its rejection would surface from
+      // checkpoint.resume() below, which treats any failure as a stale checkpoint and deletes it.
+      if (sshEgress && dnsMode !== "synthetic") {
+        throw new Error(
+          "agent.tools.gondolin ssh hosts require agent.tools.gondolin.dnsMode \"synthetic\" " +
+            "(SSH flows are matched to hosts through synthetic DNS)",
+        );
+      }
 
       const { httpHooks, env: placeholderEnv, fetch: networkFetch } = await createVmHttpHooks({
         arc,
@@ -438,6 +448,7 @@ async function ensureVm(opts: VmSessionOptions): Promise<VM> {
         vfs: { mounts },
         fetch: createVmFetch(artifactsPath, artifactsUrl, networkFetch),
         httpHooks,
+        ...(sshEgress ? { ssh: sshEgress.ssh } : {}),
         ...(Object.keys(combinedEnv).length > 0 ? { env: combinedEnv } : {}),
         dns: { mode: dnsMode },
         sandbox: {
@@ -470,6 +481,26 @@ async function ensureVm(opts: VmSessionOptions): Promise<VM> {
       } else {
         vm = await VMClass.create(vmOptions);
         logger?.info(`Gondolin VM started for arc ${arc}, workspace: ${workspacePath}`);
+      }
+
+      if (sshEgress) {
+        // Rewritten on every start: the proxy's host key changes with each muaddib
+        // process, while the guest's /etc survives in the checkpoint.
+        const installScript = Object.entries(sshEgress.guestFiles)
+          .map(([path, content]) =>
+            `mkdir -p ${shQuote(posix.dirname(path))} && printf %s ${shQuote(content)} > ${shQuote(path)}`)
+          .join(" && ");
+        try {
+          const r = await vm.exec(["/bin/sh", "-c", installScript], {
+            signal: AbortSignal.timeout(VM_HEALTH_CHECK_TIMEOUT_MS),
+          });
+          if (!r.ok) {
+            throw new Error(`Failed to install SSH proxy client config in Gondolin VM (exit ${r.exitCode}): ${r.stderr}`);
+          }
+        } catch (err) {
+          await vm.close();
+          throw err;
+        }
       }
 
       vmCache.set(arc, vm);

@@ -47,8 +47,32 @@ export interface GondolinSecretEnvConfig {
 
 export type GondolinEnvValue = string | GondolinSecretEnvConfig;
 
+export interface GondolinSshHostConfig {
+  /** auth.json provider whose key is the private key (OpenSSH/PEM text) used to authenticate upstream. */
+  provider: string;
+  /** Upstream login name; whatever user the sandbox passes to `ssh` is ignored. */
+  username: string;
+  /** Pinned upstream host public keys, each "<type> <base64>" (the last two columns of `ssh-keyscan`). */
+  hostKeys: string[];
+}
+
 export interface GondolinProfileConfig {
   env?: Record<string, GondolinEnvValue>;
+  /**
+   * Outbound SSH targets, keyed by lowercase hostname with an optional ":PORT".
+   * The host terminates the sandbox's SSH connection and re-authenticates upstream
+   * with the configured key, so the credential never enters the sandbox.
+   *
+   * That protects the credential, not the account: the agent can run any command
+   * the upstream account is allowed to run. Restrict it on the server (restricted
+   * shell, forced command) if that is too much.
+   *
+   * Only SSH exec requests are proxied (`ssh host cmd`, git), with stdin/stdout
+   * piped through; interactive sessions and the sftp subsystem (plain `scp`,
+   * `sftp`) are not supported. Requires dnsMode "synthetic". SSH to any other
+   * host or port stays blocked.
+   */
+  ssh?: Record<string, GondolinSshHostConfig>;
   /**
    * JavaScript regular-expression sources matched against canonical outbound URLs
    * (scheme + lowercase hostname + pathname, with query/fragment stripped).

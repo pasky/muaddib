@@ -1,19 +1,27 @@
+import { isIP } from "node:net";
+
 import type { AuthStore } from "../../auth/auth-store.js";
 
 import type {
   GondolinConfig,
   GondolinEnvValue,
   GondolinSecretEnvConfig,
+  GondolinSshHostConfig,
 } from "../../config/muaddib-config.js";
-import type { VmSecretDefinition } from "./network.js";
+import type { VmSecretDefinition, VmSshHostDefinition } from "./network.js";
 import { asRecord, escapeRegExp } from "../../utils/index.js";
 
 export interface ResolvedGondolinEnv {
   humanArc: string | null;
   plainEnv: Record<string, string>;
   secretEnv: Record<string, VmSecretDefinition>;
+  /** Keyed by canonical SSH target: "host", or "host:port" for non-default ports. */
+  sshHosts: Record<string, VmSshHostDefinition>;
   urlAllowRegexes: RegExp[];
 }
+
+/** Validated ssh host config; host keys are decoded to their wire blobs. */
+type SshHostFragment = Omit<GondolinSshHostConfig, "hostKeys"> & { hostKeys: Buffer[] };
 
 interface ResolveGondolinArcOptions {
   config: GondolinConfig;
@@ -28,6 +36,7 @@ interface ResolveGondolinEnvOptions extends ResolveGondolinArcOptions {
 interface ResolvedGondolinArcFragments {
   humanArc: string | null;
   env: Record<string, GondolinEnvValue>;
+  ssh: Record<string, SshHostFragment>;
   urlAllowRegexes: RegExp[];
 }
 
@@ -35,8 +44,24 @@ export function resolveUrlAllowRegexes(options: ResolveGondolinArcOptions): RegE
   return resolveGondolinArcFragments(options).urlAllowRegexes;
 }
 
+/** Canonical SSH targets ("host" or "host:port") the arc's sandbox may reach. */
+export function resolveSshTargets(options: ResolveGondolinArcOptions): string[] {
+  return Object.keys(resolveGondolinArcFragments(options).ssh);
+}
+
 export async function resolveGondolinEnv(options: ResolveGondolinEnvOptions): Promise<ResolvedGondolinEnv> {
-  const { humanArc, env, urlAllowRegexes } = resolveGondolinArcFragments(options);
+  const { humanArc, env, ssh, urlAllowRegexes } = resolveGondolinArcFragments(options);
+
+  const readAuthKey = async (consumer: string, provider: string): Promise<string> => {
+    if (!options.authStorage) {
+      throw new Error(`${consumer} references auth provider '${provider}', but authStorage is unavailable.`);
+    }
+    const apiKey = await options.authStorage.getApiKey(provider);
+    if (!apiKey) {
+      throw new Error(`${consumer} references auth provider '${provider}', but no API key is configured in auth.json.`);
+    }
+    return apiKey;
+  };
 
   const plainEnv: Record<string, string> = {};
   const secretEnv: Record<string, VmSecretDefinition> = {};
@@ -47,26 +72,22 @@ export async function resolveGondolinEnv(options: ResolveGondolinEnvOptions): Pr
       continue;
     }
 
-    if (!options.authStorage) {
-      throw new Error(
-        `Gondolin env var ${name} references auth provider '${value.provider}', but authStorage is unavailable.`,
-      );
-    }
-
-    const apiKey = await options.authStorage.getApiKey(value.provider);
-    if (!apiKey) {
-      throw new Error(
-        `Gondolin env var ${name} references auth provider '${value.provider}', but no API key is configured in auth.json.`,
-      );
-    }
-
     secretEnv[name] = {
       hosts: [...value.hosts],
-      value: apiKey,
+      value: await readAuthKey(`Gondolin env var ${name}`, value.provider),
     };
   }
 
-  return { humanArc, plainEnv, secretEnv, urlAllowRegexes };
+  const sshHosts: Record<string, VmSshHostDefinition> = {};
+  for (const [target, { provider, username, hostKeys }] of Object.entries(ssh)) {
+    sshHosts[target] = {
+      username,
+      privateKey: await readAuthKey(`Gondolin ssh host ${target}`, provider),
+      hostKeys,
+    };
+  }
+
+  return { humanArc, plainEnv, secretEnv, sshHosts, urlAllowRegexes };
 }
 
 function resolveGondolinArcFragments(options: ResolveGondolinArcOptions): ResolvedGondolinArcFragments {
@@ -83,6 +104,7 @@ function resolveGondolinArcFragments(options: ResolveGondolinArcOptions): Resolv
     : asRecord(options.config.arcs) ?? fail("agent.tools.gondolin.arcs must be an object");
 
   const env: Record<string, GondolinEnvValue> = {};
+  const ssh: Record<string, SshHostFragment> = {};
   const urlAllowRegexes: RegExp[] = [];
 
   const matchingArcs = Object.entries(arcs)
@@ -118,14 +140,99 @@ function resolveGondolinArcFragments(options: ResolveGondolinArcOptions): Resolv
         throw new Error(`${profilePath}.use is not supported; Gondolin profiles cannot inherit from other profiles`);
       }
       Object.assign(env, readEnv(profile.env, `${profilePath}.env`));
+      Object.assign(ssh, readSsh(profile.ssh, `${profilePath}.ssh`));
       urlAllowRegexes.push(...readUrlAllowRegexes(profile.urlAllowRegexes, `${profilePath}.urlAllowRegexes`));
     }
 
     Object.assign(env, readEnv(arc.env, `${arcPath}.env`));
+    Object.assign(ssh, readSsh(arc.ssh, `${arcPath}.ssh`));
     urlAllowRegexes.push(...readUrlAllowRegexes(arc.urlAllowRegexes, `${arcPath}.urlAllowRegexes`));
   }
 
-  return { humanArc, env, urlAllowRegexes };
+  return { humanArc, env, ssh, urlAllowRegexes };
+}
+
+function readSsh(value: unknown, path: string): Record<string, SshHostFragment> {
+  if (value === undefined) {
+    return {};
+  }
+
+  const record = asRecord(value);
+  if (!record) {
+    throw new Error(`${path} must be an object`);
+  }
+
+  return Object.fromEntries(
+    Object.entries(record)
+      .filter(([key]) => !key.startsWith("_comment"))
+      .map(([target, host]) => [readSshTarget(target, path), readSshHost(host, `${path}.${target}`)]),
+  );
+}
+
+/**
+ * Canonicalize an ssh config key to "host" (port 22) or "host:port".
+ *
+ * Gondolin routes SSH flows by the DNS name the guest looked up, so IP literals
+ * can never match; wildcards are refused because host keys are pinned per host.
+ */
+function readSshTarget(target: string, path: string): string {
+  const match = /^([a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::([0-9]+))?$/u.exec(target);
+  const port = match?.[2] === undefined ? 22 : Number(match[2]);
+  if (!match || isIP(match[1]) !== 0 || port < 1 || port > 65535) {
+    throw new Error(
+      `${path} key ${JSON.stringify(target)} must be a lowercase hostname with an optional :PORT (no IP addresses or wildcards)`,
+    );
+  }
+  return port === 22 ? match[1] : `${match[1]}:${port}`;
+}
+
+function readSshHost(value: unknown, path: string): SshHostFragment {
+  const record = asRecord(value);
+  if (!record) {
+    throw new Error(`${path} must be a { provider, username, hostKeys } object`);
+  }
+
+  const { provider, username, hostKeys } = record;
+  if (typeof provider !== "string" || provider.length === 0) {
+    throw new Error(`${path}.provider must be a non-empty string`);
+  }
+  if (typeof username !== "string" || username.length === 0) {
+    throw new Error(`${path}.username must be a non-empty string`);
+  }
+  if (!Array.isArray(hostKeys) || hostKeys.length === 0) {
+    throw new Error(`${path}.hostKeys must be a non-empty array of SSH public keys`);
+  }
+
+  return {
+    provider,
+    username,
+    hostKeys: hostKeys.map((key, index) => decodeSshPublicKey(key, `${path}.hostKeys[${index}]`)),
+  };
+}
+
+/**
+ * Decode "<type> <base64> [comment]" to the key's wire blob.
+ *
+ * The blob is a run of length-prefixed fields: the type name again, then the key material.
+ * Checking that framing end to end catches a key cut short in pasting, which would otherwise
+ * only show up later as a host key mismatch against a perfectly genuine server.
+ */
+function decodeSshPublicKey(value: unknown, path: string): Buffer {
+  const [type, encoded] = typeof value === "string" ? value.trim().split(/\s+/u) : [];
+  const blob = Buffer.from(encoded ?? "", "base64");
+  const fields: Buffer[] = [];
+  let offset = 0;
+  while (offset + 4 <= blob.length && offset + 4 + blob.readUInt32BE(offset) <= blob.length) {
+    const end = offset + 4 + blob.readUInt32BE(offset);
+    fields.push(blob.subarray(offset + 4, end));
+    offset = end;
+  }
+  if (!type || offset !== blob.length || fields.length < 2 || fields[0].toString("latin1") !== type) {
+    throw new Error(
+      `${path} must be an SSH public key of the form "<type> <base64>" (e.g. the last two columns of \`ssh-keyscan\` output)`,
+    );
+  }
+  return blob;
 }
 
 function readEnv(value: unknown, path: string): Record<string, GondolinEnvValue> {

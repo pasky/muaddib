@@ -6,7 +6,10 @@
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
+import { createPublicKey, generateKeyPairSync } from "node:crypto";
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -84,6 +87,17 @@ function makeFakeVm() {
 }
 
 type FakeVm = ReturnType<typeof makeFakeVm>;
+
+/** A syntactically valid ed25519 public key: wire blob plus its "<type> <base64>" text form. */
+function fakeSshPublicKey(fill: number) {
+  const sshString = (value: Buffer) => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(value.length);
+    return Buffer.concat([length, value]);
+  };
+  const blob = Buffer.concat([sshString(Buffer.from("ssh-ed25519")), sshString(Buffer.alloc(32, fill))]);
+  return { blob, line: `ssh-ed25519 ${blob.toString("base64")}` };
+}
 
 function getQcow2BackingPath(imagePath: string): string | null {
   const raw = execFileSync("qemu-img", ["info", "--output=json", imagePath], {
@@ -864,6 +878,9 @@ describe("gondolin per-arc env injection", () => {
     // HOME, PATH, VIRTUAL_ENV are set by the image's /etc/profile.d script,
     // not via VMOptions.env — only arc-level config vars should appear here.
     expect(vmOptions.env!.PATH).toBeUndefined();
+    // SSH egress stays off (and the guest untouched) unless ssh hosts are configured.
+    expect((vmOptions as { ssh?: unknown }).ssh).toBeUndefined();
+    expect(JSON.stringify(fakeVm.exec.mock.calls)).not.toContain("ssh_known_hosts");
   });
 
   it("resolves urlAllowRegexes from gondolin profiles and arc fragments", () => {
@@ -994,6 +1011,152 @@ describe("gondolin per-arc env injection", () => {
     ).rejects.toThrow("auth.json");
   });
 
+  it("proxies ssh to configured hosts with host-side credentials and pinned host keys", async () => {
+    const serverTag = "libera";
+    const channelName = "##hplusroadmap";
+    const fakeVm = makeFakeVm();
+    await registerFakeVm(fakeVm);
+    const logger = makeLogger();
+    const pinned = fakeSshPublicKey(1);
+    const other = fakeSshPublicKey(2);
+
+    const { tools, systemPromptSuffix } = createGondolinTools({
+      arc: buildArc(serverTag, channelName),
+      serverTag,
+      channelName,
+      logger,
+      authStorage: AuthStore.inMemory({
+        "gnusha-ssh": { type: "api_key", key: "PRIVATE-KEY-PEM" },
+        "git-ssh": { type: "api_key", key: "OTHER-PRIVATE-KEY-PEM" },
+      }),
+      config: {
+        ...gondolinConfig,
+        profiles: {
+          gnusha: {
+            ssh: {
+              // Explicit default port collapses onto the same target as the arc-level override.
+              "gnusha.org:22": { provider: "overridden", username: "overridden", hostKeys: [other.line] },
+              "git.example.com:2222": { provider: "git-ssh", username: "git", hostKeys: [other.line] },
+            },
+          },
+        },
+        arcs: {
+          "libera###hplusroadmap": {
+            use: ["gnusha"],
+            ssh: {
+              "gnusha.org": { provider: "gnusha-ssh", username: "muaddib", hostKeys: [`${pinned.line} some comment`] },
+            },
+          },
+        },
+      },
+    });
+
+    expect(systemPromptSuffix).toContain("gnusha.org, git.example.com:2222");
+
+    await warmVm(tools);
+
+    const { ssh, env } = await getLastVmOptions<{
+      env?: Record<string, string>;
+      ssh: {
+        allowedHosts: string[];
+        credentials: Record<string, { username: string; privateKey: string }>;
+        hostKey: string;
+        hostVerifier: (hostname: string, key: Buffer, port: number) => boolean;
+        execPolicy: (request: Record<string, unknown>) => { allow: boolean };
+      };
+    }>();
+    expect(ssh.allowedHosts).toEqual(["gnusha.org", "git.example.com:2222"]);
+    expect(ssh.credentials).toEqual({
+      "gnusha.org": { username: "muaddib", privateKey: "PRIVATE-KEY-PEM" },
+      "git.example.com:2222": { username: "git", privateKey: "OTHER-PRIVATE-KEY-PEM" },
+    });
+    // The private key never reaches the guest.
+    expect(JSON.stringify(env ?? {})).not.toContain("PRIVATE-KEY-PEM");
+    expect(JSON.stringify(fakeVm.exec.mock.calls)).not.toContain("PRIVATE-KEY-PEM");
+
+    // Upstream host keys are pinned per target.
+    expect(ssh.hostVerifier("GNUSHA.org", pinned.blob, 22)).toBe(true);
+    expect(ssh.hostVerifier("gnusha.org", other.blob, 22)).toBe(false);
+    expect(ssh.hostVerifier("gnusha.org", pinned.blob, 2222)).toBe(false);
+    expect(ssh.hostVerifier("git.example.com", other.blob, 2222)).toBe(true);
+    expect(ssh.hostVerifier("git.example.com", other.blob, 22)).toBe(false);
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("host key mismatch for gnusha.org:22"));
+
+    // The guest trusts the proxy's own (guest-facing) host key for every host.
+    const proxyPublicKey = createPublicKey(ssh.hostKey).export({ format: "jwk" });
+    const knownHostsCommand = (fakeVm.exec.mock.calls as unknown as string[][][])
+      .map(([argv]) => argv.at(-1)!)
+      .find((command) => command.includes("/etc/ssh/ssh_known_hosts"))!;
+    const knownHostsBlob = Buffer.from(/'\* ssh-rsa ([A-Za-z0-9+/=]+)\n'/u.exec(knownHostsCommand)![1], "base64");
+    expect(knownHostsBlob.includes(Buffer.from(proxyPublicKey.n!, "base64url"))).toBe(true);
+
+    // Every proxied command is allowed, and logged for audit on a single line whatever the sandbox put in it.
+    expect(ssh.execPolicy({ hostname: "gnusha.org", port: 22, guestUsername: "root", command: "wiki-put page\nINFO forged" }))
+      .toEqual({ allow: true });
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.stringContaining(String.raw`ssh exec gnusha.org:22: "wiki-put page\nINFO forged"`),
+    );
+  });
+
+  it.each([
+    [
+      "an IP address target",
+      { "198.145.64.73": { provider: "gnusha-ssh", username: "muaddib", hostKeys: [fakeSshPublicKey(1).line] } },
+      "lowercase hostname",
+    ],
+    [
+      "a wildcard target",
+      { "*.gnusha.org": { provider: "gnusha-ssh", username: "muaddib", hostKeys: [fakeSshPublicKey(1).line] } },
+      "lowercase hostname",
+    ],
+    [
+      "a missing username",
+      { "gnusha.org": { provider: "gnusha-ssh", hostKeys: [fakeSshPublicKey(1).line] } },
+      "ssh.gnusha.org.username must be a non-empty string",
+    ],
+    [
+      "unpinned host keys",
+      { "gnusha.org": { provider: "gnusha-ssh", username: "muaddib", hostKeys: [] } },
+      "ssh.gnusha.org.hostKeys must be a non-empty array",
+    ],
+    [
+      "a known_hosts line instead of a bare public key",
+      { "gnusha.org": { provider: "gnusha-ssh", username: "muaddib", hostKeys: [`gnusha.org ${fakeSshPublicKey(1).line}`] } },
+      "ssh.gnusha.org.hostKeys[0] must be an SSH public key",
+    ],
+    [
+      "a host key cut short in pasting",
+      { "gnusha.org": { provider: "gnusha-ssh", username: "muaddib", hostKeys: [fakeSshPublicKey(1).line.slice(0, -8)] } },
+      "ssh.gnusha.org.hostKeys[0] must be an SSH public key",
+    ],
+    [
+      "a host key that names its type but carries no key",
+      { "gnusha.org": { provider: "gnusha-ssh", username: "muaddib", hostKeys: ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5"] } },
+      "ssh.gnusha.org.hostKeys[0] must be an SSH public key",
+    ],
+  ])("rejects ssh config with %s", (_label, ssh, message) => {
+    expect(() =>
+      createGondolinTools({
+        arc: ARC,
+        config: { ...gondolinConfig, arcs: { "*": { ssh: ssh as never } } },
+      }),
+    ).toThrow(message);
+  });
+
+  it("refuses to start a VM when ssh hosts cannot be served", async () => {
+    const ssh = { "gnusha.org": { provider: "gnusha-ssh", username: "muaddib", hostKeys: [fakeSshPublicKey(1).line] } };
+    const run = async (config: Parameters<typeof createGondolinTools>[0]["config"], authStorage: AuthStore) => {
+      const { tools } = createGondolinTools({ arc: ARC, authStorage, config: { ...config, arcs: { "*": { ssh } } } });
+      await warmVm(tools);
+    };
+
+    await expect(run(gondolinConfig, AuthStore.inMemory()))
+      .rejects.toThrow("Gondolin ssh host gnusha.org references auth provider 'gnusha-ssh', but no API key is configured in auth.json.");
+    // Must fail before touching the VM/checkpoint: gondolin cannot map SSH flows to hostnames without synthetic DNS.
+    await expect(run({ ...gondolinConfig, dnsMode: "open" }, AuthStore.inMemory({ "gnusha-ssh": { type: "api_key", key: "k" } })))
+      .rejects.toThrow("ssh hosts require agent.tools.gondolin.dnsMode \"synthetic\"");
+  });
+
   it("config.json.example defaults arc '*' to allowing all canonical URLs", () => {
     const example = JSON.parse(readFileSync(join(process.cwd(), "config.json.example"), "utf-8")) as {
       agent?: {
@@ -1006,6 +1169,249 @@ describe("gondolin per-arc env injection", () => {
     };
 
     expect(example.agent?.tools?.gondolin?.arcs?.["*"]?.urlAllowRegexes).toEqual([".*"]);
+  });
+});
+
+// ── SSH exec bridge (Gondolin's own, as patched by scripts/patch-gondolin.mjs) ──
+
+const MIB = 1024 * 1024;
+
+/** Reject on a stuck bridge, so the caller's `finally` still tears the sockets down before Vitest gives up. */
+async function withDeadline<T>(operation: Promise<T>, what: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out waiting for ${what}`)), 10_000);
+  });
+  try {
+    return await Promise.race([operation, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Write a fixed 8 MiB (four ssh2 channel windows) without regard for backpressure, as an unhelpful peer would. */
+function flood(stream: { write(chunk: Buffer): unknown }): void {
+  const chunk = Buffer.alloc(32 * 1024, 0x61);
+  for (let sent = 0; sent < 8 * MIB; sent += chunk.length) stream.write(chunk);
+}
+
+/**
+ * Run Gondolin's real exec bridge between two real ssh2 endpoints:
+ * guest client → proxy server → bridgeSshExecChannel → upstream server.
+ */
+async function startSshBridge(onUpstreamExec: (upstreamChannel: any) => void) {
+  const gondolinPackageJson = createRequire(import.meta.url).resolve("@earendil-works/gondolin/package.json");
+  const ssh2 = createRequire(gondolinPackageJson)("ssh2");
+  const { bridgeSshExecChannel } = await import(
+    pathToFileURL(join(dirname(gondolinPackageJson), "dist/src/qemu/ssh.js")).href
+  );
+  const privateKey = generateKeyPairSync("rsa", {
+    modulusLength: 2048,
+    privateKeyEncoding: { format: "pem", type: "pkcs1" },
+    publicKeyEncoding: { format: "pem", type: "spki" },
+  }).privateKey;
+
+  const closers: Array<() => void> = [];
+  const close = () => closers.splice(0).reverse().forEach((closeOne) => closeOne());
+  const listenForExec = async (onExec: (channel: any, command: string) => void): Promise<number> => {
+    const server = new ssh2.Server({ hostKeys: [privateKey] }, (client: any) => {
+      closers.push(() => client.end());
+      client.on("error", () => {});
+      client.on("authentication", (context: any) => context.accept());
+      client.on("ready", () => client.on("session", (acceptSession: any) => {
+        acceptSession().on("exec", (acceptExec: any, _reject: unknown, info: { command: string }) => {
+          onExec(acceptExec(), info.command);
+        });
+      }));
+    });
+    closers.push(() => server.close());
+    await new Promise<void>((resolveListening) => server.listen(0, "127.0.0.1", resolveListening));
+    return server.address().port;
+  };
+
+  try {
+    const upstreamPort = await listenForExec(onUpstreamExec);
+    /** Upstream connections the bridge currently holds open. */
+    const upstreamConnections = new Set<unknown>();
+    const backend = {
+      options: {},
+      abortTcpSession: () => {},
+      ssh: {
+        agent: null,
+        execPolicy: null,
+        hostVerifier: () => true,
+        upstreams: upstreamConnections,
+        maxUpstreamConnectionsPerTcpSession: 4,
+        maxUpstreamConnectionsTotal: 64,
+        upstreamReadyTimeoutMs: 5_000,
+        upstreamKeepaliveIntervalMs: 0,
+        upstreamKeepaliveCountMax: 0,
+      },
+    };
+    const session = {
+      syntheticHostname: "127.0.0.1",
+      dstPort: upstreamPort,
+      srcIP: "192.0.2.2",
+      srcPort: 40_000,
+      ssh: { credential: { username: "muaddib", privateKey } },
+    };
+
+    let consumedFromGuest = 0;
+    let resolveProxyChannel!: (channel: any) => void;
+    const proxyChannelReady = new Promise<any>((resolveChannel) => { resolveProxyChannel = resolveChannel; });
+    const proxyPort = await listenForExec((proxyChannel, command) => {
+      // Count at emit rather than with a "data" listener, which would start the stream
+      // flowing (and discard guest stdin) before the bridge has attached its own.
+      const emit = proxyChannel.emit.bind(proxyChannel);
+      proxyChannel.emit = (event: string, ...args: unknown[]) => {
+        if (event === "data") consumedFromGuest += (args[0] as Buffer).length;
+        return emit(event, ...args);
+      };
+      resolveProxyChannel(proxyChannel);
+      void bridgeSshExecChannel({
+        backend,
+        key: "flow",
+        session,
+        proxy: { upstreams: new Set() },
+        guestChannel: proxyChannel,
+        command,
+        guestUsername: "guest",
+      });
+    });
+
+    const guest = new ssh2.Client();
+    closers.push(() => guest.end());
+    const guestChannel = await withDeadline(new Promise<any>((resolveChannel, rejectChannel) => {
+      guest.once("error", rejectChannel).once("ready", () => {
+        guest.exec("command", (error: Error | undefined, channel: any) => (error ? rejectChannel(error) : resolveChannel(channel)));
+      });
+      guest.connect({ host: "127.0.0.1", port: proxyPort, username: "guest", password: "unused" });
+    }), "the guest exec channel");
+
+    return {
+      /** The guest's end of its exec channel. */
+      guestChannel,
+      /** The proxy's end of the same channel: what the bridge reads guest stdin from and writes output to. */
+      proxyChannel: await withDeadline(proxyChannelReady, "the bridge to start"),
+      /** Bytes of guest stdin the bridge has taken off the proxy channel so far. */
+      consumedFromGuest: () => consumedFromGuest,
+      upstreamConnections,
+      close,
+    };
+  } catch (error) {
+    close();
+    throw error;
+  }
+}
+
+/** Collect everything the guest receives until its channel closes. */
+function guestOutcome(guestChannel: any): Promise<{ stdout: Buffer; stderr: string; exitCode: number | undefined }> {
+  return withDeadline(new Promise((resolveOutcome) => {
+    const chunks: Buffer[] = [];
+    let stderr = "";
+    guestChannel.on("data", (chunk: Buffer) => chunks.push(chunk));
+    guestChannel.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+    // ssh2 repeats the exit status on "close"; "exit" itself may fire before a late reader listens.
+    guestChannel.on("close", (exitCode: number | undefined) => {
+      resolveOutcome({ stdout: Buffer.concat(chunks), stderr, exitCode });
+    });
+  }), "the guest channel to close");
+}
+
+describe("gondolin — ssh exec bridge", () => {
+  it("forwards guest stdin EOF to the proxied command", async () => {
+    // Upstream behaves like `cat`: it answers only once its stdin is complete.
+    const bridge = await startSshBridge((upstreamChannel) => {
+      const chunks: Buffer[] = [];
+      upstreamChannel.on("data", (chunk: Buffer) => chunks.push(chunk));
+      upstreamChannel.on("end", () => {
+        upstreamChannel.write(Buffer.concat(chunks));
+        upstreamChannel.exit(0);
+        upstreamChannel.end();
+      });
+    });
+    try {
+      const outcome = guestOutcome(bridge.guestChannel);
+      bridge.guestChannel.end("wiki page body\n");
+      expect((await outcome).stdout.toString()).toBe("wiki page body\n");
+    } finally {
+      bridge.close();
+    }
+  });
+
+  it("delivers all output of a command that exits before the guest has read it", async () => {
+    const bridge = await startSshBridge((upstreamChannel) => {
+      upstreamChannel.stderr.write("warning: big page\n");
+      flood(upstreamChannel);
+      upstreamChannel.exit(3);
+      upstreamChannel.end();
+    });
+    try {
+      // Give the command time to finish and close upstream while its output is still in flight.
+      await new Promise((resolveLater) => setTimeout(resolveLater, 300));
+      const { stdout, stderr, exitCode } = await guestOutcome(bridge.guestChannel);
+      expect({ stdoutMib: stdout.length / MIB, stderr, exitCode })
+        .toEqual({ stdoutMib: 8, stderr: "warning: big page\n", exitCode: 3 });
+    } finally {
+      bridge.close();
+    }
+  });
+
+  // Whoever stops reading must stall the sender, not grow the host process: the bridge runs
+  // outside the VM's memory limit, and both ends are driven by the sandbox.
+  it.each([
+    {
+      flow: "upstream stdout to a guest that stopped reading",
+      upstream: (upstreamChannel: any) => flood(upstreamChannel),
+      guest: () => {},
+      reachedStalledSide: (bridge: any) => bridge.guestChannel.readableLength,
+      queuedInBridge: (bridge: any) => bridge.proxyChannel.writableLength,
+    },
+    {
+      flow: "upstream stderr to a guest that stopped reading",
+      upstream: (upstreamChannel: any) => flood(upstreamChannel.stderr),
+      guest: () => {},
+      reachedStalledSide: (bridge: any) => bridge.guestChannel.stderr.readableLength,
+      queuedInBridge: (bridge: any) => bridge.proxyChannel.stderr.writableLength,
+    },
+    {
+      flow: "guest stdin to a command that never reads it",
+      upstream: () => {},
+      guest: (bridge: any) => flood(bridge.guestChannel),
+      // The bridge only opens the upstream channel once its own upstream login completes.
+      reachedStalledSide: (_bridge: any, upstreamChannel: any) => upstreamChannel?.readableLength ?? 0,
+      queuedInBridge: (bridge: any, upstreamChannel: any) => bridge.consumedFromGuest() - upstreamChannel.readableLength,
+    },
+  ])("bounds what it queues when forwarding $flow", async ({ upstream, guest, reachedStalledSide, queuedInBridge }) => {
+    let upstreamChannel: any;
+    const bridge = await startSshBridge((channel) => {
+      upstreamChannel = channel;
+      upstream(channel);
+    });
+    try {
+      guest(bridge);
+      // Neither stalled side has a reader attached, so each accepts one channel window and stops.
+      await withDeadline((async () => {
+        let previous = -1;
+        for (let stableFor = 0; stableFor < 5;) {
+          await new Promise((resolveLater) => setTimeout(resolveLater, 50));
+          const queued = reachedStalledSide(bridge, upstreamChannel) >= MIB ? queuedInBridge(bridge, upstreamChannel) : -1;
+          stableFor = queued >= 0 && queued === previous ? stableFor + 1 : 0;
+          previous = queued;
+        }
+      })(), "the flood to back up");
+
+      // One window's worth (2 MiB) is the price of ssh2's stream buffers; the other ~4 MiB must stay with the sender.
+      expect(queuedInBridge(bridge, upstreamChannel) / MIB).toBeLessThan(3);
+
+      // A guest that walks away mid-transfer must still release the upstream connection.
+      bridge.guestChannel.destroy();
+      await withDeadline((async () => {
+        while (bridge.upstreamConnections.size > 0) await new Promise((resolveLater) => setTimeout(resolveLater, 20));
+      })(), "the upstream connection to be released");
+    } finally {
+      bridge.close();
+    }
   });
 });
 
@@ -1870,6 +2276,41 @@ describe("gondolin — post-resume health check", () => {
     // Should NOT have fallen back to VM.create
     expect(gondolin.VM.create).not.toHaveBeenCalled();
     // Checkpoint file should still exist
+    expect(existsSync(checkpointPath)).toBe(true);
+  });
+
+  it("reinstalls the ssh client config on a resumed VM, and closes the VM without dropping its checkpoint if that fails", async () => {
+    // The proxy's host key is new in every muaddib process, so a resumed guest's copy is stale.
+    const resumedVm = makeFakeVm();
+    const execDefault = resumedVm.exec.getMockImplementation()!;
+    resumedVm.exec.mockImplementation(((argv: string[]) =>
+      argv.at(-1)!.includes("/etc/ssh/ssh_known_hosts")
+        ? Promise.resolve({ ok: false, exitCode: 1, stdout: "", stderr: "Read-only file system" })
+        : execDefault()) as never);
+
+    const gondolin = await import("@earendil-works/gondolin");
+    // @ts-expect-error test-only
+    gondolin.VmCheckpoint.load.mockReturnValueOnce({
+      resume: vi.fn(async () => resumedVm),
+    });
+
+    const { getArcCheckpointPath } = await import("../src/agent/gondolin/fs.js");
+    const checkpointPath = getArcCheckpointPath("ssh-resume-arc");
+    mkdirSync(dirname(checkpointPath), { recursive: true });
+    writeFileSync(checkpointPath, "fake-checkpoint-data");
+
+    const { tools } = createGondolinTools({
+      arc: "ssh-resume-arc",
+      authStorage: AuthStore.inMemory({ "gnusha-ssh": { type: "api_key", key: "PRIVATE-KEY-PEM" } }),
+      config: {
+        ...gondolinConfig,
+        arcs: { "*": { ssh: { "gnusha.org": { provider: "gnusha-ssh", username: "muaddib", hostKeys: [fakeSshPublicKey(1).line] } } } },
+      },
+    });
+
+    await expect(warmVm(tools)).rejects.toThrow("Failed to install SSH proxy client config in Gondolin VM (exit 1): Read-only file system");
+    expect(resumedVm.close).toHaveBeenCalled();
+    expect(gondolin.VM.create).not.toHaveBeenCalled();
     expect(existsSync(checkpointPath)).toBe(true);
   });
 });
