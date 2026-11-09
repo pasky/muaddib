@@ -772,12 +772,12 @@ export async function replaceArtifactUrlsWithUploads(
     try {
       const ext = extname(match.filename).toLowerCase();
       const isText = TEXT_EXTENSIONS.has(ext);
-      const fileContent = await readFile(filePath, isText ? "utf-8" : undefined);
+      const fileContent = isText ? await readFile(filePath, "utf-8") : await readFile(filePath);
 
       attachmentIndex += 1;
       const label = `[attachment ${attachmentIndex}: ${match.filename}]`;
 
-      await sender.uploadFile(channelId, fileContent as string | Buffer, {
+      await sender.uploadFile(channelId, fileContent, {
         filename: match.filename,
         title: match.filename,
         threadTs,
