@@ -50,7 +50,7 @@ const patches = [
   // wait would never end. Small stderr output, the normal case, is unaffected.
   //
   // Remove this patch once upstream handles all three; the "ssh exec bridge" tests in
-  // tests/gondolin-checkpoint.test.ts run the real bridge and guard the behavior either way.
+  // tests/gondolin-ssh-bridge.test.ts run the real bridge and guard the behavior either way.
   {
     name: "gondolin ssh exec bridge",
     // Not an export itself, so located relative to the exported package.json.
