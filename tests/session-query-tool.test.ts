@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { AuthStore } from "../src/auth/auth-store.js";
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── streamSimple mock ────────────────────────────────────────────────────

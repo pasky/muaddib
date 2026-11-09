@@ -1,4 +1,4 @@
-// pi-ai 0.87.1 discards OpenRouter's native_finish_reason. Keep it in the
+// pi-ai 1.5.0 (still) discards OpenRouter's native_finish_reason. Keep it in the
 // errorMessage already persisted/logged/delivered by Muaddib. Remove this patch
 // once the upstream adapter preserves it; the streaming regression tests guard it.
 // Upstream: https://github.com/earendil-works/pi/issues/11931
