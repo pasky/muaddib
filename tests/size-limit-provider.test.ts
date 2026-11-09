@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { RealFSProvider, type VirtualProvider } from "@earendil-works/gondolin";
+import { NotifyingProvider } from "../src/agent/gondolin/fs/notifying-provider.js";
 import { SizeLimitProvider } from "../src/agent/gondolin/fs/size-limit-provider.js";
 
 function createTestProvider(limitBytes: number): { provider: SizeLimitProvider; dir: string } {
@@ -84,6 +85,22 @@ describe("SizeLimitProvider", () => {
 
     const entries = await provider.readdir("/");
     expect(entries).toContain("hello.txt");
+  });
+
+  it("chmod passes through wrapper providers to the host", async () => {
+    // Mirrors the /events mount stack; the guest forwards chmod since Gondolin 0.14.
+    const stacked = new SizeLimitProvider(
+      new NotifyingProvider(new RealFSProvider(dir) as VirtualProvider, () => {}, () => {}),
+      LIMIT,
+      dir,
+    );
+    writeFileSync(join(dir, "script.sh"), "#!/bin/sh\n");
+
+    await stacked.chmod("/script.sh", 0o755);
+    expect(statSync(join(dir, "script.sh")).mode & 0o777).toBe(0o755);
+
+    stacked.chmodSync("/script.sh", 0o600);
+    expect(statSync(join(dir, "script.sh")).mode & 0o777).toBe(0o600);
   });
 
   it("writeFileSync throws ENOSPC", () => {

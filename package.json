@@ -62,7 +62,7 @@
     "url": "https://github.com/pasky/muaddib/issues"
   },
   "dependencies": {
-    "@earendil-works/gondolin": "0.8.0",
+    "@earendil-works/gondolin": "0.14.0",
     "@earendil-works/pi-agent-core": "^1.5.0",
     "@earendil-works/pi-ai": "1.5.0",
     "@earendil-works/pi-coding-agent": "^1.5.0",

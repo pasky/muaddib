@@ -19,69 +19,33 @@ set -euo pipefail
 # Usage:
 #   ./scripts/build-gondolin-image.sh [OUTPUT_DIR]
 #
-# OUTPUT_DIR defaults to ~/.muaddib/gondolin-image
-# After building, set agent.tools.gondolin.guestDir in config.json to OUTPUT_DIR.
+# OUTPUT_DIR defaults to $MUADDIB_HOME/gondolin-image (~/.muaddib/gondolin-image),
+# which muaddib picks up automatically.  Rebuilding changes the image buildId,
+# so existing per-arc VM checkpoints are discarded on next use (the
+# /workspace mount persists).
+#
+# The guest sandbox helpers (sandboxd, sandboxfs, ...) are resolved by
+# `gondolin build` itself from its helper registry, matching the installed
+# gondolin version.
 #
 # Requirements:
-#   - npm ci must have been run (gondolin is a devDependency)
+#   - npm ci must have been run (provides node_modules/.bin/gondolin)
 #   - mke2fs / mkfs.ext4 (package: e2fsprogs)
 #       Debian/Ubuntu: sudo apt install e2fsprogs
 #       macOS:         brew install e2fsprogs
-#   - debugfs (part of e2fsprogs, at /usr/sbin/debugfs on Debian/Ubuntu)
-#     Used to extract pre-built sandbox binaries from the default gondolin image.
-#   - The default gondolin image must have been cached (run 'gondolin bash' once,
-#     or it will be downloaded automatically on first VM launch).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MUADDIB_HOME="${MUADDIB_HOME:-$HOME/.muaddib}"
 OUTPUT_DIR="${1:-$MUADDIB_HOME/gondolin-image}"
 GONDOLIN="${SCRIPT_DIR}/../node_modules/.bin/gondolin"
-DEBUGFS="${DEBUGFS:-/usr/sbin/debugfs}"
 
 if [ ! -x "$GONDOLIN" ]; then
   echo "error: gondolin not found at $GONDOLIN — run 'npm ci' first" >&2
   exit 1
 fi
 
-if [ ! -x "$DEBUGFS" ]; then
-  echo "error: debugfs not found at $DEBUGFS" >&2
-  echo "       Install e2fsprogs: sudo apt install e2fsprogs" >&2
-  exit 1
-fi
-
-# Locate the cached gondolin rootfs containing pre-built sandbox binaries.
-# Gondolin caches assets at ~/.cache/gondolin/<version>/rootfs.ext4.
-GONDOLIN_CACHE_DIR="$HOME/.cache/gondolin"
-CACHED_ROOTFS=""
-if [ -d "$GONDOLIN_CACHE_DIR" ]; then
-  CACHED_ROOTFS=$(find "$GONDOLIN_CACHE_DIR" -name "rootfs.ext4" | head -1)
-fi
-
-if [ -z "$CACHED_ROOTFS" ]; then
-  echo "error: no cached gondolin rootfs found in $GONDOLIN_CACHE_DIR" >&2
-  echo "       Run the default gondolin image once to populate the cache:" >&2
-  echo "         node_modules/.bin/gondolin bash" >&2
-  echo "       (Ctrl-C once you see the shell prompt)" >&2
-  exit 1
-fi
-
-echo "Using cached gondolin rootfs: $CACHED_ROOTFS"
-
-# Extract pre-built Zig sandbox binaries from the cached rootfs using debugfs.
-# This avoids needing the gondolin source tree or a Zig toolchain.
 BIN_TMPDIR=$(mktemp -d)
 trap 'rm -rf "$BIN_TMPDIR"' EXIT
-
-echo "Extracting pre-built sandbox binaries from cached image..."
-for BIN in sandboxd sandboxfs sandboxssh sandboxingress; do
-  "$DEBUGFS" -R "dump /usr/bin/$BIN $BIN_TMPDIR/$BIN" "$CACHED_ROOTFS" 2>/dev/null
-  if [ ! -f "$BIN_TMPDIR/$BIN" ]; then
-    echo "error: failed to extract $BIN from $CACHED_ROOTFS" >&2
-    exit 1
-  fi
-  chmod +x "$BIN_TMPDIR/$BIN"
-done
-echo "Extracted: sandboxd, sandboxfs, sandboxssh, sandboxingress"
 
 # Helper script to wire Playwright to system Chromium (copied into rootfs,
 # executed by postBuild.commands, then deleted).
@@ -176,19 +140,15 @@ INITEOF
 BUILD_CONFIG=$(mktemp /tmp/gondolin-build-XXXXXX.json)
 trap 'rm -f "$BUILD_CONFIG" "$INIT_EXTRA"; rm -rf "$BIN_TMPDIR"' EXIT
 
-# Use absolute paths for sandboxXxxPath so they resolve correctly regardless
+# Use absolute paths (postBuild.copy src) so they resolve correctly regardless
 # of configDir. gondolin calls path.resolve(configDir, value), which returns
 # the absolute path unchanged when value is already absolute.
 cat > "$BUILD_CONFIG" << EOF
 {
   "arch": "$ARCH",
-  "sandboxdPath": "$BIN_TMPDIR/sandboxd",
-  "sandboxfsPath": "$BIN_TMPDIR/sandboxfs",
-  "sandboxsshPath": "$BIN_TMPDIR/sandboxssh",
-  "sandboxingressPath": "$BIN_TMPDIR/sandboxingress",
   "distro": "alpine",
   "alpine": {
-    "version": "3.23.0",
+    "version": "3.23.7",
     "kernelPackage": "linux-virt",
     "kernelImage": "vmlinuz-virt",
     "rootfsPackages": [

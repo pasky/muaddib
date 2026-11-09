@@ -16,6 +16,8 @@ import {
   type VfsStatfs,
 } from "@earendil-works/gondolin";
 
+import { createErrnoError } from "./errno.js";
+
 export class NotifyingProvider extends VirtualProviderClass implements VirtualProvider {
   constructor(
     private readonly backend: VirtualProvider,
@@ -197,6 +199,14 @@ export class NotifyingProvider extends VirtualProviderClass implements VirtualPr
   symlinkSync(target: string, path: string, type?: string): void {
     if (this.backend.symlinkSync) return this.backend.symlinkSync(target, path, type);
     return super.symlinkSync!(target, path, type);
+  }
+  async chmod(path: string, mode: number): Promise<void> {
+    if (!this.backend.chmod) throw createErrnoError("ENOSYS", "chmod", path);
+    return this.backend.chmod(path, mode);
+  }
+  chmodSync(path: string, mode: number): void {
+    if (!this.backend.chmodSync) throw createErrnoError("ENOSYS", "chmod", path);
+    return this.backend.chmodSync(path, mode);
   }
 
   async rmdir(path: string): Promise<void> { return this.backend.rmdir(path); }

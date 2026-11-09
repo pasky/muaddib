@@ -7,37 +7,15 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { getSystemErrorName } from "node:util";
-
 import {
   VirtualProviderClass,
-  ERRNO,
   isWriteFlag,
   type VirtualProvider,
   type VirtualFileHandle,
   type VfsStatfs,
 } from "@earendil-works/gondolin";
 
-// ── Errno helper (createErrnoError is not in gondolin's public API) ────
-
-function createEnospcError(syscall: string, path?: string): NodeJS.ErrnoException {
-  // ERRNO values from gondolin are positive; getSystemErrorName expects negative.
-  let code: string;
-  try {
-    code = getSystemErrorName(-ERRNO.ENOSPC);
-  } catch {
-    code = "ENOSPC";
-  }
-  const message = path
-    ? `${code}: ${syscall} '${path}'`
-    : `${code}: ${syscall}`;
-  const error: NodeJS.ErrnoException = new Error(message);
-  error.code = code;
-  error.errno = ERRNO.ENOSPC;
-  error.syscall = syscall;
-  if (path) error.path = path;
-  return error;
-}
+import { createErrnoError } from "./errno.js";
 
 // ── Baseline measurement ───────────────────────────────────────────────
 
@@ -153,7 +131,7 @@ export class SizeLimitProvider extends VirtualProviderClass implements VirtualPr
   /** Throw ENOSPC if adding `bytes` would exceed the limit. */
   checkBudget(bytes: number, syscall: string, path?: string): void {
     if (this.usedBytes + bytes > this.limitBytes) {
-      throw createEnospcError(syscall, path);
+      throw createErrnoError("ENOSPC", syscall, path);
     }
   }
 
@@ -255,6 +233,14 @@ export class SizeLimitProvider extends VirtualProviderClass implements VirtualPr
   symlinkSync(target: string, path: string, type?: string): void {
     if (this.backend.symlinkSync) return this.backend.symlinkSync(target, path, type);
     return super.symlinkSync!(target, path, type);
+  }
+  async chmod(path: string, mode: number): Promise<void> {
+    if (!this.backend.chmod) throw createErrnoError("ENOSYS", "chmod", path);
+    return this.backend.chmod(path, mode);
+  }
+  chmodSync(path: string, mode: number): void {
+    if (!this.backend.chmodSync) throw createErrnoError("ENOSYS", "chmod", path);
+    return this.backend.chmodSync(path, mode);
   }
 
   // ── Provider-level write methods (size-tracked) ──
