@@ -47,18 +47,27 @@ fi
 BIN_TMPDIR=$(mktemp -d)
 trap 'rm -rf "$BIN_TMPDIR"' EXIT
 
+# Playwright's browser registry lives inside the image (not under $HOME, which
+# is the host-mounted /workspace at runtime). Set both at build and run time.
+PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+
 # Helper script to wire Playwright to system Chromium (copied into rootfs,
 # executed by postBuild.commands, then deleted).
 cat > "$BIN_TMPDIR/wire-playwright-chromium.sh" << 'PWEOF'
 #!/bin/sh
 set -eu
-for p in $(node -e '
-  const { registry } = require("playwright-core/lib/server");
+# Resolve playwright-core from the global playwright install.
+cd /usr/lib/node_modules/playwright
+# Playwright ignores env vars for the executable path and only checks its own
+# registry paths; ask its (internal) registry where it expects each browser.
+# Assigned separately so a changed internal API fails the build.
+paths=$(node -e '
+  const { registry } = require("playwright-core/lib/coreBundle").registry;
   for (const name of ["chromium", "chromium-headless-shell"]) {
-    const exe = registry.findExecutable(name);
-    if (exe) console.log(exe.executablePath("linux"));
+    console.log(registry.findExecutable(name).executablePath("linux"));
   }
-'); do
+')
+for p in $paths; do
   [ -e "$p" ] && continue
   mkdir -p "$(dirname "$p")"
   ln -sf /usr/bin/chromium-browser "$p"
@@ -196,7 +205,7 @@ cat > "$BUILD_CONFIG" << EOF
     "commands": [
       "rm -rf /usr/lib/node_modules/npm && mkdir -p /usr/lib/node_modules/npm && curl -fsSL https://registry.npmjs.org/npm/-/npm-11.2.0.tgz | tar -xz -C /usr/lib/node_modules/npm --strip-components=1",
       "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install -g playwright",
-      "sh /tmp/wire-playwright-chromium.sh && rm -f /tmp/wire-playwright-chromium.sh"
+      "PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH sh /tmp/wire-playwright-chromium.sh && rm -f /tmp/wire-playwright-chromium.sh"
     ]
   },
   "init": {
@@ -206,7 +215,8 @@ cat > "$BUILD_CONFIG" << EOF
     "HOME": "/workspace",
     "VIRTUAL_ENV": "/workspace/.venv",
     "PATH": "/workspace/bin:/workspace/.venv/bin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-    "CHROME_BIN": "/usr/bin/chromium-browser"
+    "CHROME_BIN": "/usr/bin/chromium-browser",
+    "PLAYWRIGHT_BROWSERS_PATH": "$PLAYWRIGHT_BROWSERS_PATH"
   }
 }
 EOF
