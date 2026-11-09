@@ -1172,7 +1172,7 @@ describe("gondolin per-arc env injection", () => {
   });
 });
 
-// ── SSH exec bridge (Gondolin's own, as patched by scripts/patch-gondolin.mjs) ──
+// ── SSH exec bridge (Gondolin's own, as patched by scripts/patch-deps.mjs) ──
 
 const MIB = 1024 * 1024;
 
