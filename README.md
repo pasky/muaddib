@@ -170,7 +170,7 @@ npm run cli:message -- --message "!h"
 npm run cli:message -- --message "tell me a joke"
 npm run cli:message -- --message "!d tell me a joke"
 npm run cli:message -- --message "!a summarize https://python.org"
-# Or with explicit config:
+# Reads $MUADDIB_HOME/config.json like the service does; or with explicit config:
 # npm run cli:message -- --message "!a summarize https://python.org" --config /path/to/config.json
 ```
 

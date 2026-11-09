@@ -68,8 +68,8 @@ describe("runCliMessageMode", () => {
 
     await writeFile(configPath, JSON.stringify(config), "utf-8");
 
+    // No configPath: like the service, the CLI reads $MUADDIB_HOME/config.json by default.
     const result = await runCliMessageMode({
-      configPath,
       message: "!s hi",
       runnerFactory: (input) => ({
         prompt: async () => {

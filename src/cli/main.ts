@@ -7,7 +7,7 @@ import { runCliMessageMode } from "./message-mode.js";
 
 interface ParsedArgs {
   message: string;
-  configPath: string;
+  configPath?: string;
   roomName?: string;
   arcsPath?: string;
   arcs: string[];
@@ -16,7 +16,7 @@ interface ParsedArgs {
 
 function parseArgs(argv: string[]): ParsedArgs {
   let message = "";
-  let configPath = "./config.json";
+  let configPath: string | undefined;
   let roomName: string | undefined;
   let arcsPath: string | undefined;
   const arcs: string[] = [];
@@ -69,7 +69,7 @@ async function main(): Promise<void> {
   if (args.help || !args.message) {
     // eslint-disable-next-line no-console
     console.log(
-      "Usage: node dist/cli/main.js --message \"...\" [--config /path/to/config.json] [--room irc|discord|slack] [--arcs-path /path/to/arcs] [--arc <arc-name> ...]",
+      "Usage: node dist/cli/main.js --message \"...\" [--config /path/to/config.json (default: $MUADDIB_HOME/config.json)] [--room irc|discord|slack] [--arcs-path /path/to/arcs] [--arc <arc-name> ...]",
     );
     if (!args.help && !args.message) {
       process.exitCode = 2;

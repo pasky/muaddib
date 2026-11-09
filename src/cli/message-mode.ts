@@ -1,3 +1,5 @@
+import { join } from "node:path";
+
 import { RuntimeLogWriter } from "../app/logging.js";
 import { getMuaddibHome } from "../config/paths.js";
 import {
@@ -11,7 +13,8 @@ import { parseArc } from "../rooms/room-gateway.js";
 
 export interface CliMessageModeOptions {
   message: string;
-  configPath: string;
+  /** Default: `$MUADDIB_HOME/config.json`, as for the service. */
+  configPath?: string;
   roomName?: string;
   serverTag?: string;
   channelName?: string;
@@ -56,7 +59,7 @@ export async function runCliMessageMode(options: CliMessageModeOptions): Promise
   roomName ??= "irc";
 
   const runtime = await createMuaddibRuntime({
-    configPath: options.configPath,
+    configPath: options.configPath ?? join(muaddibHome, "config.json"),
     muaddibHome,
     arcsPath: options.arcsPath,
     logger: runtimeLogger,
