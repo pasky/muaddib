@@ -47,6 +47,7 @@ interface MockSessionCtx {
     continue: ReturnType<typeof vi.fn>;
   };
   ensureProviderKey: ReturnType<typeof vi.fn>;
+  responseTracker: { lastResponseAt: number; responseCount: number };
   /** What the factory's getOverloadFallbackModel() reports. */
   overloadFallbackModel: string | null;
 }
@@ -73,6 +74,7 @@ function makeMockSession(opts: {
   const ensureProviderKey = vi.fn(async () => {});
   const ctx: MockSessionCtx = {
     session, callbacks, agent, ensureProviderKey, bumpSessionLimits: vi.fn(), overloadFallbackModel: null,
+    responseTracker: { lastResponseAt: 0, responseCount: 0 },
   };
 
   if (opts.promptImpl) {
@@ -84,7 +86,7 @@ function makeMockSession(opts: {
     session,
     agent,
     ensureProviderKey,
-    responseTimestamp: { lastResponseAt: 0 },
+    responseTracker: ctx.responseTracker,
     switchModel: (resolved: any) => { agent.state.model = resolved.model; },
     getVisionFallbackActivated: () => opts.visionFallbackActivated ?? false,
     getOverloadFallbackModel: () => ctx.overloadFallbackModel,
@@ -595,9 +597,14 @@ describe("SessionRunner", () => {
 
   it("delivers <status> text when the turn also calls tools, and drops it from the final answer", async () => {
     const deliveredTexts: string[] = [];
-    makeMockSession({
+    const ctx = makeMockSession({
       promptImpl: async (c) => {
         emitAssistantResponse(c, "<status>Searching for the paper.</status>", {
+          stopReason: "toolUse", withToolCall: { name: "web_search" },
+        });
+        // Monologue-only tool turn: nothing user-visible, so it must not
+        // advance the progress-nudge backoff.
+        emitAssistantResponse(c, "<thinking>Which result is the v2 preprint?</thinking>", {
           stopReason: "toolUse", withToolCall: { name: "web_search" },
         });
         emitAssistantResponse(c, "<status>Found it, answering now.</status>\n\nkanzure: here is the answer.");
@@ -613,8 +620,13 @@ describe("SessionRunner", () => {
     });
     const result = await runner.prompt("hello");
 
-    expect(deliveredTexts).toEqual(["Searching for the paper.", "kanzure: here is the answer."]);
-    expect(delivered.map((d) => d.interim)).toEqual([true, false]);
+    expect(deliveredTexts).toEqual([
+      "Searching for the paper.",
+      "<thinking>Which result is the v2 preprint?</thinking>",
+      "kanzure: here is the answer.",
+    ]);
+    expect(delivered.map((d) => d.interim)).toEqual([true, true, false]);
+    expect(ctx.responseTracker.responseCount).toBe(2);
     expect(result.text).toBe("kanzure: here is the answer.");
   });
 

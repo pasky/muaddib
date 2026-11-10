@@ -9,7 +9,7 @@
       "warnCostUsd": 1.0
     },
     "progress": {
-      "thresholdSeconds": 10
+      "thresholdSeconds": 30
     },
     "tools": {
       "jina": {

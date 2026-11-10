@@ -22,7 +22,7 @@ import {
   createInternalNudgeTransform,
   createNudgeDecider,
   type InvocationStart,
-  type ResponseTimestamp,
+  type ResponseTracker,
 } from "./session-limits.js";
 import { PiAiModelAdapter, type ResolvedPiAiModel } from "../models/pi-ai-model-adapter.js";
 import { piAiModels } from "../models/pi-ai-models.js";
@@ -148,7 +148,7 @@ interface CreateAgentSessionInput {
 interface CreateAgentSessionResult {
   session: AgentSession;
   agent: Agent;
-  responseTimestamp: ResponseTimestamp;
+  responseTracker: ResponseTracker;
   ensureProviderKey: (provider: string) => Promise<void>;
   /**
    * Switch the agent to another model (a fallback) and record it as a
@@ -241,7 +241,7 @@ export async function createAgentSessionForInvocation(
     limits.recordUsage(message.usage);
   });
   const sessionStartTime = Date.now();
-  const responseTimestamp: ResponseTimestamp = { lastResponseAt: 0 };
+  const responseTracker: ResponseTracker = { lastResponseAt: 0, responseCount: 0 };
   // Marks where preloaded content ends and this invocation's own turns begin.
   // Held as message identity rather than an index because compaction rewrites
   // the message list; filled in below, once the preload (explicit context or
@@ -252,7 +252,7 @@ export async function createAgentSessionForInvocation(
     limits,
     sessionStartTime,
     input.thinkingLevel ?? "off",
-    responseTimestamp,
+    responseTracker,
     input.metaReminder,
     input.progressThresholdSeconds,
   );
@@ -399,7 +399,7 @@ export async function createAgentSessionForInvocation(
   return {
     session,
     agent,
-    responseTimestamp,
+    responseTracker,
     sessionFile,
     sessionId,
     ensureProviderKey: async (provider: string) => {

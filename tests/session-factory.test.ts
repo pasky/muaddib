@@ -950,7 +950,7 @@ describe("createAgentSessionForInvocation", () => {
     expect((out.at(-1) as any).content[0].text).toContain("brief");
   });
 
-  it("resets progress nudge debounce when responseTimestamp is bumped", async () => {
+  it("resets progress nudge debounce when responseTracker is bumped", async () => {
     const ctx = await createAgentSessionForInvocation({
       model: "openai:gpt-4o-mini",
       systemPrompt: { mode: "system" },
@@ -964,7 +964,7 @@ describe("createAgentSessionForInvocation", () => {
     const transform = await getTransform(ctx);
 
     // Simulate a recent response delivery
-    ctx.responseTimestamp.lastResponseAt = Date.now();
+    ctx.responseTracker.lastResponseAt = Date.now();
 
     // Elapsed since last response ~0s < 1s threshold → no progress nudge
     const out = await transform(toolUseContext());

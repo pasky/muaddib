@@ -248,7 +248,13 @@ export class SessionRunner {
       const queueResponseDelivery = (text: string, interim = false): void => {
         pendingResponseDelivery = pendingResponseDelivery
           .then(async () => {
-            sessionCtx.responseTimestamp.lastResponseAt = Date.now();
+            // Only user-visible text counts as a report for the progress-nudge
+            // debounce/backoff; monologue-only or NULL turns reach nobody.
+            const visible = extractThinking(text).text;
+            if (visible && !isNullSentinel(visible)) {
+              sessionCtx.responseTracker.lastResponseAt = Date.now();
+              sessionCtx.responseTracker.responseCount += 1;
+            }
             await this.onResponse?.(text, { interim });
           })
           .catch((error) => {

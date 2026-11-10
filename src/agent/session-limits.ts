@@ -5,10 +5,17 @@ import { isAssistantMessage } from "./message.js";
 import type { Logger } from "../app/logging.js";
 import { accumulateUsage, emptyUsage } from "../cost/usage.js";
 
-/** Mutable timestamp holder — bumped externally when a response is delivered. */
-export interface ResponseTimestamp {
+/** Mutable response-delivery state — bumped externally when a response is delivered. */
+export interface ResponseTracker {
   lastResponseAt: number;
+  responseCount: number;
 }
+
+/**
+ * Progress nudges back off exponentially with each response already delivered
+ * (base, 2×, 4×, 8× base), so long tasks don't keep narrating at the base rate.
+ */
+const MAX_PROGRESS_BACKOFF_DOUBLINGS = 3;
 
 /**
  * Boundary between the preloaded context and this invocation's own turns,
@@ -126,7 +133,7 @@ export function createNudgeDecider(
   limits: SessionLimits,
   sessionStartTime: number,
   thinkingLevel: ThinkingLevel,
-  responseTimestamp: ResponseTimestamp,
+  responseTracker: ResponseTracker,
   metaReminder?: string,
   progressThresholdSeconds?: number,
 ): (turnCount: number) => string | null {
@@ -140,14 +147,16 @@ export function createNudgeDecider(
     // Suppress progress nudges when within 80% of either limit.
     if (progressThresholdSeconds != null && !limits.nearLimit) {
       const now = Date.now();
-      const lastActivity = Math.max(sessionStartTime, responseTimestamp.lastResponseAt);
+      const lastActivity = Math.max(sessionStartTime, responseTracker.lastResponseAt);
       const elapsedSinceLastReport = (now - lastActivity) / 1000;
+      const threshold = progressThresholdSeconds *
+        2 ** Math.min(responseTracker.responseCount, MAX_PROGRESS_BACKOFF_DOUBLINGS);
       const isFirstTurnHighReasoning =
         turnCount === 1 &&
         (thinkingLevel === "medium" || thinkingLevel === "high" || thinkingLevel === "xhigh" || thinkingLevel === "max");
 
-      if (isFirstTurnHighReasoning || elapsedSinceLastReport >= progressThresholdSeconds) {
-        parts.push("*If* you are going to call more tools, write also an extremely brief one-line status of what you are doing and why, wrapped in <status>...</status> tags (they are machine-readable: a status note is dropped instead of delivered when it turns out you are already answering). Never put your actual answer inside <status>. Continue now.");
+      if (isFirstTurnHighReasoning || elapsedSinceLastReport >= threshold) {
+        parts.push("*If* you are going to call more tools *and* have something worth telling the user (a key finding, a change of plan, or a heads-up that this will take a while), write also an extremely brief one-line status wrapped in <status>...</status> tags (they are machine-readable: a status note is dropped instead of delivered when it turns out you are already answering). Do not narrate routine steps - when in doubt, skip the status. Never put your actual answer inside <status>. Continue now.");
       }
     }
 

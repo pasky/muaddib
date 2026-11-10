@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { Usage } from "@earendil-works/pi-ai";
 
@@ -117,7 +117,7 @@ describe("SessionLimits", () => {
       limits,
       Date.now() - 60_000,
       "high",
-      { lastResponseAt: Date.now() - 60_000 },
+      { lastResponseAt: Date.now() - 60_000, responseCount: 0 },
       undefined,
       10,
     );
@@ -127,6 +127,27 @@ describe("SessionLimits", () => {
     // its final answer; plain prose instructions alone are not enforceable.
     expect(nudge).toContain("<status>");
     expect(nudge).toContain("</status>");
+  });
+
+  it("progress nudge threshold doubles per delivered response, capped at 8×", () => {
+    const now = 10_000_000;
+    vi.useFakeTimers({ now });
+    try {
+      const nudgedAfter = (elapsedSeconds: number, responseCount: number): boolean => createNudgeDecider(
+        new SessionLimits(100_000, 1.0),
+        0,
+        "off",
+        { lastResponseAt: now - elapsedSeconds * 1000, responseCount },
+        undefined,
+        30,
+      )(2) !== null;
+      for (const [responseCount, threshold] of [[0, 30], [1, 60], [2, 120], [3, 240], [7, 240]]) {
+        expect(nudgedAfter(threshold - 0.001, responseCount)).toBe(false);
+        expect(nudgedAfter(threshold, responseCount)).toBe(true);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("bump floors increments at 10% of the original limits", () => {
