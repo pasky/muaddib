@@ -79,6 +79,7 @@ describe("IpcRoomMonitor", () => {
       commandHandler: {
         handleIncomingMessage: async (message, options) => {
           seen = message;
+          await options?.sendResponse?.("Looking for the letter…", { interim: true });
           await options?.sendResponse?.("Of course, here it is.");
           await options?.sendResponse?.(letter);
         },
@@ -98,6 +99,8 @@ describe("IpcRoomMonitor", () => {
       isPrivate: true,
     });
     expect(channel.sent).toEqual([
+      // progress chatter says so, the answer does not
+      { type: "response", id: "p1", server: "pi-super", channel: "grandma", text: "Looking for the letter…", interim: true },
       { type: "response", id: "p1", server: "pi-super", channel: "grandma", text: "Of course, here it is." },
       // no IRC-style splitting, truncation or line flattening
       { type: "response", id: "p1", server: "pi-super", channel: "grandma", text: letter },

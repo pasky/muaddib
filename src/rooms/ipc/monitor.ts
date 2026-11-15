@@ -5,7 +5,8 @@
  * whatever comes back.
  *
  * Unlike IRC there is no line protocol to fit into — responses are delivered whole, line
- * breaks included; `command.responseMaxBytes` is the only length limit. And the parent is
+ * breaks included; `command.responseMaxBytes` is the only length limit. Progress chatter
+ * is flagged `interim`, so a parent that speaks can tell a "still on it" from the answer. And the parent is
  * told when a request is finished, which a chat transport never needs to know.
  *
  * stdout stays the log; the channel is the room. Arcs are `ipc:<server>#<channel>`, both
@@ -33,10 +34,13 @@ export interface IpcInboundMessage {
   content: string;
 }
 
-/** muaddib → parent. `id` is absent on responses nobody asked for (arc events). */
+/**
+ * muaddib → parent. `id` is absent on responses nobody asked for (arc events); `interim`
+ * marks progress chatter, as opposed to the answer (SendResponseOptions.interim).
+ */
 export type IpcOutbound =
   | { type: "ready"; mynick: string }
-  | { type: "response"; id?: string; server: string; channel: string; text: string }
+  | { type: "response"; id?: string; server: string; channel: string; text: string; interim?: true }
   | { type: "done"; id: string };
 
 export interface IpcChannel {
@@ -234,8 +238,8 @@ export class IpcRoomMonitor {
     const handle = async (): Promise<void> => {
       try {
         await this.options.commandHandler.handleIncomingMessage(message, {
-          sendResponse: async (text) => {
-            this.respond(serverTag, inbound.channel, text, inbound.id);
+          sendResponse: async (text, options) => {
+            this.respond(serverTag, inbound.channel, text, inbound.id, options?.interim);
           },
         });
       } finally {
@@ -251,13 +255,14 @@ export class IpcRoomMonitor {
     }
   }
 
-  respond(serverTag: string, channel: string, text: string, id?: string): void {
+  respond(serverTag: string, channel: string, text: string, id?: string, interim?: boolean): void {
     this.post({
       type: "response",
       ...(id === undefined ? {} : { id }),
       server: serverTag.slice(IPC_SERVER_TAG_PREFIX.length),
       channel,
       text,
+      ...(interim ? { interim: true as const } : {}),
     });
   }
 

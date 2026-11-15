@@ -80,6 +80,12 @@ export interface SendResult {
 export interface SendResponseOptions {
   /** When true, always send as a new message instead of editing/coalescing into the previous one. */
   forceNewMessage?: boolean;
+  /**
+   * Progress chatter (a note from a turn that still calls tools, a <status> line, a retry
+   * notice), not the answer. Chat rooms post it like anything else; a room that speaks
+   * (ipc → pi-super's voice) can treat it differently.
+   */
+  interim?: boolean;
 }
 
 /** Callback for sending a message to the room. May return the outbound platform ID. */
@@ -515,9 +521,10 @@ export class CommandExecutor {
     const deliver = async (
       text: string,
       persistOptions?: { mode?: string },
+      sendOptions?: SendResponseOptions,
     ): Promise<void> => {
-      logger.info("Delivering response", `arc=${message.arc}`, ...runTags, `response=${text}`);
-      const sr = await sendResponse(text);
+      logger.info("Delivering response", `arc=${message.arc}`, ...runTags, ...(sendOptions?.interim ? ["interim"] : []), `response=${text}`);
+      const sr = await sendResponse(text, sendOptions);
       await this.persistBotResponse(message.arc, message, text, sr ?? undefined, {
         run: triggerTs,
         ...persistOptions,
@@ -646,7 +653,7 @@ export class CommandExecutor {
     // policy, then delivers. Used for all agent text (intermediate + final)
     // and progress reports. NULL sentinels from steered background messages
     // are suppressed.
-    const onResponse = async (text: string): Promise<void> => {
+    const onResponse = async (text: string, meta?: { interim: boolean }): Promise<void> => {
       const { text: raw, thinking } = extractThinking(text);
       if (thinking) {
         await this.persistBotResponse(message.arc, message, `[internal monologue] ${thinking}`, undefined, {
@@ -657,7 +664,7 @@ export class CommandExecutor {
       let cleaned = this.cleanResponseText(raw, message.nick);
       cleaned = await this.applyResponseLengthPolicy(cleaned, message.arc);
       if (!cleaned || isNullSentinel(cleaned)) return;
-      await deliver(cleaned, { mode: trigger });
+      await deliver(cleaned, { mode: trigger }, meta?.interim ? { interim: true } : undefined);
     };
 
     const toolSet = this.selectTools(

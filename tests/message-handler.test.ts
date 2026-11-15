@@ -396,6 +396,35 @@ describe("RoomMessageHandler", () => {
     await history.close();
   });
 
+  it("tells the room which responses are progress chatter", async () => {
+    const history = createTempHistoryStore(40);
+    await history.initialize();
+    const incoming = makeMessage("!s ping");
+    incoming.isDirect = true;
+    const handler = createHandler({
+      roomConfig: roomConfig as any,
+      history,
+      classifyMode: async () => "EASY_SERIOUS",
+      runnerFactory: (input) => ({
+        prompt: async () => {
+          await input.onResponse("Checking the calendar…", { interim: true });
+          const result = makeRunnerResult("all clear");
+          await input.onResponse(result.text, { interim: false });
+          return result;
+        },
+      }),
+    });
+    const sent: Array<[string, boolean | undefined]> = [];
+    await handler.handleIncomingMessage(incoming, {
+      sendResponse: async (text, options) => {
+        sent.push([text, options?.interim]);
+      },
+    });
+    expect(sent.map(([, interim]) => interim)).toEqual([true, undefined]);
+    expect(sent[1]?.[0]).toContain("all clear");
+    await history.close();
+  });
+
   it("strips echoed IRC context prefixes in onResponse callback (sendResponse path)", async () => {
     const history = createTempHistoryStore(40);
     await history.initialize();
