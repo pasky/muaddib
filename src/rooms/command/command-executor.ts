@@ -45,7 +45,7 @@ import { UserCostLedger } from "../../cost/user-cost-ledger.js";
 import { withPersistedCostSpan, recordUsage, withCostSpan, currentCostSpan } from "../../cost/cost-span.js";
 import { LLM_CALL_TYPE, COST_SOURCE, type CostSource } from "../../cost/llm-call-type.js";
 import { ContextReducerTs, type ContextReducer } from "./context-reducer.js";
-import { dmCommandReference, type RoomMessage } from "../message.js";
+import { dmCommandReference, replaceMentionedContent, type RoomMessage } from "../message.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import type { NetworkAccessApprover } from "../../agent/network-boundary.js";
 import { createModeClassifier } from "./classifier.js";
@@ -693,7 +693,10 @@ export class CommandExecutor {
     });
 
     const queryTimestamp = formatUtcTime().slice(-5); // HH:MM in UTC, matching history format
-    const queryContent = message.originalContent ?? resolved.queryText;
+    // Keep the bot mention but drop command prefix tokens (!c, !s, @model):
+    // they are bot syntax, and e.g. !c isn't among the modes the system
+    // prompt lists, so the model would remark on an "unknown mode".
+    const queryContent = replaceMentionedContent(message, resolved.queryText);
     const queryLine = message.trusted === false
       ? `------------------------------\n[${queryTimestamp}] [UNTRUSTED] <${message.nick}> ${queryContent}[/UNTRUSTED]`
       : `------------------------------\n[${queryTimestamp}] <${message.nick}> ${queryContent}`;

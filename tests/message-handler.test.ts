@@ -324,7 +324,12 @@ async function readRawJsonlLines(history: ChatHistoryStore, arc = "libera##test"
 }
 
 describe("RoomMessageHandler", () => {
-  it("routes command to runner without duplicating trigger message and propagates reasoning level", async () => {
+  it.each([
+    { originalContent: undefined, queryBody: "hello there" },
+    // Bot mention is kept, but command prefix tokens (!c, !s, @model) are bot
+    // syntax the model shouldn't see (it would mistake !c for an unknown mode).
+    { originalContent: "muaddib: !a hello there", queryBody: "muaddib: hello there" },
+  ])("routes command to runner without duplicating trigger message and propagates reasoning level (originalContent=$originalContent)", async ({ originalContent, queryBody }) => {
     const history = createTempHistoryStore(40);
     await history.initialize();
 
@@ -333,7 +338,7 @@ describe("RoomMessageHandler", () => {
       nick: "bob",
     });
 
-    const incoming = makeMessage("!a hello there");
+    const incoming = makeMessage("!a hello there", { originalContent });
     // Note: handleIncomingMessage adds the trigger to history automatically; don't pre-add it.
 
     let runnerModel: string | null = null;
@@ -366,7 +371,7 @@ describe("RoomMessageHandler", () => {
 
     expect(sent[0]).toBe("done");
     expect(runnerModel).toBe("openai:gpt-4o-mini");
-    expect(runnerPrompt).toMatch(/^-{30}\n\[\d{2}:\d{2}\] <alice> hello there$/);
+    expect(runnerPrompt).toMatch(new RegExp(`^-{30}\\n\\[\\d{2}:\\d{2}\\] <alice> ${queryBody}$`));
     expect(runnerThinkingLevel).toBe("medium");
     expect(runnerContextContents.some((entry) => entry.includes("!a hello there"))).toBe(false);
     expect(runnerContextContents.some((entry) => entry.includes("previous context"))).toBe(true);

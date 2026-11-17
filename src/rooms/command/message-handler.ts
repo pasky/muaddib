@@ -20,7 +20,7 @@ import {
   type SendResponse,
 } from "./command-executor.js";
 import type { ChatHistoryStore } from "../../history/chat-history-store.js";
-import { buildSteeredPassiveMessage, type RoomMessage } from "../message.js";
+import { buildSteeredPassiveMessage, replaceMentionedContent, type RoomMessage } from "../message.js";
 import type { MuaddibRuntime } from "../../runtime.js";
 import type {
   NetworkAccessApprover,
@@ -381,9 +381,7 @@ export class RoomMessageHandler {
     const sanitizedQuery = `${parsedArgs.provider} [redacted]`;
     const sanitizedContent = message.content.replace(parsed.queryText.trim(), sanitizedQuery);
     const sanitizedOriginalContent = message.originalContent
-      ? message.originalContent.includes(message.content)
-        ? message.originalContent.replace(message.content, sanitizedContent)
-        : sanitizedContent
+      ? replaceMentionedContent(message, sanitizedContent)
       : undefined;
 
     return {

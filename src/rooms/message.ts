@@ -30,6 +30,23 @@ export function buildArc(serverTag: string, channelName: string): string {
 }
 
 /**
+ * `originalContent` with its `content` part (the text after the stripped bot
+ * mention) replaced by `replacement`, so the mention is preserved; just
+ * `replacement` when there is no mention or `content` can't be located in it.
+ */
+export function replaceMentionedContent(
+  message: Pick<RoomMessage, "content" | "originalContent">,
+  replacement: string,
+): string {
+  const { content, originalContent } = message;
+  if (!originalContent?.includes(content)) {
+    return replacement;
+  }
+  // Function replacer: `replacement` is user text and may contain `$&` etc.
+  return originalContent.replace(content, () => replacement);
+}
+
+/**
  * Platform-appropriate reference telling a user to run a command in a private
  * conversation: `/msg <mynick> <command>` on IRC-style transports, `DM me:
  * <command>` on Discord/Slack (which have no /msg).
