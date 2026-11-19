@@ -185,7 +185,7 @@
               "!a": {
                 "autoReduceContext": true,
                 "reasoningEffort": "high",
-                "model": "anthropic:claude-opus-5-5",
+                "model": "openrouter:google/gemini-4-neon",
                 "refusalFallbackModels": ["anthropic:claude-opus-5", "openrouter:moonshotai/kimi-k3"]
               }
             }
