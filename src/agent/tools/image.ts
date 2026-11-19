@@ -1,4 +1,4 @@
-import { execFile, type ExecFileOptions } from "node:child_process";
+import { execFile } from "node:child_process";
 
 import type { Usage } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
@@ -10,7 +10,7 @@ import { parseModelSpec } from "../../models/model-spec.js";
 import { stringifyError, toConfiguredString } from "../../utils/index.js";
 import { writeArtifactBytes } from "./artifact-storage.js";
 import type { ToolContext, MuaddibTool } from "./types.js";
-import { extractLocalArtifactPath, resolveLocalArtifactFilePath } from "./url-utils.js";
+import { extractLocalArtifactPath } from "./url-utils.js";
 
 export interface GenerateImageInput {
   prompt: string;
@@ -44,8 +44,9 @@ const GENERATE_IMAGE_PARAMETERS = Type.Object({
 const DEFAULT_IMAGE_LIMIT = 3_500_000;
 const DEFAULT_IMAGE_GEN_TIMEOUT_MS = 120_000;
 const DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
-const SLOP_WATERMARK_TIMEOUT_MS = 30_000;
-const SLOP_WATERMARK_MAX_BUFFER = 1024 * 1024;
+const FINALIZE_IMAGE_TIMEOUT_MS = 30_000;
+const FINALIZE_IMAGE_MAX_BUFFER = 64 * 1024 * 1024;
+const FINALIZE_IMAGE_JPEG_QUALITY = "90";
 const IMAGE_SUFFIX_BY_MIME_TYPE: Record<string, string> = {
   "image/png": ".png",
   "image/jpeg": ".jpg",
@@ -160,11 +161,17 @@ export function createDefaultGenerateImageExecutor(
 
     const images: GeneratedImageResultItem[] = [];
     for (const generatedImage of generatedImages) {
-      const imageBytes = Buffer.from(generatedImage.b64Data, "base64");
-      const mimeType = generatedImage.mediaType ?? sniffImageMimeType(imageBytes);
-      if (!mimeType) {
+      const rawBytes = Buffer.from(generatedImage.b64Data, "base64");
+      const rawMimeType = generatedImage.mediaType ?? sniffImageMimeType(rawBytes);
+      if (!rawMimeType) {
         throw new Error("Image generation returned an image of undeterminable format (no media_type, unrecognized bytes).");
       }
+
+      // Models typically return huge PNGs (textured styles easily exceed the
+      // cap); share a watermarked JPEG instead.
+      const finalized = await finalizeGeneratedImage(options, rawBytes);
+      const imageBytes = finalized ?? rawBytes;
+      const mimeType = finalized ? "image/jpeg" : rawMimeType;
 
       if (imageBytes.length > maxImageBytes) {
         throw new Error(
@@ -174,9 +181,8 @@ export function createDefaultGenerateImageExecutor(
 
       const suffix = IMAGE_SUFFIX_BY_MIME_TYPE[mimeType] ?? ".png";
       const artifactUrl = await writeArtifactBytes(options, imageBytes, suffix);
-      await addSlopWatermarkToArtifact(options, artifactUrl);
       images.push({
-        data: generatedImage.b64Data,
+        data: imageBytes.toString("base64"),
         mimeType,
         artifactUrl,
       });
@@ -375,20 +381,18 @@ async function resolveOpenRouterApiKey(options: ToolContext): Promise<string | u
   return toConfiguredString(process.env.OPENROUTER_API_KEY);
 }
 
-async function addSlopWatermarkToArtifact(options: ToolContext, artifactUrl: string): Promise<void> {
+/**
+ * Add the slop watermark and re-encode as JPEG in a single ImageMagick pass.
+ * Returns undefined (keeping the raw image, unwatermarked) if conversion fails.
+ */
+async function finalizeGeneratedImage(options: ToolContext, imageBytes: Buffer): Promise<Buffer | undefined> {
   try {
-    const filePath = resolveLocalArtifactFilePath(
-      artifactUrl,
-      options.toolsConfig?.artifacts?.url,
-      options.toolsConfig?.artifacts?.path,
-    );
-    if (!filePath) {
-      options.logger?.warn(`Failed to add slop watermark: generated artifact URL did not resolve locally: ${artifactUrl}`);
-      return;
-    }
-
-    await execFileAsync("convert", [
-      filePath,
+    return await execFileWithStdin("convert", [
+      "-",
+      "-background",
+      "white",
+      "-alpha",
+      "remove",
       "-gravity",
       "SouthEast",
       "-pointsize",
@@ -402,25 +406,37 @@ async function addSlopWatermarkToArtifact(options: ToolContext, artifactUrl: str
       "-annotate",
       "+10+10",
       "🍌slop",
-      filePath,
-    ], {
-      timeout: SLOP_WATERMARK_TIMEOUT_MS,
-      maxBuffer: SLOP_WATERMARK_MAX_BUFFER,
-    });
+      "-quality",
+      FINALIZE_IMAGE_JPEG_QUALITY,
+      "jpg:-",
+    ], imageBytes);
   } catch (error) {
-    options.logger?.warn(`Failed to add slop watermark to ${artifactUrl}: ${stringifyError(error)}`);
+    options.logger?.warn(`Failed to watermark/convert generated image to JPEG: ${stringifyError(error)}`);
+    return undefined;
   }
 }
 
-function execFileAsync(file: string, args: string[], options: ExecFileOptions): Promise<void> {
+function execFileWithStdin(file: string, args: string[], input: Buffer): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    execFile(file, args, options, (error) => {
+    const child = execFile(file, args, {
+      encoding: "buffer",
+      timeout: FINALIZE_IMAGE_TIMEOUT_MS,
+      maxBuffer: FINALIZE_IMAGE_MAX_BUFFER,
+    }, (error, stdout) => {
       if (error) {
         reject(error);
         return;
       }
-      resolve();
+      if (stdout.length === 0) {
+        reject(new Error(`${file} produced no output`));
+        return;
+      }
+      resolve(stdout);
     });
+    // The process may exit (e.g. on bad input) before consuming stdin; the
+    // exit error is reported through the callback above.
+    child.stdin?.on("error", () => {});
+    child.stdin?.end(input);
   });
 }
 

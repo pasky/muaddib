@@ -163,8 +163,8 @@ describe("E2E: Image generation pipeline", () => {
 
     // ── Verify artifact file was written to disk ──
     const files = await readdir(artifactsPath);
-    const pngFiles = files.filter((f) => f.endsWith(".png"));
-    expect(pngFiles.length).toBeGreaterThanOrEqual(1);
+    const jpgFiles = files.filter((f) => f.endsWith(".jpg"));
+    expect(jpgFiles.length).toBeGreaterThanOrEqual(1);
 
     // ── Verify FakeSender got response containing artifact URL ──
     // The first response may lack the URL (triggering an artifact-URL retry),

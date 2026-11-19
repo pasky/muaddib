@@ -1454,7 +1454,7 @@ describe("core tool executors generate_image support", () => {
     expect(openRouterRequestBody.input_references[0].image_url.url).toBe("data:image/png;base64,CQ==");
   });
 
-  it("generate_image adds the slop watermark to the local artifact file", async () => {
+  it("generate_image watermarks and re-encodes as JPEG before applying the size cap", async () => {
     const { dir, artifactsPath } = await makeArtifactsDir();
     const binDir = join(dir, "bin");
     const convertLogPath = join(dir, "convert-args.json");
@@ -1466,11 +1466,14 @@ describe("core tool executors generate_image support", () => {
       `#!/usr/bin/env node
 const fs = require("node:fs");
 const args = process.argv.slice(2);
-fs.writeFileSync(${JSON.stringify(convertLogPath)}, JSON.stringify(args));
-fs.appendFileSync(args[args.length - 1], "\\nWATERMARKED");
+const input = fs.readFileSync(0);
+fs.writeFileSync(${JSON.stringify(convertLogPath)}, JSON.stringify({ args, inputLength: input.length }));
+process.stdout.write("JPEG-WATERMARKED");
 `,
     );
     await chmod(convertPath, 0o755);
+    // Raw PNG exceeds the cap; only the converted JPEG fits.
+    const rawPng = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(100)]);
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -1478,7 +1481,7 @@ fs.appendFileSync(args[args.length - 1], "\\nWATERMARKED");
       if (url === "https://openrouter.ai/api/v1/images") {
         return new Response(
           JSON.stringify({
-            data: [{ b64_json: "QUJD", media_type: "image/png" }],
+            data: [{ b64_json: rawPng.toString("base64"), media_type: "image/png" }],
             usage: { prompt_tokens: 0, completion_tokens: 10, total_tokens: 10, cost: 0.04 },
           }),
           {
@@ -1493,7 +1496,7 @@ fs.appendFileSync(args[args.length - 1], "\\nWATERMARKED");
       throw new Error(`Unexpected fetch URL in test: ${url}`);
     });
 
-    const executors = createDefaultToolExecutors({ toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" }, imageGen: { model: "openrouter:google/gemini-3-pro-image-preview" } },
+    const executors = createDefaultToolExecutors({ toolsConfig: { artifacts: { path: artifactsPath, url: "https://example.com/artifacts" }, imageGen: { model: "openrouter:google/gemini-3-pro-image-preview" }, jina: { maxImageBytes: 50 } },
       authStorage: AuthStore.inMemory({ openrouter: { type: "api_key", key: "or-key" } }),
     });
 
@@ -1505,14 +1508,17 @@ fs.appendFileSync(args[args.length - 1], "\\nWATERMARKED");
       });
 
       const artifactFilename = extractFilenameFromViewerUrl(result.images[0].artifactUrl);
-      const expectedPath = join(artifactsPath, artifactFilename);
-      const convertArgs = JSON.parse(await readFile(convertLogPath, "utf-8")) as string[];
+      const convertLog = JSON.parse(await readFile(convertLogPath, "utf-8")) as { args: string[]; inputLength: number };
 
-      expect(convertArgs[0]).toBe(expectedPath);
-      expect(convertArgs.at(-1)).toBe(expectedPath);
-      expect(convertArgs).toContain("🍌slop");
-      expect(convertArgs[0]).not.toContain("?");
-      expect((await readFile(expectedPath)).toString()).toBe("ABC\nWATERMARKED");
+      expect(convertLog.inputLength).toBe(rawPng.length);
+      expect(convertLog.args).toContain("🍌slop");
+      expect(convertLog.args.at(-1)).toBe("jpg:-");
+      expect(artifactFilename).toMatch(/\.jpg$/);
+      expect((await readFile(join(artifactsPath, artifactFilename))).toString()).toBe("JPEG-WATERMARKED");
+      expect(result.images[0]).toMatchObject({
+        mimeType: "image/jpeg",
+        data: Buffer.from("JPEG-WATERMARKED").toString("base64"),
+      });
     } finally {
       process.env.PATH = previousPath;
     }
