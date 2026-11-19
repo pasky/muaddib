@@ -325,11 +325,15 @@ async function readRawJsonlLines(history: ChatHistoryStore, arc = "libera##test"
 
 describe("RoomMessageHandler", () => {
   it.each([
-    { originalContent: undefined, queryBody: "hello there" },
-    // Bot mention is kept, but command prefix tokens (!c, !s, @model) are bot
-    // syntax the model shouldn't see (it would mistake !c for an unknown mode).
-    { originalContent: "muaddib: !a hello there", queryBody: "muaddib: hello there" },
-  ])("routes command to runner without duplicating trigger message and propagates reasoning level (originalContent=$originalContent)", async ({ originalContent, queryBody }) => {
+    // The query is verbatim (as in chat history): an explicit !a must stay
+    // visible, or the model takes it for a router pick.
+    { content: "!a hello there", originalContent: undefined, thinking: "medium", noContext: false },
+    { content: "!a hello there", originalContent: "muaddib: !a hello there", thinking: "medium", noContext: false },
+    { content: "hello there", originalContent: "muaddib: hello there", thinking: "low", noContext: false },
+    // !c isn't a listed mode; the run context explains it to the model.
+    { content: "!c !a hello there", originalContent: undefined, thinking: "medium", noContext: true },
+  ])("routes command to runner without duplicating trigger message and propagates reasoning level ($content, originalContent=$originalContent)", async ({ content, originalContent, thinking, noContext }) => {
+    const queryBody = originalContent ?? content;
     const history = createTempHistoryStore(40);
     await history.initialize();
 
@@ -338,10 +342,11 @@ describe("RoomMessageHandler", () => {
       nick: "bob",
     });
 
-    const incoming = makeMessage("!a hello there", { originalContent });
+    const incoming = makeMessage(content, { originalContent });
     // Note: handleIncomingMessage adds the trigger to history automatically; don't pre-add it.
 
     let runnerModel: string | null = null;
+    let runnerRunContext: string | undefined;
     let runnerPrompt = "";
     let runnerThinkingLevel: string | undefined;
     let runnerContextContents: string[] = [];
@@ -353,6 +358,7 @@ describe("RoomMessageHandler", () => {
       classifyMode: async () => "EASY_SERIOUS",
       runnerFactory: (input) => {
         runnerModel = input.model;
+        runnerRunContext = input.systemPromptRunContext;
         return {
           prompt: async (prompt, options) => {
             runnerPrompt = prompt;
@@ -372,9 +378,10 @@ describe("RoomMessageHandler", () => {
     expect(sent[0]).toBe("done");
     expect(runnerModel).toBe("openai:gpt-4o-mini");
     expect(runnerPrompt).toMatch(new RegExp(`^-{30}\\n\\[\\d{2}:\\d{2}\\] <alice> ${queryBody}$`));
-    expect(runnerThinkingLevel).toBe("medium");
-    expect(runnerContextContents.some((entry) => entry.includes("!a hello there"))).toBe(false);
-    expect(runnerContextContents.some((entry) => entry.includes("previous context"))).toBe(true);
+    expect(runnerThinkingLevel).toBe(thinking);
+    expect(runnerContextContents.some((entry) => entry.includes("hello there"))).toBe(false);
+    expect(runnerContextContents.some((entry) => entry.includes("previous context"))).toBe(!noContext);
+    expect(runnerRunContext?.includes("!c prefix is the no-context flag")).toBe(noContext);
 
     await history.close();
   });
@@ -803,7 +810,7 @@ describe("RoomMessageHandler", () => {
     await handler.handleIncomingMessage(incoming, { sendResponse: async () => {} });
 
     expect(contextReducer.reduce).toHaveBeenCalledTimes(1);
-    expect(runnerPrompt).toMatch(/^-{30}\n\[\d{2}:\d{2}\] <alice> reduce context please$/);
+    expect(runnerPrompt).toMatch(/^-{30}\n\[\d{2}:\d{2}\] <alice> !s reduce context please$/);
     expect(runnerContextContents).toEqual(["[10:00] <summary> reduced context"]);
     expect(runnerContextContents.some((entry) => entry.includes("previous context"))).toBe(false);
 
@@ -4571,8 +4578,8 @@ describe("RoomMessageHandler", () => {
     expect(runCount).toBe(2);
     expect(sent).toContain("alice reply");
     expect(sent).toContain("bob reply");
-    expect(prompts.some(p => p.includes("<alice> alice question"))).toBe(true);
-    expect(prompts.some(p => p.includes("<bob> bob question"))).toBe(true);
+    expect(prompts.some(p => p.includes("<alice> !s alice question"))).toBe(true);
+    expect(prompts.some(p => p.includes("<bob> !s bob question"))).toBe(true);
 
     await history.close();
   });
