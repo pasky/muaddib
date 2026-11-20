@@ -14,6 +14,7 @@ import {
 } from "../src/cost/cost-policy.js";
 import { remapToOpenRouter } from "../src/cost/model-remap.js";
 import { fetchOpenRouterEndpoints, resolveProviderOverrideModel } from "../src/models/provider-overrides.js";
+import { REMOTE_CATALOG_REFRESH_INTERVAL_MS } from "../src/models/remote-catalog.js";
 import { LLM_CALL_TYPE, isLlmCallType } from "../src/cost/llm-call-type.js";
 import { UserCostLedger } from "../src/cost/user-cost-ledger.js";
 import { AuthStore } from "../src/auth/auth-store.js";
@@ -68,6 +69,7 @@ describe("resolveProviderOverrideModel normalizes version separators", () => {
 
 describe("resolveProviderOverrideModel uses per-endpoint pricing", () => {
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -341,6 +343,136 @@ describe("resolveProviderOverrideModel uses per-endpoint pricing", () => {
     expect(model!.maxTokens).toBe(2048);
     expect(model!.contextWindow).toBe(64000);
     expect(model!.compat).toBeUndefined();
+  });
+
+  it("refreshes cached endpoints after TTL (stale-while-revalidate), rejects malformed 200s, and backs off on failure", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-20T00:00:00Z"));
+
+    const makePayload = (promptPrice: string, maxTokens: number) => ({
+      data: {
+        id: "some-vendor/ttl-test-model",
+        architecture: { input_modalities: ["text"] },
+        endpoints: [
+          {
+            tag: "provider-a",
+            provider_name: "Provider A",
+            context_length: 128000,
+            max_completion_tokens: maxTokens,
+            supported_parameters: ["include_reasoning"],
+            status: 0,
+            pricing: { prompt: promptPrice, completion: "0.00001" },
+          },
+        ],
+      },
+    });
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => makePayload("0.000001", 32768),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        statusText: "Service Unavailable",
+      })
+      .mockResolvedValueOnce({
+        // Malformed HTTP 200 payload must NOT poison the working cached entry.
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({ data: { id: "some-vendor/ttl-test-model" } }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => makePayload("0.000003", 65536),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    // Initial fetch populates cache.
+    await fetchOpenRouterEndpoints("some-vendor/ttl-test-model");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(resolveProviderOverrideModel("openrouter", "some-vendor/ttl-test-model")!.cost.input).toBeCloseTo(1, 5);
+
+    // Within TTL: no refetch.
+    vi.advanceTimersByTime(REMOTE_CATALOG_REFRESH_INTERVAL_MS - 1);
+    await fetchOpenRouterEndpoints("some-vendor/ttl-test-model");
+    expect(resolveProviderOverrideModel("openrouter", "some-vendor/ttl-test-model")!.cost.input).toBeCloseTo(1, 5);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Past TTL: resolver itself starts the background refresh immediately while returning stale data.
+    vi.advanceTimersByTime(1);
+    const stale = resolveProviderOverrideModel("openrouter", "some-vendor/ttl-test-model");
+    expect(stale!.cost.input).toBeCloseTo(1, 5);
+    expect(stale!.maxTokens).toBe(32768);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // Joining the in-flight refresh settles the 503 without issuing another request.
+    await fetchOpenRouterEndpoints("some-vendor/ttl-test-model");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // Still inside 60s failure backoff (59,999ms): must NOT refetch; stale data remains usable.
+    vi.advanceTimersByTime(59_999);
+    const stillStale = resolveProviderOverrideModel("openrouter", "some-vendor/ttl-test-model");
+    expect(stillStale!.cost.input).toBeCloseTo(1, 5);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // At 60,000ms: resolver triggers retry; malformed HTTP 200 must preserve stale data and re-enter backoff.
+    vi.advanceTimersByTime(1);
+    resolveProviderOverrideModel("openrouter", "some-vendor/ttl-test-model");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    await fetchOpenRouterEndpoints("some-vendor/ttl-test-model");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    vi.advanceTimersByTime(59_999);
+    const afterMalformed = resolveProviderOverrideModel("openrouter", "some-vendor/ttl-test-model");
+    expect(afterMalformed!.cost.input).toBeCloseTo(1, 5);
+    expect(afterMalformed!.maxTokens).toBe(32768);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    // After backoff expires again, resolver refreshes with the valid new payload.
+    vi.advanceTimersByTime(1);
+    resolveProviderOverrideModel("openrouter", "some-vendor/ttl-test-model");
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    await fetchOpenRouterEndpoints("some-vendor/ttl-test-model");
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+
+    const refreshed = resolveProviderOverrideModel("openrouter", "some-vendor/ttl-test-model");
+    expect(refreshed!.cost.input).toBeCloseTo(3, 5);
+    expect(refreshed!.maxTokens).toBe(65536);
+  });
+
+  it("backs off failed cold lookups and expires failure-only entries after the retry window", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-20T00:00:00Z"));
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      statusText: "Not Found",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    // First cold miss starts fetch and returns zero-cost fallback.
+    const first = resolveProviderOverrideModel("openrouter", "typo-vendor/nonexistent-model");
+    expect(first!.cost.input).toBe(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await fetchOpenRouterEndpoints("typo-vendor/nonexistent-model");
+
+    // Within 60s backoff: does not refetch.
+    vi.advanceTimersByTime(59_999);
+    resolveProviderOverrideModel("openrouter", "typo-vendor/nonexistent-model");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // Once backoff expires, failure entry is dropped and a later attempt can retry.
+    vi.advanceTimersByTime(1);
+    resolveProviderOverrideModel("openrouter", "typo-vendor/nonexistent-model");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await fetchOpenRouterEndpoints("typo-vendor/nonexistent-model");
   });
 });
 

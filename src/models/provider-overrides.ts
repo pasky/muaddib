@@ -1,9 +1,13 @@
 import type { Api, Model, OpenAICompletionsCompat } from "@earendil-works/pi-ai";
 
 import { piAiModels } from "./pi-ai-models.js";
+import { REMOTE_CATALOG_REFRESH_INTERVAL_MS } from "./remote-catalog.js";
 
 const OPENROUTER_PROVIDER = "openrouter";
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+const OPENROUTER_ENDPOINTS_TTL_MS = REMOTE_CATALOG_REFRESH_INTERVAL_MS;
+const OPENROUTER_ENDPOINTS_RETRY_MS = 60_000;
+const MAX_FAILED_BACKOFF_ENTRIES = 512;
 
 interface OpenRouterEndpoint {
   tag: string;
@@ -15,8 +19,8 @@ interface OpenRouterEndpoint {
   pricing: {
     prompt: string;
     completion: string;
-    input_cache_read?: string;
-    input_cache_write?: string;
+    input_cache_read?: string | null;
+    input_cache_write?: string | null;
   };
 }
 
@@ -26,14 +30,93 @@ interface OpenRouterEndpointsPayload {
   endpoints: OpenRouterEndpoint[];
 }
 
+interface CachedEndpointsEntry {
+  payload: OpenRouterEndpointsPayload;
+  fetchedAt: number;
+}
+
 // Keyed by model id (whatever form was actually used against OpenRouter,
-// e.g. "moonshotai/kimi-k2.6"). Populated lazily on first lookup miss.
-const endpointsCache = new Map<string, OpenRouterEndpointsPayload>();
+// e.g. "moonshotai/kimi-k2.6"). Holds only validated payloads; refreshed
+// stale-while-revalidate after OPENROUTER_ENDPOINTS_TTL_MS.
+const endpointsCache = new Map<string, CachedEndpointsEntry>();
+// Short-lived failure backoff timestamps, pruned on expiry and capped so
+// failed cold lookups (e.g. user typos) never accumulate unboundedly.
+const endpointsFailedAt = new Map<string, number>();
 const endpointsInflight = new Map<string, Promise<OpenRouterEndpointsPayload | undefined>>();
 
+function isOptionalNumericString(value: unknown): boolean {
+  return value == null || (typeof value === "string" && Number.isFinite(parseFloat(value)));
+}
+
+function isValidEndpoint(value: unknown): value is OpenRouterEndpoint {
+  if (value === null || typeof value !== "object") return false;
+  const e = value as Partial<OpenRouterEndpoint>;
+  if (
+    typeof e.tag !== "string" ||
+    typeof e.context_length !== "number" ||
+    !Number.isFinite(e.context_length) ||
+    e.context_length <= 0 ||
+    !(e.max_completion_tokens == null || (typeof e.max_completion_tokens === "number" && Number.isFinite(e.max_completion_tokens) && e.max_completion_tokens > 0)) ||
+    !Array.isArray(e.supported_parameters) ||
+    typeof e.status !== "number" ||
+    !Number.isFinite(e.status) ||
+    e.pricing === null ||
+    typeof e.pricing !== "object"
+  ) {
+    return false;
+  }
+  return (
+    typeof e.pricing.prompt === "string" &&
+    Number.isFinite(parseFloat(e.pricing.prompt)) &&
+    typeof e.pricing.completion === "string" &&
+    Number.isFinite(parseFloat(e.pricing.completion)) &&
+    isOptionalNumericString(e.pricing.input_cache_read) &&
+    isOptionalNumericString(e.pricing.input_cache_write)
+  );
+}
+
+function isValidEndpointsPayload(value: unknown): value is OpenRouterEndpointsPayload {
+  if (value === null || typeof value !== "object") return false;
+  const p = value as Partial<OpenRouterEndpointsPayload>;
+  return (
+    typeof p.id === "string" &&
+    p.architecture !== null &&
+    typeof p.architecture === "object" &&
+    Array.isArray(p.architecture.input_modalities) &&
+    Array.isArray(p.endpoints) &&
+    p.endpoints.length > 0 &&
+    p.endpoints.every(isValidEndpoint)
+  );
+}
+
+function recordEndpointsFailure(modelId: string, now: number): void {
+  for (const [key, failedAt] of endpointsFailedAt) {
+    if (now - failedAt >= OPENROUTER_ENDPOINTS_RETRY_MS) {
+      endpointsFailedAt.delete(key);
+    }
+  }
+  endpointsFailedAt.delete(modelId);
+  endpointsFailedAt.set(modelId, now);
+  while (endpointsFailedAt.size > MAX_FAILED_BACKOFF_ENTRIES) {
+    const oldestKey = endpointsFailedAt.keys().next().value;
+    if (oldestKey === undefined) break;
+    endpointsFailedAt.delete(oldestKey);
+  }
+}
+
 export async function fetchOpenRouterEndpoints(modelId: string): Promise<OpenRouterEndpointsPayload | undefined> {
+  const now = Date.now();
   const cached = endpointsCache.get(modelId);
-  if (cached) return cached;
+  if (cached && now - cached.fetchedAt < OPENROUTER_ENDPOINTS_TTL_MS) {
+    return cached.payload;
+  }
+  const failedAt = endpointsFailedAt.get(modelId);
+  if (failedAt !== undefined) {
+    if (now - failedAt < OPENROUTER_ENDPOINTS_RETRY_MS) {
+      return cached?.payload;
+    }
+    endpointsFailedAt.delete(modelId);
+  }
   const inflight = endpointsInflight.get(modelId);
   if (inflight) return inflight;
 
@@ -41,15 +124,19 @@ export async function fetchOpenRouterEndpoints(modelId: string): Promise<OpenRou
     try {
       const resp = await fetch(`${OPENROUTER_BASE_URL}/models/${modelId}/endpoints`);
       if (!resp.ok) {
-        console.warn(`OpenRouter endpoints fetch for '${modelId}' failed: ${resp.status} ${resp.statusText}`);
-        return undefined;
+        throw new Error(`${resp.status} ${resp.statusText}`);
       }
-      const json = (await resp.json()) as { data: OpenRouterEndpointsPayload };
-      endpointsCache.set(modelId, json.data);
+      const json = (await resp.json()) as { data?: unknown };
+      if (!isValidEndpointsPayload(json?.data)) {
+        throw new Error("invalid endpoints payload");
+      }
+      endpointsCache.set(modelId, { payload: json.data, fetchedAt: Date.now() });
+      endpointsFailedAt.delete(modelId);
       return json.data;
     } catch (err) {
-      console.warn(`OpenRouter endpoints fetch for '${modelId}' error: ${err}`);
-      return undefined;
+      console.warn(`OpenRouter endpoints fetch for '${modelId}' failed: ${err}`);
+      recordEndpointsFailure(modelId, Date.now());
+      return endpointsCache.get(modelId)?.payload;
     } finally {
       endpointsInflight.delete(modelId);
     }
@@ -120,7 +207,7 @@ function endpointLimits(
   const pool = pinnedPool.length > 0 ? pinnedPool : active.length > 0 ? active : [endpoint];
   const completionCaps = pool
     .map((e) => e.max_completion_tokens)
-    .filter((n): n is number => n !== null);
+    .filter((n): n is number => typeof n === "number");
   return {
     contextWindow: Math.min(...pool.map((e) => e.context_length)),
     maxTokens: completionCaps.length > 0 ? Math.min(...completionCaps) : 8_192,
@@ -212,11 +299,14 @@ function resolveOpenRouterModel(modelId: string, providerRouting?: string[]): Mo
   for (const candidate of candidates) {
     const cached = endpointsCache.get(candidate);
     if (cached) {
-      const endpoint = pickEndpoint(cached, providerRouting);
+      if (Date.now() - cached.fetchedAt >= OPENROUTER_ENDPOINTS_TTL_MS) {
+        void fetchOpenRouterEndpoints(candidate);
+      }
+      const endpoint = pickEndpoint(cached.payload, providerRouting);
       if (endpoint) {
         return buildModelFromEndpoint(
           candidate,
-          cached,
+          cached.payload,
           endpoint,
           routingCompat,
           providerRouting,
