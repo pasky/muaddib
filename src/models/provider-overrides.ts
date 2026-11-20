@@ -122,19 +122,37 @@ function endpointLimits(
   };
 }
 
+function applyRoutingCompat(
+  model: Model<Api>,
+  routingCompat: OpenAICompletionsCompat | undefined,
+): Model<Api> {
+  if (!routingCompat) return model;
+  if (model.api === "openai-completions") {
+    return {
+      ...model,
+      compat: { ...(model.compat as OpenAICompletionsCompat | undefined), ...routingCompat },
+    };
+  }
+  // OpenRouter provider routing is only supported on openai-completions; drop
+  // non-OpenAI compat fields (e.g. anthropic-messages) when switching APIs.
+  return {
+    ...model,
+    api: "openai-completions",
+    baseUrl: OPENROUTER_BASE_URL,
+    compat: routingCompat,
+  };
+}
+
 function buildModelFromEndpoint(
   modelId: string,
   payload: OpenRouterEndpointsPayload,
   endpoint: OpenRouterEndpoint,
-  compat: OpenAICompletionsCompat | undefined,
+  routingCompat: OpenAICompletionsCompat | undefined,
   pinned: boolean,
+  known: Model<Api> | undefined,
 ): Model<Api> {
-  return {
+  const endpointOverrides = {
     id: modelId,
-    name: modelId,
-    api: "openai-completions",
-    provider: OPENROUTER_PROVIDER,
-    baseUrl: OPENROUTER_BASE_URL,
     reasoning: endpoint.supported_parameters.includes("include_reasoning"),
     input: payload.architecture.input_modalities.filter(
       (m): m is "text" | "image" => m === "text" || m === "image",
@@ -147,12 +165,21 @@ function buildModelFromEndpoint(
       cacheWrite: parseFloat(endpoint.pricing.input_cache_write ?? "0") * 1_000_000,
     },
     ...endpointLimits(payload, endpoint, pinned),
-    compat,
   };
+  const base: Model<Api> = known
+    ? { ...known, ...endpointOverrides }
+    : {
+        ...endpointOverrides,
+        name: modelId,
+        api: "openai-completions",
+        provider: OPENROUTER_PROVIDER,
+        baseUrl: OPENROUTER_BASE_URL,
+      };
+  return applyRoutingCompat(base, routingCompat);
 }
 
 function resolveOpenRouterModel(modelId: string, providerRouting?: string[]): Model<Api> | undefined {
-  const compat: OpenAICompletionsCompat | undefined = providerRouting?.length
+  const routingCompat: OpenAICompletionsCompat | undefined = providerRouting?.length
     ? { openRouterRouting: { only: providerRouting } }
     : undefined;
 
@@ -161,6 +188,14 @@ function resolveOpenRouterModel(modelId: string, providerRouting?: string[]): Mo
   const normalized = normalizeOpenRouterModelId(modelId);
   const candidates = normalized !== modelId ? [modelId, normalized] : [modelId];
 
+  // Look up the pi-ai / remote-catalog entry so warm endpoint overlays preserve
+  // thinkingLevelMap, compat, api, etc. instead of discarding them.
+  let known: Model<Api> | undefined;
+  for (const candidate of candidates) {
+    known = piAiModels.getModel(OPENROUTER_PROVIDER, candidate);
+    if (known) break;
+  }
+
   // Endpoint cache is the source of truth for pricing. Use per-endpoint pricing when
   // providerRouting is set so we don't inherit the misleading "min across endpoints"
   // pricing that OpenRouter surfaces on the top-level /models entry.
@@ -168,7 +203,16 @@ function resolveOpenRouterModel(modelId: string, providerRouting?: string[]): Mo
     const cached = endpointsCache.get(candidate);
     if (cached) {
       const endpoint = pickEndpoint(cached, providerRouting);
-      if (endpoint) return buildModelFromEndpoint(candidate, cached, endpoint, compat, endpoint.tag === providerRouting?.[0]);
+      if (endpoint) {
+        return buildModelFromEndpoint(
+          candidate,
+          cached,
+          endpoint,
+          routingCompat,
+          endpoint.tag === providerRouting?.[0],
+          known,
+        );
+      }
     }
   }
 
@@ -177,12 +221,9 @@ function resolveOpenRouterModel(modelId: string, providerRouting?: string[]): Mo
   const fetchId = candidates[candidates.length - 1];
   void fetchOpenRouterEndpoints(fetchId);
 
-  // Cache cold: fall back to pi-ai's static registry entry if available.
-  for (const candidate of candidates) {
-    const known = piAiModels.getModel(OPENROUTER_PROVIDER, candidate);
-    if (known) {
-      return compat ? { ...known, compat } : known;
-    }
+  // Cache cold: fall back to pi-ai's static/remote registry entry if available.
+  if (known) {
+    return applyRoutingCompat(known, routingCompat);
   }
 
   // Nothing known yet — synthesize a zero-cost entry so the call isn't rejected.
@@ -207,6 +248,6 @@ function resolveOpenRouterModel(modelId: string, providerRouting?: string[]): Mo
     },
     contextWindow: 128_000,
     maxTokens: 8_192,
-    compat,
+    compat: routingCompat,
   };
 }

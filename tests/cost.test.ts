@@ -2,6 +2,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { clampThinkingLevel } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -123,7 +124,105 @@ describe("resolveProviderOverrideModel uses per-endpoint pricing", () => {
     expect(model!.cost.input).toBeCloseTo(0.95, 5);
     expect(model!.cost.output).toBeCloseTo(4, 5);
     expect(model!.cost.cacheRead).toBeCloseTo(0.16, 5);
-    expect(model!.compat).toEqual({ openRouterRouting: { only: ["moonshotai/int4"] } });
+    expect(model!.compat).toMatchObject({
+      openRouterRouting: { only: ["moonshotai/int4"] },
+      requiresReasoningContentOnAssistantMessages: true,
+      thinkingFormat: "openrouter",
+    });
+  });
+
+  it("preserves thinkingLevelMap and compat from the catalog across cold and warm endpoint cache", async () => {
+    const endpointsPayload = {
+      data: {
+        id: "google/gemini-3.1-pro-preview",
+        architecture: { input_modalities: ["text", "image"] },
+        endpoints: [
+          {
+            tag: "google-vertex",
+            provider_name: "Google",
+            context_length: 1048576,
+            max_completion_tokens: 65536,
+            supported_parameters: ["include_reasoning", "tools"],
+            status: 0,
+            pricing: { prompt: "0.000002", completion: "0.000012" },
+          },
+        ],
+      },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, status: 200, statusText: "OK", json: async () => endpointsPayload })),
+    );
+
+    // Cold cache with providerRouting: must merge routing into known compat, not overwrite it.
+    const cold = resolveProviderOverrideModel("openrouter", "google/gemini-3.1-pro-preview", ["google-vertex"]);
+    expect(cold).toBeDefined();
+    expect(cold!.thinkingLevelMap?.minimal).toBeNull();
+    expect(clampThinkingLevel(cold!, "minimal")).toBe("low");
+    expect(cold!.compat).toMatchObject({
+      thinkingFormat: "openrouter",
+      supportsStrictMode: true,
+      openRouterRouting: { only: ["google-vertex"] },
+    });
+
+    // Warm cache: endpoint pricing/limits apply while thinkingLevelMap and compat stay intact.
+    await fetchOpenRouterEndpoints("google/gemini-3.1-pro-preview");
+
+    const warmUnpinned = resolveProviderOverrideModel("openrouter", "google/gemini-3.1-pro-preview");
+    expect(warmUnpinned).toBeDefined();
+    expect(warmUnpinned!.thinkingLevelMap?.minimal).toBeNull();
+    expect(clampThinkingLevel(warmUnpinned!, "minimal")).toBe("low");
+    expect(clampThinkingLevel(warmUnpinned!, "off")).toBe("low");
+    expect(warmUnpinned!.compat).toMatchObject({
+      thinkingFormat: "openrouter",
+      supportsStrictMode: true,
+    });
+
+    const warmPinned = resolveProviderOverrideModel("openrouter", "google/gemini-3.1-pro-preview", ["google-vertex"]);
+    expect(warmPinned!.compat).toMatchObject({
+      thinkingFormat: "openrouter",
+      supportsStrictMode: true,
+      openRouterRouting: { only: ["google-vertex"] },
+    });
+  });
+
+  it("preserves anthropic-messages api/compat when unpinned and switches to openai-completions when providerRouting is pinned", async () => {
+    const endpointsPayload = {
+      data: {
+        id: "anthropic/claude-sonnet-4.6",
+        architecture: { input_modalities: ["text", "image"] },
+        endpoints: [
+          {
+            tag: "anthropic",
+            provider_name: "Anthropic",
+            context_length: 200000,
+            max_completion_tokens: 128000,
+            supported_parameters: ["include_reasoning", "tools"],
+            status: 0,
+            pricing: { prompt: "0.000003", completion: "0.000015", input_cache_read: "0.0000003" },
+          },
+        ],
+      },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, status: 200, statusText: "OK", json: async () => endpointsPayload })),
+    );
+    await fetchOpenRouterEndpoints("anthropic/claude-sonnet-4.6");
+
+    const unpinned = resolveProviderOverrideModel("openrouter", "anthropic/claude-sonnet-4.6");
+    expect(unpinned).toBeDefined();
+    expect(unpinned!.api).toBe("anthropic-messages");
+    expect(unpinned!.thinkingLevelMap?.minimal).toBeNull();
+    expect(unpinned!.compat).toMatchObject({ forceAdaptiveThinking: true });
+    expect(unpinned!.cost.input).toBeCloseTo(3, 5);
+
+    const pinned = resolveProviderOverrideModel("openrouter", "anthropic/claude-sonnet-4.6", ["anthropic"]);
+    expect(pinned).toBeDefined();
+    expect(pinned!.api).toBe("openai-completions");
+    expect(pinned!.baseUrl).toBe("https://openrouter.ai/api/v1");
+    expect(pinned!.thinkingLevelMap?.minimal).toBeNull();
+    expect(pinned!.compat).toEqual({ openRouterRouting: { only: ["anthropic"] } });
   });
 
   it("falls back to default active endpoint when no providerRouting is specified", async () => {
