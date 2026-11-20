@@ -64,6 +64,12 @@ const ERROR_REFUSAL_SIGNAL_PATTERNS: ReadonlyArray<RefusalPattern> = [
     label: "content_filter_finish_reason",
     pattern: /finish_reason: content_filter/iu,
   },
+  {
+    // Gemini promptFeedback.blockReason (SAFETY, PROHIBITED_CONTENT, OTHER, …):
+    // "Gemini blocked the request: OTHER". Every block reason is a content block.
+    label: "gemini_blocked",
+    pattern: /gemini blocked the request/iu,
+  },
 ];
 
 function matchFirst(text: string, patterns: ReadonlyArray<RefusalPattern>): string | null {

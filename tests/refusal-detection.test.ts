@@ -20,6 +20,9 @@ describe("refusal detection", () => {
     // pi-ai openai-completions mapping of finish_reason "content_filter"
     // (e.g. mimo via OpenRouter, with "...considered high risk" in the body).
     ["content_filter_finish_reason", "Provider finish_reason: content_filter"],
+    // Gemini promptFeedback.blockReason, verbatim as surfaced in a live errorMessage.
+    ["gemini_blocked", "Gemini blocked the request: OTHER"],
+    ["gemini_blocked", "Gemini blocked the request: PROHIBITED_CONTENT"],
   ])("classifies a %s errorMessage as a refusal", (label, errorMessage) => {
     expect(detectRefusalErrorSignal(errorMessage)).toBe(label);
   });
