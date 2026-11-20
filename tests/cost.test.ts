@@ -186,6 +186,70 @@ describe("resolveProviderOverrideModel uses per-endpoint pricing", () => {
     });
   });
 
+  it("sets openRouterRouting.order for multi-slug routing and caps limits across all pinned endpoints", async () => {
+    const endpointsPayload = {
+      data: {
+        id: "google/gemini-4-neon",
+        architecture: { input_modalities: ["text", "image"] },
+        endpoints: [
+          {
+            tag: "google-vertex/global",
+            provider_name: "Google",
+            context_length: 1048576,
+            max_completion_tokens: 943718,
+            supported_parameters: ["include_reasoning", "tools"],
+            status: 0,
+            pricing: { prompt: "0.000003", completion: "0.000015" },
+          },
+          {
+            tag: "google-ai-studio",
+            provider_name: "Google AI Studio",
+            context_length: 1048576,
+            max_completion_tokens: 65536,
+            supported_parameters: ["include_reasoning", "tools"],
+            status: 0,
+            pricing: { prompt: "0.000003", completion: "0.000015" },
+          },
+          {
+            tag: "google-ai-studio/priority",
+            provider_name: "Google AI Studio",
+            context_length: 1048576,
+            max_completion_tokens: 943718,
+            supported_parameters: ["include_reasoning", "tools"],
+            status: 0,
+            pricing: { prompt: "0.0000054", completion: "0.000027" },
+          },
+        ],
+      },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, status: 200, statusText: "OK", json: async () => endpointsPayload })),
+    );
+    await fetchOpenRouterEndpoints("google/gemini-4-neon");
+
+    const model = resolveProviderOverrideModel("openrouter", "google/gemini-4-neon", [
+      "google-ai-studio",
+      "google-vertex/global",
+    ]);
+    expect(model).toBeDefined();
+    expect(model!.compat).toMatchObject({
+      openRouterRouting: {
+        only: ["google-ai-studio", "google-vertex/global"],
+        order: ["google-ai-studio", "google-vertex/global"],
+      },
+    });
+    expect(model!.maxTokens).toBe(65536);
+
+    // Even when the first pinned endpoint advertises a higher cap than the fallback,
+    // limits must fit every endpoint in the pinned pool so fallback cannot 400.
+    const reversed = resolveProviderOverrideModel("openrouter", "google/gemini-4-neon", [
+      "google-vertex/global",
+      "google-ai-studio",
+    ]);
+    expect(reversed!.maxTokens).toBe(65536);
+  });
+
   it("preserves anthropic-messages api/compat when unpinned and switches to openai-completions when providerRouting is pinned", async () => {
     const endpointsPayload = {
       data: {

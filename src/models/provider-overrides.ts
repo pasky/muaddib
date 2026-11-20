@@ -90,10 +90,12 @@ function pickEndpoint(
   providerRouting: string[] | undefined,
 ): OpenRouterEndpoint | undefined {
   if (providerRouting?.length) {
-    const match = payload.endpoints.find((e) => e.tag === providerRouting[0]);
-    if (match) return match;
+    for (const tag of providerRouting) {
+      const match = payload.endpoints.find((e) => e.tag === tag);
+      if (match) return match;
+    }
     console.warn(
-      `OpenRouter model '${payload.id}' has no endpoint matching provider routing '${providerRouting[0]}' ` +
+      `OpenRouter model '${payload.id}' has no endpoint matching provider routing '${providerRouting.join(",")}' ` +
         `(available: ${payload.endpoints.map((e) => e.tag).join(", ")}); using default endpoint.`,
     );
   }
@@ -101,18 +103,21 @@ function pickEndpoint(
 }
 
 /**
- * Context/output limits the request must fit. Pinned routing hits exactly one endpoint;
- * unpinned routing may land on any active one, so take the minimum across them - otherwise
- * e.g. DeepInfra's advertised 943718 max_completion_tokens makes OpenRouter skip or 400 on
- * endpoints capped at 131072.
+ * Context/output limits the request must fit. Pinned routing may land on any of the
+ * listed endpoints; unpinned routing may land on any active one, so take the minimum
+ * across that pool - otherwise e.g. DeepInfra's advertised 943718 max_completion_tokens
+ * makes OpenRouter skip or 400 on endpoints capped at 65536/131072.
  */
 function endpointLimits(
   payload: OpenRouterEndpointsPayload,
   endpoint: OpenRouterEndpoint,
-  pinned: boolean,
+  providerRouting: string[] | undefined,
 ): { contextWindow: number; maxTokens: number } {
+  const pinnedPool = providerRouting?.length
+    ? payload.endpoints.filter((e) => providerRouting.includes(e.tag))
+    : [];
   const active = payload.endpoints.filter((e) => e.status >= 0);
-  const pool = pinned || active.length === 0 ? [endpoint] : active;
+  const pool = pinnedPool.length > 0 ? pinnedPool : active.length > 0 ? active : [endpoint];
   const completionCaps = pool
     .map((e) => e.max_completion_tokens)
     .filter((n): n is number => n !== null);
@@ -148,7 +153,7 @@ function buildModelFromEndpoint(
   payload: OpenRouterEndpointsPayload,
   endpoint: OpenRouterEndpoint,
   routingCompat: OpenAICompletionsCompat | undefined,
-  pinned: boolean,
+  providerRouting: string[] | undefined,
   known: Model<Api> | undefined,
 ): Model<Api> {
   const endpointOverrides = {
@@ -164,7 +169,7 @@ function buildModelFromEndpoint(
       cacheRead: parseFloat(endpoint.pricing.input_cache_read ?? "0") * 1_000_000,
       cacheWrite: parseFloat(endpoint.pricing.input_cache_write ?? "0") * 1_000_000,
     },
-    ...endpointLimits(payload, endpoint, pinned),
+    ...endpointLimits(payload, endpoint, providerRouting),
   };
   const base: Model<Api> = known
     ? { ...known, ...endpointOverrides }
@@ -180,7 +185,12 @@ function buildModelFromEndpoint(
 
 function resolveOpenRouterModel(modelId: string, providerRouting?: string[]): Model<Api> | undefined {
   const routingCompat: OpenAICompletionsCompat | undefined = providerRouting?.length
-    ? { openRouterRouting: { only: providerRouting } }
+    ? {
+        openRouterRouting: {
+          only: providerRouting,
+          ...(providerRouting.length > 1 ? { order: providerRouting } : {}),
+        },
+      }
     : undefined;
 
   // Anthropic-style hyphenated versions (`claude-opus-4-6`) map to dotted form on OpenRouter
@@ -209,7 +219,7 @@ function resolveOpenRouterModel(modelId: string, providerRouting?: string[]): Mo
           cached,
           endpoint,
           routingCompat,
-          endpoint.tag === providerRouting?.[0],
+          providerRouting,
           known,
         );
       }
